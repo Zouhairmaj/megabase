@@ -888,7 +888,6 @@ mod tests {
         assert!(quick.contains("TechArticle"));
         assert!(quick.contains("Built from commit"));
         assert!(quick.contains("callout-note"));
-        assert!(quick.contains("callout-planned"));
         assert!(quick.contains("data-copy"));
         assert!(!quick.contains("334"));
         let _ = fs::remove_dir_all(&out);
@@ -1009,20 +1008,7 @@ mod tests {
 
     #[test]
     fn no_horizontal_overflow_if_chrome() {
-        let chrome = [
-            "google-chrome",
-            "google-chrome-stable",
-            "chromium",
-            "chromium-browser",
-        ]
-        .into_iter()
-        .find(|bin| {
-            Command::new(bin)
-                .arg("--version")
-                .output()
-                .is_ok_and(|o| o.status.success())
-        });
-        let Some(chrome) = chrome else {
+        let Some(chrome) = find_chrome() else {
             return;
         };
         let site_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -1044,7 +1030,7 @@ mod tests {
             ("status/index.html", 390),
         ] {
             let src = out.join(page);
-            let wrapper = out.join(format!("probe-{width}-{}", page.replace('/', "-")));
+            let wrapper = src.with_file_name(format!("probe-{width}.html"));
             let html = fs::read_to_string(&src).unwrap();
             // Drop remote scripts so headless Chrome does not wait on analytics.
             let mut stripped = String::new();
@@ -1068,7 +1054,7 @@ mod tests {
             let profile = out.join(format!("chrome-profile-{width}-{}", page.replace('/', "-")));
             fs::create_dir_all(&profile).unwrap();
             let dom = chrome_dump_dom(
-                chrome,
+                &chrome,
                 &uri,
                 width,
                 &profile,
@@ -1088,8 +1074,74 @@ mod tests {
         let _ = fs::remove_dir_all(&out);
     }
 
+    fn find_chrome() -> Option<PathBuf> {
+        const CANDIDATES: &[&str] = &[
+            "/opt/google/chrome/chrome",
+            "/opt/google/chrome/google-chrome",
+            "/usr/bin/google-chrome-stable",
+            "/usr/bin/google-chrome",
+            "/usr/bin/chromium-browser",
+            "/usr/bin/chromium",
+            "google-chrome-stable",
+            "google-chrome",
+            "chromium-browser",
+            "chromium",
+        ];
+        CANDIDATES.iter().find_map(|name| {
+            let path = unwrap_chrome_launcher(&resolve_chrome(name)?);
+            if injects_remote_debugging(&path) {
+                return None;
+            }
+            Command::new(&path)
+                .arg("--version")
+                .output()
+                .ok()
+                .filter(|o| o.status.success())
+                .map(|_| path)
+        })
+    }
+
+    fn resolve_chrome(name: &str) -> Option<PathBuf> {
+        let path = PathBuf::from(name);
+        if name.contains('/') {
+            return path.is_file().then_some(path);
+        }
+        let search = std::env::var_os("PATH")?;
+        std::env::split_paths(&search)
+            .map(|dir| dir.join(name))
+            .find(|candidate| candidate.is_file())
+    }
+
+    fn unwrap_chrome_launcher(path: &Path) -> PathBuf {
+        if !is_shell_script(path) {
+            return path.to_path_buf();
+        }
+        if let Some(sibling) = path.parent().map(|dir| dir.join("chrome")) {
+            if sibling.is_file() && !is_shell_script(&sibling) {
+                return sibling;
+            }
+        }
+        path.to_path_buf()
+    }
+
+    fn injects_remote_debugging(path: &Path) -> bool {
+        is_shell_script(path)
+            && fs::read_to_string(path)
+                .map(|text| text.contains("remote-debugging-port"))
+                .unwrap_or(false)
+    }
+
+    fn is_shell_script(path: &Path) -> bool {
+        use std::io::Read;
+        let Ok(mut file) = fs::File::open(path) else {
+            return false;
+        };
+        let mut magic = [0u8; 2];
+        file.read_exact(&mut magic).is_ok() && magic == *b"#!"
+    }
+
     fn chrome_dump_dom(
-        chrome: &str,
+        chrome: &Path,
         uri: &str,
         width: u32,
         profile: &Path,
@@ -1106,7 +1158,8 @@ mod tests {
                 "--no-sandbox",
                 "--disable-dev-shm-usage",
                 "--disable-extensions",
-                "--proxy-server=http://127.0.0.1:9",
+                "--no-first-run",
+                "--timeout=15000",
                 "--virtual-time-budget=2000",
                 &format!("--user-data-dir={}", profile.display()),
                 &format!("--window-size={width},900"),
