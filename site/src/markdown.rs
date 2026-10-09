@@ -1,9 +1,80 @@
 //! Small CommonMark-ish renderer for Human log, Roadmap, Devlog and Docs notes.
-//! Headings, paragraphs, lists, tables, fenced code, hr, and inline `**` / `` ` ``.
+//! Headings, paragraphs, lists, tables, fenced code, hr, callouts, and inline `**` / `` ` ``.
+
+use std::collections::BTreeMap;
 
 use crate::html::esc;
 
+#[derive(Clone, Copy)]
+pub struct Options {
+    pub copy_buttons: bool,
+    pub highlight: bool,
+    pub skip_h1: bool,
+}
+
+impl Default for Options {
+    fn default() -> Self {
+        Self {
+            copy_buttons: false,
+            highlight: false,
+            skip_h1: false,
+        }
+    }
+}
+
 pub fn render(md: &str) -> String {
+    render_with(md, Options::default())
+}
+
+pub fn headings_h2(md: &str) -> Vec<(String, String)> {
+    md.lines()
+        .filter_map(|line| {
+            let t = line.trim();
+            if t.starts_with("## ") {
+                let title = t[3..].trim().to_string();
+                if title.is_empty() {
+                    None
+                } else {
+                    Some((slugify(&title), title))
+                }
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+pub fn split_front_matter(raw: &str) -> (BTreeMap<String, String>, &str) {
+    let raw = raw.trim_start_matches('\u{feff}');
+    let Some(rest) = raw.strip_prefix("---") else {
+        return (BTreeMap::new(), raw);
+    };
+    let rest = rest.trim_start_matches('\r').trim_start_matches('\n');
+    let Some(end) = rest.find("\n---") else {
+        return (BTreeMap::new(), raw);
+    };
+    let yaml = &rest[..end];
+    let mut body = &rest[end + 4..];
+    if let Some(stripped) = body.strip_prefix('\r') {
+        body = stripped;
+    }
+    if let Some(stripped) = body.strip_prefix('\n') {
+        body = stripped;
+    }
+    let mut map = BTreeMap::new();
+    for line in yaml.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        if let Some((k, v)) = line.split_once(':') {
+            map.insert(k.trim().to_string(), v.trim().trim_matches('"').to_string());
+        }
+    }
+    (map, body)
+}
+
+pub fn render_with(md: &str, opts: Options) -> String {
     let mut blocks = Vec::new();
     let lines: Vec<&str> = md.lines().collect();
     let mut i = 0;
@@ -32,20 +103,30 @@ pub fn render(md: &str) -> String {
             if i < lines.len() {
                 i += 1;
             }
-            let label = if lang.is_empty() {
-                "CODE".to_string()
-            } else {
-                lang.to_ascii_uppercase()
-            };
-            blocks.push(format!(
-                r#"<div class="code-block"><div class="code-head"><span>{}</span></div><pre><code>{}</code></pre></div>"#,
-                esc(&label),
-                esc(&code)
-            ));
+            blocks.push(code_block(&lang, &code, opts));
+            continue;
+        }
+        if let Some((kind, title)) = parse_callout(stripped) {
+            i += 1;
+            let mut body = Vec::new();
+            while i < lines.len() {
+                let nxt = lines[i].trim_end();
+                if nxt.starts_with("> ") || nxt == ">" {
+                    body.push(nxt.trim_start_matches('>').trim().to_string());
+                    i += 1;
+                } else {
+                    break;
+                }
+            }
+            blocks.push(callout_html(kind, title.as_deref(), &body));
             continue;
         }
         if let Some(heading) = parse_heading(stripped) {
             let (level, title) = heading;
+            if opts.skip_h1 && level == 1 {
+                i += 1;
+                continue;
+            }
             let slug = slugify(&title);
             blocks.push(format!(
                 "<h{level} id=\"{slug}\">{}</h{level}>",
@@ -98,6 +179,7 @@ pub fn render(md: &str) -> String {
                 || nxt.starts_with('#')
                 || nxt == "---"
                 || nxt.starts_with("```")
+                || nxt.starts_with("> [!")
                 || numbered(nxt)
                 || bulleted(nxt)
             {
@@ -168,6 +250,176 @@ fn linkify(text: &str) -> String {
     }
     out.push_str(&esc(rest));
     out
+}
+
+fn parse_callout(line: &str) -> Option<(&'static str, Option<String>)> {
+    let t = line.trim();
+    let rest = t.strip_prefix("> [!")?;
+    let close = rest.find(']')?;
+    let kind = rest[..close].trim();
+    let after = rest[close + 1..].trim();
+    let title = if after.is_empty() {
+        None
+    } else {
+        Some(after.to_string())
+    };
+    match kind {
+        "NOTE" | "note" => Some(("note", title)),
+        "PLANNED" | "planned" => Some(("planned", title)),
+        _ => Some(("note", title)),
+    }
+}
+
+fn callout_html(kind: &str, title: Option<&str>, body: &[String]) -> String {
+    let class = if kind == "planned" {
+        "callout callout-planned"
+    } else {
+        "callout callout-note"
+    };
+    let fallback = if kind == "planned" {
+        "Planned — not available yet"
+    } else {
+        "Note"
+    };
+    let head = title.unwrap_or(fallback);
+    let paras: String = body
+        .iter()
+        .filter(|p| !p.is_empty())
+        .map(|p| format!("<p>{}</p>", inline(p)))
+        .collect();
+    format!(
+        r#"<aside class="{class}"><strong>{}</strong>{paras}</aside>"#,
+        esc(head)
+    )
+}
+
+fn code_block(lang: &str, code: &str, opts: Options) -> String {
+    let label = if lang.is_empty() {
+        "CODE".to_string()
+    } else {
+        lang.to_ascii_uppercase()
+    };
+    let copy = if opts.copy_buttons {
+        r#"<button type="button" class="copy-btn" data-copy>⧉ COPY</button>"#
+    } else {
+        ""
+    };
+    let inner = if opts.highlight {
+        highlight(code)
+    } else {
+        esc(code)
+    };
+    format!(
+        r#"<div class="code-block"><div class="code-head"><span>{}</span>{copy}</div><pre><code>{}</code></pre></div>"#,
+        esc(&label),
+        inner
+    )
+}
+
+fn highlight(code: &str) -> String {
+    let chars: Vec<char> = code.chars().collect();
+    let mut out = String::new();
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] == '/' && chars.get(i + 1) == Some(&'/') {
+            let start = i;
+            while i < chars.len() && chars[i] != '\n' {
+                i += 1;
+            }
+            out.push_str(&span_class("tok-cmt", &collect(&chars[start..i])));
+            continue;
+        }
+        if chars[i] == '#' && (i == 0 || chars[i - 1] == '\n' || chars[i - 1].is_whitespace()) {
+            let start = i;
+            while i < chars.len() && chars[i] != '\n' {
+                i += 1;
+            }
+            out.push_str(&span_class("tok-cmt", &collect(&chars[start..i])));
+            continue;
+        }
+        if chars[i] == '"' || chars[i] == '\'' {
+            let quote = chars[i];
+            let start = i;
+            i += 1;
+            while i < chars.len() && chars[i] != quote && chars[i] != '\n' {
+                if chars[i] == '\\' {
+                    i += 1;
+                }
+                i += 1;
+            }
+            if i < chars.len() && chars[i] == quote {
+                i += 1;
+            }
+            out.push_str(&span_class("tok-str", &collect(&chars[start..i])));
+            continue;
+        }
+        if chars[i].is_ascii_alphabetic() || chars[i] == '_' {
+            let start = i;
+            while i < chars.len()
+                && (chars[i].is_ascii_alphanumeric() || chars[i] == '_' || chars[i] == '-')
+            {
+                i += 1;
+            }
+            let word = collect(&chars[start..i]);
+            if is_keyword(&word) {
+                out.push_str(&span_class("tok-kw", &word));
+            } else {
+                out.push_str(&esc(&word));
+            }
+            continue;
+        }
+        out.push_str(&esc(&chars[i].to_string()));
+        i += 1;
+    }
+    out
+}
+
+fn collect(chars: &[char]) -> String {
+    chars.iter().collect()
+}
+
+fn span_class(class: &str, text: &str) -> String {
+    format!(r#"<span class="{class}">{}</span>"#, esc(text))
+}
+
+fn is_keyword(word: &str) -> bool {
+    matches!(
+        word,
+        "import"
+            | "from"
+            | "const"
+            | "let"
+            | "await"
+            | "export"
+            | "async"
+            | "function"
+            | "return"
+            | "if"
+            | "else"
+            | "for"
+            | "while"
+            | "match"
+            | "fn"
+            | "pub"
+            | "struct"
+            | "impl"
+            | "use"
+            | "mod"
+            | "true"
+            | "false"
+            | "null"
+            | "undefined"
+            | "git"
+            | "cd"
+            | "cargo"
+            | "curl"
+            | "python"
+            | "docker"
+            | "compose"
+            | "build"
+            | "run"
+            | "clone"
+    )
 }
 
 fn parse_heading(line: &str) -> Option<(usize, String)> {
@@ -267,5 +519,25 @@ mod tests {
         assert!(html.contains("<strong>world</strong>"));
         assert!(html.contains("<code>code</code>"));
         assert!(html.contains("git clone"));
+    }
+
+    #[test]
+    fn callouts_and_front_matter() {
+        let (fm, body) = split_front_matter(
+            "---\ntitle: Quickstart\nsection: get-started\n---\n\n# Quickstart\n\n> [!NOTE]\n> Day 0.\n\n> [!PLANNED]\n> Docker image.\n",
+        );
+        assert_eq!(fm.get("title").map(String::as_str), Some("Quickstart"));
+        let html = render_with(
+            body,
+            Options {
+                copy_buttons: true,
+                highlight: true,
+                skip_h1: true,
+            },
+        );
+        assert!(!html.contains("<h1"));
+        assert!(html.contains("callout-note"));
+        assert!(html.contains("callout-planned"));
+        assert_eq!(headings_h2(body).len(), 0);
     }
 }

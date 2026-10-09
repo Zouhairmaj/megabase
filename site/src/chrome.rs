@@ -12,6 +12,8 @@ pub struct Paths {
     pub root: String,
     pub current: &'static str,
     pub is_404: bool,
+    /// True on `/docs/<slug>/` (and similar) so `page(current)` goes up one directory.
+    pub in_subdir: bool,
 }
 
 impl Paths {
@@ -20,6 +22,7 @@ impl Paths {
             root: if is_404 { "/".into() } else { String::new() },
             current: "home",
             is_404,
+            in_subdir: false,
         }
     }
 
@@ -28,6 +31,7 @@ impl Paths {
             root: if is_404 { "/".into() } else { "../".into() },
             current: id,
             is_404,
+            in_subdir: false,
         }
     }
 
@@ -36,6 +40,16 @@ impl Paths {
             root: "../../".into(),
             current: id,
             is_404: false,
+            in_subdir: true,
+        }
+    }
+
+    pub fn docs_article() -> Self {
+        Self {
+            root: "../../".into(),
+            current: "docs",
+            is_404: false,
+            in_subdir: true,
         }
     }
 
@@ -61,9 +75,25 @@ impl Paths {
             return format!("/{dir}/");
         }
         if self.current == dir {
+            if self.in_subdir {
+                return "../".into();
+            }
             return "./".into();
         }
         format!("{}{dir}/", self.root)
+    }
+
+    pub fn docs_slug(&self, slug: &str) -> String {
+        if self.is_404 {
+            return format!("/docs/{slug}/");
+        }
+        if self.current == "docs" {
+            if self.in_subdir {
+                return format!("../{slug}/");
+            }
+            return format!("./{slug}/");
+        }
+        format!("{}docs/{slug}/", self.root)
     }
 }
 
@@ -76,7 +106,7 @@ const DESKTOP_NAV: &[(&str, &str, bool)] = &[
     ("roadmap", "ROADMAP", false),
     ("components", "COMPONENTS", true),
     ("devlog", "DEVLOG", false),
-    ("docs", "DOCS", true),
+    ("docs", "DOCS", false),
 ];
 
 const MOBILE_NAV: &[(&str, &str)] = &[

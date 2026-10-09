@@ -10,6 +10,7 @@
 
 mod chrome;
 mod devlog;
+mod docs;
 mod html;
 mod human_log;
 mod manifesto;
@@ -23,6 +24,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use chrome::Paths;
 use html::subst;
@@ -181,8 +183,8 @@ const PAGES: &[Page] = &[
     Page {
         id: "docs",
         dir: "docs",
-        title: "Docs — Getting started — Megabase",
-        description: "Build Megabase from source, configure it, and run the judge. Day 0: every endpoint returns 501.",
+        title: "Docs — Megabase",
+        description: "Megabase documentation, rendered from markdown in docs/ on every commit. Day 0: nothing passes yet.",
         og_type: "website",
         og_image: "og/docs.png",
         og_alt: "Megabase docs: getting started. Day 0, nothing works yet.",
@@ -281,8 +283,11 @@ struct SiteData<'a> {
     metrics: &'a Metrics,
     human: &'a human_log::HumanLog,
     entries: &'a [devlog::Entry],
+    docs: &'a [docs::Doc],
     roadmap_md: Option<&'a str>,
     coverage_svg: bool,
+    sha: &'a str,
+    date: &'a str,
 }
 
 fn build(
@@ -303,13 +308,19 @@ fn build(
         .trim()
         .to_string();
     let entries = devlog::load(repo_root)?;
+    let site_docs = docs::load(repo_root)?;
+    let sha = git_sha7(repo_root);
+    let date = build_date();
     let roadmap_md = fs::read_to_string(repo_root.join("docs/ROADMAP.md")).ok();
     let data = SiteData {
         metrics,
         human,
         entries: &entries,
+        docs: &site_docs,
         roadmap_md: roadmap_md.as_deref(),
         coverage_svg,
+        sha: &sha,
+        date: &date,
     };
 
     for page in PAGES {
@@ -336,7 +347,14 @@ fn build(
         fs::write(dir.join("index.html"), article)?;
     }
 
-    fs::write(out.join("sitemap.xml"), sitemap(&entries))?;
+    for doc in &site_docs {
+        let article = render_docs_article(doc, &site_docs, &layout, &logo, metrics, &sha, &date)?;
+        let dir = out.join("docs").join(&doc.slug);
+        fs::create_dir_all(&dir)?;
+        fs::write(dir.join("index.html"), article)?;
+    }
+
+    fs::write(out.join("sitemap.xml"), sitemap(&entries, &site_docs))?;
     let cname = site_root.join("CNAME");
     let cname_out = out.join("CNAME");
     if cname.is_file() && !same_path(&cname, &cname_out) {
@@ -392,6 +410,40 @@ fn render_article(entry: &devlog::Entry, layout: &str, logo: &str) -> io::Result
     })
 }
 
+fn render_docs_article(
+    doc: &docs::Doc,
+    all: &[docs::Doc],
+    layout: &str,
+    logo: &str,
+    metrics: &Metrics,
+    sha: &str,
+    date: &str,
+) -> io::Result<String> {
+    let paths = Paths::docs_article();
+    let title = format!("{} — Megabase", doc.title);
+    let description = if doc.description.is_empty() {
+        format!("Megabase docs: {}.", doc.title)
+    } else {
+        doc.description.clone()
+    };
+    let loc = format!("{ORIGIN}/docs/{}/", doc.slug);
+    let page = Page {
+        id: Box::leak(format!("docs-{}", doc.slug).into_boxed_str()),
+        dir: Box::leak(format!("docs/{}", doc.slug).into_boxed_str()),
+        title: Box::leak(title.into_boxed_str()),
+        description: Box::leak(description.into_boxed_str()),
+        og_type: "article",
+        og_image: "og/docs.png",
+        og_alt: "Megabase docs: getting started. Day 0, nothing works yet.",
+        kind: Kind::Docs,
+        noindex: false,
+        extra_preload: ExtraPreload::Inter,
+    };
+    wrap(&page, layout, logo, &paths, Some(&loc), |paths| {
+        Ok(docs::article(paths, all, doc, metrics, sha, date))
+    })
+}
+
 fn content(
     page: &Page,
     paths: &Paths,
@@ -416,7 +468,7 @@ fn content(
         Kind::Devlog => pages::devlog_index(paths, data.entries),
         Kind::HumanLog => pages::human_log(paths, data.metrics, &data.human.html),
         Kind::Faq => pages::faq(paths, data.metrics),
-        Kind::Docs => pages::docs(paths),
+        Kind::Docs => docs::index(paths, data.docs, data.metrics, data.sha, data.date),
         Kind::Cost => pages::cost(paths, data.metrics),
         Kind::NotFound => pages::not_found(paths),
     })
@@ -464,10 +516,12 @@ fn wrap(
         },
     );
     vars.insert("preload".into(), preload(page, asset));
-    let body_class = match page.id {
-        "manifesto" => "manifesto-page",
-        "docs" => "docs-page",
-        _ => "",
+    let body_class = if page.id == "manifesto" {
+        "manifesto-page"
+    } else if page.id == "docs" || page.id.starts_with("docs-") {
+        "docs-page"
+    } else {
+        ""
     };
     vars.insert("body_class".into(), body_class.into());
     vars.insert(
@@ -481,7 +535,8 @@ fn wrap(
     );
     vars.insert("header".into(), chrome::header(paths, logo));
     vars.insert("footer".into(), chrome::footer(paths, logo));
-    let needs_copy = matches!(page.kind, Kind::Docs | Kind::HowItWorks);
+    let needs_copy =
+        matches!(page.kind, Kind::Docs | Kind::HowItWorks) || page.id.starts_with("docs-");
     let mut scripts = String::new();
     if page.id == "manifesto" {
         scripts.push_str(&format!(r#"<script src="{asset}toc.js" defer></script>"#));
@@ -509,7 +564,7 @@ fn preload(page: &Page, asset: &str) -> String {
     }
 }
 
-fn sitemap(entries: &[devlog::Entry]) -> String {
+fn sitemap(entries: &[devlog::Entry], docs_pages: &[docs::Doc]) -> String {
     let lastmod = build_date();
     let mut urls = String::from(
         r#"<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">"#,
@@ -529,6 +584,12 @@ fn sitemap(entries: &[devlog::Entry]) -> String {
             entry.slug, entry.date
         ));
     }
+    for doc in docs_pages {
+        urls.push_str(&format!(
+            "<url><loc>{ORIGIN}/docs/{}/</loc><lastmod>{lastmod}</lastmod></url>",
+            doc.slug
+        ));
+    }
     urls.push_str("</urlset>\n");
     urls
 }
@@ -539,6 +600,30 @@ fn page_url(page: &Page) -> String {
     } else {
         format!("{ORIGIN}/{}/", page.dir)
     }
+}
+
+fn git_sha7(repo_root: &Path) -> String {
+    if let Ok(sha) = std::env::var("GITHUB_SHA") {
+        let short: String = sha.chars().take(7).collect();
+        if short.len() == 7 {
+            return short;
+        }
+    }
+    Command::new("git")
+        .args([
+            "-C",
+            repo_root.to_str().unwrap_or("."),
+            "rev-parse",
+            "--short=7",
+            "HEAD",
+        ])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|s| s.trim().to_string())
+        .filter(|s| s.len() == 7)
+        .unwrap_or_else(|| "unknown".into())
 }
 
 fn build_date() -> String {
@@ -610,6 +695,34 @@ fn jsonld(page: &Page, url: &str) -> String {
                 "image": image
             }),
         ],
+        id if id.starts_with("docs-") => {
+            let name = page.title.split(" — ").next().unwrap_or(page.title);
+            vec![
+                org,
+                website,
+                json!({
+                    "@type": "TechArticle",
+                    "@id": format!("{url}#page"),
+                    "url": url,
+                    "headline": name,
+                    "name": page.title,
+                    "description": page.description,
+                    "inLanguage": "en",
+                    "image": image,
+                    "isPartOf": { "@id": format!("{ORIGIN}/#website") },
+                    "author": { "@id": format!("{ORIGIN}/#organization") },
+                    "publisher": { "@id": format!("{ORIGIN}/#organization") }
+                }),
+                json!({
+                    "@type": "BreadcrumbList",
+                    "itemListElement": [
+                        { "@type": "ListItem", "position": 1, "name": "Megabase", "item": format!("{ORIGIN}/") },
+                        { "@type": "ListItem", "position": 2, "name": "Docs", "item": format!("{ORIGIN}/docs/") },
+                        { "@type": "ListItem", "position": 3, "name": name, "item": url }
+                    ]
+                }),
+            ]
+        }
         _ => {
             let kind = if page.og_type == "article" {
                 "Article"
@@ -714,10 +827,17 @@ mod tests {
                 fs::copy(&src, tmp_root.join(name)).expect(name);
             }
         }
-        let roadmap = real_root.join("docs/ROADMAP.md");
-        if roadmap.is_file() {
-            fs::create_dir_all(tmp_root.join("docs")).expect("docs");
-            fs::copy(&roadmap, tmp_root.join("docs/ROADMAP.md")).expect("roadmap");
+        let docs_dir = real_root.join("docs");
+        if docs_dir.is_dir() {
+            let dest = tmp_root.join("docs");
+            fs::create_dir_all(&dest).expect("docs");
+            for entry in fs::read_dir(&docs_dir).expect("read docs") {
+                let entry = entry.expect("docs entry");
+                let path = entry.path();
+                if path.extension().and_then(|e| e.to_str()) == Some("md") {
+                    fs::copy(&path, dest.join(entry.file_name())).expect("docs copy");
+                }
+            }
         }
         let devlog = real_root.join("devlog");
         if devlog.is_dir() {
@@ -768,6 +888,8 @@ mod tests {
             "human-log/index.html",
             "faq/index.html",
             "docs/index.html",
+            "docs/quickstart/index.html",
+            "docs/install/index.html",
             "cost/index.html",
             "404.html",
             "sitemap.xml",
@@ -776,7 +898,25 @@ mod tests {
         }
         let sitemap = fs::read_to_string(out.join("sitemap.xml")).unwrap();
         assert!(sitemap.contains("https://megabase.sh/status/"));
+        assert!(sitemap.contains("https://megabase.sh/docs/quickstart/"));
         assert!(!sitemap.contains("/404"));
+        let docs_index = fs::read_to_string(out.join("docs/index.html")).unwrap();
+        assert!(docs_index.contains("docs-card"));
+        assert!(docs_index.contains("aria-label=\"Install\""));
+        assert!(!docs_index.to_ascii_lowercase().contains("oxide"));
+        assert!(!docs_index.contains("334"));
+        assert!(docs_index.contains("nav-link is-current"));
+        let quick = fs::read_to_string(out.join("docs/quickstart/index.html")).unwrap();
+        assert!(quick.contains("aria-current=\"page\""));
+        assert!(quick.contains("<details"));
+        assert!(quick.contains("On this page"));
+        assert!(quick.contains("docs-nav-planned"));
+        assert!(quick.contains("TechArticle"));
+        assert!(quick.contains("Built from commit"));
+        assert!(quick.contains("callout-note"));
+        assert!(quick.contains("callout-planned"));
+        assert!(quick.contains("data-copy"));
+        assert!(!quick.contains("334"));
         let _ = fs::remove_dir_all(&out);
     }
 
