@@ -12,6 +12,44 @@
 --   migrations/20251007112900_add_session_refresh_token_columns.up.sql
 --   migrations/20251111201300_add_scopes_to_sessions.up.sql
 
+-- Pin attnum order is refresh_token_* then scopes. An empty table created
+-- with scopes first is dropped so CREATE can rebuild it; inbound FKs are
+-- dropped here and re-added later. ACCESS EXCLUSIVE then EXISTS so a
+-- concurrent insert cannot land between the emptiness check and DROP.
+DO $$
+DECLARE
+    hmac_att smallint;
+    scopes_att smallint;
+    has_rows boolean;
+BEGIN
+    IF to_regclass('auth.sessions') IS NULL THEN
+        RETURN;
+    END IF;
+    LOCK TABLE auth.sessions IN ACCESS EXCLUSIVE MODE;
+    SELECT EXISTS (SELECT 1 FROM auth.sessions) INTO has_rows;
+    SELECT a.attnum INTO hmac_att
+      FROM pg_attribute a
+      JOIN pg_class c ON c.oid = a.attrelid
+      JOIN pg_namespace ns ON ns.oid = c.relnamespace
+     WHERE ns.nspname = 'auth' AND c.relname = 'sessions'
+       AND a.attname = 'refresh_token_hmac_key'
+       AND NOT a.attisdropped AND a.attnum > 0;
+    SELECT a.attnum INTO scopes_att
+      FROM pg_attribute a
+      JOIN pg_class c ON c.oid = a.attrelid
+      JOIN pg_namespace ns ON ns.oid = c.relnamespace
+     WHERE ns.nspname = 'auth' AND c.relname = 'sessions'
+       AND a.attname = 'scopes' AND NOT a.attisdropped AND a.attnum > 0;
+    IF NOT has_rows AND hmac_att IS NOT NULL AND scopes_att IS NOT NULL
+       AND scopes_att < hmac_att THEN
+        ALTER TABLE IF EXISTS auth.refresh_tokens
+            DROP CONSTRAINT IF EXISTS refresh_tokens_session_id_fkey;
+        ALTER TABLE IF EXISTS auth.mfa_amr_claims
+            DROP CONSTRAINT IF EXISTS mfa_amr_claims_session_id_fkey;
+        DROP TABLE auth.sessions;
+    END IF;
+END $$;
+
 CREATE TABLE IF NOT EXISTS auth.sessions (
     id uuid NOT NULL,
     user_id uuid NOT NULL,
@@ -25,9 +63,9 @@ CREATE TABLE IF NOT EXISTS auth.sessions (
     ip inet NULL,
     tag text NULL,
     oauth_client_id uuid NULL,
-    scopes text NULL,
     refresh_token_hmac_key text NULL,
     refresh_token_counter bigint NULL,
+    scopes text NULL,
     CONSTRAINT sessions_pkey PRIMARY KEY (id),
     CONSTRAINT sessions_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE,
     CONSTRAINT sessions_oauth_client_id_fkey FOREIGN KEY (oauth_client_id) REFERENCES auth.oauth_clients(id) ON DELETE CASCADE,
@@ -45,9 +83,9 @@ ALTER TABLE auth.sessions ADD COLUMN IF NOT EXISTS user_agent text;
 ALTER TABLE auth.sessions ADD COLUMN IF NOT EXISTS ip inet;
 ALTER TABLE auth.sessions ADD COLUMN IF NOT EXISTS tag text;
 ALTER TABLE auth.sessions ADD COLUMN IF NOT EXISTS oauth_client_id uuid;
-ALTER TABLE auth.sessions ADD COLUMN IF NOT EXISTS scopes text;
 ALTER TABLE auth.sessions ADD COLUMN IF NOT EXISTS refresh_token_hmac_key text;
 ALTER TABLE auth.sessions ADD COLUMN IF NOT EXISTS refresh_token_counter bigint;
+ALTER TABLE auth.sessions ADD COLUMN IF NOT EXISTS scopes text;
 
 ALTER TABLE auth.sessions ALTER COLUMN id SET NOT NULL;
 ALTER TABLE auth.sessions ALTER COLUMN user_id SET NOT NULL;
@@ -91,6 +129,32 @@ BEGIN
     ) THEN
         ALTER TABLE auth.sessions
             ADD CONSTRAINT sessions_scopes_length CHECK (char_length(scopes) <= 4096);
+    END IF;
+END $$;
+
+DO $$
+BEGIN
+    IF to_regclass('auth.refresh_tokens') IS NOT NULL
+       AND NOT EXISTS (
+           SELECT 1
+           FROM pg_constraint
+           WHERE conname = 'refresh_tokens_session_id_fkey'
+             AND conrelid = to_regclass('auth.refresh_tokens')
+       ) THEN
+        ALTER TABLE auth.refresh_tokens
+            ADD CONSTRAINT refresh_tokens_session_id_fkey
+            FOREIGN KEY (session_id) REFERENCES auth.sessions(id) ON DELETE CASCADE;
+    END IF;
+    IF to_regclass('auth.mfa_amr_claims') IS NOT NULL
+       AND NOT EXISTS (
+           SELECT 1
+           FROM pg_constraint
+           WHERE conname = 'mfa_amr_claims_session_id_fkey'
+             AND conrelid = to_regclass('auth.mfa_amr_claims')
+       ) THEN
+        ALTER TABLE auth.mfa_amr_claims
+            ADD CONSTRAINT mfa_amr_claims_session_id_fkey
+            FOREIGN KEY (session_id) REFERENCES auth.sessions(id) ON DELETE CASCADE;
     END IF;
 END $$;
 

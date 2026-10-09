@@ -265,6 +265,43 @@ mod tests {
         assert!(IDENTITIES.contains("provider_id"));
         assert!(IDENTITIES.contains("GENERATED ALWAYS AS (lower(identity_data->>'email')) STORED"));
         assert!(IDENTITIES.contains("REFERENCES auth.users(id) ON DELETE CASCADE"));
+        let create = IDENTITIES
+            .find("CREATE TABLE IF NOT EXISTS auth.identities")
+            .expect("create");
+        let email = IDENTITIES[create..]
+            .find("email text GENERATED ALWAYS AS")
+            .expect("email");
+        let id = IDENTITIES[create..]
+            .find("id uuid NOT NULL DEFAULT gen_random_uuid()")
+            .expect("uuid id");
+        assert!(
+            email < id,
+            "pin attnum order is email then uuid id (20221215195800 before 20231117164230)"
+        );
+        assert!(
+            IDENTITIES.contains("DROP TABLE auth.identities"),
+            "empty wrong-order identities must be rebuilt"
+        );
+        let peek = IDENTITIES
+            .find("AND a.attname IN ('email', 'id')")
+            .expect("identities attnum peek");
+        let lock = IDENTITIES
+            .find("LOCK TABLE auth.identities IN ACCESS EXCLUSIVE MODE")
+            .expect("identities lock");
+        let exists = IDENTITIES
+            .find("EXISTS (SELECT 1 FROM auth.identities)")
+            .expect("identities exists");
+        let drop = IDENTITIES
+            .find("DROP TABLE auth.identities")
+            .expect("identities drop");
+        assert!(
+            peek < lock && lock < exists && exists < drop,
+            "inspect attnums before lock; EXISTS before DROP"
+        );
+        assert!(
+            !IDENTITIES.contains("COUNT(*)"),
+            "empty check must not scan the whole table"
+        );
     }
 
     #[test]
@@ -342,6 +379,53 @@ mod tests {
         assert!(REFRESH_TOKENS.contains("refresh_tokens_session_id_fkey"));
         assert!(REFRESH_TOKENS.contains("parent varchar(255)"));
         assert!(USERS.contains("encrypted_password"));
+        let rename_confirmed = USERS
+            .find("RENAME COLUMN confirmed_at TO email_confirmed_at")
+            .expect("rename confirmed_at");
+        let rename_token = USERS
+            .find("RENAME COLUMN email_change_token TO email_change_token_new")
+            .expect("rename email_change_token");
+        let email_confirmed = USERS
+            .find("ADD COLUMN IF NOT EXISTS email_confirmed_at")
+            .expect("email_confirmed_at");
+        let invited = USERS
+            .find("ADD COLUMN IF NOT EXISTS invited_at")
+            .expect("invited_at");
+        let token_new = USERS
+            .find("ADD COLUMN IF NOT EXISTS email_change_token_new")
+            .expect("email_change_token_new");
+        let email_change = USERS
+            .find("ADD COLUMN IF NOT EXISTS email_change varchar")
+            .expect("email_change");
+        let phone_sent = USERS
+            .find("ADD COLUMN IF NOT EXISTS phone_change_sent_at")
+            .expect("phone_change_sent_at");
+        let confirmed = USERS
+            .find("ADD COLUMN IF NOT EXISTS confirmed_at timestamptz")
+            .expect("confirmed_at");
+        let token_current = USERS
+            .find("ADD COLUMN IF NOT EXISTS email_change_token_current")
+            .expect("email_change_token_current");
+        assert!(
+            rename_confirmed < email_confirmed,
+            "rename legacy confirmed_at before ADD COLUMN email_confirmed_at"
+        );
+        assert!(
+            rename_token < token_new,
+            "rename legacy email_change_token before ADD COLUMN email_change_token_new"
+        );
+        assert!(
+            email_confirmed < invited,
+            "pin attnum order is email_confirmed_at then invited_at"
+        );
+        assert!(
+            token_new < email_change,
+            "pin attnum order is email_change_token_new then email_change"
+        );
+        assert!(
+            phone_sent < confirmed && confirmed < token_current,
+            "pin attnum order is phone_change_sent_at, confirmed_at, email_change_token_current"
+        );
         assert!(USERS.contains(
             "GENERATED ALWAYS AS (LEAST (users.email_confirmed_at, users.phone_confirmed_at)) STORED"
         ));
@@ -350,14 +434,73 @@ mod tests {
         assert!(USERS.contains("DROP INDEX auth.users_instance_id_email_idx"));
         assert!(USERS.contains("indexdef NOT LIKE '%lower(%'"));
         assert!(!USERS.contains("DROP INDEX IF EXISTS users_instance_id_email_idx"));
-        assert!(USERS.contains("is_anonymous"));
-        assert!(USERS.contains("is_sso_user"));
+        let is_sso = USERS
+            .find("ADD COLUMN IF NOT EXISTS is_sso_user")
+            .expect("is_sso_user");
+        let deleted_at = USERS
+            .find("ADD COLUMN IF NOT EXISTS deleted_at")
+            .expect("deleted_at");
+        let is_anonymous = USERS
+            .find("ADD COLUMN IF NOT EXISTS is_anonymous")
+            .expect("is_anonymous");
+        assert!(
+            is_sso < deleted_at && deleted_at < is_anonymous,
+            "pin attnum order is is_sso_user then deleted_at then is_anonymous"
+        );
+        let create_tail = USERS
+            .find("    is_sso_user boolean NOT NULL DEFAULT false,\n    deleted_at timestamptz NULL,\n    is_anonymous boolean NOT NULL DEFAULT false,")
+            .expect("CREATE lists is_sso_user before deleted_at");
+        assert!(
+            create_tail < is_sso,
+            "CREATE column list precedes ADD COLUMN repairs"
+        );
         assert!(USERS.contains("ALTER COLUMN phone TYPE text"));
         assert!(SESSIONS.contains("auth.aal_level"));
         assert!(SESSIONS.contains("timestamp WITHOUT TIME ZONE"));
         assert!(SESSIONS.contains("refresh_token_hmac_key"));
         assert!(SESSIONS.contains("sessions_scopes_length"));
         assert!(SESSIONS.contains("REFERENCES auth.oauth_clients(id) ON DELETE CASCADE"));
+        let hmac = SESSIONS
+            .find("ADD COLUMN IF NOT EXISTS refresh_token_hmac_key")
+            .expect("hmac");
+        let scopes = SESSIONS
+            .find("ADD COLUMN IF NOT EXISTS scopes")
+            .expect("scopes");
+        assert!(
+            hmac < scopes,
+            "pin attnum order is refresh_token_* then scopes"
+        );
+        assert!(
+            SESSIONS.contains("DROP TABLE auth.sessions"),
+            "empty wrong-order sessions must be rebuilt"
+        );
+        let lock = SESSIONS
+            .find("LOCK TABLE auth.sessions IN ACCESS EXCLUSIVE MODE")
+            .expect("sessions lock");
+        let exists = SESSIONS
+            .find("EXISTS (SELECT 1 FROM auth.sessions)")
+            .expect("sessions exists");
+        let drop = SESSIONS
+            .find("DROP TABLE auth.sessions")
+            .expect("sessions drop");
+        assert!(
+            lock < exists && exists < drop,
+            "ACCESS EXCLUSIVE must precede EXISTS and DROP"
+        );
+        assert!(
+            !SESSIONS.contains("COUNT(*)"),
+            "empty check must not scan the whole table"
+        );
+        let restore_refresh = SESSIONS[drop..]
+            .find("ADD CONSTRAINT refresh_tokens_session_id_fkey")
+            .expect("restore refresh_tokens FK");
+        let restore_amr = SESSIONS[drop..]
+            .find("ADD CONSTRAINT mfa_amr_claims_session_id_fkey")
+            .expect("restore mfa_amr_claims FK");
+        assert!(
+            restore_refresh > 0 && restore_amr > 0,
+            "inbound session FKs must be re-added after DROP"
+        );
         assert!(SSO_PROVIDERS.contains("disabled"));
         assert!(SSO_PROVIDERS.contains("sso_providers_resource_id_pattern_idx"));
         assert!(SAML_PROVIDERS.contains("name_id_format"));
@@ -478,6 +621,19 @@ mod tests {
         assert!(
             !SCHEMA.contains("encrypted_password"),
             "do not ship the full auth.users column list as a stub"
+        );
+        let create = SCHEMA
+            .find("CREATE TABLE IF NOT EXISTS auth.users")
+            .expect("users stub");
+        let sessions = SCHEMA[create..]
+            .find("CREATE TABLE IF NOT EXISTS auth.sessions")
+            .expect("sessions stub");
+        let stub = &SCHEMA[create..create + sessions];
+        // Adjacent lines, not `find("id uuid")`: that substring sits inside
+        // `instance_id uuid` and would make the order check a tautology.
+        assert!(
+            stub.contains("    instance_id uuid NULL,\n    id uuid NOT NULL,"),
+            "stub attnum order is instance_id then id"
         );
     }
 

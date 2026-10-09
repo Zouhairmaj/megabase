@@ -7,6 +7,7 @@
 [![Release](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2FZouhairmaj%2Fmegabase%2Fmain%2F.release-please-manifest.json&query=%24%5B%22.%22%5D&prefix=v&label=release&style=flat-square&color=00D892)](https://github.com/Zouhairmaj/megabase/releases)
 [![License](https://img.shields.io/badge/license-Apache--2.0-00D892?style=flat-square)](LICENSE)
 [![OpenSSF Scorecard](https://img.shields.io/ossf-scorecard/github.com/Zouhairmaj/megabase?label=openssf%20scorecard&style=flat-square)](https://scorecard.dev/viewer/?uri=github.com/Zouhairmaj/megabase)
+[![OpenSSF Best Practices](https://www.bestpractices.dev/projects/15348/badge)](https://www.bestpractices.dev/en/projects/15348)
 [![Codecov](https://img.shields.io/codecov/c/github/Zouhairmaj/megabase?label=codecov&style=flat-square)](https://codecov.io/gh/Zouhairmaj/megabase)
 [![Bencher](https://img.shields.io/badge/bencher-benchmarks-00D892?style=flat-square)](https://bencher.dev/perf/megabase)
 [![CodeRabbit](https://img.shields.io/coderabbit/prs/github/Zouhairmaj/megabase?style=flat-square)](https://coderabbit.ai)
@@ -16,9 +17,9 @@
 [![release-please](https://img.shields.io/badge/release--please-enabled-00D892?style=flat-square)](https://github.com/Zouhairmaj/megabase/actions/workflows/release.yml)
 [![MSRV](https://img.shields.io/badge/MSRV-1.89-00D892?style=flat-square)](https://github.com/Zouhairmaj/megabase/blob/main/Cargo.toml)
 [![Discussions](https://img.shields.io/github/discussions/Zouhairmaj/megabase?style=flat-square)](https://github.com/Zouhairmaj/megabase/discussions)
-[![Coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2FZouhairmaj%2Fmegabase%2Fmain%2Fcoverage%2Fbadge-coverage.json&style=flat-square)](#status)
-[![Conformance](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2FZouhairmaj%2Fmegabase%2Fmain%2Fcoverage%2Fbadge-conformance.json&style=flat-square)](#status)
-[![Units](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2FZouhairmaj%2Fmegabase%2Fmain%2Fcoverage%2Fsummary.json&query=%24.totals.units&label=units&style=flat-square&color=00D892)](#status)
+[![Coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2FZouhairmaj%2Fmegabase%2Fgh-pages%2Fcoverage%2Fbadge-coverage.json&style=flat-square)](#status)
+[![Conformance](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2FZouhairmaj%2Fmegabase%2Fgh-pages%2Fcoverage%2Fbadge-conformance.json&style=flat-square)](#status)
+[![Units](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2FZouhairmaj%2Fmegabase%2Fgh-pages%2Fcoverage%2Fsummary.json&query=%24.totals.units&label=units&style=flat-square&color=00D892)](#status)
 
 # Supabase, rewritten in Rust. By agents. In public.
 
@@ -112,6 +113,7 @@ See [`docs/brand/README.md`](docs/brand/README.md).
 Humans: [CONTRIBUTING.md](CONTRIBUTING.md). Agents: [AGENTS.md](AGENTS.md).
 [Issues](https://github.com/Zouhairmaj/megabase/issues).
 Security reports: [SECURITY.md](SECURITY.md).
+OpenSSF Best Practices (passing) answers: [docs/BESTPRACTICES.md](docs/BESTPRACTICES.md).
 
 ## License
 

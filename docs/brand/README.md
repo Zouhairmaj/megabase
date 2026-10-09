@@ -139,10 +139,13 @@ Treemap chips use a card-colored label with a green value: `#00D892` from
 not-started fill.
 
 README coverage and conformance shields.io badges (owner-specified,
-`flat-square`) read `coverage/badge-coverage.json` and
-`coverage/badge-conformance.json`: `#e05d44` below 50%, `#fe7d37` from
-50% to under 90%, `#00D892` at 90% and above. The site Status page shows
-those percentages as text, not shields badges.
+`flat-square`) read the same JSON from the `gh-pages` branch
+(`coverage/badge-coverage.json`, `coverage/badge-conformance.json`),
+published by Pages after Judge on `main` (no direct push to `main`):
+`#e05d44` below 50%, `#fe7d37` from 50% to under 90%, `#00D892` at 90%
+and above. PRs still commit the generated copies so `coverage check`
+can reject drift. The site Status page shows those percentages as text,
+not shields badges.
 
 ## Rules
 

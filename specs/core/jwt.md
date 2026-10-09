@@ -58,12 +58,14 @@ On success, `JwtClaims`:
 ## Errors
 
 `JwtError` kinds use PostgREST’s JWT messages so REST can map them to
-`PGRST301` / `PGRST303` later. Auth logout maps the same kinds to GoTrue
+`PGRST301` / `PGRST303` later, except `SecretTooShort`, which is Megabase's
+32-byte key floor. Auth logout maps the same kinds to GoTrue
 `bad_jwt` (`invalid JWT: unable to parse or verify signature, …`).
 
 | Kind | When | PostgREST message |
 |---|---|---|
-| `SecretMissing` | `JWT_SECRET` unset or empty | Server lacks JWT secret |
+| `SecretMissing` | `JWT_SECRET` unset or empty when building a verifier | Server lacks JWT secret |
+| `SecretTooShort` | HMAC key of 1–31 bytes (`Hs256::new`) | Megabase only: HMAC-SHA-256 keys shorter than 32 bytes are disabled (got n). Not a PostgREST message. |
 | `Empty` | token is empty | Empty JWT is sent in Authorization header |
 | `UnexpectedParts(n)` | not 3 segments | Expected 3 parts in JWT; got n |
 | `BadAlgorithm` | `alg` ≠ `HS256` | Wrong or unsupported encoding algorithm |
@@ -78,13 +80,32 @@ case-insensitive, then a single non-whitespace token
 
 ## Config
 
-`Config::from_env` reads `JWT_SECRET` (already named). The process may
-start without it so `/_megabase/health` and CI image smoke tests work.
-`Config::jwt_hs256()` fails with `SecretMissing` instead of inventing a
-key. Empty string is the same as unset.
+`Config::from_env` reads `JWT_SECRET` (already named). Length is UTF-8
+bytes, not characters, and not an entropy check.
+
+Unset: the process starts so `/_megabase/health` and CI image smoke tests
+work. `Config::jwt_hs256()` then fails with `SecretMissing`. Megabase does
+not invent a key.
+
+A present value shorter than 32 bytes, including the empty string, is a
+configuration error. `from_env` returns before the process listens:
+
+`configuration error: JWT_SECRET is N bytes; HMAC-SHA-256 keys shorter than 32 bytes are disabled`
+
+That floor is stricter than GoTrue and PostgREST, which accept any
+non-empty symmetric secret. It matches the "at least 32 characters" note
+for `AUTH_JWT_SECRET` and `PGRST_JWT_SECRET` in
+`vendor/supabase/docker/CONFIG.md`. The demo secret in `.env.example` is
+ASCII and longer than 32 bytes.
+
+`Hs256::new` rejects an empty key as `SecretMissing` and a key of 1–31
+bytes as `SecretTooShort`. A key of 32 bytes or more is accepted.
 
 ## Edge cases
 
+- `JWT_SECRET` unset: process starts; verification returns `SecretMissing`.
+- `JWT_SECRET` of 0 or 31 bytes: `Config::from_env` fails before listen.
+- `Hs256::new` with 31 bytes: `SecretTooShort`. With 32 bytes: accepted.
 - Demo `ANON_KEY` / `SERVICE_ROLE_KEY` (whitespace in the JSON payload)
   verify with the demo `JWT_SECRET`.
 - Token signed with a different secret: `BadCrypto`.
