@@ -601,9 +601,12 @@ mod tests {
             .find("CREATE TABLE IF NOT EXISTS auth.sessions")
             .expect("sessions stub");
         let stub = &SCHEMA[create..create + sessions];
-        let instance_id = stub.find("instance_id uuid NULL").expect("instance_id");
-        let id = stub.find("id uuid NOT NULL").expect("id");
-        assert!(instance_id < id, "pin attnum 1 is instance_id, then id");
+        // Adjacent lines, not `find("id uuid")`: that substring sits inside
+        // `instance_id uuid` and would make the order check a tautology.
+        assert!(
+            stub.contains("    instance_id uuid NULL,\n    id uuid NOT NULL,"),
+            "stub attnum order is instance_id then id"
+        );
     }
 
     #[test]
