@@ -259,19 +259,22 @@ license = "MIT"
         links.insert("vendor/auth".into(), "aaa".into());
         links.insert("vendor/postgrest".into(), "ccc".into());
         links.insert("vendor/extra".into(), "ddd".into());
-        let errors = pin_errors_from(toml, &links).unwrap();
-        assert!(errors.iter().any(|e| e.contains("vendor.toml says bbb")));
-        assert!(errors
-            .iter()
-            .any(|e| e.contains("missing from vendor.toml")));
+        let mut errors = pin_errors_from(toml, &links).unwrap();
+        let mut expected = vec![
+            "vendor/postgrest is at ccc, vendor.toml says bbb".to_string(),
+            "vendor/extra is a submodule missing from vendor.toml".to_string(),
+        ];
+        errors.sort();
+        expected.sort();
+        assert_eq!(errors, expected);
         links.remove("vendor/extra");
         links.insert("vendor/postgrest".into(), "bbb".into());
         assert!(pin_errors_from(toml, &links).unwrap().is_empty());
         let mut missing = BTreeMap::new();
         missing.insert("vendor/auth".into(), "aaa".into());
-        assert!(pin_errors_from(toml, &missing)
-            .unwrap()
-            .iter()
-            .any(|e| e.contains("not a submodule")));
+        assert_eq!(
+            pin_errors_from(toml, &missing).unwrap(),
+            vec!["vendor/postgrest is in vendor.toml but is not a submodule".to_string()]
+        );
     }
 }

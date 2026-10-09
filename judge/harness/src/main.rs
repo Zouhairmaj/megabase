@@ -41,7 +41,8 @@ fn parse_args() -> Result<Args> {
     parse_args_from(std::env::args().skip(1))
 }
 
-fn parse_args_from(mut it: impl Iterator<Item = String>) -> Result<Args> {
+fn parse_args_from(it: impl IntoIterator<Item = String>) -> Result<Args> {
+    let mut it = it.into_iter().peekable();
     let command = it.next().context(USAGE)?;
     let mut args = Args {
         command,
@@ -55,7 +56,10 @@ fn parse_args_from(mut it: impl Iterator<Item = String>) -> Result<Args> {
         timeout: 300,
     };
     while let Some(flag) = it.next() {
-        let mut value = || it.next().with_context(|| format!("{flag} needs a value"));
+        let mut value = || {
+            it.next_if(|v| !v.starts_with("--"))
+                .with_context(|| format!("{flag} needs a value"))
+        };
         match flag.as_str() {
             "--reference" => args.reference = value()?,
             "--megabase" => args.megabase = value()?,
@@ -295,6 +299,15 @@ mod tests {
         assert!(parse_args_from(["run", "--nope"].into_iter().map(str::to_string)).is_err());
         assert!(parse_args_from(["run", "--timeout"].into_iter().map(str::to_string)).is_err());
         assert!(parse_args_from(std::iter::empty()).is_err());
+        let err = match parse_args_from(
+            ["run", "--out", "--baseline"]
+                .into_iter()
+                .map(str::to_string),
+        ) {
+            Err(e) => e.to_string(),
+            Ok(_) => panic!("expected --out to require a value"),
+        };
+        assert!(err.contains("--out needs a value"), "{err}");
     }
 
     #[test]
