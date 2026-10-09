@@ -20,6 +20,15 @@ type HmacSha256 = Hmac<Sha256>;
 /// PostgREST `allowedSkewSeconds` in `PostgREST.Auth.Jwt`.
 pub const EXP_LEEWAY_SECS: i64 = 30;
 
+/// Minimum HMAC-SHA-256 key size, in bytes.
+///
+/// NIST SP 800-131A (2012) requires 112 bits for symmetric keys through 2030.
+/// Megabase requires 32 bytes (256 bits). That matches the symmetric-secret
+/// floor in `vendor/supabase/docker/CONFIG.md` (`AUTH_JWT_SECRET` /
+/// `PGRST_JWT_SECRET`: at least 32 characters). The check is on UTF-8 bytes.
+/// GoTrue and PostgREST accept any non-empty secret; this floor is Megabase's.
+pub const MIN_JWT_SECRET_BYTES: usize = 32;
+
 const HS256: &str = "HS256";
 
 /// Compact JWT claims Auth and REST both need from a verified token.
@@ -37,12 +46,16 @@ pub struct JwtClaims {
 }
 
 /// Why HS256 verification rejected a token. Messages match PostgREST JWT errors
-/// (`PGRST301` / `PGRST303`) so REST can reuse them; Auth maps the same kinds
-/// to GoTrue `bad_jwt`.
+/// (`PGRST301` / `PGRST303`) so REST can reuse them, except
+/// [`JwtError::SecretTooShort`], which is Megabase's key-length rule.
+/// Auth maps the same kinds to GoTrue `bad_jwt`.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum JwtError {
     #[error("Server lacks JWT secret")]
     SecretMissing,
+    /// Megabase rejects HMAC keys under [`MIN_JWT_SECRET_BYTES`]. Not a PostgREST message.
+    #[error("HMAC-SHA-256 keys shorter than 32 bytes are disabled (got {got})")]
+    SecretTooShort { got: usize },
     #[error("Empty JWT is sent in Authorization header")]
     Empty,
     #[error("Expected 3 parts in JWT; got {0}")]
@@ -76,11 +89,18 @@ impl fmt::Debug for Hs256 {
 }
 
 impl Hs256 {
-    /// Rejects an empty secret so callers never fall back to a default key.
+    /// Binds `secret` as the HMAC-SHA-256 key.
+    ///
+    /// An empty secret is [`JwtError::SecretMissing`] so callers never fall
+    /// back to a default key. A non-empty secret shorter than
+    /// [`MIN_JWT_SECRET_BYTES`] is [`JwtError::SecretTooShort`].
     pub fn new(secret: impl Into<Vec<u8>>) -> Result<Self, JwtError> {
         let secret = secret.into();
         if secret.is_empty() {
             return Err(JwtError::SecretMissing);
+        }
+        if secret.len() < MIN_JWT_SECRET_BYTES {
+            return Err(JwtError::SecretTooShort { got: secret.len() });
         }
         Ok(Self { secret })
     }
@@ -437,6 +457,27 @@ mod tests {
             Hs256::new(&[] as &[u8]).unwrap_err(),
             JwtError::SecretMissing
         );
+    }
+
+    #[test]
+    fn secret_shorter_than_32_bytes_is_rejected() {
+        assert_eq!(
+            Hs256::new(vec![b'a'; 1]).unwrap_err(),
+            JwtError::SecretTooShort { got: 1 }
+        );
+        assert_eq!(
+            Hs256::new(vec![b'a'; MIN_JWT_SECRET_BYTES - 1]).unwrap_err(),
+            JwtError::SecretTooShort {
+                got: MIN_JWT_SECRET_BYTES - 1
+            }
+        );
+        let err = Hs256::new(vec![b'a'; 31]).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("shorter than 32 bytes are disabled"),
+            "{err}"
+        );
+        assert!(Hs256::new(vec![b'a'; MIN_JWT_SECRET_BYTES]).is_ok());
     }
 
     #[test]
