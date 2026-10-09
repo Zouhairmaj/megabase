@@ -42,7 +42,7 @@ docker compose -p megabase-judge \
   -f vendor/supabase/docker/docker-compose.yml \
   -f judge/compose.override.yml \
   --env-file vendor/supabase/docker/.env.example \
-  --profile with-megabase up -d --build --wait
+  --profile with-megabase up -d --build --wait --wait-timeout 300
 
 cargo run -p megabase-judge -- wait
 cargo run -p megabase-judge -- run \

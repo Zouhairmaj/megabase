@@ -36,7 +36,7 @@ guard:
 compose := "docker compose -p megabase-judge -f vendor/supabase/docker/docker-compose.yml -f judge/compose.override.yml --env-file vendor/supabase/docker/.env.example"
 
 judge-up:
-    {{compose}} --profile with-megabase up -d --build --wait
+    {{compose}} --profile with-megabase up -d --build --wait --wait-timeout 300
     @git -C vendor/supabase status --short || true
 
 judge-down:

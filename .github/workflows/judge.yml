@@ -34,7 +34,7 @@ jobs:
             -f vendor/supabase/docker/docker-compose.yml \
             -f judge/compose.override.yml \
             --env-file vendor/supabase/docker/.env.example \
-            up -d --wait
+            up -d --wait --wait-timeout 300
       - name: Megabase on :8100
         run: |
           MEGABASE_PORT=8100 MEGABASE_HOST=0.0.0.0 \
@@ -69,6 +69,7 @@ jobs:
             -f vendor/supabase/docker/docker-compose.yml \
             -f judge/compose.override.yml \
             --env-file vendor/supabase/docker/.env.example logs --tail 80
+          docker inspect --format '{{.State.Status}} {{json .State.Health}}' supabase-pooler || true
           cat /tmp/megabase.log || true
       - name: Comment on the PR
         if: github.event_name == 'pull_request' && always()
@@ -78,8 +79,11 @@ jobs:
           script: |
             const fs = require('fs');
             let body = '## Judge\n\n_(no summary)_';
-            try { body = '## Judge\n\n' + fs.readFileSync('/tmp/judge-summary.md', 'utf8'); }
-            catch (e) { body += '\n\n' + e.message; }
+            try {
+              body = '## Judge\n\n' + fs.readFileSync('/tmp/judge-summary.md', 'utf8');
+            } catch {
+              body += '\n\nCases did not run (reference stack or harness failed first).';
+            }
             github.rest.issues.createComment({
               issue_number: context.issue.number,
               owner: context.repo.owner,
