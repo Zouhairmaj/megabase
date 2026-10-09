@@ -752,6 +752,7 @@ mod tests {
         assert!(home.contains("visually-hidden"));
         assert!(home.contains("Coverage · Conformance"));
         assert!(home.contains("Units passing the judge"));
+        assert!(home.contains("https://analytics.ahrefs.com/analytics.js"));
         let _ = fs::remove_dir_all(&out);
     }
 
