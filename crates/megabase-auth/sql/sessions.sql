@@ -25,9 +25,9 @@ CREATE TABLE IF NOT EXISTS auth.sessions (
     ip inet NULL,
     tag text NULL,
     oauth_client_id uuid NULL,
+    scopes text NULL,
     refresh_token_hmac_key text NULL,
     refresh_token_counter bigint NULL,
-    scopes text NULL,
     CONSTRAINT sessions_pkey PRIMARY KEY (id),
     CONSTRAINT sessions_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE,
     CONSTRAINT sessions_oauth_client_id_fkey FOREIGN KEY (oauth_client_id) REFERENCES auth.oauth_clients(id) ON DELETE CASCADE,
@@ -45,9 +45,9 @@ ALTER TABLE auth.sessions ADD COLUMN IF NOT EXISTS user_agent text;
 ALTER TABLE auth.sessions ADD COLUMN IF NOT EXISTS ip inet;
 ALTER TABLE auth.sessions ADD COLUMN IF NOT EXISTS tag text;
 ALTER TABLE auth.sessions ADD COLUMN IF NOT EXISTS oauth_client_id uuid;
+ALTER TABLE auth.sessions ADD COLUMN IF NOT EXISTS scopes text;
 ALTER TABLE auth.sessions ADD COLUMN IF NOT EXISTS refresh_token_hmac_key text;
 ALTER TABLE auth.sessions ADD COLUMN IF NOT EXISTS refresh_token_counter bigint;
-ALTER TABLE auth.sessions ADD COLUMN IF NOT EXISTS scopes text;
 
 ALTER TABLE auth.sessions ALTER COLUMN id SET NOT NULL;
 ALTER TABLE auth.sessions ALTER COLUMN user_id SET NOT NULL;

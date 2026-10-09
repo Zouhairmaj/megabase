@@ -45,9 +45,9 @@ compared. Implemented in `judge/harness/src/db.rs`.
 
 | Kind | Compared | Normalized |
 |---|---|---|
-| Table catalog | column name and attnum order, `pg_type.typname`, `NOT NULL`, generated expression, `relrowsecurity`, `pg_get_indexdef` | SQL text: strip `--` comments, collapse whitespace, lowercase outside `'quoted'` literals. `absent = true` passes only when both databases lack the relation |
+| Table catalog | column name and attnum order, `pg_type.typname`, `NOT NULL`, generated expression, `relrowsecurity`, `pg_get_indexdef`, `pg_get_constraintdef` (PK, UNIQUE, CHECK, FK) | SQL text: strip `--` comments, collapse whitespace, lowercase outside `'quoted'` literals. A required object missing on both sides fails; `absent = true` passes only when both databases lack the relation |
 | Function catalog | identity arguments, result type, language, `provolatile`, `prosrc` | same SQL normalization on result type and body |
-| Row snapshot | `jsonb_agg(row_to_json(t))` of `SELECT *` | HTTP JSON rules (including bcrypt), plus non-empty `auth.users` secret columns (`encrypted_password`, `*_token`), then sort the row array by serialized text. Empty token strings stay empty so an autoconfirmed clear still differs from a leftover token. |
+| Row snapshot | `jsonb_agg(row_to_json(t))` of `SELECT *` | HTTP JSON rules (including bcrypt), plus non-empty `auth.users` secret columns (`encrypted_password`, `*_token`), then sort the row array by serialized text. Mutating HTTP cases compare the before/after row delta, not the full table. Empty token strings stay empty so an autoconfirmed clear still differs from a leftover token. |
 
 Owners, ACLs, `column_default` and comments are not compared: they
 depend on which cluster roles exist and on cosmetic `COMMENT ON`.

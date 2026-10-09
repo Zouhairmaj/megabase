@@ -3,6 +3,7 @@
 //! The harness talks to Postgres itself. It does not import Megabase crates
 //! and it does not trust Megabase HTTP for schema or row state.
 
+use std::collections::BTreeSet;
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
@@ -33,6 +34,7 @@ pub struct TableCatalog {
     pub columns: Vec<Column>,
     pub row_security: bool,
     pub indexes: Vec<String>,
+    pub constraints: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
@@ -262,6 +264,15 @@ fn table_catalog(client: &mut Client, rel: &Relation) -> Result<Option<TableCata
           ORDER BY pg_get_indexdef(ix.indexrelid)",
         &[&rel.schema, &rel.name],
     )?;
+    let constraints = client.query(
+        "SELECT pg_get_constraintdef(con.oid)
+           FROM pg_constraint con
+           JOIN pg_class t ON t.oid = con.conrelid
+           JOIN pg_namespace n ON n.oid = t.relnamespace
+          WHERE n.nspname = $1 AND t.relname = $2
+          ORDER BY pg_get_constraintdef(con.oid)",
+        &[&rel.schema, &rel.name],
+    )?;
     Ok(Some(TableCatalog {
         columns: columns
             .iter()
@@ -274,6 +285,10 @@ fn table_catalog(client: &mut Client, rel: &Relation) -> Result<Option<TableCata
             .collect(),
         row_security,
         indexes: indexes
+            .iter()
+            .map(|row| normalize_sql(row.get::<_, String>(0).as_str()))
+            .collect(),
+        constraints: constraints
             .iter()
             .map(|row| normalize_sql(row.get::<_, String>(0).as_str()))
             .collect(),
@@ -336,6 +351,126 @@ fn snapshot_rows(client: &mut Client, rel: &Relation) -> Result<Option<Value>> {
     );
     let value: Value = client.query_one(&sql, &[])?.get(0);
     Ok(Some(value))
+}
+
+/// One relation's rows on both databases, taken at one moment.
+#[derive(Debug, Clone)]
+pub struct RelationSnapshot {
+    pub raw: String,
+    pub reference: Option<Value>,
+    pub megabase: Option<Value>,
+    pub megabase_error: Option<String>,
+}
+
+/// Read current rows for each relation on both databases.
+pub fn snapshot_relations(databases: &Databases, raws: &[String]) -> Result<Vec<RelationSnapshot>> {
+    let mut out = Vec::with_capacity(raws.len());
+    for raw in raws {
+        let rel = parse_relation(raw)?;
+        let mut reference = connect(&databases.reference)?;
+        match connect(&databases.megabase) {
+            Err(err) => out.push(RelationSnapshot {
+                raw: raw.clone(),
+                reference: snapshot_rows(&mut reference, &rel)?,
+                megabase: None,
+                megabase_error: Some(format!(
+                    "megabase database unreachable for `{raw}`: {err:#}"
+                )),
+            }),
+            Ok(mut megabase) => out.push(RelationSnapshot {
+                raw: raw.clone(),
+                reference: snapshot_rows(&mut reference, &rel)?,
+                megabase: snapshot_rows(&mut megabase, &rel)?,
+                megabase_error: None,
+            }),
+        }
+    }
+    Ok(out)
+}
+
+/// Rows added and removed between two snapshots of one table.
+pub fn row_delta(before: &Value, after: &Value) -> Value {
+    let before_keys = row_key_set(before);
+    let after_keys = row_key_set(after);
+    let added = rows_matching(after, |key| !before_keys.contains(key));
+    let removed = rows_matching(before, |key| !after_keys.contains(key));
+    serde_json::json!({ "added": added, "removed": removed })
+}
+
+fn row_key_set(value: &Value) -> BTreeSet<String> {
+    match value {
+        Value::Array(items) => items.iter().map(Value::to_string).collect(),
+        other => BTreeSet::from([other.to_string()]),
+    }
+}
+
+fn rows_matching(value: &Value, keep: impl Fn(&str) -> bool) -> Vec<Value> {
+    match value {
+        Value::Array(items) => items
+            .iter()
+            .filter(|item| keep(&item.to_string()))
+            .cloned()
+            .collect(),
+        other if keep(&other.to_string()) => vec![other.clone()],
+        _ => Vec::new(),
+    }
+}
+
+/// Compare per-case added/removed rows so leftover rows from an earlier
+/// case (or a previous volume) do not fail a later case.
+pub fn compare_snapshot_deltas(
+    before: &[RelationSnapshot],
+    after: &[RelationSnapshot],
+) -> Result<Option<String>> {
+    for (before, after) in before.iter().zip(after.iter()) {
+        if let Some(err) = after
+            .megabase_error
+            .as_ref()
+            .or(before.megabase_error.as_ref())
+        {
+            return Ok(Some(err.clone()));
+        }
+        if before.raw != after.raw {
+            bail!(
+                "snapshot relation order changed: `{}` vs `{}`",
+                before.raw,
+                after.raw
+            );
+        }
+        match pair(after.reference.clone(), after.megabase.clone()) {
+            Presence::BothMissing | Presence::MissingReference => {
+                bail!(
+                    "reference database has no table `{}` to snapshot (fixture or pin problem)",
+                    after.raw
+                );
+            }
+            Presence::MissingMegabase => {
+                return Ok(Some(format!(
+                    "table `{}` missing on megabase (no rows to compare)",
+                    after.raw
+                )));
+            }
+            Presence::Both(mut ref_after, mut mb_after) => {
+                let mut ref_before = before.reference.clone().unwrap_or(Value::Array(vec![]));
+                let mut mb_before = before.megabase.clone().unwrap_or(Value::Array(vec![]));
+                normalize::json_rows(&mut ref_before);
+                normalize::json_rows(&mut mb_before);
+                normalize::json_rows(&mut ref_after);
+                normalize::json_rows(&mut mb_after);
+                let ref_delta = row_delta(&ref_before, &ref_after);
+                let mb_delta = row_delta(&mb_before, &mb_after);
+                if ref_delta != mb_delta {
+                    return Ok(Some(format!(
+                        "row delta in `{}` differs: {} vs {}",
+                        after.raw,
+                        describe_json("reference", &ref_delta),
+                        describe_json("megabase", &mb_delta)
+                    )));
+                }
+            }
+        }
+    }
+    Ok(None)
 }
 
 fn describe_json(label: &str, value: &Value) -> String {
@@ -424,6 +559,26 @@ fn table_diff(raw: &str, reference: &TableCatalog, megabase: &TableCatalog) -> S
             parts.push(format!("indexes only on megabase: {mb_only:?}"));
         }
     }
+    if reference.constraints != megabase.constraints {
+        let ref_only: Vec<_> = reference
+            .constraints
+            .iter()
+            .filter(|c| !megabase.constraints.contains(c))
+            .collect();
+        let mb_only: Vec<_> = megabase
+            .constraints
+            .iter()
+            .filter(|c| !reference.constraints.contains(c))
+            .collect();
+        if !ref_only.is_empty() {
+            parts.push(format!(
+                "constraints only on the reference stack: {ref_only:?}"
+            ));
+        }
+        if !mb_only.is_empty() {
+            parts.push(format!("constraints only on megabase: {mb_only:?}"));
+        }
+    }
     if parts.is_empty() {
         format!("table `{raw}` catalog differs")
     } else {
@@ -447,11 +602,15 @@ pub fn absent_mismatch(ref_found: bool, mb_found: bool, kind: &str, raw: &str) -
     }
 }
 
+fn required_object_missing_both(kind: &str, raw: &str) -> String {
+    format!("{kind} `{raw}` missing on both databases (set absent = true if the pin dropped it)")
+}
+
 /// Compare a table's catalog (and optionally rows) on both databases.
 ///
-/// `absent` requires the object to be missing on both sides. Otherwise an
-/// object missing on both sides is a pass; missing on only one side fails
-/// the case.
+/// `absent` requires the object to be missing on both sides. A required
+/// object missing on both sides fails the case (a typo or a failed
+/// reference migration must not look like a pass).
 pub fn compare_table(
     databases: &Databases,
     raw: &str,
@@ -481,7 +640,7 @@ pub fn compare_table(
         ));
     }
     match pair(ref_cat, mb_cat) {
-        Presence::BothMissing => Ok(None),
+        Presence::BothMissing => Ok(Some(required_object_missing_both("table", raw))),
         Presence::MissingReference => Ok(Some(format!(
             "table `{raw}` present on megabase, missing on the reference stack"
         ))),
@@ -519,7 +678,7 @@ pub fn compare_function(databases: &Databases, raw: &str, absent: bool) -> Resul
         ));
     }
     match pair(ref_fn, mb_fn) {
-        Presence::BothMissing => Ok(None),
+        Presence::BothMissing => Ok(Some(required_object_missing_both("function", raw))),
         Presence::MissingReference => Ok(Some(format!(
             "function `{raw}` present on megabase, missing on the reference stack"
         ))),
@@ -644,11 +803,43 @@ mod tests {
     }
 
     #[test]
-    fn both_missing_catalogs_match() {
+    fn pair_classifies_presence() {
         assert_eq!(pair::<()>(None, None), Presence::BothMissing);
         assert_eq!(pair(None, Some(())), Presence::MissingReference);
         assert_eq!(pair(Some(()), None), Presence::MissingMegabase);
         assert_eq!(pair(Some(1), Some(2)), Presence::Both(1, 2));
+    }
+
+    #[test]
+    fn required_object_missing_both_names_absent() {
+        let msg = required_object_missing_both("table", "auth.typo");
+        assert!(msg.contains("auth.typo"), "{msg}");
+        assert!(msg.contains("absent = true"), "{msg}");
+    }
+
+    #[test]
+    fn row_delta_isolates_added_and_removed_rows() {
+        let before = serde_json::json!([{"email": "old@example.com"}]);
+        let after_ref = serde_json::json!([
+            {"email": "old@example.com"},
+            {"email": "new@example.com"}
+        ]);
+        let after_mb = serde_json::json!([{"email": "old@example.com"}]);
+        assert_eq!(
+            row_delta(&before, &after_ref),
+            serde_json::json!({
+                "added": [{"email": "new@example.com"}],
+                "removed": []
+            })
+        );
+        assert_eq!(
+            row_delta(&before, &after_mb),
+            serde_json::json!({ "added": [], "removed": [] })
+        );
+        assert_ne!(
+            row_delta(&before, &after_ref),
+            row_delta(&before, &after_mb)
+        );
     }
 
     #[test]
@@ -662,6 +853,7 @@ mod tests {
             }],
             row_security: true,
             indexes: vec!["create unique index t_pkey on auth.t using btree (id)".into()],
+            constraints: vec!["primary key (id)".into()],
         };
         let b = TableCatalog {
             columns: vec![
@@ -675,6 +867,7 @@ mod tests {
             ],
             row_security: true,
             indexes: a.indexes.clone(),
+            constraints: a.constraints.clone(),
         };
         let msg = table_diff("auth.identities", &a, &b);
         assert!(msg.contains("column count 1 vs 2"), "{msg}");

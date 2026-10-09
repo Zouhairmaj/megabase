@@ -6,8 +6,6 @@
 --   migrations/20240612123726_enable_rls_update_grants.up.sql
 -- Desired state only: do not RENAME id (that breaks an already-migrated UUID PK).
 
--- attnum order matches the pin: email was added before the uuid `id`
--- (`20221215195800` then `20231117164230`).
 CREATE TABLE IF NOT EXISTS auth.identities (
     provider_id text NOT NULL,
     user_id uuid NOT NULL,
@@ -16,8 +14,8 @@ CREATE TABLE IF NOT EXISTS auth.identities (
     last_sign_in_at timestamptz NULL,
     created_at timestamptz NULL,
     updated_at timestamptz NULL,
-    email text GENERATED ALWAYS AS (lower(identity_data->>'email')) STORED,
     id uuid NOT NULL DEFAULT gen_random_uuid(),
+    email text GENERATED ALWAYS AS (lower(identity_data->>'email')) STORED,
     CONSTRAINT identities_pkey PRIMARY KEY (id),
     CONSTRAINT identities_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE,
     CONSTRAINT identities_provider_id_provider_unique UNIQUE (provider_id, provider)
@@ -30,11 +28,13 @@ ALTER TABLE auth.identities ADD COLUMN IF NOT EXISTS provider text;
 ALTER TABLE auth.identities ADD COLUMN IF NOT EXISTS last_sign_in_at timestamptz;
 ALTER TABLE auth.identities ADD COLUMN IF NOT EXISTS created_at timestamptz;
 ALTER TABLE auth.identities ADD COLUMN IF NOT EXISTS updated_at timestamptz;
+ALTER TABLE auth.identities ADD COLUMN IF NOT EXISTS id uuid DEFAULT gen_random_uuid();
 
 ALTER TABLE auth.identities ALTER COLUMN provider_id SET NOT NULL;
 ALTER TABLE auth.identities ALTER COLUMN user_id SET NOT NULL;
 ALTER TABLE auth.identities ALTER COLUMN identity_data SET NOT NULL;
 ALTER TABLE auth.identities ALTER COLUMN provider SET NOT NULL;
+ALTER TABLE auth.identities ALTER COLUMN id SET NOT NULL;
 
 DO $$
 BEGIN
@@ -49,9 +49,6 @@ BEGIN
             ADD COLUMN email text GENERATED ALWAYS AS (lower(identity_data->>'email')) STORED;
     END IF;
 END $$;
-
-ALTER TABLE auth.identities ADD COLUMN IF NOT EXISTS id uuid DEFAULT gen_random_uuid();
-ALTER TABLE auth.identities ALTER COLUMN id SET NOT NULL;
 
 DO $$
 BEGIN

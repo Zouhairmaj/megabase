@@ -96,20 +96,21 @@ Auth SQL there (`DATABASE_URL`). Sharing the official `postgres`
 database would make row and catalog comparisons vacuous.
 
 After every mutating HTTP case (POST / PUT / PATCH / DELETE), the
-harness snapshots `auth.users` and `public.todos` on both databases and
-compares the normalized rows. Auth sign-up and REST insert therefore
-fail when the database state diverges even if the HTTP responses match.
-Set `snapshot = []` to skip, or `snapshot = ["schema.table", …]` to
-choose other relations. `storage.objects` is Level 2.
+harness snapshots `auth.users` and `public.todos` on both databases
+before and after the HTTP steps and compares the per-case row delta
+(added/removed). Leftover rows from an earlier case or a reused volume
+do not fail a later case. Set `snapshot = []` to skip, or
+`snapshot = ["schema.table", …]` to choose other relations.
+`storage.objects` is Level 2.
 
 `[[case.db]]` compares a table catalog (columns, nullability, generated
-expressions, RLS flag, `pg_get_indexdef`) or a function (arguments,
-result type, language, volatility, normalized body) so
-`auth:sql-table:*` and `auth:sql-function:*` units can become
-conformant. An object missing on both databases is a pass. Missing on
-only one side fails the case. Set `absent = true` when the pin dropped
-the object (`auth.sso_sessions`): both databases must lack it, or the
-case fails. A missing fixture snapshot table (`auth.users`,
+expressions, RLS flag, `pg_get_indexdef`, `pg_get_constraintdef`) or a
+function (arguments, result type, language, volatility, normalized body)
+so `auth:sql-table:*` and `auth:sql-function:*` units can become
+conformant. A required object missing on both databases fails the case
+(a typo must not look like a pass). Set `absent = true` when the pin
+dropped the object (`auth.sso_sessions`): both databases must lack it,
+or the case fails. A missing fixture snapshot table (`auth.users`,
 `public.todos`) on the reference stack still aborts the run.
 
 Studio browser sessions (`judge/studio/`, a Rust harness such as

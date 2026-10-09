@@ -224,6 +224,12 @@ pub fn run_case(
     let base_vars: BTreeMap<String, String> = [("run".to_string(), run_id.to_string())].into();
     let mut ref_vars = base_vars.clone();
     let mut mb_vars = base_vars;
+    let snapshot_rels = case.snapshot_relations();
+    let before = if snapshot_rels.is_empty() {
+        None
+    } else {
+        Some(db::snapshot_relations(databases, &snapshot_rels)?)
+    };
     for (i, step) in case.step.iter().enumerate() {
         // Reference-stack `send`/`capture` errors abort the run on purpose:
         // an unreachable reference stack is an environment failure, not a
@@ -273,7 +279,7 @@ pub fn run_case(
             });
         }
     }
-    if let Some(detail) = compare_side_effects(case, databases)? {
+    if let Some(detail) = compare_side_effects(case, databases, before.as_deref())? {
         return Ok(Outcome {
             id: case.id.clone(),
             description: case.description.clone(),
@@ -289,7 +295,11 @@ pub fn run_case(
     })
 }
 
-fn compare_side_effects(case: &Case, databases: &Databases) -> Result<Option<String>> {
+fn compare_side_effects(
+    case: &Case,
+    databases: &Databases,
+    before: Option<&[db::RelationSnapshot]>,
+) -> Result<Option<String>> {
     for (i, check) in case.db.iter().enumerate() {
         let detail = match check.kind()? {
             DbKind::Table { name, rows, absent } => {
@@ -301,9 +311,11 @@ fn compare_side_effects(case: &Case, databases: &Databases) -> Result<Option<Str
             return Ok(Some(format!("db check {}: {detail}", i + 1)));
         }
     }
-    for relation in case.snapshot_relations() {
-        if let Some(detail) = db::compare_row_snapshot(databases, &relation, true)? {
-            return Ok(Some(format!("snapshot `{relation}`: {detail}")));
+    if let Some(before) = before {
+        let raws: Vec<String> = before.iter().map(|s| s.raw.clone()).collect();
+        let after = db::snapshot_relations(databases, &raws)?;
+        if let Some(detail) = db::compare_snapshot_deltas(before, &after)? {
+            return Ok(Some(format!("snapshot: {detail}")));
         }
     }
     Ok(None)

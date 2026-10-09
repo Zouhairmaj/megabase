@@ -145,8 +145,9 @@ waiting on a human.
     one database would make catalog and row comparisons vacuous or
     inverted. Level 1
     snapshots `auth.users` and `public.todos` after mutating HTTP cases
-    and compares `auth` table/function catalogs. A catalog object missing
-    on both databases is a pass; `auth.sso_sessions` is required absent
+    (per-case row delta) and compares `auth` table/function catalogs
+    including `pg_get_constraintdef`. A required catalog object missing
+    on both databases fails; `auth.sso_sessions` is required absent
     (`absent = true`). A missing fixture snapshot table on the reference
     still aborts. `storage.objects` stays Level 2.
 
