@@ -1,0 +1,60 @@
+<main id="main" class="hero">
+  <section class="copy" aria-labelledby="headline">
+    <p class="eyebrow">
+      DAY 0 · BUILT BY AGENTS<span class="wide-only">, IN PUBLIC</span>
+    </p>
+    <h1 id="headline" class="headline">
+      The Supabase API.<br />
+      <span class="headline-accent">One Rust binary.</span>
+    </h1>
+    <p class="lede">
+      An open-source experiment: autonomous AI agents rewrite every
+      Supabase service in Rust, tested response by response against the
+      real stack.
+    </p>
+    <div class="actions">
+      <a class="btn btn-primary" href="{{github}}" rel="noopener noreferrer">VIEW ON GITHUB ↗</a>
+      <a class="btn btn-ghost" href="{{to_manifesto}}">READ THE MANIFESTO</a>
+    </div>
+  </section>
+
+  <aside class="status" id="status" tabindex="-1" aria-labelledby="status-title">
+    <div class="status-head">
+      <span id="status-title" class="status-title">EXPERIMENT STATUS</span>
+      <span class="status-note">updated on every commit</span>
+    </div>
+    <div class="treemap">{{treemap}}</div>
+    <dl class="stats-rows">
+      <div class="stat-row">
+        <dt>Units passing the judge</dt>
+        <dd>{{passing_total}}</dd>
+      </div>
+      <div class="stat-row">
+        <dt>Coverage · Conformance</dt>
+        <dd>{{coverage_conformance}}</dd>
+      </div>
+      <div class="stat-row">
+        <dt>Current stage</dt>
+        <dd class="accent">{{stage}}</dd>
+      </div>
+    </dl>
+    <dl class="stats-grid">
+      <div>
+        <dt>Units passing</dt>
+        <dd>{{passing_total}}</dd>
+      </div>
+      <div>
+        <dt>Stage</dt>
+        <dd class="accent">{{stage_short}}</dd>
+      </div>
+      <div>
+        <dt>Coverage</dt>
+        <dd>{{coverage}}</dd>
+      </div>
+      <div>
+        <dt>Conformance</dt>
+        <dd>{{conformance}}</dd>
+      </div>
+    </dl>
+  </aside>
+</main>

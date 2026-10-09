@@ -1,0 +1,26 @@
+/target
+/dist
+__pycache__/
+_render-*.html
+
+# Built HTML/CSS if someone generates with `--out site`.
+/index.html
+/404.html
+/sitemap.xml
+/manifesto/
+/styles.css
+/fonts/
+/logo.svg
+/favicon.svg
+/og-card.png
+/og/
+/favicon.ico
+/icon-192.png
+/icon-512.png
+/icon-maskable-512.png
+/site.webmanifest
+/toc.js
+/robots.txt
+/apple-touch-icon.png
+/.nojekyll
+

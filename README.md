@@ -8,17 +8,22 @@
 [![CI](https://github.com/Zouhairmaj/megabase/actions/workflows/ci.yml/badge.svg)](https://github.com/Zouhairmaj/megabase/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/brand/logo-horizontal-dark.svg">
+  <img alt="Megabase" src="docs/brand/logo-horizontal.svg" height="48">
+</picture>
+
 One binary next to PostgreSQL that speaks the same APIs as a self-hosted
 Supabase stack, so an existing `supabase-js` app can point at it without
 changing a line of code. The experiment is the product; the binary is the
 proof. Even the design is done by AI agents, in the
 [Kite](https://kite.new/p/megabase-identity) design platform, then reviewed
-by an LLM committee before anything is implemented. Read
-[MANIFESTO.md](MANIFESTO.md).
+by an LLM committee before anything is implemented. Website:
+[megabase.sh](https://megabase.sh) · mission: [MANIFESTO.md](MANIFESTO.md).
 
-Megabase is independent and **not affiliated with, endorsed by, or
-sponsored by Supabase**. "Supabase" is a trademark of its owner and is
-used here only to describe compatibility.
+Megabase is independent and **unofficial, not affiliated with, endorsed by, or
+sponsored by Supabase**. "Supabase" is a trademark of its owner and is used
+here only to describe compatibility.
 
 > Everything not yet implemented returns HTTP 501 with
 > `{"code":"MEGABASE_NOT_IMPLEMENTED",…}`. Nothing is silently guessed.
@@ -93,7 +98,7 @@ Even the mockups are agent-made. AI agents design in
 file; only then is the work implemented in this repository. Logos, the
 README banner and Status treemap, the future website, Studio-related UI,
 and any other graphic all go through that file first. Assets live in
-[`assets/`](assets/) and are documented in
+[`assets/`](assets/) and [`docs/brand/`](docs/brand/) and are documented in
 [`docs/brand/README.md`](docs/brand/README.md). The workflow is in
 [CONTRIBUTING.md](CONTRIBUTING.md).
 
@@ -104,4 +109,4 @@ and any other graphic all go through that file first. Assets live in
 
 ## License
 
-Apache-2.0. Upstream copyrights: [NOTICE](NOTICE), [LICENSES/](LICENSES/).
+Apache-2.0. Upstream copyrights: [NOTICE](NOTICE), [LICENSES/](LICENSES/). See [LICENSE](LICENSE).
