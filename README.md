@@ -8,11 +8,6 @@
 [![CI](https://github.com/Zouhairmaj/megabase/actions/workflows/ci.yml/badge.svg)](https://github.com/Zouhairmaj/megabase/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/brand/logo-horizontal-dark.svg">
-  <img alt="Megabase" src="docs/brand/logo-horizontal.svg" height="48">
-</picture>
-
 One binary next to PostgreSQL that speaks the same APIs as a self-hosted
 Supabase stack, so an existing `supabase-js` app can point at it without
 changing a line of code. The experiment is the product; the binary is the
