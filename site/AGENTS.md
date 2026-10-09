@@ -16,11 +16,12 @@ Extends the root `AGENTS.md`; it does not relax it.
   RUSTSEC-2026-0192).
 - Deployed to GitHub Pages by `.github/workflows/pages.yml` on push to
   `main` (and `workflow_dispatch`). That workflow checks out the event
-  SHA only and does not download Judge output (it saves the
-  default-branch Rust cache). After a successful Judge run on `main`,
-  `.github/workflows/pages-badges.yml` (`workflow_run` only, no cache
-  action) checks out the default branch, applies the Judge JSON as
-  data, and publishes shields JSON to `gh-pages`. It does not set
+  SHA only and does not download Judge output. It saves the
+  default-branch Rust cache on pushes to `main`. After a successful
+  Judge run on `main`, `.github/workflows/pages-badges.yml`
+  (`workflow_run` only, no cache action) checks out the default branch
+  and applies the Judge JSON as data only when that commit is the Judge
+  commit, then publishes shields JSON to `gh-pages`. It does not set
   `actions/checkout` `ref` from the triggering run. The generator
   writes that JSON to `_site/coverage/` (never treemap SVGs). Neither
   workflow pushes to `main`.

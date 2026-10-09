@@ -204,12 +204,13 @@ waiting on a human.
     (`workflow_run` only, no cache action). It checks out the default
     branch and does not set `actions/checkout` `ref` from the triggering
     run (Scorecard Dangerous-Workflow treats that ref as an untrusted
-    checkout). It applies the Judge JSON as data, then publishes shields
-    JSON only. `.github/workflows/pages.yml` is push and
-    `workflow_dispatch` only, checks out the event SHA, and does not
-    download `gh-pages` or a Judge artifact, because that job saves the
-    default-branch Rust cache. `pages-badges.yml` does not deploy the
-    site.
+    checkout). It applies the Judge JSON as data only when that checkout
+    is the Judge commit, then publishes shields JSON only. A newer
+    `main` waits for the next Judge run. `.github/workflows/pages.yml`
+    is push and `workflow_dispatch` only, checks out the event SHA, and
+    does not download `gh-pages` or a Judge artifact. It saves the
+    default-branch Rust cache on pushes to `main`. `pages-badges.yml`
+    does not deploy the site.
 
 ## Tracking
 
