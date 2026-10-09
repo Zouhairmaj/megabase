@@ -1,11 +1,5 @@
 name: Deploy placeholder site
 
-# Push and workflow_dispatch only. Both can write the default-branch
-# Actions cache, so this file must not check out
-# github.event.workflow_run.head_sha or download a workflow_run artifact.
-# Live Judge badges are published by pages-badges.yml, which is
-# workflow_run-only and does not save a cache.
-
 on:
   push:
     branches: [main]
@@ -19,76 +13,34 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  build:
-    name: Generate site
+  deploy:
+    name: Generate and publish to GitHub Pages
     runs-on: ubuntu-latest
-    # Read-only checkout of the event SHA (the push, or the ref selected
-    # for workflow_dispatch). Publication is a later job that does not
-    # check the repository out.
     permissions:
       contents: read
-    steps:
-      - name: Check out
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          persist-credentials: false
-          submodules: recursive
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
-        with:
-          toolchain: stable
-
-      # Trusted event SHA only (push or workflow_dispatch). The Judge
-      # artifact is applied in pages-badges.yml, which does not save a cache.
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        with:
-          key: pages
-
-      - name: Restore published Judge summary when present
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          # Keep the checked-in file until gh-pages has a summary. The
-          # download is one JSON blob; this job does not check that
-          # branch out.
-          url="repos/${GITHUB_REPOSITORY}/contents/coverage/summary.json?ref=gh-pages"
-          if gh api "$url" -H "Accept: application/vnd.github.raw" > /tmp/judge-summary.json; then
-            python3 -c 'import json; d=json.load(open("/tmp/judge-summary.json")); assert d.get("schema")==1 and "totals" in d'
-            cp /tmp/judge-summary.json coverage/summary.json
-          else
-            echo "No published coverage/summary.json; using the checked-in file."
-          fi
-
-      - name: Generate site
-        run: cargo run --manifest-path site/Cargo.toml --release -- --repo-root . --out _site
-
-      - name: Upload site
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: pages-site
-          path: _site
-          if-no-files-found: error
-          retention-days: 1
-
-  deploy:
-    name: Publish to GitHub Pages
-    needs: build
-    if: needs.build.result == 'success'
-    runs-on: ubuntu-latest
-    permissions:
       pages: write
       id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - name: Download site
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+      - name: Check out
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          name: pages-site
-          path: _site
+          persist-credentials: false
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+        with:
+          toolchain: stable
+
+      - name: Cache site workspace
+        uses: ./.github/actions/rust-cache
+        with:
+          workspace: site
+
+      - name: Generate site
+        run: cargo run --manifest-path site/Cargo.toml --release -- --repo-root . --out _site
 
       - name: Configure Pages
         uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5
