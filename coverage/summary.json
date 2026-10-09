@@ -2,12 +2,12 @@
   "schema": 1,
   "totals": {
     "units": 1024,
-    "implemented": 20,
+    "implemented": 22,
     "tested": 0,
     "conformant": 0
   },
   "percent": {
-    "coverage": 2.0,
+    "coverage": 2.1,
     "conformance": 0.0,
     "done": 0.0
   },
@@ -18,7 +18,7 @@
   "components": {
     "auth": {
       "units": 152,
-      "implemented": 20,
+      "implemented": 22,
       "tested": 0,
       "conformant": 0,
       "groups": {
@@ -30,7 +30,7 @@
         },
         "database": {
           "units": 32,
-          "implemented": 20,
+          "implemented": 22,
           "tested": 0,
           "conformant": 0
         },
@@ -575,6 +575,8 @@
     "auth:sql-table:auth.oauth_clients": "implemented",
     "auth:sql-table:auth.oauth_consents": "implemented",
     "auth:sql-table:auth.one_time_tokens": "implemented",
-    "auth:sql-table:auth.refresh_tokens": "implemented"
+    "auth:sql-table:auth.refresh_tokens": "implemented",
+    "auth:sql-table:auth.webauthn_challenges": "implemented",
+    "auth:sql-table:auth.webauthn_credentials": "implemented"
   }
 }

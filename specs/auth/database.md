@@ -1,8 +1,8 @@
-# Auth: database (issues 10 and 11)
+# Auth: database (issues 10, 11, and 13)
 
-Issues #10 and #11 port Auth SQL objects. HTTP `/auth/v1` is unchanged
-(501). These objects are the compatibility surface that RLS policies and
-clients call inside PostgreSQL.
+Issues #10, #11, and #13 port Auth SQL objects. HTTP `/auth/v1` is
+unchanged (501). These objects are the compatibility surface that RLS
+policies and clients call inside PostgreSQL.
 
 Namespace is always `auth` (GoTrue `{{ index .Options "Namespace" }}`).
 Pin: `vendor/auth` `v2.197.0` (`4eee58f296d9698a1c2c0ae14d7a0b379c7622d3`),
@@ -467,6 +467,59 @@ Indexes: `refresh_tokens_instance_id_idx`,
 `refresh_tokens_session_id_revoked_idx`, `refresh_tokens_updated_at_idx`
 on `updated_at DESC`. Comment: `Auth: Store of tokens used to refresh JWT
 tokens once they expire.`
+
+---
+
+## `auth:sql-table:auth.webauthn_credentials`
+
+Upstream create:
+`migrations/20260302000000_add_passkeys.up.sql:3`. No later migration
+and no RLS/grant in this pin. Parent key is `auth.users(id)` (stub on
+this branch until issue #12 lands the full column list).
+
+| Column | Type | Notes |
+|---|---|---|
+| id | uuid | NOT NULL, PK, `DEFAULT gen_random_uuid()` |
+| user_id | uuid | NOT NULL, FK → `auth.users(id)` ON DELETE CASCADE |
+| credential_id | bytea | NOT NULL |
+| public_key | bytea | NOT NULL |
+| attestation_type | text | NOT NULL DEFAULT `''` |
+| aaguid | uuid | NULL |
+| sign_count | bigint | NOT NULL DEFAULT 0 |
+| transports | jsonb | NOT NULL DEFAULT `[]` |
+| backup_eligible | boolean | NOT NULL DEFAULT false |
+| backed_up | boolean | NOT NULL DEFAULT false |
+| friendly_name | text | NOT NULL DEFAULT `''` |
+| created_at | timestamptz | NOT NULL DEFAULT `now()` |
+| updated_at | timestamptz | NOT NULL DEFAULT `now()` |
+| last_used_at | timestamptz | NULL |
+
+Unique index `webauthn_credentials_credential_id_key` on
+`credential_id`. Index `webauthn_credentials_user_id_idx` on `user_id`.
+No table comment.
+
+---
+
+## `auth:sql-table:auth.webauthn_challenges`
+
+Upstream create:
+`migrations/20260302000000_add_passkeys.up.sql:31`. No later migration
+and no RLS/grant in this pin. `user_id` is nullable so a signup
+challenge can exist before `auth.users` has a row (GoTrue
+`WebAuthnChallengeTypeSignup`).
+
+| Column | Type | Notes |
+|---|---|---|
+| id | uuid | NOT NULL, PK, `DEFAULT gen_random_uuid()` |
+| user_id | uuid | NULL, FK → `auth.users(id)` ON DELETE CASCADE |
+| challenge_type | text | NOT NULL, CHECK `signup` / `registration` / `authentication` |
+| session_data | jsonb | NOT NULL |
+| created_at | timestamptz | NOT NULL DEFAULT `now()` |
+| expires_at | timestamptz | NOT NULL |
+
+Indexes: `webauthn_challenges_user_id_idx` on `user_id`,
+`webauthn_challenges_expires_at_idx` on `expires_at` (cleanup of expired
+rows). No table comment.
 
 ---
 
