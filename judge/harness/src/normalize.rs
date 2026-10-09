@@ -169,6 +169,30 @@ mod tests {
             header("Content-Type", "application/json; charset=utf-8"),
             "application/json;charset=utf-8"
         );
+        assert_eq!(header("location", " /x "), "/x");
+    }
+
+    #[test]
+    fn json_walks_arrays_and_volatile_keys() {
+        let mut v = json!({
+            "iat": 1,
+            "exp": 2,
+            "rows": [{"id": "0b6a1f8e-3f43-4b5e-9c1d-2a0e5f6b7c8d"}, 3],
+            "keep": null
+        });
+        json(
+            &mut v,
+            &[
+                "/rows/1".to_string(),
+                "/missing".to_string(),
+                "no-slash".to_string(),
+            ],
+        );
+        assert_eq!(v["iat"], "<iat>");
+        assert_eq!(v["exp"], "<exp>");
+        assert_eq!(v["rows"][0]["id"], "<uuid>");
+        assert_eq!(v["rows"].as_array().unwrap().len(), 1);
+        assert!(v["keep"].is_null());
     }
 
     #[test]

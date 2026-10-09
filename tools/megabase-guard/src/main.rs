@@ -39,7 +39,17 @@ fn git_ok(args: &[&str]) -> bool {
 }
 
 fn changes(base: &str, head: &str) -> Result<Vec<Change>> {
-    let out = git(&["diff", "--name-status", "--no-renames", "-z", base, head])?;
+    parse_name_status(&git(&[
+        "diff",
+        "--name-status",
+        "--no-renames",
+        "-z",
+        base,
+        head,
+    ])?)
+}
+
+fn parse_name_status(out: &str) -> Result<Vec<Change>> {
     let fields: Vec<&str> = out.split('\0').filter(|s| !s.is_empty()).collect();
     fields
         .chunks(2)
@@ -64,16 +74,20 @@ fn changes(base: &str, head: &str) -> Result<Vec<Change>> {
 
 /// `(path, commit)` for every submodule gitlink under `vendor/` in `rev`.
 fn gitlinks(rev: &str) -> Result<BTreeMap<String, String>> {
-    let out = git(&["ls-tree", "-r", rev, "--", "vendor/"])?;
-    Ok(out
-        .lines()
+    Ok(parse_gitlinks(&git(&[
+        "ls-tree", "-r", rev, "--", "vendor/",
+    ])?))
+}
+
+fn parse_gitlinks(out: &str) -> BTreeMap<String, String> {
+    out.lines()
         .filter_map(|line| {
             let (meta, path) = line.split_once('\t')?;
             let mut parts = meta.split_whitespace();
             (parts.next()? == "160000")
                 .then(|| (path.to_string(), parts.nth(1).unwrap_or("").to_string()))
         })
-        .collect())
+        .collect()
 }
 
 #[derive(Deserialize)]
@@ -91,8 +105,11 @@ fn pin_errors(head: &str) -> Result<Vec<String>> {
     let Ok(text) = git(&["show", &format!("{head}:vendor.toml")]) else {
         return Ok(vec!["vendor.toml is missing".into()]);
     };
-    let pins: Pins = toml::from_str(&text).context("parsing vendor.toml")?;
-    let links = gitlinks(head)?;
+    pin_errors_from(&text, &gitlinks(head)?)
+}
+
+fn pin_errors_from(text: &str, links: &BTreeMap<String, String>) -> Result<Vec<String>> {
+    let pins: Pins = toml::from_str(text).context("parsing vendor.toml")?;
     let mut errors = Vec::new();
     for pin in &pins.pin {
         match links.get(&pin.path) {
@@ -186,5 +203,78 @@ fn main() -> ExitCode {
             eprintln!("error: {err:#}");
             ExitCode::from(2)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_name_status_maps_added_deleted_modified() {
+        let out = "A\0crates/a.rs\0D\0old.py\0M\0README.md\0";
+        let changes = parse_name_status(out).unwrap();
+        assert_eq!(changes.len(), 3);
+        assert_eq!(changes[0].status, Status::Added);
+        assert_eq!(changes[0].path, "crates/a.rs");
+        assert_eq!(changes[1].status, Status::Deleted);
+        assert_eq!(changes[2].status, Status::Modified);
+        assert!(parse_name_status("A").is_err());
+    }
+
+    #[test]
+    fn parse_gitlinks_keeps_only_submodule_mode() {
+        let out = "\
+160000 commit abcdef vendor/auth\n\
+100644 blob 123456 vendor.toml\n\
+160000 commit deadbeef\tvendor/postgrest\n";
+        let links = parse_gitlinks(out);
+        assert_eq!(
+            links.get("vendor/postgrest").map(String::as_str),
+            Some("deadbeef")
+        );
+        assert!(!links.contains_key("vendor/auth"));
+        assert!(!links.contains_key("vendor.toml"));
+    }
+
+    #[test]
+    fn pin_errors_from_compares_toml_and_gitlinks() {
+        let toml = r#"
+[[pin]]
+name = "auth"
+path = "vendor/auth"
+repo = "https://example/auth"
+tag = "v1"
+commit = "aaa"
+license = "MIT"
+[[pin]]
+name = "postgrest"
+path = "vendor/postgrest"
+repo = "https://example/p"
+tag = "v1"
+commit = "bbb"
+license = "MIT"
+"#;
+        let mut links = BTreeMap::new();
+        links.insert("vendor/auth".into(), "aaa".into());
+        links.insert("vendor/postgrest".into(), "ccc".into());
+        links.insert("vendor/extra".into(), "ddd".into());
+        let mut errors = pin_errors_from(toml, &links).unwrap();
+        let mut expected = vec![
+            "vendor/postgrest is at ccc, vendor.toml says bbb".to_string(),
+            "vendor/extra is a submodule missing from vendor.toml".to_string(),
+        ];
+        errors.sort();
+        expected.sort();
+        assert_eq!(errors, expected);
+        links.remove("vendor/extra");
+        links.insert("vendor/postgrest".into(), "bbb".into());
+        assert!(pin_errors_from(toml, &links).unwrap().is_empty());
+        let mut missing = BTreeMap::new();
+        missing.insert("vendor/auth".into(), "aaa".into());
+        assert_eq!(
+            pin_errors_from(toml, &missing).unwrap(),
+            vec!["vendor/postgrest is in vendor.toml but is not a submodule".to_string()]
+        );
     }
 }

@@ -189,6 +189,198 @@ pub fn toml_to_json(value: &toml::Value) -> serde_json::Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_cases() -> std::path::PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "megabase-judge-cases-{}-{unique}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn load_parses_steps_and_sorts_by_id() {
+        let dir = temp_cases();
+        fs::write(
+            dir.join("b.toml"),
+            r#"
+[[case]]
+id = "z.last"
+units = ["rest:route:GET /rest/v1/{relation}"]
+description = "later"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos"
+key = "none"
+"#,
+        )
+        .unwrap();
+        fs::write(
+            dir.join("a.toml"),
+            r#"
+[[case]]
+id = "a.first"
+units = ["auth:route:POST /auth/v1/signup"]
+[[case.step]]
+method = "POST"
+path = "/auth/v1/signup"
+key = "service_role"
+headers = { Prefer = "return=representation" }
+json = { email = "a@example.com", n = 1, ok = true, tags = ["x"] }
+compare_headers = ["Retry-After"]
+ignore = ["/id"]
+capture = { user = "/id" }
+"#,
+        )
+        .unwrap();
+        let cases = load(&dir).unwrap();
+        assert_eq!(
+            cases.iter().map(|c| c.id.as_str()).collect::<Vec<_>>(),
+            ["a.first", "z.last"]
+        );
+        assert_eq!(cases[0].step[0].key, Key::ServiceRole);
+        assert_eq!(cases[1].step[0].key, Key::None);
+        assert_eq!(cases[0].step[0].headers["Prefer"], "return=representation");
+        let json = toml_to_json(cases[0].step[0].json.as_ref().unwrap());
+        assert_eq!(json["email"], "a@example.com");
+        assert_eq!(json["n"], 1);
+        assert_eq!(json["ok"], true);
+        assert_eq!(json["tags"], serde_json::json!(["x"]));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn load_rejects_duplicates_empty_units_steps_and_json_plus_body() {
+        let dir = temp_cases();
+        fs::write(
+            dir.join("dup.toml"),
+            r#"
+[[case]]
+id = "same"
+units = ["u"]
+[[case.step]]
+method = "GET"
+path = "/"
+[[case]]
+id = "same"
+units = ["u"]
+[[case.step]]
+method = "GET"
+path = "/"
+"#,
+        )
+        .unwrap();
+        assert!(load(&dir)
+            .unwrap_err()
+            .to_string()
+            .contains("duplicate case id"));
+        let _ = fs::remove_dir_all(&dir);
+
+        let dir = temp_cases();
+        fs::write(
+            dir.join("empty-units.toml"),
+            r#"
+[[case]]
+id = "x"
+units = []
+[[case.step]]
+method = "GET"
+path = "/"
+"#,
+        )
+        .unwrap();
+        assert!(load(&dir)
+            .unwrap_err()
+            .to_string()
+            .contains("lists no units"));
+        let _ = fs::remove_dir_all(&dir);
+
+        let dir = temp_cases();
+        fs::write(
+            dir.join("no-steps.toml"),
+            r#"
+[[case]]
+id = "x"
+units = ["u"]
+step = []
+"#,
+        )
+        .unwrap();
+        assert!(load(&dir).unwrap_err().to_string().contains("has no steps"));
+        let _ = fs::remove_dir_all(&dir);
+
+        let dir = temp_cases();
+        fs::write(
+            dir.join("both.toml"),
+            r#"
+[[case]]
+id = "x"
+units = ["u"]
+[[case.step]]
+method = "POST"
+path = "/"
+json = { a = 1 }
+body = "raw"
+"#,
+        )
+        .unwrap();
+        assert!(load(&dir)
+            .unwrap_err()
+            .to_string()
+            .contains("both `json` and `body`"));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn load_rejects_unknown_fields() {
+        let dir = temp_cases();
+        fs::write(
+            dir.join("extra.toml"),
+            r#"
+[[case]]
+id = "x"
+units = ["u"]
+surprise = true
+[[case.step]]
+method = "GET"
+path = "/"
+"#,
+        )
+        .unwrap();
+        assert!(load(&dir).is_err());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn toml_to_json_covers_scalars_arrays_tables_and_datetime() {
+        let value: toml::Value = toml::from_str(
+            r#"
+s = "hi"
+i = 2
+f = 1.5
+b = false
+when = 1979-05-27T07:32:00Z
+nested = { k = "v" }
+list = [1, "a"]
+"#,
+        )
+        .unwrap();
+        let json = toml_to_json(&value);
+        assert_eq!(json["s"], "hi");
+        assert_eq!(json["i"], 2);
+        assert_eq!(json["f"], 1.5);
+        assert_eq!(json["b"], false);
+        assert_eq!(json["when"], "1979-05-27T07:32:00Z");
+        assert_eq!(json["nested"]["k"], "v");
+        assert_eq!(json["list"], serde_json::json!([1, "a"]));
+    }
 
     fn parse_one(text: &str) -> Case {
         let parsed: CaseFile = toml::from_str(text).unwrap();

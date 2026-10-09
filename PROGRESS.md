@@ -143,7 +143,18 @@ waiting on a human.
     `#e05d44` below 50%, `#fe7d37` from 50% to under 90%, `#00D892` at
     90% and above (`flat-square`). Treemap chips and generated SVG
     badges stay on the brand greens in `docs/brand/README.md`.
-17. **Judge databases are separate** (2026-10-09, issue #113). Side-effect
+17. **Owned lockfiles.** Scorecard/OSV flagged RUSTSEC-2026-0206
+    (`rustybuzz` unmaintained) and RUSTSEC-2026-0192 (`ttf-parser`
+    unmaintained) in `site/Cargo.lock`, not the workspace lockfile and
+    not `vendor/`. `site/` is excluded from the workspace, so root
+    `cargo audit` missed them. Fix: `resvg` 0.45 → 0.48 (harfrust +
+    skrifa). `just audit` scans every owned lockfile (`Cargo.lock`,
+    `site/Cargo.lock`). The target CI `cargo-audit` job must pass
+    `--file` for each of those; implementing this target is a follow-up
+    (#157), and a workspace-only run misses `site/`. `vendor/**`
+    lockfiles stay frozen; do not add an OSV ignore unless a finding
+    exists only there.
+18. **Judge databases are separate** (2026-10-09, issue #113). Side-effect
     checks compare the official cluster's `postgres` database with a
     dedicated `megabase` database on the same instance (`megabase-judge
     prepare` on host port 54322, then `DATABASE_URL=…/megabase`). Sharing
@@ -216,8 +227,11 @@ Physically impossible for the agent (repository settings or credentials):
       (Settings → Actions → General → Workflow permissions;
       `can_approve_pull_request_reviews=true`. Run 37961663758 predates it.)
 - [ ] Set secret `RELEASE_PLEASE_TOKEN` (PAT or GitHub App) so lockfile
-      pushes on the release branch start required checks (`GITHUB_TOKEN`
-      pushes do not trigger workflows)
+      pushes on the release branch start required checks natively
+      (`GITHUB_TOKEN` pushes do not trigger `push`/`pull_request`
+      workflows). Preferred even though Release now
+      `workflow_dispatch`es those checks when the secret is unset.
+      Exact steps: `HUMAN_LOG.md` Pending, 2026-10-09.
 - [ ] Allow `github-actions` to publish GitHub Releases / tags on `main`
 - [ ] Enforce CODEOWNERS
 - [ ] Allow `github-actions` to push coverage commits to `main`
