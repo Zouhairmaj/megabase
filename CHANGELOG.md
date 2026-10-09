@@ -1,5 +1,9 @@
 # Changelog
 
+All notable changes to Megabase are documented in this file.
+The format is produced by [release-please](https://github.com/googleapis/release-please).
+Sections: Features, Bug Fixes, Performance, Conformance/judge, Documentation.
+
 ## 0.1.0 (2026-10-09)
 
 
@@ -50,9 +54,3 @@
 * merge committee-reviewed AGENTS.md ([8b4100d](https://github.com/Zouhairmaj/megabase/commit/8b4100dde86860e7cdf73257d09d8573ea32e7a5))
 * point GitHub links at Zouhairmaj/megabase ([6fcc9d3](https://github.com/Zouhairmaj/megabase/commit/6fcc9d35d0a47321b0280ceca28549b0208cbfb7))
 * remove duplicate logo below README banner ([#124](https://github.com/Zouhairmaj/megabase/issues/124)) ([3783039](https://github.com/Zouhairmaj/megabase/commit/3783039aa6a85a698810e8623e2f3cf1b17c1111))
-
-## Changelog
-
-All notable changes to Megabase are documented in this file.
-The format is produced by [release-please](https://github.com/googleapis/release-please).
-Sections: Features, Bug Fixes, Performance, Conformance/judge, Documentation.
