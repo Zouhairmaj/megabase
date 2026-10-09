@@ -506,5 +506,105 @@ mod tests {
             "a\n<!-- x:begin -->\nnew\n<!-- x:end -->\nb\n"
         );
         assert!(splice("no markers", "x", "").is_err());
+        assert!(splice("<!-- x:end -->\n<!-- x:begin -->", "x", "n").is_err());
+    }
+
+    fn sample_units() -> UnitsFile {
+        use crate::model::{Collector, Pin, Source};
+        let mut c = Collector::default();
+        c.route(
+            "rest",
+            "resources",
+            "GET",
+            "/rest/v1/todos",
+            1,
+            Source {
+                repo: "postgrest".into(),
+                file: "ApiRequest.hs".into(),
+                line: 10,
+            },
+        );
+        c.exclude(
+            "studio",
+            "GET /sign-in".into(),
+            "hosted-platform page",
+            Source {
+                repo: "supabase".into(),
+                file: "pages/sign-in.tsx".into(),
+                line: 1,
+            },
+        );
+        c.finish(vec![Pin {
+            name: "postgrest".into(),
+            path: "vendor/postgrest".into(),
+            repo: "https://github.com/PostgREST/postgrest".into(),
+            tag: "v16".into(),
+            commit: "abc".into(),
+            license: "MIT".into(),
+            image: Some("postgrest/postgrest:v16".into()),
+        }])
+    }
+
+    #[test]
+    fn badge_colors_follow_thresholds() {
+        assert!(badge("coverage", "0%", "#303235").contains("#303235"));
+        assert!(badge("coverage", "10%", "#005441").contains("#005441"));
+        assert!(badge("coverage", "50%", "#009366").contains("#009366"));
+        let high = badge("coverage", "90%", "#00D892");
+        assert!(high.contains("#00D892"));
+        assert!(high.contains("#0B0E12"));
+    }
+
+    #[test]
+    fn render_and_apply_write_generated_files() {
+        let units = sample_units();
+        let status = Status {
+            states: {
+                let mut m = BTreeMap::new();
+                m.insert("rest:route:GET /rest/v1/todos".into(), State::Implemented);
+                m
+            },
+            cases_total: 0,
+            cases_passing: 0,
+        };
+        let summary = crate::status::summarize(&units, &status);
+        let outputs = render(&units, &status, &summary).unwrap();
+        assert!(outputs.files.contains_key(Path::new("coverage/units.json")));
+        assert!(outputs
+            .files
+            .contains_key(Path::new("coverage/badge-coverage.svg")));
+        assert!(outputs
+            .files
+            .contains_key(Path::new("docs/epics/level-1/rest-resources.md")));
+        let pins = outputs
+            .blocks
+            .iter()
+            .find(|(_, m, _)| *m == "pins")
+            .unwrap()
+            .2
+            .as_str();
+        assert!(pins.contains("`postgrest/postgrest:v16`"));
+
+        let tree = crate::scan::TempTree::new();
+        tree.write(
+            "README.md",
+            "x\n<!-- status:begin -->\nold\n<!-- status:end -->\n",
+        );
+        tree.write(
+            "docs/COMPATIBILITY.md",
+            "<!-- pins:begin -->\n<!-- pins:end --><!-- units:begin -->\n<!-- units:end -->\n",
+        );
+        tree.write(
+            "PROGRESS.md",
+            "<!-- pins:begin -->\n<!-- pins:end --><!-- status:begin -->\n<!-- status:end -->\n",
+        );
+        tree.write("coverage/stale.svg", "<svg/>");
+        let drift = apply(&tree.root, &outputs, false).unwrap();
+        assert!(drift.iter().any(|p| p.contains("stale.svg")));
+        apply(&tree.root, &outputs, true).unwrap();
+        assert!(!tree.root.join("coverage/stale.svg").exists());
+        assert!(tree.root.join("coverage/units.json").exists());
+        let readme = std::fs::read_to_string(tree.root.join("README.md")).unwrap();
+        assert!(readme.contains("How the denominator is computed"));
     }
 }

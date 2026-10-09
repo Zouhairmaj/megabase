@@ -142,4 +142,22 @@ mod tests {
             ]
         );
     }
+
+    #[test]
+    fn live_routes_and_only_filter() {
+        let src = r#"
+  scope "/app" do
+    live("/board", BoardLive)
+    resources("/notes", NoteController, only: [:index, :create])
+  end
+"#;
+        let found: Vec<_> = routes(src)
+            .into_iter()
+            .map(|r| format!("{} {}", r.method, r.path))
+            .collect();
+        assert_eq!(
+            found,
+            ["GET /app/board", "GET /app/notes", "POST /app/notes",]
+        );
+    }
 }
