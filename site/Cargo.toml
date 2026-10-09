@@ -1,0 +1,10 @@
+[package]
+name = "megabase-site"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+publish = false
+description = "Tiny static generator for the Megabase placeholder site"
+
+[dependencies]
+serde_json = "1"
