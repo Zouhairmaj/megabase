@@ -134,9 +134,15 @@ the Kite page "Repo / README":
 | name | `#F7F7F7` | `#0B0E12` |
 | count `/total` | `#BABABB` | `#303235` |
 
-Badges use a card-colored label with a green value: `#00D892` from 90%,
-`#009366` from 50%, `#005441` otherwise; empty chips use the not-started
-fill.
+Treemap chips use a card-colored label with a green value: `#00D892` from
+90%, `#009366` from 50%, `#005441` otherwise; empty chips use the
+not-started fill.
+
+README coverage and conformance shields.io badges (owner-specified,
+`flat-square`) read `coverage/badge-coverage.json` and
+`coverage/badge-conformance.json`: `#e05d44` below 50%, `#fe7d37` from
+50% to under 90%, `#00D892` at 90% and above. The site Status page shows
+those percentages as text, not shields badges.
 
 ## Rules
 

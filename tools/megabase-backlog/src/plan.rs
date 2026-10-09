@@ -700,4 +700,29 @@ mod tests {
             .contains("/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/api.go#L42"));
         assert!(!epic.body.contains("/blob/HEAD/"));
     }
+
+    #[test]
+    fn component_label_and_markdown_plan() {
+        assert_eq!(component_label("rest"), "REST");
+        assert_eq!(component_label("website"), "Website");
+        assert_eq!(component_label("other"), "Megabase");
+        let items = build(&UnitsFile {
+            units: vec![Unit {
+                id: "rest:route:GET /rest/v1/{relation}".into(),
+                component: "rest".into(),
+                group: "resources".into(),
+                name: "GET /rest/v1/{relation}".into(),
+                level: 1,
+                source: Source {
+                    repo: "postgrest".into(),
+                    file: "a.hs".into(),
+                    line: 1,
+                },
+            }],
+            vendor: vec![],
+        });
+        let md = render_markdown(&items);
+        assert!(md.contains("# Backlog plan"));
+        assert!(md.contains("epic:rest:resources:1"));
+    }
 }

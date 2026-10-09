@@ -61,6 +61,11 @@ backlog-dry:
 bench:
     cargo bench --locked --bench health
 
+# Advisories on every Cargo.lock we own (not vendor/).
+audit:
+    cargo audit --file Cargo.lock
+    cargo audit --file site/Cargo.lock
+
 # cargo-fuzz (nightly). CI: 60s on PRs, 600s on the schedule.
 # Force the host triple: a musl-built cargo-fuzz otherwise picks
 # x86_64-unknown-linux-musl, which AddressSanitizer cannot link.

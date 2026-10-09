@@ -963,5 +963,75 @@ mod tests {
         assert!(!may_set_status(Some("Blocked"), "Backlog"));
         assert!(!may_set_status(Some("Done"), "Ready"));
         assert!(!may_set_status(Some("In review"), "Ready"));
+        assert!(may_set_status(Some(" ready "), "Ready"));
+        assert!(!may_set_status(None, "In progress"));
+    }
+
+    #[test]
+    fn megabase_id_skips_malformed_and_empty() {
+        assert!(parse_megabase_id("no comment").is_none());
+        assert!(parse_megabase_id("<!-- megabase-id: -->").is_none());
+        assert!(parse_megabase_id("<!-- megabase-id: x").is_none());
+    }
+
+    #[test]
+    fn counts_and_project_options() {
+        let epic = Item {
+            key: "epic:rest:resources:1".into(),
+            title: "t".into(),
+            body: "b".into(),
+            labels: vec![],
+            milestone: None,
+            component: "rest",
+            level: Some(1),
+            effort: "M",
+            status: "Ready",
+            parent: None,
+            blocked_by: vec![],
+            priority: 1000,
+        };
+        let task = Item {
+            parent: Some("epic:rest:resources:1".into()),
+            status: "Backlog",
+            level: Some(2),
+            priority: 1,
+            ..epic.clone()
+        };
+        assert_eq!(counts(&[epic.clone(), task.clone()]), (1, 1, 2));
+        assert_eq!(priority_option(&epic), "P0");
+        let p1 = Item {
+            priority: 10,
+            ..epic.clone()
+        };
+        assert_eq!(priority_option(&p1), "P1");
+        assert_eq!(priority_option(&task), "P2");
+        let p3 = Item {
+            status: "Backlog",
+            level: Some(3),
+            ..epic.clone()
+        };
+        assert_eq!(priority_option(&p3), "P3");
+        assert_eq!(level_option(&epic), "Level 1");
+        assert_eq!(level_option(&task), "Level 2");
+        for (n, label) in [(3, "Level 3"), (4, "Level 4"), (5, "Level 5")] {
+            let item = Item {
+                level: Some(n),
+                ..epic.clone()
+            };
+            assert_eq!(level_option(&item), label);
+        }
+        let none = Item {
+            level: None,
+            ..epic
+        };
+        assert_eq!(level_option(&none), "No level");
+    }
+
+    #[test]
+    fn already_linked_matches_idempotent_errors() {
+        assert!(already_linked("already exists"));
+        assert!(already_linked("Duplicate sub-issue"));
+        assert!(already_linked("sub-issue does exist"));
+        assert!(!already_linked("permission denied"));
     }
 }

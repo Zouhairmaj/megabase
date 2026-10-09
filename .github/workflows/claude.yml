@@ -46,11 +46,18 @@ jobs:
       - name: Run Claude Code
         id: claude
         uses: anthropics/claude-code-action@2dca132ff0e0c4094ce6048b422c6915a071210b # v1.0.247
+        env:
+          # PAT so `gh pr create` is authored by megabase-agent and CI runs
+          # without waiting for approval. GITHUB_TOKEN can open a PR, but its
+          # pull_request workflow runs require approval.
+          GH_TOKEN: ${{ secrets.MEGABASE_AGENT_GH_TOKEN || github.token }}
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ secrets.MEGABASE_AGENT_GH_TOKEN || github.token }}
           branch_prefix: "issue-"
           branch_name_template: "{{prefix}}{{entityNumber}}-{{description}}"
           additional_permissions: |
             actions: read
           claude_args: |
-            --append-system-prompt "Follow AGENTS.md and GOAL.md. Write Rust only. Never modify vendor/ or judge/. Iteration commits use `[component] unit: what changed (coverage X→Y, conformance A→B)`. PR titles use Conventional Commits."
+            --allowedTools "mcp__github__create_pull_request,mcp__github__update_pull_request,mcp__github__get_pull_request,Bash(gh pr create:*),Bash(gh pr edit:*),Bash(gh pr view:*),Bash(gh pr list:*)"
+            --append-system-prompt "Follow AGENTS.md and GOAL.md. Write Rust only. Never modify vendor/ or judge/. Iteration commits use `[component] unit: what changed (coverage X→Y, conformance A→B)`. When you implement an issue, after pushing the branch, open the pull request yourself with `gh pr create` (or mcp__github__create_pull_request). Do not stop at a Create-a-PR compare link. Use a Conventional Commits title (types and scopes in .github/workflows/semantic-pr.yml). The body follows .github/pull_request_template.md and must include `Closes #<n>` for the issue. If a PR for this branch already exists, update it with `gh pr edit` (or mcp__github__update_pull_request) instead of opening another. Never include the trigger phrase in comments."
