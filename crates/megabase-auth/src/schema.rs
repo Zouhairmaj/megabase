@@ -73,34 +73,15 @@ const ONE_TIME_TOKENS: &str = include_str!("../sql/one_time_tokens.sql");
 // megabase:unit auth:sql-table:auth.refresh_tokens
 const REFRESH_TOKENS: &str = include_str!("../sql/refresh_tokens.sql");
 
-// megabase:unit auth:sql-table:auth.users
 const USERS: &str = include_str!("../sql/users.sql");
-
-// megabase:unit auth:sql-table:auth.sessions
 const SESSIONS: &str = include_str!("../sql/sessions.sql");
-
-// megabase:unit auth:sql-table:auth.schema_migrations
 const SCHEMA_MIGRATIONS: &str = include_str!("../sql/schema_migrations.sql");
-
-// megabase:unit auth:sql-table:auth.sso_providers
 const SSO_PROVIDERS: &str = include_str!("../sql/sso_providers.sql");
-
-// megabase:unit auth:sql-table:auth.sso_domains
 const SSO_DOMAINS: &str = include_str!("../sql/sso_domains.sql");
-
-// megabase:unit auth:sql-table:auth.saml_providers
 const SAML_PROVIDERS: &str = include_str!("../sql/saml_providers.sql");
-
-// megabase:unit auth:sql-table:auth.saml_relay_states
 const SAML_RELAY_STATES: &str = include_str!("../sql/saml_relay_states.sql");
-
-// megabase:unit auth:sql-table:auth.sso_sessions
 const SSO_SESSIONS: &str = include_str!("../sql/sso_sessions.sql");
-
-// megabase:unit auth:sql-table:auth.scim_users
 const SCIM_USERS: &str = include_str!("../sql/scim_users.sql");
-
-// megabase:unit auth:sql-table:auth.scim_tokens
 const SCIM_TOKENS: &str = include_str!("../sql/scim_tokens.sql");
 
 const OBJECTS: &[&str] = &[
@@ -184,6 +165,16 @@ fn require_cleartext_postgres(database_url: &str) -> Result<(), SchemaError> {
 /// valid `tokio-postgres` sslmode and fails at parse. The connect and SQL
 /// run under a 30s deadline so a stalled PostgreSQL cannot hang startup.
 pub async fn install_schema(database_url: &str) -> Result<(), SchemaError> {
+    // megabase:unit auth:sql-table:auth.users
+    // megabase:unit auth:sql-table:auth.sessions
+    // megabase:unit auth:sql-table:auth.schema_migrations
+    // megabase:unit auth:sql-table:auth.sso_providers
+    // megabase:unit auth:sql-table:auth.sso_domains
+    // megabase:unit auth:sql-table:auth.saml_providers
+    // megabase:unit auth:sql-table:auth.saml_relay_states
+    // megabase:unit auth:sql-table:auth.sso_sessions
+    // megabase:unit auth:sql-table:auth.scim_users
+    // megabase:unit auth:sql-table:auth.scim_tokens
     install_schema_within(database_url, INSTALL_DEADLINE).await
 }
 
