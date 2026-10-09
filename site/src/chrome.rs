@@ -202,7 +202,6 @@ pub fn footer(paths: &Paths, logo: &str) -> String {
             ("Status", paths.page("status")),
             ("Devlog", paths.page("devlog")),
             ("Human log", paths.page("human-log")),
-            ("Cost", paths.page("cost")),
         ],
     );
     let resources = col(
@@ -225,7 +224,6 @@ pub fn footer(paths: &Paths, logo: &str) -> String {
     let mobile_right = [
         ("Devlog", paths.page("devlog")),
         ("Human log", paths.page("human-log")),
-        ("Cost", paths.page("cost")),
         ("Docs", paths.page("docs")),
         ("FAQ", paths.page("faq")),
         ("GitHub ↗", GITHUB.into()),
