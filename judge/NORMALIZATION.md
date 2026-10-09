@@ -44,7 +44,7 @@ compared. Implemented in `judge/harness/src/db.rs`.
 
 | Kind | Compared | Normalized |
 |---|---|---|
-| Table catalog | column name, `pg_type.typname`, `NOT NULL`, generated expression, `relrowsecurity`, `pg_get_indexdef` | SQL text: strip `--` comments, collapse whitespace, lowercase |
+| Table catalog | column name and attnum order, `pg_type.typname`, `NOT NULL`, generated expression, `relrowsecurity`, `pg_get_indexdef` | SQL text: strip `--` comments, collapse whitespace, lowercase. `absent = true` passes only when both databases lack the relation |
 | Function catalog | identity arguments, result type, language, `provolatile`, `prosrc` | same SQL normalization on result type and body |
 | Row snapshot | `jsonb_agg(row_to_json(t))` of `SELECT *` ordered by the first column | same JSON rules as HTTP bodies (JWT, UUID, timestamp, volatile keys) |
 

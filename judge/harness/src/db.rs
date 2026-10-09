@@ -320,12 +320,63 @@ fn describe_json(label: &str, value: &Value) -> String {
     }
 }
 
+fn describe_table_diff(raw: &str, reference: &TableCatalog, megabase: &TableCatalog) -> String {
+    let names = |cat: &TableCatalog| {
+        cat.columns
+            .iter()
+            .map(|c| c.name.as_str())
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    if reference
+        .columns
+        .iter()
+        .map(|c| &c.name)
+        .collect::<Vec<_>>()
+        != megabase.columns.iter().map(|c| &c.name).collect::<Vec<_>>()
+    {
+        return format!(
+            "table `{raw}` catalog differs: columns [{names}] vs [{other}]",
+            names = names(reference),
+            other = names(megabase)
+        );
+    }
+    format!(
+        "table `{raw}` catalog differs: {} vs {}",
+        describe_json(
+            "reference",
+            &serde_json::to_value(reference).unwrap_or(Value::Null)
+        ),
+        describe_json(
+            "megabase",
+            &serde_json::to_value(megabase).unwrap_or(Value::Null)
+        )
+    )
+}
+
+/// Both sides missing is a match when the case requires absence.
+pub fn absent_mismatch(ref_found: bool, mb_found: bool, kind: &str, raw: &str) -> Option<String> {
+    match (ref_found, mb_found) {
+        (false, false) => None,
+        (true, false) => Some(format!(
+            "{kind} `{raw}` exists on the reference stack but the case requires it to be absent"
+        )),
+        (false, true) => Some(format!(
+            "{kind} `{raw}` exists on megabase but must be absent to match the pin"
+        )),
+        (true, true) => Some(format!(
+            "{kind} `{raw}` exists on both stacks but the case requires it to be absent"
+        )),
+    }
+}
+
 /// Compare a table's catalog (and optionally rows) on both databases.
 pub fn compare_table(
     databases: &Databases,
     raw: &str,
     rows: bool,
     reference_missing_is_fatal: bool,
+    absent: bool,
 ) -> Result<Option<String>> {
     let rel = parse_relation(raw)?;
     let mut reference = connect(&databases.reference)?;
@@ -337,9 +388,19 @@ pub fn compare_table(
             )))
         }
     };
-    let Some(ref_cat) = table_catalog(&mut reference, &rel)
-        .with_context(|| format!("catalog `{raw}` on the reference stack"))?
-    else {
+    let ref_cat = table_catalog(&mut reference, &rel)
+        .with_context(|| format!("catalog `{raw}` on the reference stack"))?;
+    let mb_cat = table_catalog(&mut megabase, &rel)
+        .with_context(|| format!("catalog `{raw}` on megabase"))?;
+    if absent {
+        return Ok(absent_mismatch(
+            ref_cat.is_some(),
+            mb_cat.is_some(),
+            "table",
+            raw,
+        ));
+    }
+    let Some(ref_cat) = ref_cat else {
         if reference_missing_is_fatal {
             bail!("reference database has no table `{raw}` (fixture or pin problem)");
         }
@@ -347,17 +408,11 @@ pub fn compare_table(
             "table `{raw}` missing on the reference stack"
         )));
     };
-    let Some(mb_cat) = table_catalog(&mut megabase, &rel)
-        .with_context(|| format!("catalog `{raw}` on megabase"))?
-    else {
+    let Some(mb_cat) = mb_cat else {
         return Ok(Some(format!("table `{raw}` missing on megabase")));
     };
     if ref_cat != mb_cat {
-        return Ok(Some(format!(
-            "table `{raw}` catalog differs: {} vs {}",
-            describe_json("reference", &serde_json::to_value(&ref_cat)?),
-            describe_json("megabase", &serde_json::to_value(&mb_cat)?)
-        )));
+        return Ok(Some(describe_table_diff(raw, &ref_cat, &mb_cat)));
     }
     if rows {
         return compare_row_snapshot(databases, raw, reference_missing_is_fatal);
@@ -370,6 +425,7 @@ pub fn compare_function(
     databases: &Databases,
     raw: &str,
     reference_missing_is_fatal: bool,
+    absent: bool,
 ) -> Result<Option<String>> {
     let rel = parse_relation(raw)?;
     let mut reference = connect(&databases.reference)?;
@@ -381,9 +437,19 @@ pub fn compare_function(
             )))
         }
     };
-    let Some(ref_fn) = function_catalog(&mut reference, &rel)
-        .with_context(|| format!("function `{raw}` on the reference stack"))?
-    else {
+    let ref_fn = function_catalog(&mut reference, &rel)
+        .with_context(|| format!("function `{raw}` on the reference stack"))?;
+    let mb_fn = function_catalog(&mut megabase, &rel)
+        .with_context(|| format!("function `{raw}` on megabase"))?;
+    if absent {
+        return Ok(absent_mismatch(
+            ref_fn.is_some(),
+            mb_fn.is_some(),
+            "function",
+            raw,
+        ));
+    }
+    let Some(ref_fn) = ref_fn else {
         if reference_missing_is_fatal {
             bail!("reference database has no function `{raw}` (pin problem)");
         }
@@ -391,9 +457,7 @@ pub fn compare_function(
             "function `{raw}` missing on the reference stack"
         )));
     };
-    let Some(mb_fn) = function_catalog(&mut megabase, &rel)
-        .with_context(|| format!("function `{raw}` on megabase"))?
-    else {
+    let Some(mb_fn) = mb_fn else {
         return Ok(Some(format!("function `{raw}` missing on megabase")));
     };
     if ref_fn != mb_fn {
@@ -495,5 +559,22 @@ mod tests {
         assert!(!is_ident(""));
         assert!(!is_ident("1users"));
         assert!(!is_ident("users;"));
+    }
+
+    #[test]
+    fn absent_matches_only_when_both_sides_lack_the_object() {
+        assert_eq!(
+            absent_mismatch(false, false, "table", "auth.sso_sessions"),
+            None
+        );
+        assert!(absent_mismatch(true, false, "table", "auth.sso_sessions")
+            .unwrap()
+            .contains("reference"));
+        assert!(absent_mismatch(false, true, "table", "auth.sso_sessions")
+            .unwrap()
+            .contains("megabase"));
+        assert!(absent_mismatch(true, true, "table", "auth.sso_sessions")
+            .unwrap()
+            .contains("both"));
     }
 }

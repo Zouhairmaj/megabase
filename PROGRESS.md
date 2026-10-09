@@ -140,9 +140,9 @@ waiting on a human.
     prepare` on host port 54322, then `DATABASE_URL=…/megabase`). Sharing
     one database would make catalog and row comparisons vacuous or
     inverted. Level 1
-    snapshots `auth.users` and `public.todos` after mutating HTTP cases
-    and compares `auth` table/function catalogs. `storage.objects` stays
-    Level 2.
+   snapshots `auth.users` and `public.todos` after mutating HTTP cases
+   and compares `auth` table/function catalogs. `auth.sso_sessions` is
+   absent on the pin (`absent = true`). `storage.objects` stays Level 2.
 
 ## Tracking
 

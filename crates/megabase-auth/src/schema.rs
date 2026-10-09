@@ -255,6 +255,19 @@ mod tests {
         assert!(IDENTITIES.contains("provider_id"));
         assert!(IDENTITIES.contains("GENERATED ALWAYS AS (lower(identity_data->>'email')) STORED"));
         assert!(IDENTITIES.contains("REFERENCES auth.users(id) ON DELETE CASCADE"));
+        let create = IDENTITIES
+            .find("CREATE TABLE IF NOT EXISTS auth.identities")
+            .expect("create");
+        let email = IDENTITIES[create..]
+            .find("email text GENERATED ALWAYS AS")
+            .expect("email");
+        let id = IDENTITIES[create..]
+            .find("id uuid NOT NULL DEFAULT gen_random_uuid()")
+            .expect("uuid id");
+        assert!(
+            email < id,
+            "pin attnum order is email then uuid id (20221215195800 before 20231117164230)"
+        );
     }
 
     #[test]
@@ -348,6 +361,16 @@ mod tests {
         assert!(SESSIONS.contains("refresh_token_hmac_key"));
         assert!(SESSIONS.contains("sessions_scopes_length"));
         assert!(SESSIONS.contains("REFERENCES auth.oauth_clients(id) ON DELETE CASCADE"));
+        let hmac = SESSIONS
+            .find("ADD COLUMN IF NOT EXISTS refresh_token_hmac_key")
+            .expect("hmac");
+        let scopes = SESSIONS
+            .find("ADD COLUMN IF NOT EXISTS scopes")
+            .expect("scopes");
+        assert!(
+            hmac < scopes,
+            "pin attnum order is refresh_token_* then scopes"
+        );
         assert!(SSO_PROVIDERS.contains("disabled"));
         assert!(SSO_PROVIDERS.contains("sso_providers_resource_id_pattern_idx"));
         assert!(SAML_PROVIDERS.contains("name_id_format"));

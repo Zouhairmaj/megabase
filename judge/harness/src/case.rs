@@ -40,6 +40,9 @@ pub struct DbCheck {
     /// Also compare every row of `table`. Ignored for functions.
     #[serde(default)]
     pub rows: bool,
+    /// The object must be missing on both databases (dropped on the pin).
+    #[serde(default)]
+    pub absent: bool,
 }
 
 impl DbCheck {
@@ -48,8 +51,12 @@ impl DbCheck {
             (Some(table), None) => Ok(DbKind::Table {
                 name: table,
                 rows: self.rows,
+                absent: self.absent,
             }),
-            (None, Some(function)) => Ok(DbKind::Function { name: function }),
+            (None, Some(function)) => Ok(DbKind::Function {
+                name: function,
+                absent: self.absent,
+            }),
             (Some(_), Some(_)) => bail!("a db check lists both `table` and `function`"),
             (None, None) => bail!("a db check lists neither `table` nor `function`"),
         }
@@ -58,8 +65,15 @@ impl DbCheck {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DbKind<'a> {
-    Table { name: &'a str, rows: bool },
-    Function { name: &'a str },
+    Table {
+        name: &'a str,
+        rows: bool,
+        absent: bool,
+    },
+    Function {
+        name: &'a str,
+        absent: bool,
+    },
 }
 
 pub fn is_mutating_method(method: &str) -> bool {
@@ -241,7 +255,10 @@ function = "auth.uid()"
         assert!(case.step.is_empty());
         assert_eq!(
             case.db[0].kind().unwrap(),
-            DbKind::Function { name: "auth.uid()" }
+            DbKind::Function {
+                name: "auth.uid()",
+                absent: false
+            }
         );
     }
 
@@ -251,8 +268,31 @@ function = "auth.uid()"
             table: Some("auth.users".into()),
             function: Some("auth.uid()".into()),
             rows: false,
+            absent: false,
         };
         assert!(check.kind().is_err());
+    }
+
+    #[test]
+    fn absent_table_check_parses() {
+        let case = parse_one(
+            r#"
+[[case]]
+id = "sso"
+units = ["auth:sql-table:auth.sso_sessions"]
+[[case.db]]
+table = "auth.sso_sessions"
+absent = true
+"#,
+        );
+        assert_eq!(
+            case.db[0].kind().unwrap(),
+            DbKind::Table {
+                name: "auth.sso_sessions",
+                rows: false,
+                absent: true
+            }
+        );
     }
 
     #[test]
@@ -265,5 +305,17 @@ function = "auth.uid()"
         assert!(cases
             .iter()
             .any(|c| c.id == "auth.sql.table.users" && c.step.is_empty() && !c.db.is_empty()));
+        let sso = cases
+            .iter()
+            .find(|c| c.id == "auth.sql.table.sso_sessions")
+            .expect("sso_sessions case");
+        assert_eq!(
+            sso.db[0].kind().unwrap(),
+            DbKind::Table {
+                name: "auth.sso_sessions",
+                rows: false,
+                absent: true
+            }
+        );
     }
 }

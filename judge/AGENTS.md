@@ -8,7 +8,8 @@ bootstrap exception. Architecture and commands are in
 - **Cases** (`cases/<component>.toml`): write one `[[case]]` per behavior.
   Take `units = [...]` from `coverage/units.json` and run the steps against
   `fixtures/schema.sql`. A case may be HTTP-only, `[[case.db]]`-only
-  (schema objects), or both. Mutating HTTP cases snapshot `auth.users`
+  (schema objects), or both. Use `absent = true` when the pinned
+  reference dropped the object. Mutating HTTP cases snapshot `auth.users`
   and `public.todos` unless `snapshot` overrides that. Every case must
   pass on the reference stack. Expected behavior always comes from the
   reference, never from Megabase. The harness talks to Postgres itself

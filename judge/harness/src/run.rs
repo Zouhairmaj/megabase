@@ -292,8 +292,12 @@ pub fn run_case(
 fn compare_side_effects(case: &Case, databases: &Databases) -> Result<Option<String>> {
     for (i, check) in case.db.iter().enumerate() {
         let detail = match check.kind()? {
-            DbKind::Table { name, rows } => db::compare_table(databases, name, rows, true)?,
-            DbKind::Function { name } => db::compare_function(databases, name, true)?,
+            DbKind::Table { name, rows, absent } => {
+                db::compare_table(databases, name, rows, true, absent)?
+            }
+            DbKind::Function { name, absent } => {
+                db::compare_function(databases, name, true, absent)?
+            }
         };
         if let Some(detail) = detail {
             return Ok(Some(format!("db check {}: {detail}", i + 1)));

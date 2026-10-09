@@ -107,7 +107,9 @@ expressions, RLS flag, `pg_get_indexdef`) or a function (arguments,
 result type, language, volatility, normalized body) so
 `auth:sql-table:*` and `auth:sql-function:*` units can become
 conformant. A missing object on the reference stack aborts the run; a
-missing object on Megabase fails the case.
+missing object on Megabase fails the case. Set `absent = true` when the
+pin dropped the object (`auth.sso_sessions`): both databases must lack
+it, or the case fails.
 
 Studio browser sessions (`judge/studio/`, a Rust harness such as
 fantoccini or chromiumoxide driving Chromium against official Studio

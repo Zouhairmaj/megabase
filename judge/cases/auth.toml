@@ -331,10 +331,11 @@ table = "auth.sso_providers"
 
 [[case]]
 id = "auth.sql.table.sso_sessions"
-description = "auth.sso_sessions columns, RLS and indexes match"
+description = "auth.sso_sessions is absent after the pin (dropped; data lives on auth.sessions)"
 units = ["auth:sql-table:auth.sso_sessions"]
 [[case.db]]
 table = "auth.sso_sessions"
+absent = true
 
 [[case]]
 id = "auth.sql.table.users"
