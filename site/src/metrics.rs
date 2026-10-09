@@ -28,6 +28,19 @@ pub enum UnitStatus {
 }
 
 #[derive(Clone, Debug)]
+pub struct FeatureGroup {
+    pub id: String,
+    pub label: String,
+    pub units: Vec<UnitStatus>,
+}
+
+impl FeatureGroup {
+    pub fn total(&self) -> usize {
+        self.units.len()
+    }
+}
+
+#[derive(Clone, Debug)]
 pub struct ComponentBlock {
     pub id: String,
     pub label: &'static str,
@@ -36,6 +49,7 @@ pub struct ComponentBlock {
     pub tested: usize,
     pub conformant: usize,
     pub units: Vec<UnitStatus>,
+    pub groups: Vec<FeatureGroup>,
 }
 
 impl ComponentBlock {
@@ -60,10 +74,28 @@ impl ComponentBlock {
             tested,
             conformant,
             units,
+            groups: Vec::new(),
         }
     }
 
     pub fn from_units(id: impl Into<String>, label: &'static str, units: Vec<UnitStatus>) -> Self {
+        Self::from_groups(id, label, Vec::new(), units)
+    }
+
+    pub fn from_groups(
+        id: impl Into<String>,
+        label: &'static str,
+        groups: Vec<FeatureGroup>,
+        fallback_units: Vec<UnitStatus>,
+    ) -> Self {
+        let units = if groups.is_empty() {
+            fallback_units
+        } else {
+            groups
+                .iter()
+                .flat_map(|g| g.units.iter().copied())
+                .collect()
+        };
         let not_started = units
             .iter()
             .filter(|s| **s == UnitStatus::NotStarted)
@@ -85,6 +117,7 @@ impl ComponentBlock {
             tested,
             conformant,
             units,
+            groups,
         }
     }
 
@@ -116,6 +149,12 @@ impl ComponentBlock {
 }
 
 #[derive(Clone, Debug)]
+pub struct VendorPin {
+    pub name: String,
+    pub tag: String,
+}
+
+#[derive(Clone, Debug)]
 pub struct Metrics {
     pub passing: Option<usize>,
     pub total: Option<usize>,
@@ -123,9 +162,13 @@ pub struct Metrics {
     pub conformance: Option<f64>,
     pub components: Vec<ComponentBlock>,
     pub by_component: BTreeMap<String, f64>,
+    pub vendor: BTreeMap<String, VendorPin>,
     pub source: String,
     pub stage: String,
     pub stage_short: String,
+    pub human_interventions: usize,
+    pub spend_label: String,
+    pub next_milestone: String,
 }
 
 impl Metrics {
@@ -137,9 +180,13 @@ impl Metrics {
             conformance: None,
             components: Vec::new(),
             by_component: BTreeMap::new(),
+            vendor: BTreeMap::new(),
             source: "placeholder".into(),
             stage: FALLBACK_STAGE.into(),
             stage_short: FALLBACK_STAGE_SHORT.into(),
+            human_interventions: 0,
+            spend_label: "—".into(),
+            next_milestone: "Level 1 · REST + Auth".into(),
         }
     }
 
@@ -175,6 +222,30 @@ impl Metrics {
         }
         compact_pct(self.by_component.get(key).copied().unwrap_or(0.0))
     }
+
+    pub fn component(&self, id: &str) -> Option<&ComponentBlock> {
+        self.components.iter().find(|c| c.id == id)
+    }
+
+    pub fn component_progress(&self, id: &str) -> String {
+        match self.component(id) {
+            Some(block) => format!("{} / {}", comma(block.conformant), comma(block.total())),
+            None if self.has_data() => "0 / 0".into(),
+            None => "—".into(),
+        }
+    }
+
+    pub fn pin(&self, vendor_key: &str) -> String {
+        self.vendor
+            .get(vendor_key)
+            .map(|v| v.tag.clone())
+            .filter(|t| !t.is_empty())
+            .unwrap_or_else(|| "—".into())
+    }
+
+    pub fn human_interventions_label(&self) -> String {
+        comma(self.human_interventions)
+    }
 }
 
 pub fn load(repo_root: &Path) -> Metrics {
@@ -194,11 +265,17 @@ pub fn load(repo_root: &Path) -> Metrics {
     if units_path.is_file() {
         if let Ok(text) = fs::read_to_string(&units_path) {
             if let Ok(value) = serde_json::from_str::<Value>(&text) {
+                apply_vendor(&mut metrics, &value);
                 if let Some(summary) = value.get("summary") {
                     if metrics.source == "placeholder" {
                         apply_summary(&mut metrics, summary);
                     }
                     merge_components(&mut metrics, summary);
+                }
+                if let Some(n) = value.get("total").and_then(Value::as_u64) {
+                    if metrics.total.is_none() {
+                        metrics.total = Some(n as usize);
+                    }
                 }
                 if let Some(list) = value.get("units").and_then(Value::as_array) {
                     if !list.is_empty() {
@@ -213,12 +290,50 @@ pub fn load(repo_root: &Path) -> Metrics {
     metrics
 }
 
+fn apply_vendor(metrics: &mut Metrics, value: &Value) {
+    let Some(list) = value.get("vendor").and_then(Value::as_array) else {
+        return;
+    };
+    for item in list {
+        let name = item
+            .get("name")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
+        if name.is_empty() {
+            continue;
+        }
+        let tag = item
+            .get("tag")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
+        metrics.vendor.insert(name.clone(), VendorPin { name, tag });
+    }
+}
+
 fn apply_summary(metrics: &mut Metrics, value: &Value) {
+    if let Some(totals) = value.get("totals") {
+        if let Some(n) = totals.get("units").and_then(Value::as_u64) {
+            metrics.total = Some(n as usize);
+        }
+        if let Some(n) = totals.get("conformant").and_then(Value::as_u64) {
+            metrics.passing = Some(n as usize);
+        }
+    }
     if let Some(n) = value.get("total_units").and_then(Value::as_u64) {
         metrics.total = Some(n as usize);
     }
     if let Some(n) = value.get("conformant").and_then(Value::as_u64) {
         metrics.passing = Some(n as usize);
+    }
+    if let Some(pct) = value.get("percent") {
+        if let Some(n) = pct.get("coverage").and_then(Value::as_f64) {
+            metrics.coverage = Some(n);
+        }
+        if let Some(n) = pct.get("conformance").and_then(Value::as_f64) {
+            metrics.conformance = Some(n);
+        }
     }
     if let Some(n) = value.get("coverage_percent").and_then(Value::as_f64) {
         metrics.coverage = Some(n);
@@ -227,9 +342,129 @@ fn apply_summary(metrics: &mut Metrics, value: &Value) {
         metrics.conformance = Some(n);
     }
     merge_components(metrics, value);
+    if let Some(map) = value.get("components").and_then(Value::as_object) {
+        merge_phase0_components(metrics, map);
+    }
     if metrics.components.is_empty() {
         blocks_from_summary(metrics, value);
     }
+}
+
+fn merge_phase0_components(metrics: &mut Metrics, map: &serde_json::Map<String, Value>) {
+    if !metrics.components.is_empty() {
+        for (name, stats) in map {
+            if let Some(n) = stats
+                .get("units")
+                .or_else(|| stats.get("total"))
+                .and_then(Value::as_u64)
+            {
+                if n > 0 {
+                    metrics.by_component.insert(
+                        name.clone(),
+                        stats
+                            .get("implemented")
+                            .and_then(Value::as_u64)
+                            .map(|implemented| 100.0 * implemented as f64 / n as f64)
+                            .unwrap_or(0.0),
+                    );
+                }
+            }
+        }
+        return;
+    }
+    let mut blocks = Vec::new();
+    let mut seen = std::collections::BTreeSet::new();
+    for id in COMPONENT_ORDER {
+        if let Some(stats) = map.get(*id) {
+            seen.insert(*id);
+            if let Some(block) = block_from_phase0(id, stats) {
+                blocks.push(block);
+            }
+        }
+    }
+    for (id, stats) in map {
+        if seen.contains(id.as_str()) {
+            continue;
+        }
+        if let Some(block) = block_from_phase0(id, stats) {
+            blocks.push(block);
+        }
+    }
+    if !blocks.is_empty() {
+        metrics.components = blocks;
+    }
+}
+
+fn block_from_phase0(id: &str, stats: &Value) -> Option<ComponentBlock> {
+    let total = stats
+        .get("units")
+        .or_else(|| stats.get("total"))
+        .and_then(Value::as_u64)
+        .unwrap_or(0) as usize;
+    if total == 0 {
+        return None;
+    }
+    let implemented = stats
+        .get("implemented")
+        .and_then(Value::as_u64)
+        .unwrap_or(0) as usize;
+    let tested = stats.get("tested").and_then(Value::as_u64).unwrap_or(0) as usize;
+    let conformant = stats.get("conformant").and_then(Value::as_u64).unwrap_or(0) as usize;
+    let mut groups = Vec::new();
+    if let Some(map) = stats.get("groups").and_then(Value::as_object) {
+        let mut keys: Vec<_> = map.keys().cloned().collect();
+        keys.sort();
+        for key in keys {
+            let Some(gstats) = map.get(&key) else {
+                continue;
+            };
+            let n = gstats.get("units").and_then(Value::as_u64).unwrap_or(0) as usize;
+            if n == 0 {
+                continue;
+            }
+            let g_impl = gstats
+                .get("implemented")
+                .and_then(Value::as_u64)
+                .unwrap_or(0) as usize;
+            let g_tested = gstats.get("tested").and_then(Value::as_u64).unwrap_or(0) as usize;
+            let g_conf = gstats
+                .get("conformant")
+                .and_then(Value::as_u64)
+                .unwrap_or(0) as usize;
+            let impl_only = g_impl.saturating_sub(g_tested.max(g_conf));
+            let tested_only = g_tested.saturating_sub(g_conf);
+            let not_started = n.saturating_sub(g_impl.max(g_tested).max(g_conf));
+            let mut units = Vec::with_capacity(n);
+            units.extend(std::iter::repeat_n(UnitStatus::NotStarted, not_started));
+            units.extend(std::iter::repeat_n(UnitStatus::Implemented, impl_only));
+            units.extend(std::iter::repeat_n(UnitStatus::Tested, tested_only));
+            units.extend(std::iter::repeat_n(UnitStatus::Conformant, g_conf));
+            while units.len() < n {
+                units.push(UnitStatus::NotStarted);
+            }
+            groups.push(FeatureGroup {
+                id: key.clone(),
+                label: group_label(&key),
+                units,
+            });
+        }
+    }
+    Some(ComponentBlock::from_groups(
+        id,
+        component_label(id),
+        groups,
+        {
+            let impl_only = implemented.saturating_sub(tested.max(conformant));
+            let tested_only = tested.saturating_sub(conformant);
+            let not_started = total.saturating_sub(implemented.max(tested).max(conformant));
+            let mut units = Vec::with_capacity(total);
+            units.extend(std::iter::repeat_n(UnitStatus::NotStarted, not_started));
+            units.extend(std::iter::repeat_n(UnitStatus::Implemented, impl_only));
+            units.extend(std::iter::repeat_n(UnitStatus::Tested, tested_only));
+            units.extend(std::iter::repeat_n(UnitStatus::Conformant, conformant));
+            units
+        },
+    ))
 }
 
 fn merge_components(metrics: &mut Metrics, value: &Value) {
@@ -306,61 +541,82 @@ fn blocks_from_summary(metrics: &mut Metrics, value: &Value) {
 }
 
 fn apply_units(metrics: &mut Metrics, list: &[Value]) {
-    let mut units_by: BTreeMap<String, Vec<UnitStatus>> = BTreeMap::new();
+    let mut grouped: BTreeMap<String, BTreeMap<String, Vec<UnitStatus>>> = BTreeMap::new();
     let mut passing = 0usize;
+    let mut implemented_n = 0usize;
     for item in list {
         let component = item
             .get("component")
             .and_then(Value::as_str)
             .unwrap_or("other")
             .to_string();
+        let group = item
+            .get("group")
+            .and_then(Value::as_str)
+            .unwrap_or("units")
+            .to_string();
         let status = status_of(item);
         if status == UnitStatus::Conformant {
             passing += 1;
         }
-        units_by.entry(component).or_default().push(status);
+        if status != UnitStatus::NotStarted {
+            implemented_n += 1;
+        }
+        grouped
+            .entry(component)
+            .or_default()
+            .entry(group)
+            .or_default()
+            .push(status);
     }
 
     let total = list.len();
     metrics.total = Some(total);
     metrics.passing = Some(passing);
     if metrics.coverage.is_none() && total > 0 {
-        let implemented = units_by
-            .values()
-            .flatten()
-            .filter(|s| **s != UnitStatus::NotStarted)
-            .count();
-        metrics.coverage = Some(100.0 * implemented as f64 / total as f64);
+        metrics.coverage = Some(100.0 * implemented_n as f64 / total as f64);
     }
     if metrics.conformance.is_none() && total > 0 {
         metrics.conformance = Some(100.0 * passing as f64 / total as f64);
     }
 
     let mut blocks = Vec::new();
+    let mut remaining = grouped;
     for id in COMPONENT_ORDER {
-        let Some(units) = units_by.remove(*id) else {
+        let Some(groups_map) = remaining.remove(*id) else {
             continue;
         };
-        let t = units.len();
-        let implemented = units
-            .iter()
-            .filter(|s| **s != UnitStatus::NotStarted)
-            .count();
+        let block = block_from_grouped(id, groups_map);
+        let t = block.total();
         if t > 0 {
+            let implemented = t - block.not_started;
             metrics
                 .by_component
                 .insert((*id).into(), 100.0 * implemented as f64 / t as f64);
         }
-        blocks.push(ComponentBlock::from_units(*id, component_label(id), units));
+        blocks.push(block);
     }
-    for (id, units) in units_by {
-        blocks.push(ComponentBlock::from_units(
-            id.clone(),
-            component_label(&id),
-            units,
-        ));
+    for (id, groups_map) in remaining {
+        blocks.push(block_from_grouped(&id, groups_map));
     }
     metrics.components = blocks;
+}
+
+fn block_from_grouped(id: &str, groups_map: BTreeMap<String, Vec<UnitStatus>>) -> ComponentBlock {
+    let mut groups: Vec<FeatureGroup> = groups_map
+        .into_iter()
+        .map(|(gid, units)| FeatureGroup {
+            label: group_label(&gid),
+            id: gid,
+            units,
+        })
+        .collect();
+    groups.sort_by(|a, b| a.id.cmp(&b.id));
+    let flat: Vec<UnitStatus> = groups
+        .iter()
+        .flat_map(|g| g.units.iter().copied())
+        .collect();
+    ComponentBlock::from_groups(id, component_label(id), groups, flat)
 }
 
 fn status_of(item: &Value) -> UnitStatus {
@@ -394,6 +650,105 @@ pub fn component_label(id: &str) -> &'static str {
         "studio" => "Studio",
         "core" => "Core",
         _ => "Other",
+    }
+}
+
+pub fn group_label(id: &str) -> String {
+    id.replace('-', " ").replace('_', " ")
+}
+
+pub struct CatalogRow {
+    pub id: &'static str,
+    pub name: &'static str,
+    pub upstream: &'static str,
+    pub vendor_key: &'static str,
+    pub path: &'static str,
+    pub crate_name: &'static str,
+    pub levels: &'static str,
+}
+
+pub const CATALOG: &[CatalogRow] = &[
+    CatalogRow {
+        id: "rest",
+        name: "REST API",
+        upstream: "PostgREST · Haskell · MIT",
+        vendor_key: "postgrest",
+        path: "/rest/v1",
+        crate_name: "megabase-rest",
+        levels: "L1",
+    },
+    CatalogRow {
+        id: "auth",
+        name: "Auth",
+        upstream: "Supabase Auth · Go · MIT",
+        vendor_key: "auth",
+        path: "/auth/v1",
+        crate_name: "megabase-auth",
+        levels: "L1–L2",
+    },
+    CatalogRow {
+        id: "storage",
+        name: "Storage",
+        upstream: "Storage API · TypeScript · Apache-2.0",
+        vendor_key: "storage",
+        path: "/storage/v1",
+        crate_name: "megabase-storage",
+        levels: "L2",
+    },
+    CatalogRow {
+        id: "realtime",
+        name: "Realtime",
+        upstream: "Realtime · Elixir · Apache-2.0",
+        vendor_key: "realtime",
+        path: "/realtime/v1",
+        crate_name: "megabase-realtime",
+        levels: "L3",
+    },
+    CatalogRow {
+        id: "functions",
+        name: "Edge Functions",
+        upstream: "Edge Runtime · Rust+Deno · MIT",
+        vendor_key: "edge-runtime",
+        path: "/functions/v1",
+        crate_name: "megabase-functions",
+        levels: "L4",
+    },
+    CatalogRow {
+        id: "pooler",
+        name: "Pooler",
+        upstream: "Supavisor · Elixir · Apache-2.0",
+        vendor_key: "supavisor",
+        path: "pg wire",
+        crate_name: "megabase-pooler",
+        levels: "L4",
+    },
+    CatalogRow {
+        id: "meta",
+        name: "Postgres Meta",
+        upstream: "postgres-meta · TypeScript · Apache-2.0",
+        vendor_key: "postgres-meta",
+        path: "/pg",
+        crate_name: "megabase-meta",
+        levels: "L4",
+    },
+    CatalogRow {
+        id: "studio",
+        name: "Studio",
+        upstream: "supabase/studio · Next.js · Apache-2.0",
+        vendor_key: "supabase",
+        path: "/ (dashboard)",
+        crate_name: "megabase-studio",
+        levels: "L4 test · L5",
+    },
+];
+
+pub fn status_tag(block: Option<&ComponentBlock>) -> &'static str {
+    match block {
+        None => "DAY 0",
+        Some(b) if b.conformant == b.total() && b.total() > 0 => "CONFORMANT",
+        Some(b) if b.tested > 0 || b.conformant > 0 => "IN PROGRESS",
+        Some(b) if b.implemented > 0 => "IMPLEMENTED",
+        Some(_) => "NOT STARTED",
     }
 }
 
@@ -465,5 +820,19 @@ mod tests {
             .expect("auth");
         assert_eq!(auth.tested, 1);
         assert_eq!(auth.conformant, 1);
+    }
+
+    #[test]
+    fn phase0_component_percent_falls_back_to_total() {
+        let mut metrics = Metrics::placeholder();
+        metrics.components = vec![ComponentBlock::from_counts("rest", "REST", 2, 0, 0, 0)];
+        let map = json!({
+            "rest": { "total": 10, "implemented": 2 }
+        })
+        .as_object()
+        .unwrap()
+        .clone();
+        merge_phase0_components(&mut metrics, &map);
+        assert_eq!(metrics.by_component.get("rest"), Some(&20.0));
     }
 }
