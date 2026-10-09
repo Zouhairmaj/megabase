@@ -233,5 +233,7 @@ still serves. Objects are created in one transaction. After `ADD COLUMN IF
 NOT EXISTS`, required columns get `SET NOT NULL` so an older table is not
 left nullable. `sslmode` is parsed by `tokio-postgres` (the same parser as
 the connection). `sslmode=require` aborts as TLS-required; `verify-*` is
-an invalid value for this client and also aborts. The connection is
-cleartext.
+an invalid value for this client and also aborts. The connection is always
+cleartext (`NoTls`); `sslmode=disable` is not a safe remote option. Use a
+Unix socket or loopback, or a separate encrypted transport, until TLS
+exists.

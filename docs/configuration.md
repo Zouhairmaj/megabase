@@ -25,7 +25,10 @@ Omit `DATABASE_URL` to skip schema install (the HTTP server still starts).
 The installer connects **without TLS** (`NoTls`). That is the local judge
 database. `sslmode=require` aborts startup instead of sending the password
 in the clear. `verify-ca` and `verify-full` are not accepted by this client
-and also abort. Use a Unix socket, an internal network, or `sslmode=disable`.
+and also abort. `sslmode=disable`, and the default `prefer` when this client
+cannot offer TLS, still send credentials in the clear. Use a Unix socket or
+loopback. A remote `DATABASE_URL` needs a separate encrypted transport until
+Megabase speaks TLS to PostgreSQL.
 
 ## Listen address
 
