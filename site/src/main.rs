@@ -11,6 +11,7 @@
 
 mod manifesto;
 mod metrics;
+mod og;
 mod treemap;
 
 use std::collections::BTreeMap;
@@ -40,7 +41,8 @@ struct Page {
     og_type: &'static str,
     /// Per-page Open Graph card under `static/`, 1200×630 PNG. Designs live in
     /// the Kite file `megabase-identity`, page "Website / OG images";
-    /// regenerate with `python3 site/og-src/generate.py`.
+    /// regenerate with `cargo run --manifest-path site/Cargo.toml -- og`
+    /// (see `og.rs`).
     og_image: &'static str,
     og_alt: &'static str,
     kind: Kind,
@@ -69,7 +71,7 @@ const PAGES: &[Page] = &[
         description: "Unofficial open-source experiment: AI agents rewrite every Supabase service as one Rust binary, tested response by response against the real stack.",
         og_type: "website",
         og_image: "og/home.png",
-        og_alt: "Megabase: The Supabase API. One Rust binary. Unofficial experiment, not affiliated with Supabase, Inc.",
+        og_alt: "Megabase: The Supabase API. One Rust binary. Unofficial experiment. Not affiliated with or endorsed by Supabase, Inc.",
         kind: Kind::Home,
         compact_nav: true,
         noindex: false,
@@ -83,7 +85,7 @@ const PAGES: &[Page] = &[
         description: "The Megabase manifesto: why AI agents are rewriting Supabase in Rust, the rules of the experiment, its scope, and how progress is judged.",
         og_type: "article",
         og_image: "og/manifesto.png",
-        og_alt: "Megabase manifesto: Supabase, in Rust. By agents. In public.",
+        og_alt: "Megabase manifesto: Supabase, in Rust. By agents. In public. Not affiliated with or endorsed by Supabase, Inc.",
         kind: Kind::Manifesto,
         compact_nav: false,
         noindex: false,
@@ -97,7 +99,7 @@ const PAGES: &[Page] = &[
         description: "This unit is not implemented.",
         og_type: "website",
         og_image: "og-card.png",
-        og_alt: "Megabase: The Supabase API. One Rust binary.",
+        og_alt: "Megabase: The Supabase API. One Rust binary. Not affiliated with or endorsed by Supabase, Inc.",
         kind: Kind::Template("pages/not-found.html"),
         compact_nav: false,
         noindex: true,
@@ -123,6 +125,10 @@ fn main() -> io::Result<()> {
     let args: Vec<String> = std::env::args().collect();
     let mut repo_root = None;
     let mut out = None;
+    let site_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    if args.get(1).map(String::as_str) == Some("og") {
+        return og::generate(&site_root);
+    }
     let mut i = 1;
     while i < args.len() {
         match args[i].as_str() {
@@ -141,7 +147,6 @@ fn main() -> io::Result<()> {
         }
     }
 
-    let site_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let repo_root = repo_root.unwrap_or_else(|| site_root.parent().unwrap().to_path_buf());
     let out = out.unwrap_or_else(|| site_root.join("dist"));
 
@@ -402,7 +407,9 @@ fn sitemap() -> String {
             continue;
         }
         let loc = page_url(page);
-        urls.push_str(&format!("<url><loc>{loc}</loc><lastmod>{lastmod}</lastmod></url>"));
+        urls.push_str(&format!(
+            "<url><loc>{loc}</loc><lastmod>{lastmod}</lastmod></url>"
+        ));
     }
     urls.push_str("</urlset>\n");
     urls
@@ -444,22 +451,52 @@ fn build_date() -> String {
 /// schema.org JSON-LD. Home: Organization + WebSite + SoftwareSourceCode.
 /// Inner pages: an Article/WebPage with a breadcrumb. 404: none.
 fn jsonld(page: &Page, url: &str) -> String {
-    let org = format!(
-        r#"{{"@type":"Organization","@id":"{ORIGIN}/#organization","name":"Megabase","url":"{ORIGIN}/","logo":{{"@type":"ImageObject","url":"{ORIGIN}/icon-512.png","width":512,"height":512}},"sameAs":["{GITHUB}"]}}"#
-    );
-    let website = format!(
-        r#"{{"@type":"WebSite","@id":"{ORIGIN}/#website","name":"Megabase","url":"{ORIGIN}/","inLanguage":"en","description":"Unofficial open-source experiment: AI agents rewrite Supabase as one Rust binary. Not affiliated with Supabase, Inc.","publisher":{{"@id":"{ORIGIN}/#organization"}}}}"#
-    );
+    use serde_json::json;
+
+    let org = json!({
+        "@type": "Organization",
+        "@id": format!("{ORIGIN}/#organization"),
+        "name": "Megabase",
+        "url": format!("{ORIGIN}/"),
+        "logo": {
+            "@type": "ImageObject",
+            "url": format!("{ORIGIN}/icon-512.png"),
+            "width": 512,
+            "height": 512
+        },
+        "sameAs": [GITHUB]
+    });
+    let website = json!({
+        "@type": "WebSite",
+        "@id": format!("{ORIGIN}/#website"),
+        "name": "Megabase",
+        "url": format!("{ORIGIN}/"),
+        "inLanguage": "en",
+        "description": format!(
+            "Unofficial open-source experiment: AI agents rewrite Supabase as one Rust binary. {}",
+            og::DISCLAIMER
+        ),
+        "publisher": { "@id": format!("{ORIGIN}/#organization") }
+    });
+    let image = format!("{ORIGIN}/{}", page.og_image);
     let graph = match page.id {
-        "home" => {
-            let code = format!(
-                r#"{{"@type":"SoftwareSourceCode","@id":"{ORIGIN}/#code","name":"Megabase","description":"{desc}","url":"{ORIGIN}/","codeRepository":"{GITHUB}","programmingLanguage":{{"@type":"ComputerLanguage","name":"Rust"}},"license":"https://www.apache.org/licenses/LICENSE-2.0","author":{{"@id":"{ORIGIN}/#organization"}},"image":"{ORIGIN}/{img}"}}"#,
-                desc = page.description,
-                img = page.og_image,
-            );
-            format!("[{org},{website},{code}]")
-        }
         "404" => return String::new(),
+        "home" => vec![
+            org,
+            website,
+            json!({
+                "@type": "SoftwareSourceCode",
+                "@id": format!("{ORIGIN}/#code"),
+                "name": "Megabase",
+                "description": page.description,
+                "url": format!("{ORIGIN}/"),
+                "codeRepository": GITHUB,
+                "programmingLanguage": { "@type": "ComputerLanguage", "name": "Rust" },
+                "license": "https://www.apache.org/licenses/LICENSE-2.0",
+                "author": { "@id": format!("{ORIGIN}/#organization") },
+                "image": image
+            }),
+        ],
         _ => {
             let kind = if page.og_type == "article" {
                 "Article"
@@ -467,21 +504,36 @@ fn jsonld(page: &Page, url: &str) -> String {
                 "WebPage"
             };
             let name = page.title.split(" — ").next().unwrap_or(page.title);
-            let main = format!(
-                r#"{{"@type":"{kind}","@id":"{url}#page","url":"{url}","headline":"{name}","name":"{title}","description":"{desc}","inLanguage":"en","image":"{ORIGIN}/{img}","isPartOf":{{"@id":"{ORIGIN}/#website"}},"author":{{"@id":"{ORIGIN}/#organization"}},"publisher":{{"@id":"{ORIGIN}/#organization"}}}}"#,
-                title = page.title,
-                desc = page.description,
-                img = page.og_image,
-            );
-            let crumbs = format!(
-                r#"{{"@type":"BreadcrumbList","itemListElement":[{{"@type":"ListItem","position":1,"name":"Megabase","item":"{ORIGIN}/"}},{{"@type":"ListItem","position":2,"name":"{name}","item":"{url}"}}]}}"#
-            );
-            format!("[{org},{website},{main},{crumbs}]")
+            vec![
+                org,
+                website,
+                json!({
+                    "@type": kind,
+                    "@id": format!("{url}#page"),
+                    "url": url,
+                    "headline": name,
+                    "name": page.title,
+                    "description": page.description,
+                    "inLanguage": "en",
+                    "image": image,
+                    "isPartOf": { "@id": format!("{ORIGIN}/#website") },
+                    "author": { "@id": format!("{ORIGIN}/#organization") },
+                    "publisher": { "@id": format!("{ORIGIN}/#organization") }
+                }),
+                json!({
+                    "@type": "BreadcrumbList",
+                    "itemListElement": [
+                        { "@type": "ListItem", "position": 1, "name": "Megabase", "item": format!("{ORIGIN}/") },
+                        { "@type": "ListItem", "position": 2, "name": name, "item": url }
+                    ]
+                }),
+            ]
         }
     };
-    format!(
-        r#"<script type="application/ld+json">{{"@context":"https://schema.org","@graph":{graph}}}</script>"#
-    )
+    let doc = json!({ "@context": "https://schema.org", "@graph": graph });
+    // `<` is escaped so no value can close the <script> element early.
+    let body = doc.to_string().replace('<', "\\u003c");
+    format!(r#"<script type="application/ld+json">{body}</script>"#)
 }
 
 fn subst(tpl: &str, vars: &BTreeMap<String, String>) -> String {
