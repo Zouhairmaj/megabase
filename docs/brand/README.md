@@ -136,7 +136,10 @@ the Kite page "Repo / README":
 
 Badges use a card-colored label with a green value: `#00D892` from 90%,
 `#009366` from 50%, `#005441` otherwise; empty chips use the not-started
-fill.
+fill. README coverage and conformance shields.io badges read the same
+steps from `coverage/badge-coverage.json` and
+`coverage/badge-conformance.json` (`flat-square`). The site Status page
+shows those percentages as text, not shields badges.
 
 ## Rules
 
