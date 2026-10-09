@@ -1,6 +1,6 @@
 -- Ported from supabase/auth migrations (MIT), pin v2.197.0.
--- Schema plus parent keys for foreign keys in this issue. Full
--- auth.users / auth.sessions definitions are later units.
+-- Schema plus parent keys for foreign keys. Full auth.users /
+-- auth.sessions definitions are later units; do not mark them done.
 
 CREATE SCHEMA IF NOT EXISTS auth;
 GRANT USAGE ON SCHEMA auth TO PUBLIC;

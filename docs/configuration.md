@@ -16,7 +16,7 @@ other names. There is no `.env.example` in this tree; the judge uses
 | --- | --- |
 | MEGABASE_HOST | Bind address. Default `0.0.0.0`. |
 | MEGABASE_PORT | HTTP port. Default `8000`. |
-| DATABASE_URL | PostgreSQL connection string. PostgreSQL stays external; Megabase does not bundle it. When set, startup installs the Auth SQL objects this build implements: `auth.uid()`, `auth.role()`, `auth.email()`, `auth.jwt()`, and tables `auth.instances`, `auth.audit_log_entries`, `auth.identities`, `auth.flow_state`, `auth.mfa_amr_claims`, `auth.custom_oauth_providers`. The statements are idempotent. If install fails, the process exits. |
+| DATABASE_URL | PostgreSQL connection string. PostgreSQL stays external; Megabase does not bundle it. When set, startup installs the Auth SQL objects listed in [`specs/auth/database.md`](../specs/auth/database.md). The statements are idempotent. If install fails, the process exits. |
 | JWT_SECRET | Secret used to sign and verify JWTs. Auth HTTP is not implemented; the value is still read so a missing secret can fail loudly later instead of minting a default. |
 
 Omit `DATABASE_URL` to skip schema install (the HTTP server still starts).
