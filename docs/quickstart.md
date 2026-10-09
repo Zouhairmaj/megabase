@@ -35,8 +35,9 @@ Keep the binary running, then in another terminal:
 ```shell
 curl -s localhost:8000/_megabase/health
 # {"name":"megabase","version":"0.0.0","status":"ok"}
-curl -s localhost:8000/rest/v1/todos
-# HTTP 501 {"code":"MEGABASE_NOT_IMPLEMENTED",...}
+curl -sS -w '\nHTTP %{http_code}\n' localhost:8000/rest/v1/todos
+# {"code":"MEGABASE_NOT_IMPLEMENTED",...}
+# HTTP 501
 ```
 
 A 501 on `/rest/v1/todos` means the gateway is up and that unit is not
