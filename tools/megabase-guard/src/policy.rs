@@ -113,8 +113,9 @@ fn strip_release_as(value: &mut serde_json::Value) -> bool {
     removed
 }
 
-/// True when `after` only appends items under `## Pending`.
-pub fn is_human_log_pending_append(before: &str, after: &str) -> bool {
+/// True when a `review/*` edit only appends or removes `## Pending` items
+/// (prefix grow or shrink) and/or grows the Completed section.
+pub fn is_human_log_review_ok(before: &str, after: &str) -> bool {
     const HEADING: &str = "## Pending";
     let Some(old_at) = before.find(HEADING) else {
         return false;
@@ -131,7 +132,40 @@ pub fn is_human_log_pending_append(before: &str, after: &str) -> bool {
     let Some((new_pending, new_rest)) = split_pending_body(&after[new_at..]) else {
         return false;
     };
-    old_rest == new_rest && new_pending.starts_with(old_pending) && new_pending != old_pending
+    let pending_ok = new_pending == old_pending
+        || new_pending.starts_with(old_pending)
+        || old_pending.starts_with(new_pending);
+    pending_ok && is_completed_section_ok(old_rest, new_rest) && after != before
+}
+
+fn is_completed_section_ok(old_rest: &str, new_rest: &str) -> bool {
+    if old_rest == new_rest {
+        return true;
+    }
+    let Some(old_body) = completed_body(old_rest) else {
+        return false;
+    };
+    let Some(new_body) = completed_body(new_rest) else {
+        return false;
+    };
+    if new_body == old_body {
+        return true;
+    }
+    if is_empty_completed(old_body) {
+        return new_body.starts_with("## Completed");
+    }
+    let old_trim = old_body.trim_end();
+    new_body.starts_with(old_trim) && new_body.len() > old_trim.len()
+}
+
+fn completed_body(rest: &str) -> Option<&str> {
+    rest.strip_prefix("\n---")
+        .map(|body| body.trim_start_matches('\n'))
+}
+
+fn is_empty_completed(body: &str) -> bool {
+    let trimmed = body.trim();
+    trimmed.is_empty() || trimmed == "*No completed human interventions recorded yet.*"
 }
 
 fn split_pending_body(from_heading: &str) -> Option<(&str, &str)> {
@@ -176,15 +210,15 @@ pub fn evaluate(changes: &[Change], ctx: &Context) -> Vec<String> {
             // Phase 0 only: the lead approved landing the Design (Kite)
             // and Documentation sections in GOAL.md on the bootstrap branch.
             let bootstrap_goal = bootstrap && path == "GOAL.md";
-            let pending_append = review
+            let human_log_review = review
                 && path == "HUMAN_LOG.md"
                 && change.status == Status::Modified
                 && change
                     .before
                     .as_deref()
                     .zip(change.after.as_deref())
-                    .is_some_and(|(before, after)| is_human_log_pending_append(before, after));
-            if !creating_empty_log && !bootstrap_goal && !pending_append {
+                    .is_some_and(|(before, after)| is_human_log_review_ok(before, after));
+            if !creating_empty_log && !bootstrap_goal && !human_log_review {
                 violations.push(format!(
                     "{path}: human-owned file; only maintainers edit it"
                 ));
@@ -434,17 +468,45 @@ mod tests {
 
     #[test]
     fn review_branch_may_append_human_log_pending_only() {
-        let before = "# Human Intervention Log\n\n## Pending\n\n- old\n\n---\n\n*No completed*\n";
+        let before = "# Human Intervention Log\n\n## Pending\n\n- old\n\n---\n\n*No completed human interventions recorded yet.*\n";
         let after =
-            "# Human Intervention Log\n\n## Pending\n\n- old\n\n- new pending\n\n---\n\n*No completed*\n";
+            "# Human Intervention Log\n\n## Pending\n\n- old\n\n- new pending\n\n---\n\n*No completed human interventions recorded yet.*\n";
         let c = ctx("review/release-ci", false);
         assert!(evaluate(&[modified("HUMAN_LOG.md", before, after)], &c).is_empty());
         let rewritten =
-            "# Human Intervention Log\n\n## Pending\n\n- rewritten\n\n---\n\n*No completed*\n";
+            "# Human Intervention Log\n\n## Pending\n\n- rewritten\n\n---\n\n*No completed human interventions recorded yet.*\n";
         assert_eq!(
             evaluate(&[modified("HUMAN_LOG.md", before, rewritten)], &c).len(),
             1
         );
+        assert_eq!(
+            evaluate(
+                &[modified("HUMAN_LOG.md", before, after)],
+                &ctx("issue-1-x", false)
+            )
+            .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn review_branch_may_complete_human_log_pending() {
+        let before = "# Human Intervention Log\n\n## Pending\n\n- keep\n\n- done\n\n---\n\n*No completed human interventions recorded yet.*\n";
+        let after =
+            "# Human Intervention Log\n\n## Pending\n\n- keep\n\n---\n\n## Completed\n\n- done\n";
+        let c = ctx("review/release-ci", false);
+        assert!(evaluate(&[modified("HUMAN_LOG.md", before, after)], &c).is_empty());
+        let before_placeholder = "# Human Intervention Log\n\n## Pending\n\n- keep\n\n---\n\n*No completed human interventions recorded yet.*\n";
+        assert!(evaluate(&[modified("HUMAN_LOG.md", before_placeholder, after)], &c).is_empty());
+        let rewritten_completed =
+            "# Human Intervention Log\n\n## Pending\n\n- keep\n\n---\n\n## Completed\n\n- other\n";
+        assert_eq!(
+            evaluate(&[modified("HUMAN_LOG.md", after, rewritten_completed)], &c).len(),
+            1
+        );
+        let appended_completed =
+            "# Human Intervention Log\n\n## Pending\n\n- keep\n\n---\n\n## Completed\n\n- done\n\n- later\n";
+        assert!(evaluate(&[modified("HUMAN_LOG.md", after, appended_completed)], &c).is_empty());
         assert_eq!(
             evaluate(
                 &[modified("HUMAN_LOG.md", before, after)],

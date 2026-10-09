@@ -21,7 +21,8 @@ agreement). CI runs it on every pull request.
 
 - Edits to `GOAL.md` (except the lead-approved Design and Documentation
   sections on the Phase 0 bootstrap branch) or `MANIFESTO.md`.
-- Edits to `HUMAN_LOG.md` except the bootstrap case below.
+- Edits to `HUMAN_LOG.md` except the bootstrap case and the `review/*`
+  pending/completed exception below.
 - Edits to `vendor/`, `vendor.toml` or `.gitmodules` after bootstrap.
 - Source files in languages other than Rust (`.py`, `.js`, `.ts`, `.go`,
   `.ex`, `.hs`, `.rb`, `.lua`, `.sh`, …) outside `vendor/`. SQL, TOML,
@@ -75,9 +76,11 @@ Any other path on those branches is rejected, including reviewed paths
 and product code. This is narrower than a `review/*` exception: the bot
 cannot land CI or judge changes through a release PR.
 
-`review/*` may append items under `## Pending` in `HUMAN_LOG.md` so
-agents can record human-only blockers. Completed interventions stay
-human-owned.
+`review/*` may append or remove items under `## Pending` in `HUMAN_LOG.md`
+(prefix grow or shrink of the pending body) and may grow the Completed
+section (replace the empty-log placeholder, or append after existing
+completed entries). Format text and earlier completed entries stay
+unchanged.
 
 ## Consequences
 

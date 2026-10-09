@@ -79,7 +79,8 @@ waiting on a human.
    `release-please--branches--*` may change only `CHANGELOG.md`,
    `.release-please-manifest.json`, `Cargo.toml`, `Cargo.lock`, and
    delete `release-as` from `release-please-config.json`. `review/*`
-   may append `HUMAN_LOG.md` Pending items.
+   may append or complete `HUMAN_LOG.md` Pending items and grow the
+   Completed section.
 6. **README status is generated.** `megabase-coverage update` on `main`;
    `check` is a required CI job. Agents keep it current. Status is one
    full-width nested treemap (`coverage/treemap.svg`, light:
@@ -191,10 +192,12 @@ Physically impossible for the agent (repository settings or credentials):
 - [ ] Branch protection on `main`: PRs only, required checks
       `Build`, `MSRV 1.89`, `Coverage check`, `Protected paths`,
       `Judge`, `Conventional Commits title`, one approving review
-- [ ] Allow GitHub Actions to create and approve pull requests
-      (Settings → Actions → General → Workflow permissions), and/or
-      set secret `RELEASE_PLEASE_TOKEN`, so release-please can open
-      PRs and lockfile pushes start required checks
+- [x] Allow GitHub Actions to create and approve pull requests
+      (Settings → Actions → General → Workflow permissions;
+      `can_approve_pull_request_reviews=true`. Run 37961663758 predates it.)
+- [ ] Set secret `RELEASE_PLEASE_TOKEN` (PAT or GitHub App) so lockfile
+      pushes on the release branch start required checks (`GITHUB_TOKEN`
+      pushes do not trigger workflows)
 - [ ] Allow `github-actions` to publish GitHub Releases / tags on `main`
 - [ ] Enforce CODEOWNERS
 - [ ] Allow `github-actions` to push coverage commits to `main`

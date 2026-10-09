@@ -19,11 +19,11 @@ Each entry should include:
 - **Reason**: The placeholder site deploys with `actions/configure-pages` (`enablement: true`), `actions/upload-pages-artifact`, and `actions/deploy-pages` on push to `main`. Pages is not enabled yet (`GET /pages` is 404). `enablement: true` cannot turn Pages on with `GITHUB_TOKEN` alone (it needs a PAT or GitHub App token with Pages write). After the source is set to GitHub Actions, re-run **Deploy placeholder site**.
 - **Files affected**: GitHub Pages settings (not in git)
 
-- **Date**: 2026-10-09
-- **Action**: (pending) Repo Settings → Actions → General → Workflow permissions → enable “Allow GitHub Actions to create and approve pull requests” (and ensure the release workflow can open/update release PRs).
-- **Reason**: main job release-please failed with “GitHub Actions is not permitted to create or approve pull requests” (run 37961663758). PR #137 was opened by megabase-agent as a workaround; the main check stays red until Actions can create PRs (or the workflow uses a permitted token).
-- **Files affected**: GitHub Actions settings (not in git)
-
 ---
 
-*No completed human interventions recorded yet.*
+## Completed
+
+- **Date**: 2026-10-09
+- **Action**: Enabled “Allow GitHub Actions to create and approve pull requests” (Settings → Actions → General → Workflow permissions). Confirmed via API: `can_approve_pull_request_reviews=true`.
+- **Reason**: Release run 37961663758 failed with “GitHub Actions is not permitted to create or approve pull requests” before this setting was on. The pending item recorded that failure; the setting is now enabled. Lockfile-head checks still need `RELEASE_PLEASE_TOKEN` (`GITHUB_TOKEN` pushes do not trigger workflows).
+- **Files affected**: GitHub Actions settings (not in git)
