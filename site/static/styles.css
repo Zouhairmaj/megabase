@@ -797,7 +797,7 @@ body:has(#licensing-and-credits:target) .toc-list a[href="#licensing-and-credits
 }
 
 .sec-num {
-  color: var(--muted);
+  color: var(--muted-aa);
 }
 
 .article h3 {

@@ -38,6 +38,11 @@ struct Page {
     title: &'static str,
     description: &'static str,
     og_type: &'static str,
+    /// Per-page Open Graph card under `static/`, 1200×630 PNG. Designs live in
+    /// the Kite file `megabase-identity`, page "Website / OG images";
+    /// regenerate with `python3 site/og-src/generate.py`.
+    og_image: &'static str,
+    og_alt: &'static str,
     kind: Kind,
     /// Home uses the compact Kite nav (Manifesto only). Inner pages share
     /// Home / Manifesto / GitHub, which grows as forthcoming pages ship.
@@ -61,8 +66,10 @@ const PAGES: &[Page] = &[
         id: "home",
         dir: "",
         title: "Megabase — The Supabase API. One Rust binary.",
-        description: "An open-source experiment: autonomous AI agents rewrite every Supabase service in Rust, tested response by response against the real stack.",
+        description: "Unofficial open-source experiment: AI agents rewrite every Supabase service as one Rust binary, tested response by response against the real stack.",
         og_type: "website",
+        og_image: "og/home.png",
+        og_alt: "Megabase: The Supabase API. One Rust binary. Unofficial experiment, not affiliated with Supabase, Inc.",
         kind: Kind::Home,
         compact_nav: true,
         noindex: false,
@@ -73,8 +80,10 @@ const PAGES: &[Page] = &[
         id: "manifesto",
         dir: "manifesto",
         title: "Manifesto — Megabase",
-        description: "Supabase, rewritten in Rust. By agents. In public. The Megabase manifesto.",
+        description: "The Megabase manifesto: why AI agents are rewriting Supabase in Rust, the rules of the experiment, its scope, and how progress is judged.",
         og_type: "article",
+        og_image: "og/manifesto.png",
+        og_alt: "Megabase manifesto: Supabase, in Rust. By agents. In public.",
         kind: Kind::Manifesto,
         compact_nav: false,
         noindex: false,
@@ -87,6 +96,8 @@ const PAGES: &[Page] = &[
         title: "Not found — Megabase",
         description: "This unit is not implemented.",
         og_type: "website",
+        og_image: "og-card.png",
+        og_alt: "Megabase: The Supabase API. One Rust binary.",
         kind: Kind::Template("pages/not-found.html"),
         compact_nav: false,
         noindex: true,
@@ -210,32 +221,59 @@ fn render_page(
     repo_root: &Path,
     metrics: &Metrics,
 ) -> io::Result<String> {
-    let asset = if page.dir.is_empty() { "" } else { "../" };
-    let to_home = if page.dir.is_empty() { "./" } else { "../" };
-    let to_manifesto = if page.id == "manifesto" {
+    // GitHub Pages serves 404.html at any missing path (e.g. /a/b/c), so its
+    // links must be root-absolute; every other page stays relative.
+    let is_404 = page.id == "404";
+    let asset = if is_404 {
+        "/"
+    } else if page.dir.is_empty() {
+        ""
+    } else {
+        "../"
+    };
+    let to_home = if is_404 {
+        "/"
+    } else if page.dir.is_empty() {
+        "./"
+    } else {
+        "../"
+    };
+    let to_manifesto: String = if is_404 {
+        "/manifesto/".into()
+    } else if page.id == "manifesto" {
         "./".into()
     } else if page.dir.is_empty() {
         "manifesto/".into()
     } else {
         "../manifesto/".into()
     };
-    let canonical = if page.dir.is_empty() {
-        format!("{ORIGIN}/")
-    } else {
-        format!("{ORIGIN}/{}/", page.dir)
-    };
+    let canonical = page_url(page);
 
     let mut vars = BTreeMap::new();
     vars.insert("title".into(), page.title.into());
     vars.insert("description".into(), page.description.into());
-    vars.insert("canonical".into(), canonical.clone());
+    // The 404 has no canonical URL: it must not claim to be the home page.
+    vars.insert(
+        "canonical_tags".into(),
+        if is_404 {
+            String::new()
+        } else {
+            format!(
+                r#"<link rel="canonical" href="{canonical}" />
+    <meta property="og:url" content="{canonical}" />"#
+            )
+        },
+    );
     vars.insert("og_type".into(), page.og_type.into());
+    vars.insert("og_image".into(), format!("{ORIGIN}/{}", page.og_image));
+    vars.insert("og_alt".into(), page.og_alt.into());
+    vars.insert("jsonld".into(), jsonld(page, &canonical));
     vars.insert("origin".into(), ORIGIN.into());
     vars.insert("asset".into(), asset.into());
     vars.insert("github".into(), GITHUB.into());
     vars.insert("logo".into(), logo.into());
     vars.insert("to_home".into(), to_home.into());
-    vars.insert("to_manifesto".into(), to_manifesto);
+    vars.insert("to_manifesto".into(), to_manifesto.clone());
     vars.insert(
         "robots".into(),
         if page.noindex {
@@ -261,7 +299,7 @@ fn render_page(
             String::new()
         },
     );
-    vars.insert("header".into(), header(page, logo, asset, to_home));
+    vars.insert("header".into(), header(page, logo, &to_manifesto, to_home));
     vars.insert("footer".into(), footer(GITHUB));
     vars.insert(
         "scripts".into(),
@@ -304,16 +342,9 @@ fn render_page(
     Ok(subst(layout, &vars))
 }
 
-fn header(page: &Page, logo: &str, _asset: &str, to_home: &str) -> String {
+fn header(page: &Page, logo: &str, manifesto_href: &str, to_home: &str) -> String {
     let mut links = String::new();
     if page.compact_nav {
-        let manifesto_href = if page.id == "manifesto" {
-            "./"
-        } else if page.dir.is_empty() {
-            "manifesto/"
-        } else {
-            "../manifesto/"
-        };
         links.push_str(&nav_link(
             "MANIFESTO",
             manifesto_href,
@@ -321,13 +352,6 @@ fn header(page: &Page, logo: &str, _asset: &str, to_home: &str) -> String {
         ));
     } else {
         links.push_str(&nav_link("HOME", to_home, page.id == "home"));
-        let manifesto_href = if page.id == "manifesto" {
-            "./"
-        } else if page.dir.is_empty() {
-            "manifesto/"
-        } else {
-            "../manifesto/"
-        };
         links.push_str(&nav_link(
             "MANIFESTO",
             manifesto_href,
@@ -369,6 +393,7 @@ fn preload(page: &Page, asset: &str) -> String {
 }
 
 fn sitemap() -> String {
+    let lastmod = build_date();
     let mut urls = String::from(
         r#"<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">"#,
     );
@@ -376,15 +401,87 @@ fn sitemap() -> String {
         if page.noindex {
             continue;
         }
-        let loc = if page.dir.is_empty() {
-            format!("{ORIGIN}/")
-        } else {
-            format!("{ORIGIN}/{}/", page.dir)
-        };
-        urls.push_str(&format!("<url><loc>{loc}</loc></url>"));
+        let loc = page_url(page);
+        urls.push_str(&format!("<url><loc>{loc}</loc><lastmod>{lastmod}</lastmod></url>"));
     }
     urls.push_str("</urlset>\n");
     urls
+}
+
+fn page_url(page: &Page) -> String {
+    if page.dir.is_empty() {
+        format!("{ORIGIN}/")
+    } else {
+        format!("{ORIGIN}/{}/", page.dir)
+    }
+}
+
+/// Build date (UTC, YYYY-MM-DD) for sitemap `lastmod`. Honours
+/// `SOURCE_DATE_EPOCH` for reproducible builds.
+fn build_date() -> String {
+    let secs = std::env::var("SOURCE_DATE_EPOCH")
+        .ok()
+        .and_then(|v| v.parse::<i64>().ok())
+        .unwrap_or_else(|| {
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs() as i64)
+                .unwrap_or(0)
+        });
+    // Civil-from-days (Howard Hinnant).
+    let z = secs.div_euclid(86_400) + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = yoe + era * 400 + i64::from(m <= 2);
+    format!("{y:04}-{m:02}-{d:02}")
+}
+
+/// schema.org JSON-LD. Home: Organization + WebSite + SoftwareSourceCode.
+/// Inner pages: an Article/WebPage with a breadcrumb. 404: none.
+fn jsonld(page: &Page, url: &str) -> String {
+    let org = format!(
+        r#"{{"@type":"Organization","@id":"{ORIGIN}/#organization","name":"Megabase","url":"{ORIGIN}/","logo":{{"@type":"ImageObject","url":"{ORIGIN}/icon-512.png","width":512,"height":512}},"sameAs":["{GITHUB}"]}}"#
+    );
+    let website = format!(
+        r#"{{"@type":"WebSite","@id":"{ORIGIN}/#website","name":"Megabase","url":"{ORIGIN}/","inLanguage":"en","description":"Unofficial open-source experiment: AI agents rewrite Supabase as one Rust binary. Not affiliated with Supabase, Inc.","publisher":{{"@id":"{ORIGIN}/#organization"}}}}"#
+    );
+    let graph = match page.id {
+        "home" => {
+            let code = format!(
+                r#"{{"@type":"SoftwareSourceCode","@id":"{ORIGIN}/#code","name":"Megabase","description":"{desc}","url":"{ORIGIN}/","codeRepository":"{GITHUB}","programmingLanguage":{{"@type":"ComputerLanguage","name":"Rust"}},"license":"https://www.apache.org/licenses/LICENSE-2.0","author":{{"@id":"{ORIGIN}/#organization"}},"image":"{ORIGIN}/{img}"}}"#,
+                desc = page.description,
+                img = page.og_image,
+            );
+            format!("[{org},{website},{code}]")
+        }
+        "404" => return String::new(),
+        _ => {
+            let kind = if page.og_type == "article" {
+                "Article"
+            } else {
+                "WebPage"
+            };
+            let name = page.title.split(" — ").next().unwrap_or(page.title);
+            let main = format!(
+                r#"{{"@type":"{kind}","@id":"{url}#page","url":"{url}","headline":"{name}","name":"{title}","description":"{desc}","inLanguage":"en","image":"{ORIGIN}/{img}","isPartOf":{{"@id":"{ORIGIN}/#website"}},"author":{{"@id":"{ORIGIN}/#organization"}},"publisher":{{"@id":"{ORIGIN}/#organization"}}}}"#,
+                title = page.title,
+                desc = page.description,
+                img = page.og_image,
+            );
+            let crumbs = format!(
+                r#"{{"@type":"BreadcrumbList","itemListElement":[{{"@type":"ListItem","position":1,"name":"Megabase","item":"{ORIGIN}/"}},{{"@type":"ListItem","position":2,"name":"{name}","item":"{url}"}}]}}"#
+            );
+            format!("[{org},{website},{main},{crumbs}]")
+        }
+    };
+    format!(
+        r#"<script type="application/ld+json">{{"@context":"https://schema.org","@graph":{graph}}}</script>"#
+    )
 }
 
 fn subst(tpl: &str, vars: &BTreeMap<String, String>) -> String {
