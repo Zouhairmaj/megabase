@@ -22,6 +22,7 @@ Headers the gateway invents (`date`, `server`, `via`, `x-kong-*`,
 | Kind | Rule |
 |---|---|
 | Compact JWT (`eyJ….….…`) | `<jwt>` |
+| bcrypt hash (`$2a$10$…`) | `<bcrypt>` |
 | ISO-8601 / RFC 3339 timestamp | `<timestamp>` |
 | UUID | `<uuid>` |
 | JSON keys `expires_at`, `iat`, `exp` | replaced by `"<key>"` when the value is not null |
@@ -46,7 +47,7 @@ compared. Implemented in `judge/harness/src/db.rs`.
 |---|---|---|
 | Table catalog | column name and attnum order, `pg_type.typname`, `NOT NULL`, generated expression, `relrowsecurity`, `pg_get_indexdef` | SQL text: strip `--` comments, collapse whitespace, lowercase outside `'quoted'` literals. `absent = true` passes only when both databases lack the relation |
 | Function catalog | identity arguments, result type, language, `provolatile`, `prosrc` | same SQL normalization on result type and body |
-| Row snapshot | `jsonb_agg(row_to_json(t))` of `SELECT *` | same JSON rules as HTTP bodies (JWT, UUID, timestamp, volatile keys), then sort the array by serialized row text so `ORDER BY 1` is not the only order (the first `auth.users` column is `instance_id`, shared by every row) |
+| Row snapshot | `jsonb_agg(row_to_json(t))` of `SELECT *` | HTTP JSON rules (including bcrypt), plus non-empty `auth.users` secret columns (`encrypted_password`, `*_token`), then sort the row array by serialized text. Empty token strings stay empty so an autoconfirmed clear still differs from a leftover token. |
 
 Owners, ACLs, `column_default` and comments are not compared: they
 depend on which cluster roles exist and on cosmetic `COMMENT ON`.

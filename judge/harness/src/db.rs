@@ -3,6 +3,7 @@
 //! The harness talks to Postgres itself. It does not import Megabase crates
 //! and it does not trust Megabase HTTP for schema or row state.
 
+use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
 use anyhow::{bail, Context, Result};
@@ -174,15 +175,15 @@ pub fn prepare(admin_url: &str, megabase_url: &str, fixtures: &str) -> Result<()
 }
 
 pub fn normalize_sql(sql: &str) -> String {
-    let without_line_comments = regex::Regex::new(r"--[^\n]*")
-        .expect("comment regex")
+    static COMMENT: OnceLock<regex::Regex> = OnceLock::new();
+    static WS: OnceLock<regex::Regex> = OnceLock::new();
+    let without_line_comments = COMMENT
+        .get_or_init(|| regex::Regex::new(r"--[^\n]*").expect("comment regex"))
         .replace_all(sql, " ");
-    let compact = regex::Regex::new(r"\s+")
-        .expect("ws regex")
-        .replace_all(&without_line_comments, " ")
-        .trim()
-        .to_string();
-    lowercase_sql_outside_literals(&compact)
+    let compact = WS
+        .get_or_init(|| regex::Regex::new(r"\s+").expect("ws regex"))
+        .replace_all(&without_line_comments, " ");
+    lowercase_sql_outside_literals(compact.trim())
 }
 
 /// Lowercase SQL keywords and identifiers, but keep `'quoted'` literal case
@@ -206,12 +207,6 @@ fn lowercase_sql_outside_literals(sql: &str) -> String {
         }
     }
     result
-}
-
-fn sort_row_array(value: &mut Value) {
-    if let Value::Array(items) = value {
-        items.sort_by_cached_key(Value::to_string);
-    }
 }
 
 fn table_catalog(client: &mut Client, rel: &Relation) -> Result<Option<TableCatalog>> {
@@ -329,10 +324,12 @@ fn snapshot_rows(client: &mut Client, rel: &Relation) -> Result<Option<Value>> {
         return Ok(None);
     }
     // Qualified identifiers are validated in parse_relation.
+    // Row order is applied in Rust after JSON normalization: `ORDER BY 1`
+    // is not a stable key (`auth.users.instance_id` is shared).
     let sql = format!(
         "SELECT COALESCE(
             (SELECT jsonb_agg(row_to_json(t))
-               FROM (SELECT * FROM {}.{} ORDER BY 1) t),
+               FROM (SELECT * FROM {}.{}) t),
             '[]'::jsonb
         )",
         rel.schema, rel.name
@@ -350,38 +347,88 @@ fn describe_json(label: &str, value: &Value) -> String {
     }
 }
 
-fn describe_table_diff(raw: &str, reference: &TableCatalog, megabase: &TableCatalog) -> String {
-    let names = |cat: &TableCatalog| {
-        cat.columns
-            .iter()
-            .map(|c| c.name.as_str())
-            .collect::<Vec<_>>()
-            .join(", ")
-    };
-    if reference
-        .columns
-        .iter()
-        .map(|c| &c.name)
-        .collect::<Vec<_>>()
-        != megabase.columns.iter().map(|c| &c.name).collect::<Vec<_>>()
-    {
-        return format!(
-            "table `{raw}` catalog differs: columns [{names}] vs [{other}]",
-            names = names(reference),
-            other = names(megabase)
-        );
+#[derive(Debug, PartialEq, Eq)]
+enum Presence<T> {
+    BothMissing,
+    MissingReference,
+    MissingMegabase,
+    Both(T, T),
+}
+
+fn pair<T>(reference: Option<T>, megabase: Option<T>) -> Presence<T> {
+    match (reference, megabase) {
+        (None, None) => Presence::BothMissing,
+        (None, Some(_)) => Presence::MissingReference,
+        (Some(_), None) => Presence::MissingMegabase,
+        (Some(reference), Some(megabase)) => Presence::Both(reference, megabase),
     }
-    format!(
-        "table `{raw}` catalog differs: {} vs {}",
-        describe_json(
-            "reference",
-            &serde_json::to_value(reference).unwrap_or(Value::Null)
-        ),
-        describe_json(
-            "megabase",
-            &serde_json::to_value(megabase).unwrap_or(Value::Null)
-        )
-    )
+}
+
+fn table_diff(raw: &str, reference: &TableCatalog, megabase: &TableCatalog) -> String {
+    let mut parts = Vec::new();
+    if reference.columns != megabase.columns {
+        if reference.columns.len() != megabase.columns.len() {
+            parts.push(format!(
+                "column count {} vs {}",
+                reference.columns.len(),
+                megabase.columns.len()
+            ));
+        }
+        let n = reference.columns.len().max(megabase.columns.len());
+        for i in 0..n {
+            match (reference.columns.get(i), megabase.columns.get(i)) {
+                (Some(a), Some(b)) if a != b => {
+                    parts.push(format!(
+                        "column[{i}] {} vs {}",
+                        describe_json("reference", &serde_json::to_value(a).unwrap_or(Value::Null)),
+                        describe_json("megabase", &serde_json::to_value(b).unwrap_or(Value::Null))
+                    ));
+                    break;
+                }
+                (Some(a), None) => {
+                    parts.push(format!(
+                        "column[{i}] `{}` only on the reference stack",
+                        a.name
+                    ));
+                    break;
+                }
+                (None, Some(b)) => {
+                    parts.push(format!("column[{i}] `{}` only on megabase", b.name));
+                    break;
+                }
+                _ => {}
+            }
+        }
+    }
+    if reference.row_security != megabase.row_security {
+        parts.push(format!(
+            "row_security {} vs {}",
+            reference.row_security, megabase.row_security
+        ));
+    }
+    if reference.indexes != megabase.indexes {
+        let ref_only: Vec<_> = reference
+            .indexes
+            .iter()
+            .filter(|i| !megabase.indexes.contains(i))
+            .collect();
+        let mb_only: Vec<_> = megabase
+            .indexes
+            .iter()
+            .filter(|i| !reference.indexes.contains(i))
+            .collect();
+        if !ref_only.is_empty() {
+            parts.push(format!("indexes only on the reference stack: {ref_only:?}"));
+        }
+        if !mb_only.is_empty() {
+            parts.push(format!("indexes only on megabase: {mb_only:?}"));
+        }
+    }
+    if parts.is_empty() {
+        format!("table `{raw}` catalog differs")
+    } else {
+        format!("table `{raw}` catalog differs: {}", parts.join("; "))
+    }
 }
 
 /// Both sides missing is a match when the case requires absence.
@@ -401,11 +448,14 @@ pub fn absent_mismatch(ref_found: bool, mb_found: bool, kind: &str, raw: &str) -
 }
 
 /// Compare a table's catalog (and optionally rows) on both databases.
+///
+/// `absent` requires the object to be missing on both sides. Otherwise an
+/// object missing on both sides is a pass; missing on only one side fails
+/// the case.
 pub fn compare_table(
     databases: &Databases,
     raw: &str,
     rows: bool,
-    reference_missing_is_fatal: bool,
     absent: bool,
 ) -> Result<Option<String>> {
     let rel = parse_relation(raw)?;
@@ -430,33 +480,22 @@ pub fn compare_table(
             raw,
         ));
     }
-    let Some(ref_cat) = ref_cat else {
-        if reference_missing_is_fatal {
-            bail!("reference database has no table `{raw}` (fixture or pin problem)");
+    match pair(ref_cat, mb_cat) {
+        Presence::BothMissing => Ok(None),
+        Presence::MissingReference => Ok(Some(format!(
+            "table `{raw}` present on megabase, missing on the reference stack"
+        ))),
+        Presence::MissingMegabase => Ok(Some(format!("table `{raw}` missing on megabase"))),
+        Presence::Both(ref_cat, mb_cat) if ref_cat != mb_cat => {
+            Ok(Some(table_diff(raw, &ref_cat, &mb_cat)))
         }
-        return Ok(Some(format!(
-            "table `{raw}` missing on the reference stack"
-        )));
-    };
-    let Some(mb_cat) = mb_cat else {
-        return Ok(Some(format!("table `{raw}` missing on megabase")));
-    };
-    if ref_cat != mb_cat {
-        return Ok(Some(describe_table_diff(raw, &ref_cat, &mb_cat)));
+        Presence::Both(_, _) if rows => compare_row_snapshot(databases, raw, false),
+        Presence::Both(_, _) => Ok(None),
     }
-    if rows {
-        return compare_row_snapshot(databases, raw, reference_missing_is_fatal);
-    }
-    Ok(None)
 }
 
 /// Compare a function's overloads on both databases.
-pub fn compare_function(
-    databases: &Databases,
-    raw: &str,
-    reference_missing_is_fatal: bool,
-    absent: bool,
-) -> Result<Option<String>> {
+pub fn compare_function(databases: &Databases, raw: &str, absent: bool) -> Result<Option<String>> {
     let rel = parse_relation(raw)?;
     let mut reference = connect(&databases.reference)?;
     let mut megabase = match connect(&databases.megabase) {
@@ -479,29 +518,24 @@ pub fn compare_function(
             raw,
         ));
     }
-    let Some(ref_fn) = ref_fn else {
-        if reference_missing_is_fatal {
-            bail!("reference database has no function `{raw}` (pin problem)");
-        }
-        return Ok(Some(format!(
-            "function `{raw}` missing on the reference stack"
-        )));
-    };
-    let Some(mb_fn) = mb_fn else {
-        return Ok(Some(format!("function `{raw}` missing on megabase")));
-    };
-    if ref_fn != mb_fn {
-        return Ok(Some(format!(
+    match pair(ref_fn, mb_fn) {
+        Presence::BothMissing => Ok(None),
+        Presence::MissingReference => Ok(Some(format!(
+            "function `{raw}` present on megabase, missing on the reference stack"
+        ))),
+        Presence::MissingMegabase => Ok(Some(format!("function `{raw}` missing on megabase"))),
+        Presence::Both(ref_fn, mb_fn) if ref_fn != mb_fn => Ok(Some(format!(
             "function `{raw}` differs: {} vs {}",
             describe_json("reference", &serde_json::to_value(&ref_fn)?),
             describe_json("megabase", &serde_json::to_value(&mb_fn)?)
-        )));
+        ))),
+        Presence::Both(_, _) => Ok(None),
     }
-    Ok(None)
 }
 
 /// Snapshot every row of a relation on both databases and compare after
-/// the same JSON normalization used for HTTP bodies.
+/// JSON normalization. `reference_missing_is_fatal` is for fixture tables
+/// (`auth.users`, `public.todos`) that the reference stack must have.
 pub fn compare_row_snapshot(
     databases: &Databases,
     raw: &str,
@@ -517,35 +551,35 @@ pub fn compare_row_snapshot(
             )))
         }
     };
-    let Some(mut ref_rows) = snapshot_rows(&mut reference, &rel)
-        .with_context(|| format!("snapshot `{raw}` on the reference stack"))?
-    else {
-        if reference_missing_is_fatal {
-            bail!("reference database has no table `{raw}` to snapshot");
+    let ref_rows = snapshot_rows(&mut reference, &rel)
+        .with_context(|| format!("snapshot `{raw}` on the reference stack"))?;
+    let mb_rows = snapshot_rows(&mut megabase, &rel)
+        .with_context(|| format!("snapshot `{raw}` on megabase"))?;
+    match pair(ref_rows, mb_rows) {
+        Presence::BothMissing | Presence::MissingReference if reference_missing_is_fatal => {
+            bail!("reference database has no table `{raw}` to snapshot (fixture or pin problem)");
         }
-        return Ok(Some(format!(
-            "table `{raw}` missing on the reference stack"
-        )));
-    };
-    let Some(mut mb_rows) = snapshot_rows(&mut megabase, &rel)
-        .with_context(|| format!("snapshot `{raw}` on megabase"))?
-    else {
-        return Ok(Some(format!(
+        Presence::BothMissing => Ok(None),
+        Presence::MissingReference => Ok(Some(format!(
+            "table `{raw}` present on megabase, missing on the reference stack"
+        ))),
+        Presence::MissingMegabase => Ok(Some(format!(
             "table `{raw}` missing on megabase (no rows to compare)"
-        )));
-    };
-    normalize::json(&mut ref_rows, &[]);
-    normalize::json(&mut mb_rows, &[]);
-    sort_row_array(&mut ref_rows);
-    sort_row_array(&mut mb_rows);
-    if ref_rows != mb_rows {
-        return Ok(Some(format!(
-            "rows in `{raw}` differ: {} vs {}",
-            describe_json("reference", &ref_rows),
-            describe_json("megabase", &mb_rows)
-        )));
+        ))),
+        Presence::Both(mut ref_rows, mut mb_rows) => {
+            normalize::json_rows(&mut ref_rows);
+            normalize::json_rows(&mut mb_rows);
+            if ref_rows != mb_rows {
+                Ok(Some(format!(
+                    "rows in `{raw}` differ: {} vs {}",
+                    describe_json("reference", &ref_rows),
+                    describe_json("megabase", &mb_rows)
+                )))
+            } else {
+                Ok(None)
+            }
+        }
     }
-    Ok(None)
 }
 
 #[cfg(test)]
@@ -594,6 +628,57 @@ mod tests {
             normalize_sql("WHERE name = 'O''Brien'"),
             "where name = 'O''Brien'"
         );
+    }
+
+    #[test]
+    fn sql_normalization_preserves_quoted_literals() {
+        assert_eq!(
+            normalize_sql("current_setting('request.jwt.claim.email')"),
+            "current_setting('request.jwt.claim.email')"
+        );
+        assert_ne!(
+            normalize_sql("current_setting('email')"),
+            normalize_sql("current_setting('EMAIL')")
+        );
+        assert_eq!(normalize_sql("it''s Fine"), "it''s fine");
+    }
+
+    #[test]
+    fn both_missing_catalogs_match() {
+        assert_eq!(pair::<()>(None, None), Presence::BothMissing);
+        assert_eq!(pair(None, Some(())), Presence::MissingReference);
+        assert_eq!(pair(Some(()), None), Presence::MissingMegabase);
+        assert_eq!(pair(Some(1), Some(2)), Presence::Both(1, 2));
+    }
+
+    #[test]
+    fn table_diff_names_the_first_column() {
+        let a = TableCatalog {
+            columns: vec![Column {
+                name: "id".into(),
+                typ: "uuid".into(),
+                not_null: true,
+                generated: None,
+            }],
+            row_security: true,
+            indexes: vec!["create unique index t_pkey on auth.t using btree (id)".into()],
+        };
+        let b = TableCatalog {
+            columns: vec![
+                a.columns[0].clone(),
+                Column {
+                    name: "email".into(),
+                    typ: "text".into(),
+                    not_null: false,
+                    generated: Some("lower((identity_data ->> 'email'::text))".into()),
+                },
+            ],
+            row_security: true,
+            indexes: a.indexes.clone(),
+        };
+        let msg = table_diff("auth.identities", &a, &b);
+        assert!(msg.contains("column count 1 vs 2"), "{msg}");
+        assert!(msg.contains("email"), "{msg}");
     }
 
     #[test]
