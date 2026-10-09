@@ -15,7 +15,9 @@ permissions:
   contents: read
 
 concurrency:
-  group: pages-badges
+  # Same group as pages.yml so a site deploy cannot finish after this
+  # job and put older homepage metrics back.
+  group: pages
   cancel-in-progress: false
 
 jobs:
