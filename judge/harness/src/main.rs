@@ -27,7 +27,7 @@ common:
   --reference-database URL     reference Postgres (default from --env)
   --megabase-database URL      Megabase Postgres (default from --env, db megabase)
   --env FILE                   env file with ANON_KEY, SERVICE_ROLE_KEY,
-                               POSTGRES_PASSWORD, POSTGRES_PORT
+                               POSTGRES_PASSWORD
                                (default vendor/supabase/docker/.env.example)";
 
 struct Args {
@@ -113,25 +113,36 @@ fn percent_encode(raw: &str) -> String {
     out
 }
 
+/// Host port published by `judge/compose.override.yml` for the Postgres
+/// container. Official compose maps Supavisor to host `5432`; connecting
+/// there fails `prepare` with `no tenant identifier provided` and the
+/// harness never reaches the cases. Do not read `POSTGRES_PORT` from the
+/// env file: that value is the in-network port (5432).
+const DIRECT_POSTGRES_HOST_PORT: &str = "54322";
+
 fn default_databases(args: &Args) -> Result<db::Databases> {
     let text = std::fs::read_to_string(&args.env)
         .with_context(|| format!("reading {}", args.env.display()))?;
     let password = percent_encode(&env_value(&text, &args.env, "POSTGRES_PASSWORD")?);
-    // Host 5432 is Supavisor. Direct Postgres is published on 54322 by
-    // judge/compose.override.yml.
-    let port = "54322";
-    let reference = args
-        .reference_database
-        .clone()
-        .unwrap_or_else(|| format!("postgres://postgres:{password}@127.0.0.1:{port}/postgres"));
-    let megabase = args
-        .megabase_database
-        .clone()
-        .unwrap_or_else(|| format!("postgres://postgres:{password}@127.0.0.1:{port}/megabase"));
-    Ok(db::Databases {
-        reference,
-        megabase,
-    })
+    Ok(database_urls(
+        &password,
+        args.reference_database.clone(),
+        args.megabase_database.clone(),
+    ))
+}
+
+fn database_urls(
+    password: &str,
+    reference: Option<String>,
+    megabase: Option<String>,
+) -> db::Databases {
+    let port = DIRECT_POSTGRES_HOST_PORT;
+    db::Databases {
+        reference: reference
+            .unwrap_or_else(|| format!("postgres://postgres:{password}@127.0.0.1:{port}/postgres")),
+        megabase: megabase
+            .unwrap_or_else(|| format!("postgres://postgres:{password}@127.0.0.1:{port}/megabase")),
+    }
 }
 
 fn wait(args: &Args, keys: &Keys) -> Result<()> {
@@ -325,5 +336,38 @@ fn main() -> ExitCode {
             eprintln!("error: {err:#}");
             ExitCode::from(2)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_database_urls_use_direct_postgres_not_supavisor() {
+        let dbs = database_urls("secret", None, None);
+        assert_eq!(
+            dbs.reference,
+            "postgres://postgres:secret@127.0.0.1:54322/postgres"
+        );
+        assert_eq!(
+            dbs.megabase,
+            "postgres://postgres:secret@127.0.0.1:54322/megabase"
+        );
+        assert!(
+            !dbs.reference.contains(":5432/"),
+            "host 5432 is Supavisor; prepare would fail before cases run"
+        );
+    }
+
+    #[test]
+    fn explicit_database_urls_win() {
+        let dbs = database_urls(
+            "secret",
+            Some("postgres://u:p@db:5432/postgres".into()),
+            Some("postgres://u:p@db:5432/megabase".into()),
+        );
+        assert_eq!(dbs.reference, "postgres://u:p@db:5432/postgres");
+        assert_eq!(dbs.megabase, "postgres://u:p@db:5432/megabase");
     }
 }
