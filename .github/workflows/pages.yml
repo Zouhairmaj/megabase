@@ -34,6 +34,11 @@ jobs:
         with:
           toolchain: stable
 
+      - name: Cache site workspace
+        uses: ./.github/actions/rust-cache
+        with:
+          workspace: site
+
       - name: Generate site
         run: cargo run --manifest-path site/Cargo.toml --release -- --repo-root . --out _site
 
