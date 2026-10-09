@@ -1816,9 +1816,14 @@ mod tests {
     fn real_summary_at_every_preset() {
         let metrics = real_metrics();
         let summed: usize = metrics.components.iter().map(|c| c.total()).sum();
-        let total = metrics.total.expect("live coverage must include totals.units");
+        let total = metrics
+            .total
+            .expect("live coverage must include totals.units");
         assert!(total > 0, "live coverage must have units");
-        assert_eq!(total, summed, "summary total must equal the sum of components");
+        assert_eq!(
+            total, summed,
+            "summary total must equal the sum of components"
+        );
         for preset in PRESETS {
             assert_layout(&metrics, *preset);
         }
@@ -1913,10 +1918,7 @@ mod tests {
         assert!(!svg.contains("font-size=\"8\" fill=\"#8A8B8E\""));
         for c in &live {
             let name = c.label.to_ascii_uppercase();
-            assert!(
-                svg.contains(&name),
-                "hero must label component {name}"
-            );
+            assert!(svg.contains(&name), "hero must label component {name}");
             let count = format!("/{}", comma(c.total()));
             assert!(
                 svg.contains(&count) || svg.contains(&name),

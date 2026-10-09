@@ -984,7 +984,9 @@ mod tests {
         build(&site_root, &real_root, &out, &metrics, &human).expect("build live");
         let home = fs::read_to_string(out.join("index.html")).unwrap();
         let status = fs::read_to_string(out.join("status/index.html")).unwrap();
-        let total = metrics.total.expect("live coverage must include totals.units");
+        let total = metrics
+            .total
+            .expect("live coverage must include totals.units");
         assert!(total > 0, "live coverage must have units");
         let shown = metrics::comma(total);
         assert!(
