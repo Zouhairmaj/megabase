@@ -52,10 +52,11 @@ jobs:
           set -euo pipefail
           JWT_SECRET=$(grep '^JWT_SECRET=' vendor/supabase/docker/.env.example | cut -d= -f2-)
           POSTGRES_PASSWORD=$(grep '^POSTGRES_PASSWORD=' vendor/supabase/docker/.env.example | cut -d= -f2-)
-          # Host :5432 is Supavisor. Direct Postgres is on 54322.
-          # Dedicated `megabase` database (created by prepare). Sharing
-          # the official `postgres` database would make catalog and row
-          # comparisons vacuous. `supabase_admin` can run install_schema.
+          # Host :5432 is Supavisor. Direct Postgres is on 54322
+          # (judge/compose.override.yml). Dedicated `megabase` database
+          # (created by prepare). Sharing the official `postgres`
+          # database would make catalog and row comparisons vacuous.
+          # `supabase_admin` can run install_schema.
           DATABASE_URL="postgres://supabase_admin:${POSTGRES_PASSWORD}@127.0.0.1:54322/megabase"
           MEGABASE_PORT=8100 MEGABASE_HOST=0.0.0.0 \
             JWT_SECRET="$JWT_SECRET" DATABASE_URL="$DATABASE_URL" \
