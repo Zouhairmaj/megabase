@@ -9,9 +9,10 @@ card: Start the binary, call /_megabase/health, then hit a 501 on an unimplement
 # Quickstart
 
 > [!NOTE]
-> Unimplemented HTTP endpoints answer 501 `MEGABASE_NOT_IMPLEMENTED`. Auth
-> SQL objects listed in [Configuration](configuration.md) are installed when
-> `DATABASE_URL` is set. This is not production software.
+> Unimplemented HTTP endpoints answer 501 `MEGABASE_NOT_IMPLEMENTED`.
+> `GET /auth/v1/health` is live. Auth SQL objects listed in
+> [Configuration](configuration.md) are installed when `DATABASE_URL` is
+> set. This is not production software.
 
 ## Build from source
 
@@ -59,9 +60,10 @@ verify it are in [Install](install.md).
 
 ## Use with supabase-js
 
-Point supabase-js at your local base URL. Every request to an unimplemented
-unit returns 501 today; Level 1 targets REST and Auth email/password first
-(see [Roadmap](ROADMAP.md)).
+Point supabase-js at your local base URL. An unimplemented unit returns
+501. `GET /auth/v1/health` answers the GoTrue health document. Level 1
+targets REST and Auth email/password (see [Roadmap](ROADMAP.md) and
+[Configuration](configuration.md)).
 
 ```javascript
 import { createClient } from '@supabase/supabase-js'

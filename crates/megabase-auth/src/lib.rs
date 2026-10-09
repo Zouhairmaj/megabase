@@ -1,18 +1,26 @@
 //! Supabase Auth-compatible API (`/auth/v1`) for Megabase.
 //!
 //! Target behavior: Supabase Auth, vendor/auth (MIT), pinned in `vendor/`.
-//! Issue #6 serves the first `/auth/v1/admin` GET/DELETE batch. Every other
-//! Auth path still returns `MEGABASE_NOT_IMPLEMENTED`. Database objects
+//! Issue #6 serves the first `/auth/v1/admin` GET/DELETE batch. Issue #15
+//! serves health, settings, autoconfirm email signup, and logout. Every
+//! other Auth path returns `MEGABASE_NOT_IMPLEMENTED`. Database objects
 //! listed in `specs/auth/database.md` are installed when `DATABASE_URL` is
 //! set.
 
 mod admin;
+mod config;
+mod error;
 mod http;
+mod jsonutil;
+mod routes;
 mod schema;
 mod state;
+mod store;
 
+pub use config::AuthConfig;
 pub use schema::{install_schema, SchemaError};
 pub use state::AuthState;
+pub use store::Backend;
 
 use axum::{extract::OriginalUri, http::Method, Router};
 use megabase_core::MegabaseNotImplemented;
@@ -24,7 +32,8 @@ pub fn router() -> Router {
 }
 
 pub fn router_with_state(state: AuthState) -> Router {
-    admin::router(state)
+    admin::router(state.clone())
+        .merge(routes::router(state))
         // Path match without a method handler is Axum 405; send those to the
         // same 501 as unknown paths (GOAL.md §3 rule 5).
         .method_not_allowed_fallback(not_implemented)

@@ -105,6 +105,25 @@ impl Hs256 {
         Ok(Self { secret })
     }
 
+    /// Sign `payload` as a compact HS256 JWT (`typ` `JWT`).
+    ///
+    /// Ported from supabase/auth `internal/tokens/service.go` `SignJWT` (MIT),
+    /// pin v2.197.0. The payload object is serialized as JSON; claim order is
+    /// not significant.
+    pub fn sign(&self, payload: &Value) -> Result<String, JwtError> {
+        let header = serde_json::json!({ "alg": HS256, "typ": "JWT" });
+        let header_json = serde_json::to_vec(&header).map_err(|_| JwtError::BadCrypto)?;
+        let payload_json = serde_json::to_vec(payload).map_err(|_| JwtError::BadCrypto)?;
+        let header_b64 = URL_SAFE_NO_PAD.encode(header_json);
+        let payload_b64 = URL_SAFE_NO_PAD.encode(payload_json);
+        let signing_input = format!("{header_b64}.{payload_b64}");
+        let mut mac =
+            HmacSha256::new_from_slice(&self.secret).map_err(|_| JwtError::SecretMissing)?;
+        mac.update(signing_input.as_bytes());
+        let signature = URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes());
+        Ok(format!("{signing_input}.{signature}"))
+    }
+
     /// Verify `token` with the current Unix time.
     pub fn verify(&self, token: &str) -> Result<JwtClaims, JwtError> {
         self.verify_at(token, unix_now())
@@ -277,6 +296,26 @@ mod tests {
         assert_eq!(claims.role.as_deref(), Some("service_role"));
         assert_eq!(claims.sub, None);
         assert_eq!(claims.exp, Some(1_799_535_600));
+    }
+
+    #[test]
+    fn sign_round_trips_through_verify() {
+        let payload = json!({
+            "role": "authenticated",
+            "sub": "11111111-1111-1111-1111-111111111111",
+            "aud": "authenticated",
+            "exp": DURING_DEMO + 3600,
+            "iat": DURING_DEMO,
+        });
+        let token = verifier().sign(&payload).unwrap();
+        let claims = verifier().verify_at(&token, DURING_DEMO).unwrap();
+        assert_eq!(claims.role.as_deref(), Some("authenticated"));
+        assert_eq!(
+            claims.sub.as_deref(),
+            Some("11111111-1111-1111-1111-111111111111")
+        );
+        assert_eq!(claims.raw["aud"], "authenticated");
+        assert_eq!(claims.exp, Some(DURING_DEMO + 3600));
     }
 
     #[test]
