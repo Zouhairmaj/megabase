@@ -133,7 +133,9 @@ waiting on a human.
     (`release-as`). The v0.1.0 release PR must delete `release-as`
     before it merges.
     Container `FROM` lines are pinned by digest (root image and
-    `.cursor/Dockerfile`).
+    `.cursor/Dockerfile`). Cloud Agent `rustup-init` and
+    `cargo-binstall` downloads in `.cursor/Dockerfile` are pinned by
+    SHA-256 and verified before exec (no `curl|sh`).
 
 ## Tracking
 
