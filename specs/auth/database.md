@@ -151,10 +151,14 @@ Final shape: rename `id` → `provider_id` and UUID PK
 | updated_at | timestamptz | NULL |
 | email | text | `GENERATED ALWAYS AS (lower(identity_data->>'email')) STORED` |
 
-Unique `(provider_id, provider)` as `identities_provider_id_provider_unique`.
+Pinned catalog attnum order is `provider_id` … `updated_at`, then `email`,
+then uuid `id` (`20221215195800` before `20231117164230`). Unique
+`(provider_id, provider)` as `identities_provider_id_provider_unique`.
 Indexes: `identities_user_id_idx`, `identities_email_idx` (`text_pattern_ops`).
 Comments as in those migrations. Installer must **not** `RENAME` `id`: that
-breaks a database that already has the UUID primary key.
+breaks a database that already has the UUID primary key. An empty table
+whose `email` attnum is after `id` is dropped and recreated; a non-empty
+table keeps its existing attnums.
 
 ---
 
@@ -571,6 +575,12 @@ lines 10 and 27.
 | scopes | text | NULL, `char_length <= 4096` |
 | refresh_token_hmac_key | text | NULL |
 | refresh_token_counter | bigint | NULL |
+
+Pinned catalog attnum order is `oauth_client_id`, then
+`refresh_token_hmac_key` / `refresh_token_counter`, then `scopes`.
+An empty table with `scopes` before the refresh-token columns is dropped
+and recreated (inbound FKs are dropped and added again). A non-empty
+table keeps its existing attnums.
 
 Comment: `Auth: Stores session data associated to a user.` RLS on.
 
