@@ -361,6 +361,31 @@ mod tests {
     }
 
     #[test]
+    fn renders_home_card_with_bundled_fonts() {
+        let site_root = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let mut opt = resvg::usvg::Options::default();
+        {
+            let db = opt.fontdb_mut();
+            for weight in ["Regular", "Bold"] {
+                let path = site_root.join(format!("og-fonts/JetBrainsMono-{weight}.ttf"));
+                db.load_font_data(fs::read(&path).expect("bundled OG font"));
+            }
+        }
+        let tree = resvg::usvg::Tree::from_str(&svg(&CARDS[0]), &opt).expect("svg parses");
+        let mut pixmap = resvg::tiny_skia::Pixmap::new(W as u32, H as u32).expect("pixmap");
+        resvg::render(
+            &tree,
+            resvg::tiny_skia::Transform::default(),
+            &mut pixmap.as_mut(),
+        );
+        assert!(
+            pixmap.data().iter().any(|&b| b != 0),
+            "harfrust/skrifa stack should paint the home card"
+        );
+        assert!(pixmap.encode_png().is_ok());
+    }
+
+    #[test]
     fn cards_omit_cost_copy() {
         for card in CARDS {
             assert_ne!(card.key, "cost");

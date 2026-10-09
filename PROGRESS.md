@@ -134,6 +134,16 @@ waiting on a human.
     before it merges.
     Container `FROM` lines are pinned by digest (root image and
     `.cursor/Dockerfile`).
+16. **Owned lockfiles.** Scorecard/OSV flagged RUSTSEC-2026-0206
+    (`rustybuzz` unmaintained) and RUSTSEC-2026-0192 (`ttf-parser`
+    unmaintained) in `site/Cargo.lock`, not the workspace lockfile and
+    not `vendor/`. `site/` is excluded from the workspace, so root
+    `cargo audit` missed them. Fix: `resvg` 0.45 → 0.48 (harfrust +
+    skrifa). `just audit` scans every owned lockfile (`Cargo.lock`,
+    `site/Cargo.lock`). The CI `cargo-audit` job must pass `--file` for
+    each of those; a workspace-only run misses `site/`. `vendor/**`
+    lockfiles stay frozen; do not add an OSV ignore unless a finding
+    exists only there.
 
 ## Tracking
 

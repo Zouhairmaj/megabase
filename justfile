@@ -61,6 +61,11 @@ backlog-dry:
 bench:
     cargo bench --locked --bench health
 
+# Advisories on every Cargo.lock we own (not vendor/).
+audit:
+    cargo audit --file Cargo.lock
+    cargo audit --file site/Cargo.lock
+
 ci: fmt-check lint test coverage-check
 
 clean:
