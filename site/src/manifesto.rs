@@ -289,7 +289,7 @@ fn is_scope_table(rows: &[Vec<String>]) -> bool {
 
 fn render_scope_table(rows: &[Vec<String>], metrics: &Metrics) -> String {
     let mut parts = String::from(
-        r#"<div class="table-scroll" tabindex="0" role="region" aria-label="Scope"><div class="scope-table"><div class="scope-row scope-head" role="row"><span>COMPONENT</span><span>UPSTREAM</span><span>STATUS</span></div>"#,
+        r#"<div class="table-scroll" tabindex="0" role="region" aria-label="Scope"><div class="scope-table" role="table" aria-label="Scope"><div class="scope-row scope-head" role="row"><span role="columnheader">COMPONENT</span><span role="columnheader">UPSTREAM</span><span role="columnheader">STATUS</span></div>"#,
     );
     for cells in rows.iter().skip(1) {
         let name = cells.first().map(String::as_str).unwrap_or("");
@@ -305,7 +305,7 @@ fn render_scope_table(rows: &[Vec<String>], metrics: &Metrics) -> String {
         };
         let upstream = format!("{language} · {license}");
         parts.push_str(&format!(
-            r#"<div class="scope-row"><span class="scope-name">{}</span><span>{}</span><span>{}</span></div>"#,
+            r#"<div class="scope-row" role="row"><span class="scope-name" role="cell">{}</span><span role="cell">{}</span><span role="cell">{}</span></div>"#,
             esc(name),
             esc(&upstream),
             esc(&status)

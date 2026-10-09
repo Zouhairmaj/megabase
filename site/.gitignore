@@ -13,7 +13,12 @@ _render-*.html
 /logo.svg
 /favicon.svg
 /og-card.png
-/og-card.svg
+/og/
+/favicon.ico
+/icon-192.png
+/icon-512.png
+/icon-maskable-512.png
+/site.webmanifest
 /toc.js
 /robots.txt
 /apple-touch-icon.png

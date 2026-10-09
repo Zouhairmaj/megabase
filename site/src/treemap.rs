@@ -53,7 +53,7 @@ pub fn svg_size(metrics: &Metrics, width: f64, height: f64) -> String {
     let packed: Vec<(&ComponentBlock, [f64; 4])> = blocks
         .iter()
         .copied()
-        .zip(cells.into_iter())
+        .zip(cells)
         .map(|(block, rect)| {
             let (x, y, w, h) = inset(rect[0], rect[1], rect[2], rect[3], BLOCK_GAP / 2.0);
             (block, [x, y, w, h])
