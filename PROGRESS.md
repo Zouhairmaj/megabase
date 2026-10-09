@@ -165,6 +165,15 @@ waiting on a human.
     on both databases fails; `auth.sso_sessions` is required absent
     (`absent = true`). A missing fixture snapshot table on the reference
     still aborts. `storage.objects` stays Level 2.
+19. **Signed releases.** When release-please creates a GitHub Release (or
+    a human dispatches Release with an existing tag), CI builds musl-static
+    linux `x86_64` and `aarch64` `megabase` binaries, writes `SHA256SUMS`,
+    signs blobs keylessly with Sigstore (`cosign sign-blob`), attaches SLSA
+    provenance (`.intoto.jsonl` via `actions/attest-build-provenance`), and
+    publishes `ghcr.io/zouhairmaj/megabase` tagged with the version
+    (`cosign sign`). `id-token: write` is only on that signing job. Install
+    and verify: [`docs/install.md`](docs/install.md). Goal: OpenSSF Scorecard
+    Packaging and Signed-Releases.
 
 ## Tracking
 
@@ -255,6 +264,11 @@ Physically impossible for the agent (repository settings or credentials):
       security) so the path in `SECURITY.md` works
 - [ ] Optionally register an [OpenSSF Best Practices](https://www.bestpractices.dev/)
       badge (Scorecard CII-Best-Practices; long-horizon)
+- [ ] After the first GHCR push, confirm
+      `ghcr.io/zouhairmaj/megabase` is public (Settings → Packages).
+      Then dispatch **Release** with tag `v0.1.0` so that release gains
+      signed assets (it shipped without binaries). Scorecard
+      Signed-Releases looks at the last five GitHub Releases.
 
 Log each of these in `HUMAN_LOG.md` when it is done. The delegation of
 decisions itself is a human intervention to log.

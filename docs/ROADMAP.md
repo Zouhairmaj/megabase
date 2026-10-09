@@ -144,4 +144,7 @@ approval of the current head SHA and green CI. The lockfile is part of
 the release PR (`cargo update -w` on the release branch). If it is still
 stale, run `cargo update -w` on that branch. Each GitHub Release body
 is annotated with the coverage / conformance delta versus the previous
-tag.
+tag. The same Release job attaches musl-static linux `x86_64` and
+`aarch64` binaries, `SHA256SUMS`, Sigstore signatures, and SLSA
+provenance, and publishes `ghcr.io/zouhairmaj/megabase:<tag>` (cosign).
+Install and verify those artifacts in [Install](install.md).

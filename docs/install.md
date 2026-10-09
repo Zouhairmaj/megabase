@@ -1,9 +1,9 @@
 ---
 title: Install
-description: Clone the workspace, build the megabase binary, or build the pinned container image.
+description: Download a signed GitHub Release binary, pull the GHCR image, or build from source.
 section: get-started
 order: 1
-card: Build from source with Rust 1.89+ or from the root Dockerfile. PostgreSQL is external.
+card: Signed linux binaries and ghcr.io/zouhairmaj/megabase on each GitHub Release, or build from source.
 ---
 
 # Install
@@ -11,6 +11,79 @@ card: Build from source with Rust 1.89+ or from the root Dockerfile. PostgreSQL 
 Megabase is one Rust binary next to PostgreSQL. Unimplemented routes return
 HTTP 501 `{"code":"MEGABASE_NOT_IMPLEMENTED",...}`. Nothing here is
 production software.
+
+Each GitHub Release attaches musl-static linux `x86_64` and `aarch64`
+binaries, `SHA256SUMS`, Sigstore signatures, and SLSA provenance, and
+publishes `ghcr.io/zouhairmaj/megabase` tagged with that version. Commands
+for download and verification live only on this page.
+
+## Release binary
+
+Pick the asset that matches your CPU (`uname -m`: `x86_64` or `aarch64`).
+Replace `v0.1.0` with the tag you want from
+[Releases](https://github.com/Zouhairmaj/megabase/releases).
+
+```shell
+TAG=v0.1.0
+ARCH=x86_64-unknown-linux-musl
+BASE=https://github.com/Zouhairmaj/megabase/releases/download/${TAG}
+ASSET=megabase-${TAG}-${ARCH}
+curl -fsSL -O "${BASE}/${ASSET}"
+curl -fsSL -O "${BASE}/SHA256SUMS"
+curl -fsSL -O "${BASE}/SHA256SUMS.sig"
+curl -fsSL -O "${BASE}/SHA256SUMS.pem"
+sha256sum -c SHA256SUMS --ignore-missing
+chmod +x "${ASSET}"
+./"${ASSET}"
+```
+
+The binary listens on `0.0.0.0:8000` (`MEGABASE_HOST` / `MEGABASE_PORT`).
+See [Configuration](configuration.md).
+
+## Verify signatures
+
+Release blobs are signed keylessly with Sigstore (`cosign sign-blob` in
+`.github/workflows/release.yml`). The signing identity is this
+repository's Release workflow; the OIDC issuer is GitHub Actions.
+
+Install [cosign](https://docs.sigstore.dev/cosign/system_config/installation/),
+then:
+
+```shell
+cosign verify-blob \
+  --certificate SHA256SUMS.pem \
+  --signature SHA256SUMS.sig \
+  --certificate-identity-regexp '^https://github.com/Zouhairmaj/megabase/\.github/workflows/release\.yml@refs/' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  SHA256SUMS
+```
+
+To verify a binary instead of the checksum file, use that asset's `.pem`
+and `.sig` (same identity flags). SLSA provenance is
+`megabase-${TAG}.intoto.jsonl` on the Release and in GitHub attestations:
+
+```shell
+gh attestation verify "${ASSET}" --repo Zouhairmaj/megabase
+```
+
+## Container image
+
+The published image is `ghcr.io/zouhairmaj/megabase:<tag>` (also tagged
+without the leading `v`). It is signed with `cosign sign` in the same
+Release job.
+
+```shell
+docker pull ghcr.io/zouhairmaj/megabase:v0.1.0
+cosign verify \
+  --certificate-identity-regexp '^https://github.com/Zouhairmaj/megabase/\.github/workflows/release\.yml@refs/' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  ghcr.io/zouhairmaj/megabase:v0.1.0
+docker run --rm -p 8000:8000 ghcr.io/zouhairmaj/megabase:v0.1.0
+```
+
+Pass `-e DATABASE_URL=...` if the process should install Auth SQL objects.
+The image includes `megabase-healthcheck`, which probes
+`/_megabase/health`.
 
 ## Clone
 
@@ -30,9 +103,8 @@ cargo build --release --locked -p megabase
 ./target/release/megabase
 ```
 
-The binary listens on `0.0.0.0:8000` (`MEGABASE_HOST` / `MEGABASE_PORT`).
-See [Configuration](configuration.md). `just` lists every recipe that
-works today.
+Environment variables are in [Configuration](configuration.md). `just` lists
+every recipe that works today.
 
 When `DATABASE_URL` is set, startup creates the Auth schema objects Megabase
 currently implements. The install is idempotent. Without `DATABASE_URL` the
@@ -44,7 +116,7 @@ The public site generator is separate:
 cargo run --manifest-path site/Cargo.toml -- --repo-root . --out _site
 ```
 
-## Container image
+## Build the image locally
 
 The root `Dockerfile` builds the release image. Both `FROM` lines are
 pinned by digest so Scorecard Pinned-Dependencies does not flag a
@@ -82,10 +154,6 @@ docker build -t megabase .
 docker run --rm -p 8000:8000 megabase
 ```
 
-Pass `-e DATABASE_URL=...` if the process should install Auth SQL objects.
-The image includes `megabase-healthcheck`, which probes
-`/_megabase/health`.
-
 ## Requirements
 
 | Tool | Why |
@@ -93,3 +161,4 @@ The image includes `megabase-healthcheck`, which probes
 | Rust 1.89+ | Workspace MSRV; CI also checks 1.89 |
 | PostgreSQL 15+ | External database (not required just to start the 501 gateway) |
 | Docker | Release image; Compose for the judge |
+| cosign (optional) | Verify Sigstore signatures on Release assets and GHCR |

@@ -39,6 +39,9 @@ Do **not** report:
 - issues that exist only in `vendor/` (report those upstream)
 - theoretical issues in components that still return 501
 
+Release binaries and `ghcr.io/zouhairmaj/megabase` are signed. How to
+verify a download is in [`docs/install.md`](docs/install.md).
+
 ## Disclosure
 
 After a fix lands we credit the reporter in the GitHub Security Advisory
