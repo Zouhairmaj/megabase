@@ -5,11 +5,6 @@
 
 # Supabase, rewritten in Rust. By agents. In public.
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/brand/logo-horizontal-dark.svg">
-  <img alt="Megabase" src="docs/brand/logo-horizontal.svg" height="48">
-</picture>
-
 One binary next to PostgreSQL that speaks the same APIs as a self-hosted
 Supabase stack, so an existing `supabase-js` app can point at it without
 changing a line of code. The experiment is the product; the binary is the
