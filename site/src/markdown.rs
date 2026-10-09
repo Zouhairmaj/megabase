@@ -27,16 +27,17 @@ pub fn render(md: &str) -> String {
 }
 
 pub fn headings_h2(md: &str) -> Vec<(String, String)> {
-    let mut in_fence = false;
+    let mut fence_len = 0usize;
     let mut headings = Vec::new();
     for line in md.lines() {
-        if !in_fence && is_fence_open(line) {
-            in_fence = true;
-            continue;
-        }
-        if in_fence {
-            if is_fence_close(line) {
-                in_fence = false;
+        if fence_len == 0 {
+            if let Some(n) = fence_open_len(line) {
+                fence_len = n;
+                continue;
+            }
+        } else {
+            if is_fence_close(line, fence_len) {
+                fence_len = 0;
             }
             continue;
         }
@@ -96,11 +97,11 @@ pub fn render_with(md: &str, opts: Options) -> String {
             i += 1;
             continue;
         }
-        if is_fence_open(lines[i]) {
+        if let Some(open_len) = fence_open_len(lines[i]) {
             let lang = stripped.trim_start_matches('`').trim().to_string();
             i += 1;
             let mut code = String::new();
-            while i < lines.len() && !is_fence_close(lines[i]) {
+            while i < lines.len() && !is_fence_close(lines[i], open_len) {
                 if !code.is_empty() {
                     code.push('\n');
                 }
@@ -237,18 +238,25 @@ fn linkify(text: &str) -> String {
                 let label = &rest[start + 1..start + mid];
                 let href_start = start + mid + 2;
                 let href = &rest[href_start..start + mid + end];
+                let consumed = start + mid + end + 1;
+                if !safe_href(href) {
+                    out.push_str(&esc(&rest[..consumed]));
+                    rest = &rest[consumed..];
+                    continue;
+                }
                 out.push_str(&esc(&rest[..start]));
-                let rel = if href.starts_with("http") {
-                    r#" rel="noopener noreferrer""#
-                } else {
-                    ""
-                };
+                let rel =
+                    if href.trim().starts_with("http://") || href.trim().starts_with("https://") {
+                        r#" rel="noopener noreferrer""#
+                    } else {
+                        ""
+                    };
                 out.push_str(&format!(
                     r#"<a href="{}"{rel}>{}</a>"#,
                     esc(href),
                     esc(label)
                 ));
-                rest = &rest[start + mid + end + 1..];
+                rest = &rest[consumed..];
                 continue;
             }
         }
@@ -429,12 +437,41 @@ fn is_keyword(word: &str) -> bool {
     )
 }
 
-fn is_fence_open(line: &str) -> bool {
-    line.trim_end().starts_with("```")
+fn fence_open_len(line: &str) -> Option<usize> {
+    let stripped = line.trim_end();
+    if !stripped.starts_with("```") {
+        return None;
+    }
+    Some(stripped.chars().take_while(|c| *c == '`').count())
 }
 
-fn is_fence_close(line: &str) -> bool {
-    line.trim_start().starts_with("```")
+fn is_fence_close(line: &str, open_len: usize) -> bool {
+    let stripped = line.trim_start();
+    if !stripped.starts_with("```") {
+        return false;
+    }
+    let n = stripped.chars().take_while(|c| *c == '`').count();
+    n >= open_len && stripped[n..].chars().all(char::is_whitespace)
+}
+
+fn safe_href(href: &str) -> bool {
+    let href = href.trim();
+    if href.is_empty() || href.starts_with("//") {
+        return false;
+    }
+    if href.starts_with('#') || href.starts_with("./") || href.starts_with("../") {
+        return true;
+    }
+    if href.starts_with('/') && !href.starts_with("//") {
+        return true;
+    }
+    match href.split_once(':') {
+        None => true,
+        Some((scheme, rest)) => {
+            rest.starts_with("//")
+                && (scheme.eq_ignore_ascii_case("http") || scheme.eq_ignore_ascii_case("https"))
+        }
+    }
 }
 
 fn parse_heading(line: &str) -> Option<(usize, String)> {
@@ -571,5 +608,31 @@ mod tests {
         assert!(html.contains("id=\"real-heading\""));
         assert!(html.contains("id=\"still-a-heading\""));
         assert!(!html.contains("id=\"not-a-heading\""));
+    }
+
+    #[test]
+    fn fence_close_requires_matching_length_and_no_info_string() {
+        let md = "````md\n## not a heading\n```\nstill code\n````\n\n## Real\n";
+        assert_eq!(headings_h2(md), vec![("real".into(), "Real".into())]);
+        let html = render(md);
+        assert!(html.contains("## not a heading"));
+        assert!(html.contains("still code"));
+        assert!(html.contains("id=\"real\""));
+        assert!(!html.contains("id=\"not-a-heading\""));
+
+        let inner = render("```\n```text\nstill code\n```\n");
+        assert!(inner.contains("```text"));
+        assert!(inner.contains("still code"));
+    }
+
+    #[test]
+    fn unsafe_markdown_hrefs_render_as_text() {
+        let html = render(
+            "[ok](https://megabase.sh/) and [run](javascript:alert(1)) and [local](/docs/).",
+        );
+        assert!(html.contains("href=\"https://megabase.sh/\""));
+        assert!(html.contains("href=\"/docs/\""));
+        assert!(!html.contains("href=\"javascript:"));
+        assert!(html.contains("[run](javascript:alert(1))"));
     }
 }
