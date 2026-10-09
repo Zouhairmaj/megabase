@@ -17,8 +17,8 @@ pub fn home(paths: &Paths, metrics: &Metrics) -> String {
         r#"<main id="main" class="home-main">
 <section class="hero">
   <div class="hero-copy">
-    <p class="kicker hide-mobile">DAY 0 · NOTHING PASSES YET · BUILT BY AGENTS, IN PUBLIC</p>
-    <p class="kicker hide-desktop">DAY 0 · PHASE 0</p>
+    <p class="kicker hide-mobile">{kicker_desktop}</p>
+    <p class="kicker hide-desktop">{kicker_mobile}</p>
     <h1 class="display">Supabase,<br />rewritten in Rust.<br /><span class="headline-accent">By agents. In public.</span></h1>
     <p class="lede hide-mobile">Autonomous AI agents are porting every service Supabase has written into one Rust binary that sits next to PostgreSQL. The goal: any supabase-js app runs on it without changing a line of code. An external judge compares every response with the real Supabase stack.</p>
     <p class="lede hide-desktop">AI agents are porting every Supabase service into one Rust binary next to PostgreSQL, judged response by response against the real stack.</p>
@@ -135,6 +135,8 @@ pub fn home(paths: &Paths, metrics: &Metrics) -> String {
         components_href = paths.page("components"),
         faq_href = paths.page("faq"),
         levels = level_cards(metrics, false),
+        kicker_desktop = esc(&hero_kicker_desktop(metrics)),
+        kicker_mobile = esc(&hero_kicker_mobile(metrics)),
     )
 }
 
@@ -176,73 +178,178 @@ fn status_panel(metrics: &Metrics) -> String {
     )
 }
 
+struct LevelSpec {
+    n: u8,
+    kicker: &'static str,
+    gate: &'static str,
+    gate_pct: Option<f64>,
+    title: &'static str,
+    body: &'static str,
+    stretch: bool,
+}
+
+const LEVELS: &[LevelSpec] = &[
+    LevelSpec {
+        n: 1,
+        kicker: "LEVEL 1",
+        gate: "≥ 95%",
+        gate_pct: Some(95.0),
+        title: "REST API + email/password auth",
+        body: "Goal: most apps run.",
+        stretch: false,
+    },
+    LevelSpec {
+        n: 2,
+        kicker: "LEVEL 2",
+        gate: "≥ 90%",
+        gate_pct: Some(90.0),
+        title: "OAuth, magic links, Storage",
+        body: "Files and social login.",
+        stretch: false,
+    },
+    LevelSpec {
+        n: 3,
+        kicker: "LEVEL 3",
+        gate: "≥ 85%",
+        gate_pct: Some(85.0),
+        title: "Realtime",
+        body: "Database changes, broadcast, presence.",
+        stretch: false,
+    },
+    LevelSpec {
+        n: 4,
+        kicker: "LEVEL 4",
+        gate: "≥ 80%",
+        gate_pct: Some(80.0),
+        title: "Functions, pooler, Meta + the Studio test",
+        body: "Official Studio can’t tell the difference.",
+        stretch: false,
+    },
+    LevelSpec {
+        n: 5,
+        kicker: "LEVEL 5",
+        gate: "stretch",
+        gate_pct: None,
+        title: "Studio, served from the binary",
+        body: "Deferred pending a feasibility study.",
+        stretch: true,
+    },
+];
+
+fn hero_kicker_desktop(metrics: &Metrics) -> String {
+    match metrics.passing {
+        Some(n) if n > 0 => format!(
+            "{} · {} {} PASS · BUILT BY AGENTS, IN PUBLIC",
+            metrics.stage_short.to_ascii_uppercase(),
+            metrics::comma(n),
+            if n == 1 { "UNIT" } else { "UNITS" }
+        ),
+        _ => "DAY 0 · NOTHING PASSES YET · BUILT BY AGENTS, IN PUBLIC".into(),
+    }
+}
+
+fn hero_kicker_mobile(metrics: &Metrics) -> String {
+    match metrics.passing {
+        Some(n) if n > 0 => format!(
+            "{} · {} {} PASS",
+            metrics.stage_short.to_ascii_uppercase(),
+            metrics::comma(n),
+            if n == 1 { "UNIT" } else { "UNITS" }
+        ),
+        _ => "DAY 0 · PHASE 0".into(),
+    }
+}
+
+fn level_scope_counts(metrics: &Metrics, level: u8) -> Option<(usize, usize)> {
+    if !metrics.has_data() {
+        return None;
+    }
+    let needle = format!("L{level}");
+    let mut total = 0;
+    let mut conformant = 0;
+    for row in CATALOG {
+        if !row.levels.contains(&needle) {
+            continue;
+        }
+        if let Some(block) = metrics.component(row.id) {
+            total += block.total();
+            conformant += block.conformant;
+        }
+    }
+    Some((conformant, total))
+}
+
+fn level_complete(metrics: &Metrics, spec: &LevelSpec) -> bool {
+    let Some(gate) = spec.gate_pct else {
+        return false;
+    };
+    match level_scope_counts(metrics, spec.n) {
+        Some((conformant, total)) if total > 0 => {
+            100.0 * conformant as f64 / total as f64 >= gate
+        }
+        _ => false,
+    }
+}
+
+fn level_progress_label(metrics: &Metrics, spec: &LevelSpec) -> String {
+    if spec.stretch {
+        return "deferred".into();
+    }
+    match level_scope_counts(metrics, spec.n) {
+        None => "— · not started".into(),
+        Some((conformant, total)) => {
+            let value = if total == 0 {
+                0.0
+            } else {
+                100.0 * conformant as f64 / total as f64
+            };
+            let state = if conformant == 0 {
+                "not started"
+            } else if spec.gate_pct.is_some_and(|gate| value >= gate) {
+                "complete"
+            } else {
+                "in progress"
+            };
+            format!("{} · {state}", metrics::compact_pct(value))
+        }
+    }
+}
+
 fn level_cards(metrics: &Metrics, detailed: bool) -> String {
-    let items = [
-        (
-            "LEVEL 1 · NEXT",
-            "≥ 95%",
-            "REST API + email/password auth",
-            "Goal: most apps run.",
-            true,
-            false,
-        ),
-        (
-            "LEVEL 2",
-            "≥ 90%",
-            "OAuth, magic links, Storage",
-            "Files and social login.",
-            false,
-            false,
-        ),
-        (
-            "LEVEL 3",
-            "≥ 85%",
-            "Realtime",
-            "Database changes, broadcast, presence.",
-            false,
-            false,
-        ),
-        (
-            "LEVEL 4",
-            "≥ 80%",
-            "Functions, pooler, Meta + the Studio test",
-            "Official Studio can’t tell the difference.",
-            false,
-            false,
-        ),
-        (
-            "LEVEL 5",
-            "stretch",
-            "Studio, served from the binary",
-            "Deferred pending a feasibility study.",
-            false,
-            true,
-        ),
-    ];
+    let next = LEVELS
+        .iter()
+        .find(|spec| !spec.stretch && !level_complete(metrics, spec))
+        .map(|spec| spec.n);
     let mut cards = String::new();
-    for (kicker, gate, title, body, next, stretch) in items {
-        let class = if stretch {
+    for spec in LEVELS {
+        let is_next = next == Some(spec.n);
+        let class = if spec.stretch {
             "level-card is-stretch"
-        } else if next {
+        } else if is_next {
             "level-card is-next"
         } else {
             "level-card"
         };
-        let progress = if stretch {
-            "deferred".into()
-        } else if metrics.has_data() {
-            format!("{} · not started", metrics.conformance_label())
+        let kicker = if is_next {
+            format!("{} · NEXT", spec.kicker)
         } else {
-            "— · not started".into()
+            spec.kicker.to_string()
         };
+        let progress = level_progress_label(metrics, spec);
         let extra = if detailed {
             String::new()
         } else {
-            format!(r#"<div class="bar" aria-hidden="true"></div><p class="muted">{progress}</p>"#)
+            format!(
+                r#"<div class="bar" aria-hidden="true"></div><p class="muted">{}</p>"#,
+                esc(&progress)
+            )
         };
         cards.push_str(&format!(
             r#"<article class="{class}"><div class="level-head"><span class="card-kicker {kicker_class}">{kicker}</span><span class="muted">{gate}</span></div><h3>{title}</h3><p>{body}</p>{extra}</article>"#,
-            kicker_class = if next { "accent" } else { "" },
+            kicker_class = if is_next { "accent" } else { "" },
+            gate = spec.gate,
+            title = spec.title,
+            body = spec.body,
         ));
     }
     format!(r#"<div class="level-row">{cards}</div>"#)
@@ -733,4 +840,53 @@ pub fn devlog_article(paths: &Paths, entry: &devlog::Entry) -> String {
         title = esc(&entry.title),
         body = &entry.body_html,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::metrics::ComponentBlock;
+
+    fn live_progress() -> Metrics {
+        let mut metrics = Metrics::placeholder();
+        metrics.total = Some(5);
+        metrics.passing = Some(2);
+        metrics.conformance = Some(40.0);
+        metrics.components = vec![
+            ComponentBlock::from_counts("rest", "REST", 0, 0, 0, 2),
+            ComponentBlock::from_counts("auth", "Auth", 1, 0, 0, 0),
+            ComponentBlock::from_counts("storage", "Storage", 1, 0, 0, 0),
+            ComponentBlock::from_counts("realtime", "Realtime", 1, 0, 0, 0),
+        ];
+        metrics
+    }
+
+    #[test]
+    fn hero_claim_follows_live_passing_count() {
+        let live = live_progress();
+        assert!(hero_kicker_desktop(&live).contains("2 UNITS PASS"));
+        assert!(!hero_kicker_desktop(&live).contains("NOTHING PASSES YET"));
+        assert!(hero_kicker_desktop(&Metrics::placeholder()).contains("NOTHING PASSES YET"));
+        assert_eq!(hero_kicker_mobile(&Metrics::placeholder()), "DAY 0 · PHASE 0");
+    }
+
+    #[test]
+    fn roadmap_progress_is_per_level_scope() {
+        let live = live_progress();
+        assert_eq!(
+            level_progress_label(&live, &LEVELS[0]),
+            "66.7% · in progress"
+        );
+        assert_eq!(level_progress_label(&live, &LEVELS[1]), "0% · not started");
+        assert_eq!(level_progress_label(&live, &LEVELS[2]), "0% · not started");
+        assert_eq!(level_progress_label(&live, &LEVELS[4]), "deferred");
+        assert_ne!(
+            level_progress_label(&live, &LEVELS[0]),
+            format!("{} · not started", live.conformance_label())
+        );
+        let html = level_cards(&live, false);
+        assert!(html.contains("LEVEL 1 · NEXT"));
+        assert!(!html.contains("40.0% · not started"));
+        assert!(!html.contains("40% · not started"));
+    }
 }
