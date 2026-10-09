@@ -1,75 +1,58 @@
-# Megabase Justfile
-# Run commands with: just <command>
+# Megabase commands. Only recipes that actually work are listed.
 
-# Default: show available commands
 default:
     @just --list
 
-# Build the project
 build:
-    cargo build
+    cargo build --release --locked -p megabase
 
-# Build release binary
-release:
-    cargo build --release
-
-# Run the binary (dev mode)
 run:
-    cargo run
+    cargo run -p megabase
 
-# Run tests
 test:
-    cargo test --all
+    cargo test --workspace --locked
 
-# Run clippy lints
 lint:
-    cargo clippy --all-targets --all-features -- -D warnings
+    cargo clippy --workspace --all-targets -- -D warnings
 
-# Format code
 fmt:
     cargo fmt --all
 
-# Check formatting
 fmt-check:
     cargo fmt --all -- --check
 
-# Full CI check (format, lint, test)
-ci: fmt-check lint test
+# Extract units, render treemaps/badges, splice README / COMPATIBILITY / PROGRESS.
+coverage:
+    cargo run --locked -p megabase-coverage -- update
 
-# Extract units from vendor sources
-extract-units:
-    python3 scripts/extract-units.py
+coverage-check:
+    cargo run --locked -p megabase-coverage -- check
 
-# Generate coverage treemaps
-treemap:
-    python3 scripts/generate-treemap.py
+# Reject protected-path changes (see docs/adr/0003-protected-paths.md).
+guard:
+    cargo run --locked -p megabase-guard -- --base origin/main --head HEAD --head-ref "$(git branch --show-current)"
 
-# Update coverage (extract + treemap)
-coverage: extract-units treemap
+# Official stack + Megabase. Writes nothing into vendor/.
+compose := "docker compose -p megabase-judge -f vendor/supabase/docker/docker-compose.yml -f judge/compose.override.yml --env-file vendor/supabase/docker/.env.example"
 
-# Start the judge reference stack
 judge-up:
-    cd judge && docker compose up -d
+    {{compose}} --profile with-megabase up -d --build --wait
+    @git -C vendor/supabase status --short || true
 
-# Stop the judge reference stack
 judge-down:
-    cd judge && docker compose down
+    {{compose}} --profile with-megabase down
 
-# Run judge comparison tests
-judge: judge-up
-    @echo "Waiting for services..."
-    @sleep 10
-    python3 judge/compare.py --verbose
+# Compare both stacks. Requires judge-up, or a host Megabase on :8100 and the reference on :8000.
+judge:
+    cargo run --locked -p megabase-judge -- wait
+    cargo run --locked -p megabase-judge -- run --cases judge/cases --out coverage/judge-results.json --baseline coverage/judge-results.json --summary /tmp/judge-summary.md
+    @cat /tmp/judge-summary.md
 
-# Run judge with JSON output
-judge-json:
-    python3 judge/compare.py --json
+# Upsert GitHub milestones, labels, Project, epics (needs issues+project write).
+backlog:
+    cargo run --locked -p megabase-backlog -- sync
 
-# Clean build artifacts
+ci: fmt-check lint test coverage-check
+
 clean:
     cargo clean
-    rm -rf coverage/*.svg coverage/summary.json
-
-# Show current coverage summary
-status:
-    @cat coverage/summary.json | python3 -m json.tool

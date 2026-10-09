@@ -1,29 +1,14 @@
-// Megabase Studio - Supabase Studio-compatible dashboard API
-// Ported from Supabase Studio (Apache-2.0 license) - see NOTICE
-// Upstream: vendor/supabase/apps/studio
+//! Supabase Studio server-side API routes for Megabase.
+//!
+//! Target behavior: Supabase Studio, vendor/supabase/apps/studio (Apache-2.0), pinned in `vendor/`.
+//! No unit is implemented yet; every request returns the structured
+//! `MEGABASE_NOT_IMPLEMENTED` 501. When logic is ported, each file gets a
+//! header naming the upstream repository, path and license.
 
-use axum::{http::Method, routing::get, Router};
-use megabase_core::MegabaseNotImplemented;
+use axum::Router;
+
+pub const COMPONENT: &str = "studio";
 
 pub fn router() -> Router {
-    Router::new()
-        .route("/", get(root_handler))
-        .nest("/api", api_router())
-        .fallback(fallback_handler)
-}
-
-fn api_router() -> Router {
-    Router::new().fallback(api_handler)
-}
-
-async fn root_handler() -> MegabaseNotImplemented {
-    MegabaseNotImplemented::studio("GET /studio/")
-}
-
-async fn api_handler(method: Method, uri: axum::http::Uri) -> MegabaseNotImplemented {
-    MegabaseNotImplemented::studio(format!("{} /studio/api{}", method, uri.path()))
-}
-
-async fn fallback_handler(method: Method, uri: axum::http::Uri) -> MegabaseNotImplemented {
-    MegabaseNotImplemented::studio(format!("{} /studio{}", method, uri.path()))
+    megabase_core::not_implemented_router(COMPONENT)
 }

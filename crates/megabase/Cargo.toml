@@ -15,5 +15,4 @@ path = "src/main.rs"
 megabase-core = { workspace = true }
 megabase-server = { workspace = true }
 tokio = { workspace = true }
-tracing = { workspace = true }
 tracing-subscriber = { workspace = true }

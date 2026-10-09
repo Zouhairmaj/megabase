@@ -1,0 +1,131 @@
+# Auth (Supabase Auth / GoTrue) cases. Unit ids come from coverage/units.json.
+# `{{run}}` is unique per judge run, so sign-ups never collide with earlier runs.
+
+[[case]]
+id = "auth.health"
+description = "Service health document"
+units = ["auth:route:GET /auth/v1/health"]
+[[case.step]]
+method = "GET"
+path = "/auth/v1/health"
+
+[[case]]
+id = "auth.settings"
+description = "Public settings: enabled providers, autoconfirm, signup flags"
+units = ["auth:route:GET /auth/v1/settings"]
+[[case.step]]
+method = "GET"
+path = "/auth/v1/settings"
+
+[[case]]
+id = "auth.signup.password"
+description = "Email/password sign-up returns a session when autoconfirm is on"
+units = ["auth:route:POST /auth/v1/signup"]
+[[case.step]]
+method = "POST"
+path = "/auth/v1/signup"
+json = { email = "judge-signup-{{run}}@example.com", password = "judge-password-1" }
+
+[[case]]
+id = "auth.signup.weak-password"
+description = "Sign-up rejects a too-short password with the upstream error code"
+units = ["auth:route:POST /auth/v1/signup"]
+[[case.step]]
+method = "POST"
+path = "/auth/v1/signup"
+json = { email = "judge-weak-{{run}}@example.com", password = "123" }
+
+[[case]]
+id = "auth.token.password"
+description = "Sign up, then exchange email/password for a session"
+units = ["auth:route:POST /auth/v1/token", "auth:grant-type:password"]
+[[case.step]]
+method = "POST"
+path = "/auth/v1/signup"
+json = { email = "judge-token-{{run}}@example.com", password = "judge-password-1" }
+[[case.step]]
+method = "POST"
+path = "/auth/v1/token?grant_type=password"
+json = { email = "judge-token-{{run}}@example.com", password = "judge-password-1" }
+
+[[case]]
+id = "auth.token.wrong-password"
+description = "Password grant with a wrong password is a 400 invalid_credentials"
+units = ["auth:route:POST /auth/v1/token", "auth:grant-type:password"]
+[[case.step]]
+method = "POST"
+path = "/auth/v1/signup"
+json = { email = "judge-wrong-{{run}}@example.com", password = "judge-password-1" }
+[[case.step]]
+method = "POST"
+path = "/auth/v1/token?grant_type=password"
+json = { email = "judge-wrong-{{run}}@example.com", password = "not-the-password" }
+
+[[case]]
+id = "auth.token.refresh"
+description = "Refresh-token grant rotates the session"
+units = ["auth:route:POST /auth/v1/token", "auth:grant-type:refresh_token"]
+[[case.step]]
+method = "POST"
+path = "/auth/v1/signup"
+json = { email = "judge-refresh-{{run}}@example.com", password = "judge-password-1" }
+capture = { refresh = "/refresh_token" }
+[[case.step]]
+method = "POST"
+path = "/auth/v1/token?grant_type=refresh_token"
+json = { refresh_token = "{{refresh}}" }
+
+[[case]]
+id = "auth.user.get"
+description = "GET /user with the session's access token"
+units = ["auth:route:GET /auth/v1/user"]
+[[case.step]]
+method = "POST"
+path = "/auth/v1/signup"
+json = { email = "judge-user-{{run}}@example.com", password = "judge-password-1" }
+capture = { token = "/access_token" }
+[[case.step]]
+method = "GET"
+path = "/auth/v1/user"
+headers = { Authorization = "Bearer {{token}}" }
+
+[[case]]
+id = "auth.user.anon-key"
+description = "GET /user with only the anon key is rejected"
+units = ["auth:route:GET /auth/v1/user"]
+[[case.step]]
+method = "GET"
+path = "/auth/v1/user"
+
+[[case]]
+id = "auth.logout"
+description = "Logout with a session token returns 204"
+units = ["auth:route:POST /auth/v1/logout"]
+[[case.step]]
+method = "POST"
+path = "/auth/v1/signup"
+json = { email = "judge-logout-{{run}}@example.com", password = "judge-password-1" }
+capture = { token = "/access_token" }
+[[case.step]]
+method = "POST"
+path = "/auth/v1/logout"
+headers = { Authorization = "Bearer {{token}}" }
+
+[[case]]
+id = "auth.admin.users.list"
+description = "Admin user list requires the service role"
+units = ["auth:route:GET /auth/v1/admin/users"]
+[[case.step]]
+method = "GET"
+path = "/auth/v1/admin/users?per_page=1"
+key = "service_role"
+ignore = ["/users", "/total", "/aud"]
+compare_headers = ["x-total-count"]
+
+[[case]]
+id = "auth.admin.users.anon"
+description = "Admin user list with the anon key is forbidden"
+units = ["auth:route:GET /auth/v1/admin/users"]
+[[case.step]]
+method = "GET"
+path = "/auth/v1/admin/users"

@@ -1,16 +1,16 @@
-// Megabase Core - Configuration
-// Ported from Supabase components (Apache-2.0, MIT licenses - see NOTICE)
+use crate::Error;
 
-use serde::{Deserialize, Serialize};
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Runtime configuration, read from environment variables.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Config {
+    /// `MEGABASE_HOST`, default `0.0.0.0`.
     pub host: String,
+    /// `MEGABASE_PORT`, default `8000` (the port the Supabase gateway uses).
     pub port: u16,
-    pub database_url: String,
-    pub jwt_secret: String,
-    pub anon_key: Option<String>,
-    pub service_role_key: Option<String>,
+    /// `DATABASE_URL`. Not used yet; read so deployments can set it today.
+    pub database_url: Option<String>,
+    /// `JWT_SECRET`. Not used yet.
+    pub jwt_secret: Option<String>,
 }
 
 impl Default for Config {
@@ -18,34 +18,52 @@ impl Default for Config {
         Self {
             host: "0.0.0.0".to_string(),
             port: 8000,
-            database_url: "postgres://postgres:postgres@localhost:5432/postgres".to_string(),
-            jwt_secret: "your-super-secret-jwt-token-with-at-least-32-characters".to_string(),
-            anon_key: None,
-            service_role_key: None,
+            database_url: None,
+            jwt_secret: None,
         }
     }
 }
 
 impl Config {
-    pub fn from_env() -> Self {
-        Self {
-            host: std::env::var("MEGABASE_HOST").unwrap_or_else(|_| "0.0.0.0".to_string()),
-            port: std::env::var("MEGABASE_PORT")
-                .ok()
-                .and_then(|p| p.parse().ok())
-                .unwrap_or(8000),
-            database_url: std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-                "postgres://postgres:postgres@localhost:5432/postgres".to_string()
-            }),
-            jwt_secret: std::env::var("JWT_SECRET").unwrap_or_else(|_| {
-                "your-super-secret-jwt-token-with-at-least-32-characters".to_string()
-            }),
-            anon_key: std::env::var("ANON_KEY").ok(),
-            service_role_key: std::env::var("SERVICE_ROLE_KEY").ok(),
-        }
+    pub fn from_env() -> crate::Result<Self> {
+        Self::from_lookup(|key| std::env::var(key).ok())
+    }
+
+    pub fn from_lookup(lookup: impl Fn(&str) -> Option<String>) -> crate::Result<Self> {
+        let defaults = Self::default();
+        let port = match lookup("MEGABASE_PORT") {
+            Some(raw) => raw
+                .parse()
+                .map_err(|_| Error::Config(format!("MEGABASE_PORT is not a valid port: {raw}")))?,
+            None => defaults.port,
+        };
+        Ok(Self {
+            host: lookup("MEGABASE_HOST").unwrap_or(defaults.host),
+            port,
+            database_url: lookup("DATABASE_URL"),
+            jwt_secret: lookup("JWT_SECRET"),
+        })
     }
 
     pub fn bind_address(&self) -> String {
         format!("{}:{}", self.host, self.port)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn defaults_without_env() {
+        let config = Config::from_lookup(|_| None).unwrap();
+        assert_eq!(config, Config::default());
+        assert_eq!(config.bind_address(), "0.0.0.0:8000");
+    }
+
+    #[test]
+    fn rejects_invalid_port() {
+        let err = Config::from_lookup(|k| (k == "MEGABASE_PORT").then(|| "x".into()));
+        assert!(err.is_err());
     }
 }

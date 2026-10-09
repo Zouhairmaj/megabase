@@ -1,30 +1,14 @@
-// Megabase REST - PostgREST-compatible REST API
-// Ported from PostgREST (MIT license) - see NOTICE
-// Upstream: vendor/postgrest
+//! PostgREST-compatible REST API (`/rest/v1`) for Megabase.
+//!
+//! Target behavior: PostgREST, vendor/postgrest (MIT), pinned in `vendor/`.
+//! No unit is implemented yet; every request returns the structured
+//! `MEGABASE_NOT_IMPLEMENTED` 501. When logic is ported, each file gets a
+//! header naming the upstream repository, path and license.
 
-use axum::{
-    extract::Path,
-    http::Method,
-    routing::{any, get},
-    Router,
-};
-use megabase_core::MegabaseNotImplemented;
+use axum::Router;
+
+pub const COMPONENT: &str = "rest";
 
 pub fn router() -> Router {
-    Router::new()
-        .route("/", get(root_handler))
-        .route("/rpc/{function}", any(rpc_handler))
-        .fallback(table_handler)
-}
-
-async fn root_handler() -> MegabaseNotImplemented {
-    MegabaseNotImplemented::rest("GET /rest/v1/")
-}
-
-async fn table_handler(method: Method, uri: axum::http::Uri) -> MegabaseNotImplemented {
-    MegabaseNotImplemented::rest(format!("{} /rest/v1{}", method, uri.path()))
-}
-
-async fn rpc_handler(method: Method, Path(function): Path<String>) -> MegabaseNotImplemented {
-    MegabaseNotImplemented::rest(format!("{} /rest/v1/rpc/{}", method, function))
+    megabase_core::not_implemented_router(COMPONENT)
 }

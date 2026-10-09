@@ -1,0 +1,125 @@
+{
+  "schema": 1,
+  "cases": [
+    {
+      "id": "auth.admin.users.anon",
+      "pass": false
+    },
+    {
+      "id": "auth.admin.users.list",
+      "pass": false
+    },
+    {
+      "id": "auth.health",
+      "pass": false
+    },
+    {
+      "id": "auth.logout",
+      "pass": false
+    },
+    {
+      "id": "auth.settings",
+      "pass": false
+    },
+    {
+      "id": "auth.signup.password",
+      "pass": false
+    },
+    {
+      "id": "auth.signup.weak-password",
+      "pass": false
+    },
+    {
+      "id": "auth.token.password",
+      "pass": false
+    },
+    {
+      "id": "auth.token.refresh",
+      "pass": false
+    },
+    {
+      "id": "auth.token.wrong-password",
+      "pass": false
+    },
+    {
+      "id": "auth.user.anon-key",
+      "pass": false
+    },
+    {
+      "id": "auth.user.get",
+      "pass": false
+    },
+    {
+      "id": "meta.config.version",
+      "pass": false
+    },
+    {
+      "id": "meta.health",
+      "pass": false
+    },
+    {
+      "id": "realtime.ping",
+      "pass": false
+    },
+    {
+      "id": "rest.count.exact",
+      "pass": false
+    },
+    {
+      "id": "rest.filter.eq",
+      "pass": false
+    },
+    {
+      "id": "rest.filter.gt-lt",
+      "pass": false
+    },
+    {
+      "id": "rest.filter.in",
+      "pass": false
+    },
+    {
+      "id": "rest.filter.unknown-operator",
+      "pass": false
+    },
+    {
+      "id": "rest.insert.rls-denied",
+      "pass": false
+    },
+    {
+      "id": "rest.limit-offset",
+      "pass": false
+    },
+    {
+      "id": "rest.missing-table",
+      "pass": false
+    },
+    {
+      "id": "rest.object.single",
+      "pass": false
+    },
+    {
+      "id": "rest.rpc.get",
+      "pass": false
+    },
+    {
+      "id": "rest.rpc.post",
+      "pass": false
+    },
+    {
+      "id": "rest.select.all",
+      "pass": false
+    },
+    {
+      "id": "rest.select.columns",
+      "pass": false
+    },
+    {
+      "id": "storage.bucket.list",
+      "pass": false
+    },
+    {
+      "id": "storage.bucket.missing",
+      "pass": false
+    }
+  ]
+}
