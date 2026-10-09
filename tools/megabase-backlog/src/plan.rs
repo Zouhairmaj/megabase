@@ -10,6 +10,14 @@ const CHUNK: usize = 10;
 #[derive(Debug, Deserialize)]
 pub struct UnitsFile {
     pub units: Vec<Unit>,
+    #[serde(default)]
+    pub vendor: Vec<Pin>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct Pin {
+    pub name: String,
+    pub commit: String,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -151,13 +159,17 @@ fn repo_url(repo: &str) -> &'static str {
     }
 }
 
-fn source_link(u: &Unit) -> String {
+fn source_link(u: &Unit, pins: &BTreeMap<String, String>) -> String {
     let base = repo_url(&u.source.repo);
     if base.is_empty() {
         format!("`{}:{}`", u.source.file, u.source.line)
     } else {
+        let rev = pins
+            .get(&u.source.repo)
+            .map(String::as_str)
+            .unwrap_or("HEAD");
         format!(
-            "[`{}:{}`]({base}/blob/HEAD/{}#L{})",
+            "[`{}:{}`]({base}/blob/{rev}/{}#L{})",
             u.source.file, u.source.line, u.source.file, u.source.line
         )
     }
@@ -167,10 +179,10 @@ fn chunk<T>(items: &[T], size: usize) -> Vec<&[T]> {
     items.chunks(size.max(1)).collect()
 }
 
-fn unit_rows(units: &[Unit]) -> String {
+fn unit_rows(units: &[Unit], pins: &BTreeMap<String, String>) -> String {
     let mut s = String::from("| Unit id | Name | Upstream |\n|---|---|---|\n");
     for u in units {
-        let _ = writeln!(s, "| `{}` | {} | {} |", u.id, u.name, source_link(u));
+        let _ = writeln!(s, "| `{}` | {} | {} |", u.id, u.name, source_link(u, pins));
     }
     s
 }
@@ -190,9 +202,14 @@ fn component_label_tag(c: &str) -> String {
     format!("component:{c}")
 }
 
-pub fn build(units: &[Unit]) -> Vec<Item> {
+pub fn build(file: &UnitsFile) -> Vec<Item> {
+    let pins: BTreeMap<String, String> = file
+        .vendor
+        .iter()
+        .map(|p| (p.name.clone(), p.commit.clone()))
+        .collect();
     let mut groups: BTreeMap<(u8, String, String), Vec<Unit>> = BTreeMap::new();
-    for u in units {
+    for u in &file.units {
         groups
             .entry((u.level, u.component.clone(), u.group.clone()))
             .or_default()
@@ -239,7 +256,7 @@ pub fn build(units: &[Unit]) -> Vec<Item> {
             }
             body.push('\n');
         }
-        let _ = writeln!(body, "## Units\n\n{}", unit_rows(members));
+        let _ = writeln!(body, "## Units\n\n{}", unit_rows(members, &pins));
         let _ = writeln!(body, "## Acceptance\n");
         let _ = writeln!(
             body,
@@ -314,7 +331,7 @@ pub fn build(units: &[Unit]) -> Vec<Item> {
                     b,
                     "## Scope\n\n**In:** the units below. **Out:** everything else in the epic.\n"
                 );
-                let _ = writeln!(b, "## Units\n\n{}", unit_rows(part));
+                let _ = writeln!(b, "## Units\n\n{}", unit_rows(part, &pins));
                 let _ = writeln!(
                     b,
                     "## Acceptance\n\n- Spec in `specs/{component}/` if missing.\n\
@@ -589,7 +606,10 @@ mod tests {
                 },
             })
             .collect();
-        let items = build(&units);
+        let items = build(&UnitsFile {
+            units,
+            vendor: vec![],
+        });
         assert!(items.len() < 150, "{}", items.len());
         assert!(items.iter().any(|i| i.key == "epic:website:site:later"));
         assert!(items.iter().any(|i| i.title == "Website: design in Kite"));
@@ -629,7 +649,10 @@ mod tests {
                 line: 1,
             },
         };
-        let items = build(&[mk("rest:r", "resources"), mk("rest:f", "filtering")]);
+        let items = build(&UnitsFile {
+            units: vec![mk("rest:r", "resources"), mk("rest:f", "filtering")],
+            vendor: vec![],
+        });
         let filtering = items
             .iter()
             .find(|i| i.key == "epic:rest:filtering:1")
@@ -646,5 +669,35 @@ mod tests {
             .expect("committee task");
         assert_eq!(committee.parent.as_deref(), Some("epic:website:site:later"));
         assert_eq!(committee.blocked_by, ["task:website:design:later"]);
+    }
+
+    #[test]
+    fn source_links_use_the_pin_commit() {
+        let items = build(&UnitsFile {
+            units: vec![Unit {
+                id: "auth:route:GET /auth/v1/signup".into(),
+                component: "auth".into(),
+                group: "endpoints".into(),
+                name: "GET /auth/v1/signup".into(),
+                level: 1,
+                source: Source {
+                    repo: "auth".into(),
+                    file: "internal/api/api.go".into(),
+                    line: 42,
+                },
+            }],
+            vendor: vec![Pin {
+                name: "auth".into(),
+                commit: "4eee58f296d9698a1c2c0ae14d7a0b379c7622d3".into(),
+            }],
+        });
+        let epic = items
+            .iter()
+            .find(|i| i.key == "epic:auth:endpoints:1")
+            .expect("auth endpoints epic");
+        assert!(epic
+            .body
+            .contains("/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/api.go#L42"));
+        assert!(!epic.body.contains("/blob/HEAD/"));
     }
 }

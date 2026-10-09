@@ -4,15 +4,11 @@
 
 - Milestone: Level 1
 - Labels: `component:auth`, `level:1`, `type:feature`
-- Units: 6
+- Units: 2
 
 Specs go in `specs/auth/<unit>.md` (GOAL.md section 5). Mark served code with `// megabase:unit <id>` and add judge cases in `judge/cases/` listing the unit ids.
 
 | State | Unit id | Upstream source |
 |---|---|---|
-| ⬜ | `auth:route:DELETE /auth/v1/user/identities/{identity_id}` | [internal/api/api.go:288](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/api.go#L288) |
-| ⬜ | `auth:route:DELETE /auth/v1/user/oauth/grants` | [internal/api/api.go:295](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/api.go#L295) |
 | ⬜ | `auth:route:GET /auth/v1/user` | [internal/api/api.go:282](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/api.go#L282) |
-| ⬜ | `auth:route:GET /auth/v1/user/identities/authorize` | [internal/api/api.go:287](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/api.go#L287) |
-| ⬜ | `auth:route:GET /auth/v1/user/oauth/grants` | [internal/api/api.go:294](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/api.go#L294) |
 | ⬜ | `auth:route:PUT /auth/v1/user` | [internal/api/api.go:283](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/api.go#L283) |

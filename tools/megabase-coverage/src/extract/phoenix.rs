@@ -61,10 +61,12 @@ pub fn routes(text: &str) -> Vec<PhoenixRoute> {
             let excluded = listed(&except).unwrap_or_default();
             let included = listed(&only);
             let member = format!("{base}/:{id}");
+            let edit = format!("{base}/:{id}/edit");
+            let new = format!("{base}/new");
             let actions = [
                 ("index", "GET", base.as_str()),
-                ("edit", "GET", ""),
-                ("new", "GET", ""),
+                ("edit", "GET", edit.as_str()),
+                ("new", "GET", new.as_str()),
                 ("show", "GET", member.as_str()),
                 ("create", "POST", base.as_str()),
                 ("update", "PATCH", member.as_str()),
@@ -75,7 +77,7 @@ pub fn routes(text: &str) -> Vec<PhoenixRoute> {
                 let wanted = included
                     .as_ref()
                     .is_none_or(|o| o.iter().any(|a| a == action));
-                if path.is_empty() || !wanted || excluded.iter().any(|a| a == action) {
+                if !wanted || excluded.iter().any(|a| a == action) {
                     continue;
                 }
                 out.push(PhoenixRoute {
@@ -109,6 +111,7 @@ mod tests {
     pipe_through(:api)
     # get("/commented", C, :x)
     resources("/tenants", TenantController, param: "tenant_id", except: [:edit, :new])
+    resources("/posts", PostController)
     get("/ping", PingController, :ping)
   end
   get "/top", C, :top
@@ -126,6 +129,14 @@ mod tests {
                 "PATCH /api/tenants/{tenant_id}",
                 "PUT /api/tenants/{tenant_id}",
                 "DELETE /api/tenants/{tenant_id}",
+                "GET /api/posts",
+                "GET /api/posts/{id}/edit",
+                "GET /api/posts/new",
+                "GET /api/posts/{id}",
+                "POST /api/posts",
+                "PATCH /api/posts/{id}",
+                "PUT /api/posts/{id}",
+                "DELETE /api/posts/{id}",
                 "GET /api/ping",
                 "GET /top",
             ]

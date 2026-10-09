@@ -224,7 +224,22 @@ pub fn run_case(
     let mut mb_vars = base_vars;
     for (i, step) in case.step.iter().enumerate() {
         let r = send(&agent, reference, step, keys, &ref_vars)?;
-        let m = send(&agent, megabase, step, keys, &mb_vars)?;
+        let m = match send(&agent, megabase, step, keys, &mb_vars) {
+            Ok(observed) => observed,
+            Err(err) => {
+                return Ok(Outcome {
+                    id: case.id.clone(),
+                    description: case.description.clone(),
+                    pass: false,
+                    detail: Some(format!(
+                        "step {} ({} {}): megabase transport error: {err:#}",
+                        i + 1,
+                        step.method,
+                        step.path
+                    )),
+                });
+            }
+        };
         capture(&r, step, &mut ref_vars)
             .with_context(|| format!("case `{}` step {} on the reference stack", case.id, i + 1))?;
         let megabase_captured = capture(&m, step, &mut mb_vars);

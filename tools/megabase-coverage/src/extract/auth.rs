@@ -29,8 +29,15 @@ const LEVEL_2_GROUPS: &[&str] = &[
     "custom-providers",
 ];
 
-fn route_level(group: &str) -> u8 {
-    if LEVEL_2_GROUPS.contains(&group) {
+fn route_level(path: &str) -> u8 {
+    let nested = path.split('/').filter(|s| !s.is_empty()).any(|seg| {
+        let name = seg
+            .trim_start_matches('{')
+            .trim_end_matches('}')
+            .trim_start_matches('.');
+        LEVEL_2_GROUPS.contains(&name)
+    });
+    if nested {
         2
     } else {
         1
@@ -116,7 +123,7 @@ fn routes(ctx: &mut Ctx, repo: &Repo) -> Result<()> {
             group
         };
         let source = repo.source(ROUTES, &text, offset);
-        ctx.gateway_route(C, &group, HOST, &method, &path, route_level(&group), source);
+        ctx.gateway_route(C, &group, HOST, &method, &path, route_level(&path), source);
     }
     Ok(())
 }
@@ -271,4 +278,31 @@ fn sql_objects(ctx: &mut Ctx, repo: &Repo) -> Result<()> {
     }
     require(vec![(); count], "auth SQL objects")?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn nested_admin_and_user_paths_are_level_two() {
+        assert_eq!(route_level("/admin/users"), 1);
+        assert_eq!(route_level("/admin/users/{user_id}"), 1);
+        assert_eq!(route_level("/admin/audit"), 1);
+        assert_eq!(route_level("/admin/generate_link"), 1);
+        assert_eq!(route_level("/signup"), 1);
+        assert_eq!(route_level("/user"), 1);
+        assert_eq!(route_level("/admin/sso/providers"), 2);
+        assert_eq!(route_level("/admin/oauth/clients/{client_id}"), 2);
+        assert_eq!(route_level("/admin/custom-providers"), 2);
+        assert_eq!(route_level("/admin/users/{user_id}/factors"), 2);
+        assert_eq!(
+            route_level("/admin/users/{user_id}/passkeys/{passkey_id}"),
+            2
+        );
+        assert_eq!(route_level("/user/identities/{identity_id}"), 2);
+        assert_eq!(route_level("/user/oauth/grants"), 2);
+        assert_eq!(route_level("/authorize"), 2);
+        assert_eq!(route_level("/.well-known/jwks.json"), 2);
+    }
 }

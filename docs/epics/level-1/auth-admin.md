@@ -4,37 +4,16 @@
 
 - Milestone: Level 1
 - Labels: `component:auth`, `level:1`, `type:feature`
-- Units: 28
+- Units: 7
 
 Specs go in `specs/auth/<unit>.md` (GOAL.md section 5). Mark served code with `// megabase:unit <id>` and add judge cases in `judge/cases/` listing the unit ids.
 
 | State | Unit id | Upstream source |
 |---|---|---|
-| ⬜ | `auth:route:DELETE /auth/v1/admin/custom-providers/{identifier}` | [internal/api/api.go:440](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/api.go#L440) |
-| ⬜ | `auth:route:DELETE /auth/v1/admin/oauth/clients/{client_id}` | [internal/api/api.go:424](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/api.go#L424) |
-| ⬜ | `auth:route:DELETE /auth/v1/admin/sso/providers/{idp_id}` | [internal/api/api.go:406](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/api.go#L406) |
 | ⬜ | `auth:route:DELETE /auth/v1/admin/users/{user_id}` | [internal/api/api.go:390](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/api.go#L390) |
-| ⬜ | `auth:route:DELETE /auth/v1/admin/users/{user_id}/factors/{factor_id}` | [internal/api/api.go:376](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/api.go#L376) |
-| ⬜ | `auth:route:DELETE /auth/v1/admin/users/{user_id}/passkeys/{passkey_id}` | [internal/api/api.go:384](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/api.go#L384) |
 | ⬜ | `auth:route:GET /auth/v1/admin/audit` | [internal/api/api.go:363](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/api.go#L363) |
-| ⬜ | `auth:route:GET /auth/v1/admin/custom-providers` | [internal/api/api.go:434](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/api.go#L434) |
-| ⬜ | `auth:route:GET /auth/v1/admin/custom-providers/{identifier}` | [internal/api/api.go:438](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/api.go#L438) |
-| ⬜ | `auth:route:GET /auth/v1/admin/oauth/clients` | [internal/api/api.go:418](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/api.go#L418) |
-| ⬜ | `auth:route:GET /auth/v1/admin/oauth/clients/{client_id}` | [internal/api/api.go:422](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/api.go#L422) |
-| ⬜ | `auth:route:GET /auth/v1/admin/sso/providers` | [internal/api/api.go:398](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/api.go#L398) |
-| ⬜ | `auth:route:GET /auth/v1/admin/sso/providers/{idp_id}` | [internal/api/api.go:404](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/api.go#L404) |
 | ⬜ | `auth:route:GET /auth/v1/admin/users` | [internal/api/api.go:367](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/api.go#L367) |
 | ⬜ | `auth:route:GET /auth/v1/admin/users/{user_id}` | [internal/api/api.go:388](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/api.go#L388) |
-| ⬜ | `auth:route:GET /auth/v1/admin/users/{user_id}/factors` | [internal/api/api.go:373](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/api.go#L373) |
-| ⬜ | `auth:route:GET /auth/v1/admin/users/{user_id}/passkeys` | [internal/api/api.go:382](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/api.go#L382) |
-| ⬜ | `auth:route:POST /auth/v1/admin/custom-providers` | [internal/api/api.go:435](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/api.go#L435) |
 | ⬜ | `auth:route:POST /auth/v1/admin/generate_link` | [internal/api/api.go:394](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/api.go#L394) |
-| ⬜ | `auth:route:POST /auth/v1/admin/oauth/clients` | [internal/api/api.go:416](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/api.go#L416) |
-| ⬜ | `auth:route:POST /auth/v1/admin/oauth/clients/{client_id}/regenerate_secret` | [internal/api/api.go:425](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/api.go#L425) |
-| ⬜ | `auth:route:POST /auth/v1/admin/sso/providers` | [internal/api/api.go:399](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/api.go#L399) |
 | ⬜ | `auth:route:POST /auth/v1/admin/users` | [internal/api/api.go:368](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/api.go#L368) |
-| ⬜ | `auth:route:PUT /auth/v1/admin/custom-providers/{identifier}` | [internal/api/api.go:439](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/api.go#L439) |
-| ⬜ | `auth:route:PUT /auth/v1/admin/oauth/clients/{client_id}` | [internal/api/api.go:423](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/api.go#L423) |
-| ⬜ | `auth:route:PUT /auth/v1/admin/sso/providers/{idp_id}` | [internal/api/api.go:405](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/api.go#L405) |
 | ⬜ | `auth:route:PUT /auth/v1/admin/users/{user_id}` | [internal/api/api.go:389](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/api.go#L389) |
-| ⬜ | `auth:route:PUT /auth/v1/admin/users/{user_id}/factors/{factor_id}` | [internal/api/api.go:377](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/api.go#L377) |

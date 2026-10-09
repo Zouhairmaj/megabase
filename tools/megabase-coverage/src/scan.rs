@@ -51,8 +51,12 @@ fn walk(dir: &Path, f: &mut dyn FnMut(&Path)) -> Result<()> {
         .collect::<std::io::Result<_>>()?;
     entries.sort_by_key(|e| e.file_name());
     for entry in entries {
+        let ft = entry.file_type()?;
+        if ft.is_symlink() {
+            continue;
+        }
         let path = entry.path();
-        if entry.file_type()?.is_dir() {
+        if ft.is_dir() {
             walk(&path, f)?;
         } else {
             f(&path);
@@ -168,6 +172,9 @@ pub fn block_end(skeleton: &str, open: usize) -> usize {
         match b {
             b'{' => depth += 1,
             b'}' => {
+                if depth == 0 {
+                    continue;
+                }
                 depth -= 1;
                 if depth == 0 {
                     return i + 1;
@@ -256,6 +263,14 @@ mod tests {
             join_paths(&["upload/resumable", "/sign", "/*"]),
             "/upload/resumable/sign/*"
         );
+    }
+
+    #[test]
+    fn block_end_ignores_closing_brace_before_open() {
+        let src = "} { inner }";
+        let open = src.find('{').unwrap();
+        assert_eq!(&src[..block_end(src, open)], "} { inner }");
+        assert_eq!(block_end("no braces", 0), "no braces".len());
     }
 
     #[test]

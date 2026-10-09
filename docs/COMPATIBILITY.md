@@ -90,7 +90,7 @@ In scope: **1024 units**. Excluded: **76** upstream items.
 | REST | query-params | 1 | 8 | 0 | 0 | 0 |
 | REST | resources | 1 | 10 | 0 | 0 | 0 |
 | REST | rpc | 1 | 4 | 0 | 0 | 0 |
-| Auth | admin | 1 | 28 | 0 | 0 | 0 |
+| Auth | admin | 1–2 | 28 | 0 | 0 | 0 |
 | Auth | database | 1 | 32 | 0 | 0 | 0 |
 | Auth | endpoints | 1–2 | 13 | 0 | 0 | 0 |
 | Auth | factors | 2 | 9 | 0 | 0 | 0 |
@@ -100,7 +100,7 @@ In scope: **1024 units**. Excluded: **76** upstream items.
 | Auth | scim | 2 | 3 | 0 | 0 | 0 |
 | Auth | sso | 2 | 3 | 0 | 0 | 0 |
 | Auth | token | 1–2 | 6 | 0 | 0 | 0 |
-| Auth | user | 1 | 6 | 0 | 0 | 0 |
+| Auth | user | 1–2 | 6 | 0 | 0 | 0 |
 | Auth | verify | 1–2 | 10 | 0 | 0 | 0 |
 | Auth | well-known | 2 | 3 | 0 | 0 | 0 |
 | Realtime | client-events | 3 | 3 | 0 | 0 | 0 |

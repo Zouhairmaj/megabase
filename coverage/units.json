@@ -1339,7 +1339,7 @@
       "name": "DELETE /auth/v1/admin/custom-providers/{identifier}",
       "method": "DELETE",
       "path": "/auth/v1/admin/custom-providers/{identifier}",
-      "level": 1,
+      "level": 2,
       "source": {
         "repo": "auth",
         "file": "internal/api/api.go",
@@ -1354,7 +1354,7 @@
       "name": "DELETE /auth/v1/admin/oauth/clients/{client_id}",
       "method": "DELETE",
       "path": "/auth/v1/admin/oauth/clients/{client_id}",
-      "level": 1,
+      "level": 2,
       "source": {
         "repo": "auth",
         "file": "internal/api/api.go",
@@ -1369,7 +1369,7 @@
       "name": "DELETE /auth/v1/admin/sso/providers/{idp_id}",
       "method": "DELETE",
       "path": "/auth/v1/admin/sso/providers/{idp_id}",
-      "level": 1,
+      "level": 2,
       "source": {
         "repo": "auth",
         "file": "internal/api/api.go",
@@ -1399,7 +1399,7 @@
       "name": "DELETE /auth/v1/admin/users/{user_id}/factors/{factor_id}",
       "method": "DELETE",
       "path": "/auth/v1/admin/users/{user_id}/factors/{factor_id}",
-      "level": 1,
+      "level": 2,
       "source": {
         "repo": "auth",
         "file": "internal/api/api.go",
@@ -1414,7 +1414,7 @@
       "name": "DELETE /auth/v1/admin/users/{user_id}/passkeys/{passkey_id}",
       "method": "DELETE",
       "path": "/auth/v1/admin/users/{user_id}/passkeys/{passkey_id}",
-      "level": 1,
+      "level": 2,
       "source": {
         "repo": "auth",
         "file": "internal/api/api.go",
@@ -1444,7 +1444,7 @@
       "name": "GET /auth/v1/admin/custom-providers",
       "method": "GET",
       "path": "/auth/v1/admin/custom-providers",
-      "level": 1,
+      "level": 2,
       "source": {
         "repo": "auth",
         "file": "internal/api/api.go",
@@ -1459,7 +1459,7 @@
       "name": "GET /auth/v1/admin/custom-providers/{identifier}",
       "method": "GET",
       "path": "/auth/v1/admin/custom-providers/{identifier}",
-      "level": 1,
+      "level": 2,
       "source": {
         "repo": "auth",
         "file": "internal/api/api.go",
@@ -1474,7 +1474,7 @@
       "name": "GET /auth/v1/admin/oauth/clients",
       "method": "GET",
       "path": "/auth/v1/admin/oauth/clients",
-      "level": 1,
+      "level": 2,
       "source": {
         "repo": "auth",
         "file": "internal/api/api.go",
@@ -1489,7 +1489,7 @@
       "name": "GET /auth/v1/admin/oauth/clients/{client_id}",
       "method": "GET",
       "path": "/auth/v1/admin/oauth/clients/{client_id}",
-      "level": 1,
+      "level": 2,
       "source": {
         "repo": "auth",
         "file": "internal/api/api.go",
@@ -1504,7 +1504,7 @@
       "name": "GET /auth/v1/admin/sso/providers",
       "method": "GET",
       "path": "/auth/v1/admin/sso/providers",
-      "level": 1,
+      "level": 2,
       "source": {
         "repo": "auth",
         "file": "internal/api/api.go",
@@ -1519,7 +1519,7 @@
       "name": "GET /auth/v1/admin/sso/providers/{idp_id}",
       "method": "GET",
       "path": "/auth/v1/admin/sso/providers/{idp_id}",
-      "level": 1,
+      "level": 2,
       "source": {
         "repo": "auth",
         "file": "internal/api/api.go",
@@ -1564,7 +1564,7 @@
       "name": "GET /auth/v1/admin/users/{user_id}/factors",
       "method": "GET",
       "path": "/auth/v1/admin/users/{user_id}/factors",
-      "level": 1,
+      "level": 2,
       "source": {
         "repo": "auth",
         "file": "internal/api/api.go",
@@ -1579,7 +1579,7 @@
       "name": "GET /auth/v1/admin/users/{user_id}/passkeys",
       "method": "GET",
       "path": "/auth/v1/admin/users/{user_id}/passkeys",
-      "level": 1,
+      "level": 2,
       "source": {
         "repo": "auth",
         "file": "internal/api/api.go",
@@ -1594,7 +1594,7 @@
       "name": "POST /auth/v1/admin/custom-providers",
       "method": "POST",
       "path": "/auth/v1/admin/custom-providers",
-      "level": 1,
+      "level": 2,
       "source": {
         "repo": "auth",
         "file": "internal/api/api.go",
@@ -1624,7 +1624,7 @@
       "name": "POST /auth/v1/admin/oauth/clients",
       "method": "POST",
       "path": "/auth/v1/admin/oauth/clients",
-      "level": 1,
+      "level": 2,
       "source": {
         "repo": "auth",
         "file": "internal/api/api.go",
@@ -1639,7 +1639,7 @@
       "name": "POST /auth/v1/admin/oauth/clients/{client_id}/regenerate_secret",
       "method": "POST",
       "path": "/auth/v1/admin/oauth/clients/{client_id}/regenerate_secret",
-      "level": 1,
+      "level": 2,
       "source": {
         "repo": "auth",
         "file": "internal/api/api.go",
@@ -1654,7 +1654,7 @@
       "name": "POST /auth/v1/admin/sso/providers",
       "method": "POST",
       "path": "/auth/v1/admin/sso/providers",
-      "level": 1,
+      "level": 2,
       "source": {
         "repo": "auth",
         "file": "internal/api/api.go",
@@ -1684,7 +1684,7 @@
       "name": "PUT /auth/v1/admin/custom-providers/{identifier}",
       "method": "PUT",
       "path": "/auth/v1/admin/custom-providers/{identifier}",
-      "level": 1,
+      "level": 2,
       "source": {
         "repo": "auth",
         "file": "internal/api/api.go",
@@ -1699,7 +1699,7 @@
       "name": "PUT /auth/v1/admin/oauth/clients/{client_id}",
       "method": "PUT",
       "path": "/auth/v1/admin/oauth/clients/{client_id}",
-      "level": 1,
+      "level": 2,
       "source": {
         "repo": "auth",
         "file": "internal/api/api.go",
@@ -1714,7 +1714,7 @@
       "name": "PUT /auth/v1/admin/sso/providers/{idp_id}",
       "method": "PUT",
       "path": "/auth/v1/admin/sso/providers/{idp_id}",
-      "level": 1,
+      "level": 2,
       "source": {
         "repo": "auth",
         "file": "internal/api/api.go",
@@ -1744,7 +1744,7 @@
       "name": "PUT /auth/v1/admin/users/{user_id}/factors/{factor_id}",
       "method": "PUT",
       "path": "/auth/v1/admin/users/{user_id}/factors/{factor_id}",
-      "level": 1,
+      "level": 2,
       "source": {
         "repo": "auth",
         "file": "internal/api/api.go",
@@ -3208,7 +3208,7 @@
       "name": "DELETE /auth/v1/user/identities/{identity_id}",
       "method": "DELETE",
       "path": "/auth/v1/user/identities/{identity_id}",
-      "level": 1,
+      "level": 2,
       "source": {
         "repo": "auth",
         "file": "internal/api/api.go",
@@ -3223,7 +3223,7 @@
       "name": "DELETE /auth/v1/user/oauth/grants",
       "method": "DELETE",
       "path": "/auth/v1/user/oauth/grants",
-      "level": 1,
+      "level": 2,
       "source": {
         "repo": "auth",
         "file": "internal/api/api.go",
@@ -3253,7 +3253,7 @@
       "name": "GET /auth/v1/user/identities/authorize",
       "method": "GET",
       "path": "/auth/v1/user/identities/authorize",
-      "level": 1,
+      "level": 2,
       "source": {
         "repo": "auth",
         "file": "internal/api/api.go",
@@ -3268,7 +3268,7 @@
       "name": "GET /auth/v1/user/oauth/grants",
       "method": "GET",
       "path": "/auth/v1/user/oauth/grants",
-      "level": 1,
+      "level": 2,
       "source": {
         "repo": "auth",
         "file": "internal/api/api.go",

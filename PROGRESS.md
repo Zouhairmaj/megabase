@@ -5,8 +5,9 @@ the source of truth for **decisions and overall state**.
 
 ## Current phase
 
-Phase 0 — bootstrap. Remaining work that is physically possible for agents
-is in this PR. Feature work starts after it merges.
+PHASE 0 COMPLETE — awaiting human review.
+
+Feature work starts after this PR merges.
 
 ## Pins
 
@@ -145,7 +146,7 @@ None.
 - [x] Treemaps and badges in the Megabase palette
 - [x] CI: build, MSRV, coverage check, protected paths, judge, coverage commit on `main`
 - [x] NOTICE, LICENSES/ (SPDX from each vendored LICENSE)
-- [x] HUMAN_LOG.md created empty (0 bytes; bootstrap exception)
+- [x] HUMAN_LOG.md present (human-owned; already on `main`, not created empty)
 - [x] CODEOWNERS (`@Zouhairmaj`)
 - [x] Versioning: policy in `docs/ROADMAP.md` (Phase 0 = `0.1.0`)
 - [x] `AGENTS.md` (committee-reviewed) plus nested guides
@@ -160,7 +161,7 @@ None.
       Backlog** Status aligned with `issue-<n>-*` branches, PRs and
       `blocked` (needs repo secret `PROJECT_TOKEN`)
 
-**Not claimed complete until this PR is green and ready for review.**
+**PHASE 0 COMPLETE — awaiting human review.**
 
 ## Human-only actions
 

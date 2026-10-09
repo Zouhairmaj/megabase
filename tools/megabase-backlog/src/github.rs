@@ -331,10 +331,39 @@ fn issue_labels(item: &Item) -> Vec<String> {
     labels
 }
 
+fn managed_label(name: &str) -> bool {
+    name.starts_with("component:") || name.starts_with("level:") || name.starts_with("type:")
+}
+
+fn reconcile_labels(existing: &BTreeSet<String>, wanted: &[String]) -> Vec<String> {
+    let mut labels: BTreeSet<String> = existing
+        .iter()
+        .filter(|name| !managed_label(name))
+        .cloned()
+        .collect();
+    labels.extend(wanted.iter().cloned());
+    let mut out: Vec<String> = labels.into_iter().collect();
+    out.sort();
+    out
+}
+
 #[derive(Debug, Clone)]
 pub struct ExistingIssue {
     pub number: u64,
     pub node_id: String,
+    body: String,
+    labels: BTreeSet<String>,
+    milestone: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct LabelName {
+    name: String,
+}
+
+#[derive(Deserialize)]
+struct MilestoneRef {
+    title: String,
 }
 
 #[derive(Deserialize)]
@@ -343,6 +372,9 @@ struct IssueRow {
     node_id: String,
     body: Option<String>,
     pull_request: Option<Value>,
+    #[serde(default)]
+    labels: Vec<LabelName>,
+    milestone: Option<MilestoneRef>,
 }
 
 pub fn load_issues_by_id() -> Result<BTreeMap<String, ExistingIssue>> {
@@ -368,6 +400,9 @@ pub fn load_issues_by_id() -> Result<BTreeMap<String, ExistingIssue>> {
                         ExistingIssue {
                             number: issue.number,
                             node_id: issue.node_id,
+                            body: body.clone(),
+                            labels: issue.labels.into_iter().map(|l| l.name).collect(),
+                            milestone: issue.milestone.map(|m| m.title),
                         },
                     );
                 }
@@ -382,20 +417,73 @@ pub fn load_issues_by_id() -> Result<BTreeMap<String, ExistingIssue>> {
     Ok(by_key)
 }
 
-/// Create only issues whose megabase-id is not already on GitHub.
+fn patch_issue(number: u64, body: &str, labels: &[String], milestone: Option<u64>) -> Result<()> {
+    let payload = json!({
+        "body": body,
+        "labels": labels,
+        "milestone": milestone,
+    });
+    let mut child = Command::new("gh")
+        .args([
+            "api",
+            "-X",
+            "PATCH",
+            &format!("repos/{REPO}/issues/{number}"),
+            "--input",
+            "-",
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .context("spawn gh issue patch")?;
+    child
+        .stdin
+        .take()
+        .context("patch stdin")?
+        .write_all(payload.to_string().as_bytes())?;
+    let out = child.wait_with_output().context("gh issue patch")?;
+    if !out.status.success() {
+        bail!(
+            "PATCH issues/{number} failed: {}{}",
+            String::from_utf8_lossy(&out.stderr),
+            String::from_utf8_lossy(&out.stdout)
+        );
+    }
+    Ok(())
+}
+
+/// Create missing issues, update bodies/labels/milestones on matches, and
+/// close generated issues whose megabase-id is no longer in the plan.
 pub fn ensure_issues(
     sync: &Sync,
     items: &[Item],
     existing: &mut BTreeMap<String, ExistingIssue>,
     milestones: &BTreeMap<String, u64>,
 ) -> Result<()> {
+    let wanted: BTreeSet<&str> = items.iter().map(|i| i.key.as_str()).collect();
     let mut created = 0usize;
+    let mut updated = 0usize;
     for item in items {
-        if existing.contains_key(&item.key) {
+        let labels = issue_labels(item);
+        let milestone_title = item.milestone.map(str::to_string);
+        let milestone = item.milestone.and_then(|t| milestones.get(t).copied());
+        if let Some(ex) = existing.get(&item.key) {
+            let labels = reconcile_labels(&ex.labels, &labels);
+            let label_set: BTreeSet<String> = labels.iter().cloned().collect();
+            if ex.body == item.body && ex.labels == label_set && ex.milestone == milestone_title {
+                continue;
+            }
+            if sync.dry_run {
+                sync.note(&format!("would update #{} {}", ex.number, item.key));
+                updated += 1;
+                continue;
+            }
+            patch_issue(ex.number, &item.body, &labels, milestone)?;
+            eprintln!("issue #{} {} (updated)", ex.number, item.key);
+            updated += 1;
             continue;
         }
-        let labels = issue_labels(item).join(",");
-        let milestone = item.milestone.and_then(|t| milestones.get(t).copied());
         if sync.dry_run {
             sync.note(&format!("would create {} ({})", item.title, item.key));
             created += 1;
@@ -411,7 +499,7 @@ pub fn ensure_issues(
             "--body".into(),
             item.body.clone(),
             "--label".into(),
-            labels,
+            labels.join(","),
         ];
         if let Some(m) = milestone {
             args.extend(["--milestone".into(), m.to_string()]);
@@ -430,15 +518,50 @@ pub fn ensure_issues(
             .as_str()
             .context("issue node_id")?
             .to_string();
-        existing.insert(item.key.clone(), ExistingIssue { number, node_id });
+        existing.insert(
+            item.key.clone(),
+            ExistingIssue {
+                number,
+                node_id,
+                body: item.body.clone(),
+                labels: labels.iter().cloned().collect(),
+                milestone: milestone_title,
+            },
+        );
         created += 1;
         eprintln!("issue #{number} {} (created)", item.key);
     }
-    if created == 0 {
-        eprintln!("no issues to create (all megabase-id keys matched)");
-    } else {
-        eprintln!("{created} issues created");
+    let mut closed = 0usize;
+    for (key, ex) in existing.iter() {
+        if wanted.contains(key.as_str()) {
+            continue;
+        }
+        if !(key.starts_with("epic:") || key.starts_with("task:")) {
+            continue;
+        }
+        if sync.dry_run {
+            sync.note(&format!(
+                "would close #{} {key} (no longer in plan)",
+                ex.number
+            ));
+            closed += 1;
+            continue;
+        }
+        gh(&[
+            "issue",
+            "close",
+            &ex.number.to_string(),
+            "-R",
+            REPO,
+            "--reason",
+            "not_planned",
+            "--comment",
+            "Superseded: this megabase-id is no longer in the generated plan (units moved between levels). See docs/backlog/PLAN.md.",
+        ])?;
+        eprintln!("issue #{} {key} (closed)", ex.number);
+        closed += 1;
     }
+    eprintln!("{created} created, {updated} updated, {closed} closed");
     Ok(())
 }
 

@@ -43,7 +43,7 @@ fn write_plan(root: &Path, markdown: &str) -> Result<()> {
 
 fn sync(root: &Path, dry_run: bool) -> Result<()> {
     let units = load_units(root)?;
-    let items = build(&units.units);
+    let items = build(&units);
     write_plan(root, &render_markdown(&items))?;
     let (epics, tasks, total) = github::counts(&items);
     eprintln!("{epics} epics, {tasks} sub-issues, {total} total (cap 150)");
@@ -58,11 +58,21 @@ fn sync(root: &Path, dry_run: bool) -> Result<()> {
 
     github::ensure_labels(&sync).context("labels")?;
     let milestones = github::ensure_milestones(&sync).context("milestones")?;
-    let (project_id, project_number) = github::find_project().context("project")?;
     let mut existing = github::load_issues_by_id().context("list issues")?;
     github::ensure_issues(&sync, &items, &mut existing, &milestones).context("issues")?;
-    github::apply_project(&sync, &project_id, &items, &existing).context("project fields")?;
-    eprintln!("synced {total} items to GitHub project {project_number}");
+    match github::find_project() {
+        Ok((project_id, project_number)) => {
+            github::apply_project(&sync, &project_id, &items, &existing)
+                .context("project fields")?;
+            eprintln!("synced {total} items to GitHub project {project_number}");
+        }
+        Err(err) => {
+            eprintln!("project fields skipped: {err:#}");
+            eprintln!(
+                "issues were still created/updated; set PROJECT_TOKEN (classic PAT, project scope) to fill the board"
+            );
+        }
+    }
     Ok(())
 }
 
@@ -77,7 +87,7 @@ fn main() -> ExitCode {
     let result = repo_root().and_then(|root| match cmd {
         "plan" => {
             let units = load_units(&root)?;
-            let items = build(&units.units);
+            let items = build(&units);
             let (epics, tasks, total) = github::counts(&items);
             eprintln!("{epics} epics, {tasks} sub-issues, {total} total");
             write_plan(&root, &render_markdown(&items))
