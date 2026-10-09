@@ -14,5 +14,7 @@ Signup settings do not parse `GOTRUE_JWT_ADMIN_ROLES`. `/auth/v1/admin`
 keeps the GoTrue unset default from issue #6
 (`service_role,supabase_admin`). bcrypt cost is 10 (Go's `DefaultCost`).
 An unset `JWT_SECRET` fails signup before insert. A present secret shorter
-than 32 bytes aborts startup (decision in #170). Phone signup, anonymous
-signup, and email signup with autoconfirm off stay HTTP 501.
+than 32 bytes aborts startup (decision in #170). Phone signup and email
+signup with autoconfirm off stay HTTP 501. With anonymous users disabled,
+anonymous signup returns HTTP 422 (`anonymous_provider_disabled`); when
+anonymous users are enabled, it returns HTTP 501.
