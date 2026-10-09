@@ -160,13 +160,18 @@ jobs:
           # and does not fail the shell, so the check below can report it.
           ids_json=$(python3 - "judge/cases/${SERVICE}.toml" <<'PY'
           import json, sys, tomllib
-          with open(sys.argv[1], "rb") as fh:
+          path = sys.argv[1]
+          with open(path, "rb") as fh:
               doc = tomllib.load(fh)
-          ids = [
-              case["id"]
-              for case in doc.get("case", [])
-              if isinstance(case, dict) and "id" in case
-          ]
+          cases = doc.get("case", [])
+          if not isinstance(cases, list):
+              raise SystemExit(f"{path}: case is not an array")
+          ids = []
+          for index, case in enumerate(cases):
+              case_id = case.get("id") if isinstance(case, dict) else None
+              if not isinstance(case_id, str) or case_id == "":
+                  raise SystemExit(f"{path}: case {index} has no string id")
+              ids.append(case_id)
           json.dump(ids, sys.stdout)
           PY
           )
