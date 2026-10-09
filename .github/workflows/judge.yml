@@ -47,7 +47,8 @@ jobs:
             up -d --wait --wait-timeout 300
       - name: Megabase on :8100
         run: |
-          MEGABASE_PORT=8100 MEGABASE_HOST=0.0.0.0 \
+          JWT_SECRET=$(grep '^JWT_SECRET=' vendor/supabase/docker/.env.example | cut -d= -f2-)
+          MEGABASE_PORT=8100 MEGABASE_HOST=0.0.0.0 JWT_SECRET="$JWT_SECRET" \
             ./target/release/megabase > /tmp/megabase.log 2>&1 &
           echo $! > /tmp/megabase.pid
       - name: Wait
