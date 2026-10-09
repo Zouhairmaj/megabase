@@ -30,6 +30,7 @@ pub enum UnitStatus {
 #[derive(Clone, Debug)]
 pub struct FeatureGroup {
     pub id: String,
+    #[allow(dead_code)]
     pub label: String,
     pub units: Vec<UnitStatus>,
 }

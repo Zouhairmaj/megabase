@@ -287,14 +287,7 @@ fn groups_of(comp: &ComponentBlock) -> Vec<(&str, &str, &[UnitStatus])> {
         groups.sort_by(|a, b| b.total().cmp(&a.total()).then_with(|| a.id.cmp(&b.id)));
         groups
             .into_iter()
-            .map(|g| {
-                let label = if g.label.is_empty() {
-                    g.id.as_str()
-                } else {
-                    g.label.as_str()
-                };
-                (g.id.as_str(), label, g.units.as_slice())
-            })
+            .map(|g| (g.id.as_str(), g.id.as_str(), g.units.as_slice()))
             .collect()
     }
 }

@@ -668,6 +668,7 @@ a:hover {
 
 .status-map {
   display: flex;
+  flex-direction: row;
   gap: 48px;
   align-items: stretch;
   min-width: 0;
