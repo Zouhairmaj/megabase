@@ -102,11 +102,12 @@ release-please (`release-please-config.json`):
 walks workspace members and fails on `version.workspace = true`
 ([googleapis/release-please#2478](https://github.com/googleapis/release-please/issues/2478)).
 A TOML extra-file updater bumps `[workspace.package].version`; member
-crates inherit. `bootstrap-sha` is the Phase 0 merge on `main` so
-bootstrap history is not dumped into a 0.0.1 changelog; release-please
-ignores it after the first release PR merges. Phase 0's `0.1.0` still
-needs a `Release-As: 0.1.0` footer from the orchestrator. Do not add a
-`version.txt`.
+crates inherit. `bootstrap-sha` is Day 0 (`25ebab3`, exclusive) so the
+first release PR covers Phase 0. `release-as` is `0.1.0` for that
+bootstrap only — delete the key in the v0.1.0 release PR (or right
+after it merges) so later `feat` / `fix` / `conformance` commits go
+back to patch bumps. release-please ignores `bootstrap-sha` after the
+first release PR merges. Do not add a `version.txt`.
 
 Cadence:
 

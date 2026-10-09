@@ -123,8 +123,9 @@ waiting on a human.
     `version.workspace = true`, so release-please's `rust` strategy
     errors (`value at path package.version is not tagged`). Config uses
     `release-type: simple` and bumps `[workspace.package].version` only.
-    `bootstrap-sha` is the Phase 0 merge; do not mint a release from
-    bootstrap history. Container `FROM` lines are pinned by digest.
+    `bootstrap-sha` is Day 0 so the first release PR is Phase 0 at
+    `0.1.0` (`release-as`). Drop `release-as` when that PR lands.
+    Container `FROM` lines are pinned by digest.
 
 ## Tracking
 
