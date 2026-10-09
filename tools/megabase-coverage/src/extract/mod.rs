@@ -764,10 +764,7 @@ license = "Apache-2.0"
         );
         tree.mkdir("vendor/supabase");
         let err = extract(&tree.root).unwrap_err().to_string();
-        assert!(
-            err.contains("empty") || err.contains("no pin named"),
-            "{err}"
-        );
+        assert!(err.contains("empty"), "{err}");
         tree.write("vendor/supabase/.git", "gitdir: /tmp\n");
         tree.write(
             "vendor/supabase/docker/volumes/api/kong.yml",

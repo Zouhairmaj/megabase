@@ -344,11 +344,15 @@ mod tests {
 
     #[test]
     fn clean_respects_escaped_quotes_and_backticks() {
-        let src = r#"s = "a\"b"; t = `line
-{keep}`"#;
+        let src = "s = \"a\\\"b\"; t = `line\n{keep}`";
         let cleaned = clean(src, TS);
-        assert!(!cleaned.skeleton.contains("a\\\"b") || cleaned.skeleton.contains(' '));
-        assert!(cleaned.code.contains("`line"));
+        let quote = src.find('"').unwrap();
+        let inner = &cleaned.skeleton[quote + 1..quote + 5];
+        assert_eq!(inner, "    ", "{inner:?}");
+        assert!(!cleaned.skeleton.contains("a\\\"b"));
+        assert!(cleaned.code.contains("a\\\"b"));
+        assert!(!cleaned.skeleton.contains("{keep}"));
+        assert!(cleaned.code.contains("{keep}"));
         assert!(cleaned.skeleton.contains('\n'));
     }
 

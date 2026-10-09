@@ -723,6 +723,6 @@ mod tests {
         });
         let md = render_markdown(&items);
         assert!(md.contains("# Backlog plan"));
-        assert!(md.contains("epic:rest:resources:1") || md.contains("REST"));
+        assert!(md.contains("epic:rest:resources:1"));
     }
 }

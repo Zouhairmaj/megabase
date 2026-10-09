@@ -547,10 +547,11 @@ mod tests {
 
     #[test]
     fn badge_colors_follow_thresholds() {
-        assert!(badge("coverage", "0%", "#303235").contains("#303235"));
-        assert!(badge("coverage", "10%", "#005441").contains("#005441"));
-        assert!(badge("coverage", "50%", "#009366").contains("#009366"));
-        let high = badge("coverage", "90%", "#00D892");
+        assert_eq!(badge_color(0.0), "#303235");
+        assert_eq!(badge_color(10.0), "#005441");
+        assert_eq!(badge_color(50.0), "#009366");
+        assert_eq!(badge_color(90.0), "#00D892");
+        let high = badge("coverage", "90%", badge_color(90.0));
         assert!(high.contains("#00D892"));
         assert!(high.contains("#0B0E12"));
     }
