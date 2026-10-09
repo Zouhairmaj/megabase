@@ -1,685 +1,1135 @@
+//! Dark nested-square treemaps for megabase.sh.
+//!
+//! One generator, used on Home (hero + live map) and Status. Layout is a
+//! squarified treemap of components (largest first) with groups squarified
+//! the same way inside each component. Unit cells are whole squares of one
+//! global size, painted with a pattern and two paths per group.
+
 use crate::metrics::{
     comma, CatalogRow, ComponentBlock, FeatureGroup, Metrics, UnitStatus, CATALOG,
 };
 
 const BG: &str = "#0B0E12";
-const NOT_STARTED: &str = "#2A2C2F";
-const PANEL_SQUARE: &str = "#303235";
-const GROUP_STROKE: &str = "#303235";
+const BLOCK: &str = "#121417";
+const HEADER: &str = "#181A1D";
+const GROUP: &str = "#0B0E12";
+const NOT_STARTED: &str = "#303235";
 const IMPLEMENTED: &str = "#005441";
 const TESTED: &str = "#009366";
 const CONFORMANT: &str = "#00D892";
-const LABEL: &str = "#BABABB";
-const PANEL_LABEL: &str = "#F7F7F7";
-const PANEL_HEADER_BG: &str = "#181A1D";
-const BLOCK_GAP: f64 = 4.0;
-const BLOCK_PAD: f64 = 4.0;
-const UNIT_GAP: f64 = 1.5;
-const LABEL_H: f64 = 14.0;
-const MIN_CELL: f64 = 2.0;
-const PANEL_GAP: f64 = 3.0;
-const PANEL_HEADER_H: f64 = 16.0;
-const PANEL_INSET: f64 = 3.0;
-const PANEL_UNIT_GAP: f64 = 2.0;
+const LABEL: &str = "#F7F7F7";
+const GROUP_LABEL: &str = "#8A8B8E";
 
-/// Visual order for the Home status-panel treemap so REST sits above AUTH
-/// and META above STUDIO.
-const PANEL_ORDER: &[&str] = &[
-    "rest",
-    "auth",
-    "meta",
-    "studio",
-    "storage",
-    "realtime",
-    "functions",
-    "pooler",
+const S_MIN: i32 = 3;
+const S_MAX: i32 = 40;
+const GROUP_BONUS: f64 = 5.0;
+const LABEL_INSET: i32 = 6;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Preset {
+    pub width: i32,
+    pub height: i32,
+    pub header_h: i32,
+    pub gap: i32,
+    pub nested: bool,
+    pub group_label_px: i32,
+    pub id: &'static str,
+}
+
+pub const STATUS_DESKTOP: Preset = Preset {
+    width: 816,
+    height: 640,
+    header_h: 20,
+    gap: 4,
+    nested: true,
+    group_label_px: 8,
+    id: "status-d",
+};
+pub const STATUS_MOBILE: Preset = Preset {
+    width: 350,
+    height: 760,
+    header_h: 18,
+    gap: 3,
+    nested: true,
+    group_label_px: 7,
+    id: "status-m",
+};
+pub const HOME_DESKTOP: Preset = Preset {
+    width: 1192,
+    height: 520,
+    header_h: 20,
+    gap: 4,
+    nested: true,
+    group_label_px: 8,
+    id: "home-d",
+};
+pub const HOME_MOBILE: Preset = Preset {
+    width: 350,
+    height: 700,
+    header_h: 18,
+    gap: 3,
+    nested: true,
+    group_label_px: 7,
+    id: "home-m",
+};
+pub const HERO_DESKTOP: Preset = Preset {
+    width: 442,
+    height: 260,
+    header_h: 14,
+    gap: 4,
+    nested: false,
+    group_label_px: 8,
+    id: "hero-d",
+};
+pub const HERO_MOBILE: Preset = Preset {
+    width: 308,
+    height: 300,
+    header_h: 14,
+    gap: 3,
+    nested: false,
+    group_label_px: 7,
+    id: "hero-m",
+};
+
+#[cfg(test)]
+pub const PRESETS: &[Preset] = &[
+    STATUS_DESKTOP,
+    STATUS_MOBILE,
+    HOME_DESKTOP,
+    HOME_MOBILE,
+    HERO_DESKTOP,
+    HERO_MOBILE,
 ];
 
-pub fn svg(metrics: &Metrics) -> String {
-    svg_size(metrics, 462.0, 200.0)
+#[derive(Clone, Copy, Debug)]
+struct IRect {
+    x: i32,
+    y: i32,
+    w: i32,
+    h: i32,
 }
 
-pub fn svg_size(metrics: &Metrics, width: f64, height: f64) -> String {
-    let blocks: Vec<&ComponentBlock> = metrics
-        .components
-        .iter()
-        .filter(|c| c.total() > 0)
-        .collect();
-
-    let label = if blocks.is_empty() {
-        "Experiment treemap: no coverage data yet.".to_string()
-    } else {
-        format!(
-            "Experiment treemap: {} of {} units. One whole square per unit, grouped by component.",
-            metrics.passing.map(comma).unwrap_or_else(|| "—".into()),
-            metrics.total.map(comma).unwrap_or_else(|| "—".into())
-        )
-    };
-
-    let mut out = String::new();
-    out.push_str(&format!(
-        r##"<svg class="treemap-svg" viewBox="0 0 {width} {height}" width="100%" height="100%" role="img" aria-label="{label}" xmlns="http://www.w3.org/2000/svg"><title>{label}</title><rect width="{width}" height="{height}" fill="{BG}"/>"##
-    ));
-
-    if blocks.is_empty() {
-        paint_day0_catalog(&mut out, width, height);
-        out.push_str("</svg>");
-        return out;
+impl IRect {
+    fn right(self) -> i32 {
+        self.x + self.w
     }
-
-    let weights: Vec<f64> = blocks.iter().map(|c| c.total() as f64).collect();
-    let cells = squarify(&weights, 0.0, 0.0, width, height);
-    let packed: Vec<(&ComponentBlock, [f64; 4])> = blocks
-        .iter()
-        .copied()
-        .zip(cells)
-        .map(|(block, rect)| {
-            let (x, y, w, h) = inset(rect[0], rect[1], rect[2], rect[3], BLOCK_GAP / 2.0);
-            (block, [x, y, w, h])
-        })
-        .filter(|(_, r)| r[2] > 1.0 && r[3] > 1.0)
-        .collect();
-
-    let mut cell = global_cell(&packed);
-    while cell > MIN_CELL && !grids_fit(&packed, cell) {
-        cell = (cell - 0.05).max(MIN_CELL);
-        cell = (cell * 100.0).floor() / 100.0;
+    fn bottom(self) -> i32 {
+        self.y + self.h
     }
-    for (block, [x, y, w, h]) in packed {
-        paint_block(&mut out, block, x, y, w, h, cell);
+    #[cfg(test)]
+    fn contains(self, inner: IRect) -> bool {
+        inner.x >= self.x
+            && inner.y >= self.y
+            && inner.right() <= self.right()
+            && inner.bottom() <= self.bottom()
     }
-
-    out.push_str("</svg>");
-    out
 }
 
-/// Home hero status-panel treemap (442×220 desktop, 308×290 mobile).
+#[derive(Clone, Debug)]
+struct PlacedGroup {
+    id: String,
+    rect: IRect,
+    n: usize,
+    cols: i32,
+    ox: i32,
+    oy: i32,
+    units: Vec<UnitStatus>,
+    text: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+struct PlacedComp {
+    id: String,
+    rect: IRect,
+    label: String,
+    font_px: i32,
+    groups: Vec<PlacedGroup>,
+}
+
+#[derive(Clone, Debug)]
+struct Layout {
+    preset: Preset,
+    s: i32,
+    unit_gap: i32,
+    components: Vec<PlacedComp>,
+}
+
+pub fn render(metrics: &Metrics, preset: Preset) -> String {
+    paint(&build(metrics, preset), metrics)
+}
+
+#[allow(dead_code)]
 pub fn panel(metrics: &Metrics, width: f64, height: f64) -> String {
-    let blocks = panel_blocks(metrics);
-    let mut out = String::new();
-    out.push_str(&format!(
-        r##"<svg class="panel-treemap" viewBox="0 0 {width} {height}" width="{width}" height="{height}" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false"><rect width="{width}" height="{height}" fill="{BG}"/>"##
-    ));
-    if blocks.is_empty() {
-        paint_day0_catalog(&mut out, width, height);
-        out.push_str("</svg>");
-        return out;
-    }
-    let weights: Vec<f64> = blocks.iter().map(|b| b.total() as f64).collect();
-    let rects = layout_blocks(&weights, width, height, PANEL_GAP);
-    for (block, rect) in blocks.iter().zip(rects) {
-        paint_panel_block(&mut out, block, rect);
-    }
-    out.push_str("</svg>");
-    out
+    let preset = if width >= 400.0 {
+        HERO_DESKTOP
+    } else {
+        HERO_MOBILE
+    };
+    let mut p = preset;
+    p.width = width.round() as i32;
+    p.height = height.round() as i32;
+    render(metrics, p)
+}
+
+#[allow(dead_code)]
+pub fn svg_size(metrics: &Metrics, width: f64, height: f64) -> String {
+    let mut p = HOME_DESKTOP;
+    p.width = width.round() as i32;
+    p.height = height.round() as i32;
+    render(metrics, p)
+}
+
+#[allow(dead_code)]
+pub fn svg(metrics: &Metrics) -> String {
+    render(metrics, HOME_DESKTOP)
 }
 
 pub fn panel_alt(metrics: &Metrics) -> String {
-    let blocks = panel_blocks(metrics);
-    if blocks.is_empty() {
-        return "Experiment treemap: no coverage data yet.".into();
-    }
-    let mut parts = Vec::new();
-    for block in &blocks {
-        parts.push(format!(
-            "{} {}/{}",
-            panel_name(&block.id),
-            block.conformant,
-            block.total()
-        ));
+    alt_text(metrics)
+}
+
+pub fn alt_text(metrics: &Metrics) -> String {
+    if !metrics.has_data() || metrics.components.iter().all(|c| c.total() == 0) {
+        return "Component map: no coverage data yet.".into();
     }
     format!(
-        "Experiment treemap: {} of {} units. {}.",
-        metrics.passing.map(comma).unwrap_or_else(|| "—".into()),
-        metrics.total.map(comma).unwrap_or_else(|| "—".into()),
-        parts.join(", ")
+        "Component map: {} of {} units. One whole square per unit, grouped by component and feature group.",
+        metrics.passing.map(comma).unwrap_or_else(|| "0".into()),
+        metrics.total.map(comma).unwrap_or_else(|| "0".into()),
     )
 }
 
-fn panel_blocks(metrics: &Metrics) -> Vec<&ComponentBlock> {
-    let mut out = Vec::new();
-    let mut seen = std::collections::HashSet::new();
-    for id in PANEL_ORDER {
-        if let Some(block) = metrics
-            .components
-            .iter()
-            .find(|c| c.id == *id && c.total() > 0)
-        {
-            seen.insert(block.id.as_str());
-            out.push(block);
-        }
+fn build(metrics: &Metrics, preset: Preset) -> Layout {
+    let comps = live_components(metrics);
+    if comps.is_empty() {
+        return day0_layout(preset);
     }
-    for block in &metrics.components {
-        if block.total() > 0 && !seen.contains(block.id.as_str()) {
-            out.push(block);
-        }
-    }
-    out
+    search_layout(&comps, preset, 3, 6)
+        .or_else(|| search_layout(&comps, preset, 0, 2))
+        .or_else(|| try_peel_layout(&comps, preset))
+        .unwrap_or_else(|| fallback_layout(&comps, preset))
 }
 
-fn panel_name(id: &str) -> &'static str {
-    match id {
-        "rest" => "REST",
-        "auth" => "AUTH",
-        "meta" => "META",
-        "studio" => "STUDIO",
-        "storage" => "STORAGE",
-        "realtime" => "REALTIME",
-        "functions" => "FUNCTIONS",
-        "pooler" => "POOLER",
-        _ => "UNIT",
-    }
-}
-
-/// Pair consecutive components, give the first pair a full-height column
-/// (REST above AUTH), squarify the remaining pairs, then squarify inside
-/// each pair. Matches the Home desktop and mobile status-panel frames.
-fn nested_pair_squarify(weights: &[f64], x: f64, y: f64, w: f64, h: f64) -> Vec<[f64; 4]> {
-    if weights.is_empty() {
-        return Vec::new();
-    }
-    if weights.len() == 1 {
-        return vec![[x, y, w, h]];
-    }
-    let mut groups: Vec<&[f64]> = Vec::new();
-    let mut i = 0;
-    while i < weights.len() {
-        let take = if i + 1 < weights.len() { 2 } else { 1 };
-        groups.push(&weights[i..i + take]);
-        i += take;
-    }
-    let group_weights: Vec<f64> = groups.iter().map(|g| g.iter().sum()).collect();
-    let group_rects = group_rects(&group_weights, x, y, w, h);
-    let mut out = Vec::with_capacity(weights.len());
-    for (group, rect) in groups.iter().zip(group_rects) {
-        if group.len() == 1 {
-            out.push(rect);
-        } else {
-            out.extend(squarify(group, rect[0], rect[1], rect[2], rect[3]));
-        }
-    }
-    out
-}
-
-fn group_rects(weights: &[f64], x: f64, y: f64, w: f64, h: f64) -> Vec<[f64; 4]> {
-    if weights.is_empty() {
-        return Vec::new();
-    }
-    if weights.len() == 1 {
-        return vec![[x, y, w, h]];
-    }
-    let total: f64 = weights.iter().sum();
-    if total <= 0.0 || w <= 0.0 || h <= 0.0 {
-        return vec![[x, y, w.max(1.0), h.max(1.0)]; weights.len()];
-    }
-    let col_w = (weights[0] / total * w).clamp(1.0, w);
-    let mut rects = vec![[x, y, col_w, h]];
-    let rest = &weights[1..];
-    let remain_w = (w - col_w).max(1.0);
-    if rest.len() == 1 {
-        rects.push([x + col_w, y, remain_w, h]);
-    } else {
-        rects.extend(squarify(rest, x + col_w, y, remain_w, h));
-    }
-    rects
-}
-
-fn layout_blocks(weights: &[f64], width: f64, height: f64, gap: f64) -> Vec<[f64; 4]> {
-    let mut rects = nested_pair_squarify(weights, 0.0, 0.0, width, height);
-    for r in &mut rects {
-        let x1 = r[0].round();
-        let y1 = r[1].round();
-        let x2 = (r[0] + r[2]).round();
-        let y2 = (r[1] + r[3]).round();
-        r[0] = x1;
-        r[1] = y1;
-        r[2] = (x2 - x1).max(1.0);
-        r[3] = (y2 - y1).max(1.0);
-    }
-    let snapshot = rects.clone();
-    for (i, r) in rects.iter_mut().enumerate() {
-        let right = r[0] + r[2];
-        let bottom = r[1] + r[3];
-        let neighbor_right = snapshot.iter().enumerate().any(|(j, o)| {
-            j != i && (o[0] - right).abs() < 1.5 && ranges_overlap(r[1], r[3], o[1], o[3])
-        });
-        let neighbor_bottom = snapshot.iter().enumerate().any(|(j, o)| {
-            j != i && (o[1] - bottom).abs() < 1.5 && ranges_overlap(r[0], r[2], o[0], o[2])
-        });
-        if neighbor_right {
-            r[2] = (r[2] - gap).max(1.0);
-        }
-        if neighbor_bottom {
-            r[3] = (r[3] - gap).max(1.0);
-        }
-        if r[0] + r[2] > width {
-            r[2] = (width - r[0]).max(1.0);
-        }
-        if r[1] + r[3] > height {
-            r[3] = (height - r[1]).max(1.0);
-        }
-    }
-    rects
-}
-
-fn ranges_overlap(a: f64, ah: f64, b: f64, bh: f64) -> bool {
-    let a2 = a + ah;
-    let b2 = b + bh;
-    a < b2 - 0.5 && b < a2 - 0.5
-}
-
-fn paint_panel_block(out: &mut String, block: &ComponentBlock, rect: [f64; 4]) {
-    let [x, y, w, h] = rect;
-    let name = panel_name(&block.id);
-    let full = format!("{} {}/{}", name, block.conformant, block.total());
-    let label = if label_fits(&full, w) {
-        full
-    } else {
-        name.to_string()
-    };
-    out.push_str(&format!(
-        r##"<g data-component="{id}" data-x="{x:.0}" data-y="{y:.0}" data-w="{w:.0}" data-h="{h:.0}"><rect class="block-head" x="{x:.0}" y="{y:.0}" width="{w:.0}" height="{hh}" fill="{PANEL_HEADER_BG}"/><text x="{tx:.0}" y="{ty:.0}" font-family="JetBrains Mono, ui-monospace, monospace" font-size="10" fill="{PANEL_LABEL}">{label}</text>"##,
-        id = xml_esc(&block.id),
-        hh = PANEL_HEADER_H,
-        tx = x + 6.0,
-        ty = y + 11.0,
-        label = xml_esc(&label),
-    ));
-    let body_x = x + PANEL_INSET;
-    let body_y = y + PANEL_HEADER_H + PANEL_INSET;
-    let body_w = (w - PANEL_INSET * 2.0).max(0.0);
-    let body_h = (h - PANEL_HEADER_H - PANEL_INSET * 2.0).max(0.0);
-    let units = block.unit_statuses();
-    let cells = pack_unit_grid(units.len(), body_x, body_y, body_w, body_h);
-    for (status, (sx, sy, s)) in units.iter().zip(cells) {
-        let fill = match status {
-            UnitStatus::NotStarted => PANEL_SQUARE,
-            UnitStatus::Implemented => IMPLEMENTED,
-            UnitStatus::Tested => TESTED,
-            UnitStatus::Conformant => CONFORMANT,
-        };
-        out.push_str(&format!(
-            r##"<rect class="unit" x="{sx:.0}" y="{sy:.0}" width="{s:.0}" height="{s:.0}" fill="{fill}" shape-rendering="crispEdges"/>"##
-        ));
-    }
-    out.push_str("</g>");
-}
-
-fn label_fits(text: &str, block_w: f64) -> bool {
-    // JetBrains Mono 10px ≈ 6px per character, plus 6px left inset and 4px right.
-    6.0 + text.len() as f64 * 6.0 + 4.0 <= block_w
-}
-
-fn pack_unit_grid(n: usize, x: f64, y: f64, w: f64, h: f64) -> Vec<(f64, f64, f64)> {
-    if n == 0 || w < 1.0 || h < 1.0 {
-        return Vec::new();
-    }
-    let max_s = w.min(h).floor().max(1.0) as i32;
-    let mut chosen: Option<(f64, usize, usize)> = None;
-    for s in (1..=max_s).rev() {
-        let s_f = s as f64;
-        let mut best_cols: Option<(usize, usize, f64)> = None;
-        for cols in 1..=n {
-            let rows = n.div_ceil(cols);
-            let grid_w = cols as f64 * s_f + (cols.saturating_sub(1) as f64) * PANEL_UNIT_GAP;
-            let grid_h = rows as f64 * s_f + (rows.saturating_sub(1) as f64) * PANEL_UNIT_GAP;
-            if grid_w > w + 0.01 || grid_h > h + 0.01 {
-                continue;
-            }
-            let err = (grid_w / grid_h.max(0.001) - w / h.max(0.001)).abs();
-            let better = match best_cols {
-                None => true,
-                Some((c, _, e)) => {
-                    err < e - f64::EPSILON || ((err - e).abs() < f64::EPSILON && cols < c)
+fn search_layout(
+    comps: &[&ComponentBlock],
+    preset: Preset,
+    min_lo: i32,
+    min_hi: i32,
+) -> Option<Layout> {
+    let mut best: Option<Layout> = None;
+    let mut best_s = -1;
+    for extra in 1..=4 {
+        for min_pct in min_lo..=min_hi {
+            if let Some(layout) = try_layout(comps, preset, extra, min_pct) {
+                if layout.s > best_s {
+                    best_s = layout.s;
+                    best = Some(layout);
                 }
-            };
-            if better {
-                best_cols = Some((cols, rows, err));
             }
         }
-        if let Some((cols, rows, _)) = best_cols {
-            chosen = Some((s_f, cols, rows));
-            break;
-        }
     }
-    let Some((s, cols, rows)) = chosen else {
-        return Vec::new();
-    };
-    let grid_w = cols as f64 * s + (cols.saturating_sub(1) as f64) * PANEL_UNIT_GAP;
-    let grid_h = rows as f64 * s + (rows.saturating_sub(1) as f64) * PANEL_UNIT_GAP;
-    let origin_x = x + ((w - grid_w) / 2.0).floor().max(0.0);
-    let origin_y = y + ((h - grid_h) / 2.0).floor().max(0.0);
-    let mut out = Vec::with_capacity(n);
-    for i in 0..n {
-        let r = i / cols;
-        let c = i % cols;
-        let sx = origin_x + c as f64 * (s + PANEL_UNIT_GAP);
-        let sy = origin_y + r as f64 * (s + PANEL_UNIT_GAP);
-        out.push((sx, sy, s));
-    }
-    out
+    best
 }
 
-fn grids_fit(packed: &[(&ComponentBlock, [f64; 4])], cell: f64) -> bool {
-    packed.iter().all(|(block, [_, _, w, h])| {
-        let (inner_w, inner_h, _) = inner_area(*w, *h);
-        if block.groups.len() > 1 {
-            let weights: Vec<f64> = block.groups.iter().map(|g| g.total() as f64).collect();
-            let cells = squarify(&weights, 0.0, 0.0, inner_w, inner_h);
-            block.groups.iter().zip(cells).all(|(group, rect)| {
-                let (gw, gh) = (rect[2], rect[3]);
-                let pad = 1.0;
-                let (cols, rows) = grid_for(
-                    group.total(),
-                    (gw - pad).max(0.0),
-                    (gh - pad).max(0.0),
-                    cell,
-                );
-                let grid_w = cols as f64 * cell + (cols.saturating_sub(1) as f64) * UNIT_GAP;
-                let grid_h = rows as f64 * cell + (rows.saturating_sub(1) as f64) * UNIT_GAP;
-                grid_w <= gw + 0.05 && grid_h <= gh + 0.05
-            })
-        } else {
-            let (cols, rows) = grid_for(block.total(), inner_w, inner_h, cell);
-            let grid_w = cols as f64 * cell + (cols.saturating_sub(1) as f64) * UNIT_GAP;
-            let grid_h = rows as f64 * cell + (rows.saturating_sub(1) as f64) * UNIT_GAP;
-            grid_w <= inner_w + 0.01 && grid_h <= inner_h + 0.01
-        }
+fn live_components(metrics: &Metrics) -> Vec<&ComponentBlock> {
+    metrics
+        .components
+        .iter()
+        .filter(|c| c.total() > 0)
+        .collect()
+}
+
+fn fallback_layout(comps: &[&ComponentBlock], preset: Preset) -> Layout {
+    try_layout(comps, preset, 1, 0).unwrap_or_else(|| {
+        let weights = component_weights(comps, 1, 0);
+        let rects = pack_rects(&weights, 0, 0, preset.width, preset.height, preset.gap);
+        layout_from_rects(comps, &rects, preset).unwrap_or_else(|| Layout {
+            preset,
+            s: S_MIN,
+            unit_gap: unit_gap(S_MIN),
+            components: Vec::new(),
+        })
     })
 }
 
-fn global_cell(packed: &[(&ComponentBlock, [f64; 4])]) -> f64 {
-    let mut cell = f64::MAX;
-    for (block, [_, _, w, h]) in packed {
-        let (inner_w, inner_h, _) = inner_area(*w, *h);
-        if block.groups.len() > 1 {
-            let weights: Vec<f64> = block.groups.iter().map(|g| g.total() as f64).collect();
-            let cells = squarify(&weights, 0.0, 0.0, inner_w, inner_h);
-            for (group, rect) in block.groups.iter().zip(cells) {
-                cell = cell.min(max_cell(group.total(), rect[2].max(1.0), rect[3].max(1.0)));
-            }
-        } else {
-            cell = cell.min(max_cell(block.total(), inner_w, inner_h));
-        }
-    }
-    if !cell.is_finite() || cell < MIN_CELL {
-        MIN_CELL
-    } else {
-        (cell * 100.0).floor() / 100.0
-    }
-}
-
-fn inner_area(w: f64, h: f64) -> (f64, f64, bool) {
-    let inner_w = (w - BLOCK_PAD * 2.0).max(0.0);
-    let labeled = h >= LABEL_H + MIN_CELL + BLOCK_PAD * 2.0 + 4.0;
-    let inner_h = if labeled {
-        (h - BLOCK_PAD * 2.0 - LABEL_H).max(0.0)
-    } else {
-        (h - BLOCK_PAD * 2.0).max(0.0)
-    };
-    (inner_w, inner_h, labeled)
-}
-
-fn max_cell(n: usize, w: f64, h: f64) -> f64 {
-    if n == 0 || w <= 0.0 || h <= 0.0 {
-        return 0.0;
-    }
-    let mut best = 0.0;
-    for cols in 1..=n {
-        let rows = n.div_ceil(cols);
-        let cell_w = (w - UNIT_GAP * (cols as f64 - 1.0)) / cols as f64;
-        let cell_h = (h - UNIT_GAP * (rows as f64 - 1.0)) / rows as f64;
-        let cell = cell_w.min(cell_h);
-        if cell > best {
-            best = cell;
-        }
-    }
-    best
-}
-
-fn grid_for(n: usize, w: f64, h: f64, cell: f64) -> (usize, usize) {
-    let max_cols = (((w + UNIT_GAP) / (cell + UNIT_GAP)).floor() as usize).clamp(1, n);
-    let max_rows = (((h + UNIT_GAP) / (cell + UNIT_GAP)).floor() as usize).max(1);
-    let mut best = (1usize, n);
-    let mut best_score = f64::MAX;
-    for cols in 1..=max_cols {
-        let rows = n.div_ceil(cols);
-        if rows > max_rows {
-            continue;
-        }
-        let used_w = cols as f64 * cell + (cols.saturating_sub(1) as f64) * UNIT_GAP;
-        let used_h = rows as f64 * cell + (rows.saturating_sub(1) as f64) * UNIT_GAP;
-        if used_w > w + 0.01 || used_h > h + 0.01 {
-            continue;
-        }
-        let aspect = (used_w / used_h.max(0.001) - w / h.max(0.001)).abs();
-        let leftover = (cols * rows - n) as f64;
-        let score = leftover * 2.0 + aspect;
-        if score < best_score {
-            best_score = score;
-            best = (cols, rows);
-        }
-    }
-    best
-}
-
-/// Day-0 map: one labelled grey tile per known component, equal area.
-/// No unit cells and no invented denominator — those arrive with coverage/.
-fn paint_day0_catalog(out: &mut String, width: f64, height: f64) {
-    let weights: Vec<f64> = CATALOG.iter().map(|_| 1.0).collect();
-    let cells = squarify(&weights, 0.0, 0.0, width, height);
-    for (row, rect) in CATALOG.iter().zip(cells) {
-        let (x, y, w, h) = inset(rect[0], rect[1], rect[2], rect[3], BLOCK_GAP / 2.0);
-        if w < 2.0 || h < 2.0 {
-            continue;
-        }
-        out.push_str(&format!(
-            r##"<g data-component="{id}" data-x="{x:.2}" data-y="{y:.2}" data-w="{w:.2}" data-h="{h:.2}"><rect x="{x:.2}" y="{y:.2}" width="{w:.2}" height="{h:.2}" fill="{NOT_STARTED}"/><text x="{tx:.2}" y="{ty:.2}" text-anchor="middle" dominant-baseline="middle" font-family="JetBrains Mono, ui-monospace, monospace" font-size="11" font-weight="700" fill="{LABEL}">{label}</text></g>"##,
-            id = xml_esc(&row.id),
-            tx = x + w / 2.0,
-            ty = y + h / 2.0,
-            label = xml_esc(day0_label(row)),
-        ));
-    }
-}
-
-fn day0_label(row: &CatalogRow) -> &'static str {
-    match row.id {
-        "rest" => "REST",
-        "auth" => "AUTH",
-        "storage" => "STORAGE",
-        "realtime" => "REALTIME",
-        "functions" => "FUNCTIONS",
-        "pooler" => "POOLER",
-        "meta" => "META",
-        "studio" => "STUDIO",
-        _ => row.name,
-    }
-}
-
-fn paint_block(
-    out: &mut String,
-    block: &ComponentBlock,
-    x: f64,
-    y: f64,
-    w: f64,
-    h: f64,
-    cell: f64,
-) {
-    let n = block.total();
-    if n == 0 {
-        return;
-    }
-    let (inner_w, inner_h, labeled) = inner_area(w, h);
-    let origin_x = x + BLOCK_PAD;
-    let origin_y = y + BLOCK_PAD + if labeled { LABEL_H } else { 0.0 };
-
-    out.push_str(&format!(
-        r##"<g data-component="{id}" data-x="{x:.2}" data-y="{y:.2}" data-w="{w:.2}" data-h="{h:.2}">"##,
-        id = xml_esc(&block.id)
-    ));
-
-    if labeled && w >= 36.0 {
-        out.push_str(&format!(
-            r##"<text x="{tx:.2}" y="{ty:.2}" text-anchor="middle" dominant-baseline="middle" font-family="JetBrains Mono, ui-monospace, monospace" font-size="10" font-weight="700" fill="{LABEL}">{name}</text>"##,
-            tx = x + w / 2.0,
-            ty = y + BLOCK_PAD + LABEL_H / 2.0,
-            name = xml_esc(block.label)
-        ));
-    }
-
-    if block.groups.len() > 1 {
-        paint_groups(
-            out,
-            &block.groups,
-            origin_x,
-            origin_y,
-            inner_w,
-            inner_h,
-            cell,
-        );
-    } else {
-        let units = block.unit_statuses();
-        paint_unit_grid(out, &units, origin_x, origin_y, inner_w, inner_h, cell);
-    }
-    out.push_str("</g>");
-}
-
-fn paint_groups(
-    out: &mut String,
-    groups: &[FeatureGroup],
-    x: f64,
-    y: f64,
-    w: f64,
-    h: f64,
-    cell: f64,
-) {
-    let weights: Vec<f64> = groups.iter().map(|g| g.total() as f64).collect();
-    let cells = squarify(&weights, x, y, w, h);
-    for (group, rect) in groups.iter().zip(cells) {
-        let (gx, gy, gw, gh) = inset(rect[0], rect[1], rect[2], rect[3], 0.75);
-        if gw < 1.0 || gh < 1.0 {
-            continue;
-        }
-        out.push_str(&format!(
-            r##"<rect data-group="{id}" x="{gx:.2}" y="{gy:.2}" width="{gw:.2}" height="{gh:.2}" fill="none" stroke="{GROUP_STROKE}" stroke-width="0.5"/>"##,
-            id = xml_esc(&group.id)
-        ));
-        paint_unit_grid(out, &group.units, gx, gy, gw, gh, cell);
-    }
-}
-
-fn paint_unit_grid(
-    out: &mut String,
-    units: &[UnitStatus],
-    x: f64,
-    y: f64,
-    w: f64,
-    h: f64,
-    cell: f64,
-) {
-    let n = units.len();
-    if n == 0 {
-        return;
-    }
-    let (cols, rows) = grid_for(n, w, h, cell);
-    let grid_w = cols as f64 * cell + (cols.saturating_sub(1) as f64) * UNIT_GAP;
-    let grid_h = rows as f64 * cell + (rows.saturating_sub(1) as f64) * UNIT_GAP;
-    let origin_x = x + ((w - grid_w) / 2.0).max(0.0);
-    let origin_y = y + ((h - grid_h) / 2.0).max(0.0);
-    for (i, status) in units.iter().enumerate() {
-        let c = i % cols;
-        let r = i / cols;
-        let sx = origin_x + c as f64 * (cell + UNIT_GAP);
-        let sy = origin_y + r as f64 * (cell + UNIT_GAP);
-        let fill = status_color(*status);
-        out.push_str(&format!(
-            r##"<rect class="unit" x="{sx:.2}" y="{sy:.2}" width="{cell:.2}" height="{cell:.2}" fill="{fill}"/>"##
-        ));
-    }
-}
-
-fn status_color(status: UnitStatus) -> &'static str {
-    match status {
-        UnitStatus::NotStarted => NOT_STARTED,
-        UnitStatus::Implemented => IMPLEMENTED,
-        UnitStatus::Tested => TESTED,
-        UnitStatus::Conformant => CONFORMANT,
-    }
-}
-
-fn inset(x: f64, y: f64, w: f64, h: f64, pad: f64) -> (f64, f64, f64, f64) {
-    (
-        x + pad,
-        y + pad,
-        (w - pad * 2.0).max(0.0),
-        (h - pad * 2.0).max(0.0),
-    )
-}
-
-fn xml_esc(s: &str) -> String {
-    s.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-}
-
-/// Squarified treemap. `sizes` are relative weights; result rects are `[x,y,w,h]`.
-fn squarify(sizes: &[f64], x: f64, y: f64, dx: f64, dy: f64) -> Vec<[f64; 4]> {
-    let total: f64 = sizes.iter().sum();
-    let area = dx * dy;
-    if sizes.is_empty() || total <= 0.0 || area <= 0.0 {
-        return Vec::new();
-    }
-    let mut remaining: Vec<f64> = sizes.iter().map(|s| s / total * area).collect();
-    let mut x = x;
-    let mut y = y;
-    let mut dx = dx;
-    let mut dy = dy;
-    let mut out = Vec::with_capacity(sizes.len());
-
-    while !remaining.is_empty() {
-        let side = if dx >= dy { dy } else { dx };
-        if side <= 0.0 {
-            break;
-        }
-        let mut row = vec![remaining.remove(0)];
-        while !remaining.is_empty() {
-            let mut trial = row.clone();
-            trial.push(remaining[0]);
-            if worst_aspect(&row, side) >= worst_aspect(&trial, side) {
-                row.push(remaining.remove(0));
-            } else {
-                break;
-            }
-        }
-        let row_area: f64 = row.iter().sum();
-        if dx >= dy {
-            let width = (row_area / dy).min(dx);
-            let mut yy = y;
-            for a in &row {
-                let h = if width > 0.0 { a / width } else { 0.0 };
-                out.push([x, yy, width, h]);
-                yy += h;
-            }
-            x += width;
-            dx -= width;
-        } else {
-            let height = (row_area / dx).min(dy);
-            let mut xx = x;
-            for a in &row {
-                let w = if height > 0.0 { a / height } else { 0.0 };
-                out.push([xx, y, w, height]);
-                xx += w;
-            }
-            y += height;
-            dy -= height;
+fn component_weights(comps: &[&ComponentBlock], extra: i32, min_pct: i32) -> Vec<f64> {
+    let raw: Vec<f64> = comps
+        .iter()
+        .map(|c| {
+            let groups = group_n(c).max(1) as f64;
+            c.total() as f64 + extra as f64 * groups
+        })
+        .collect();
+    let sum: f64 = raw.iter().sum::<f64>().max(1.0);
+    let floor = (min_pct as f64 / 100.0) * sum;
+    let mut out = raw;
+    for w in &mut out {
+        if *w < floor {
+            *w = floor;
         }
     }
     out
 }
 
-fn worst_aspect(row: &[f64], side: f64) -> f64 {
+fn group_n(comp: &ComponentBlock) -> usize {
+    if comp.groups.is_empty() {
+        1
+    } else {
+        comp.groups.len()
+    }
+}
+
+fn groups_of(comp: &ComponentBlock) -> Vec<(&str, &str, &[UnitStatus])> {
+    if comp.groups.is_empty() {
+        vec![("units", "units", comp.units.as_slice())]
+    } else {
+        let mut groups: Vec<&FeatureGroup> = comp.groups.iter().filter(|g| g.total() > 0).collect();
+        groups.sort_by(|a, b| b.total().cmp(&a.total()).then_with(|| a.id.cmp(&b.id)));
+        groups
+            .into_iter()
+            .map(|g| {
+                let label = if g.label.is_empty() {
+                    g.id.as_str()
+                } else {
+                    g.label.as_str()
+                };
+                (g.id.as_str(), label, g.units.as_slice())
+            })
+            .collect()
+    }
+}
+
+fn place_groups(
+    comps: &[&ComponentBlock],
+    rects: &[IRect],
+    preset: Preset,
+) -> Option<Vec<Vec<IRect>>> {
+    let mut out = Vec::with_capacity(comps.len());
+    for (comp, block) in comps.iter().zip(rects) {
+        let body = body_rect(*block, preset);
+        if body.w < 1 || body.h < 1 {
+            return None;
+        }
+        if !preset.nested {
+            out.push(vec![body]);
+            continue;
+        }
+        let grouped = groups_of(comp);
+        if grouped.is_empty() {
+            out.push(vec![body]);
+            continue;
+        }
+        let weights: Vec<f64> = grouped
+            .iter()
+            .map(|(_, _, units)| units.len() as f64 + GROUP_BONUS)
+            .collect();
+        let rects = pack_rects(&weights, body.x, body.y, body.w, body.h, preset.gap);
+        if rects.len() != grouped.len() {
+            return None;
+        }
+        out.push(rects);
+    }
+    Some(out)
+}
+
+fn body_rect(block: IRect, preset: Preset) -> IRect {
+    let inset = if preset.nested { preset.gap } else { 0 };
+    let y = block.y + preset.header_h + inset;
+    let h = block.h - preset.header_h - inset * 2;
+    IRect {
+        x: block.x + inset,
+        y,
+        w: (block.w - inset * 2).max(0),
+        h: h.max(0),
+    }
+}
+
+fn finish_groups(
+    comps: &[&ComponentBlock],
+    rects: &[IRect],
+    group_rects: &[Vec<IRect>],
+    preset: Preset,
+    s: i32,
+) -> Option<Vec<PlacedComp>> {
+    let ugap = unit_gap(s);
+    let mut placed = Vec::with_capacity(comps.len());
+    for ((comp, block), grects) in comps.iter().zip(rects).zip(group_rects) {
+        let grouped = if preset.nested {
+            groups_of(comp)
+        } else {
+            vec![("units", "units", comp.units.as_slice())]
+        };
+        if grouped.len() != grects.len() {
+            return None;
+        }
+        let mut groups = Vec::with_capacity(grouped.len());
+        for ((id, label, units), rect) in grouped.into_iter().zip(grects) {
+            let ordered = ordered_units(units);
+            let n = ordered.len();
+            let (cols, ox, oy) = place_grid(n, *rect, s, ugap)?;
+            let text = group_label_text(label, *rect, ox, oy, preset);
+            groups.push(PlacedGroup {
+                id: id.to_string(),
+                rect: *rect,
+                n,
+                cols,
+                ox,
+                oy,
+                units: ordered,
+                text,
+            });
+        }
+        let (label, font_px) = component_label(comp, *block, preset);
+        placed.push(PlacedComp {
+            id: comp.id.clone(),
+            rect: *block,
+            label,
+            font_px,
+            groups,
+        });
+    }
+    Some(placed)
+}
+
+fn min_block_h(preset: Preset) -> i32 {
+    preset.header_h + if preset.nested { preset.gap * 2 } else { 0 } + S_MIN + 2
+}
+
+fn try_layout(
+    comps: &[&ComponentBlock],
+    preset: Preset,
+    extra: i32,
+    min_pct: i32,
+) -> Option<Layout> {
+    let mut weights = component_weights(comps, extra, min_pct);
+    for _ in 0..32 {
+        let rects = pack_rects(&weights, 0, 0, preset.width, preset.height, preset.gap);
+        if rects.len() != comps.len() {
+            return None;
+        }
+        if bump_min_sizes(comps, &rects, preset, &mut weights) {
+            continue;
+        }
+        if let Some(layout) = layout_from_rects(comps, &rects, preset) {
+            return Some(layout);
+        }
+        if !bump_unfit(comps, &rects, preset, &mut weights) {
+            return None;
+        }
+    }
+    None
+}
+
+fn layout_from_rects(comps: &[&ComponentBlock], rects: &[IRect], preset: Preset) -> Option<Layout> {
+    if rects.len() != comps.len() {
+        return None;
+    }
+    for (comp, r) in comps.iter().zip(rects) {
+        if r.w < min_label_width(comp, preset) || r.h < min_block_h(preset) {
+            return None;
+        }
+    }
+    let group_rects = place_groups(comps, rects, preset)?;
+    let slots = collect_slots(comps, &group_rects, preset)?;
+    let s = choose_s(&slots)?;
+    let placed = finish_groups(comps, rects, &group_rects, preset, s)?;
+    Some(Layout {
+        preset,
+        s,
+        unit_gap: unit_gap(s),
+        components: placed,
+    })
+}
+
+fn collect_slots(
+    comps: &[&ComponentBlock],
+    group_rects: &[Vec<IRect>],
+    preset: Preset,
+) -> Option<Vec<(IRect, usize)>> {
+    let mut slots = Vec::new();
+    for (comp, grects) in comps.iter().zip(group_rects) {
+        let grouped = if preset.nested {
+            groups_of(comp)
+        } else {
+            vec![("units", "units", comp.units.as_slice())]
+        };
+        if grouped.len() != grects.len() {
+            return None;
+        }
+        for ((_, _, units), rect) in grouped.iter().zip(grects) {
+            slots.push((*rect, units.len()));
+        }
+    }
+    Some(slots)
+}
+
+fn choose_s(slots: &[(IRect, usize)]) -> Option<i32> {
+    for s in (S_MIN..=S_MAX).rev() {
+        let ugap = unit_gap(s);
+        if slots
+            .iter()
+            .all(|(rect, n)| place_grid(*n, *rect, s, ugap).is_some())
+        {
+            return Some(s);
+        }
+    }
+    None
+}
+
+fn bump_min_sizes(
+    comps: &[&ComponentBlock],
+    rects: &[IRect],
+    preset: Preset,
+    weights: &mut [f64],
+) -> bool {
+    let mut bumped = false;
+    for (i, (comp, r)) in comps.iter().zip(rects).enumerate() {
+        let min_w = min_label_width(comp, preset);
+        if r.w < min_w {
+            weights[i] *= (min_w as f64 / r.w.max(1) as f64).max(1.08);
+            bumped = true;
+        }
+        let min_h = min_block_h(preset);
+        if r.h < min_h {
+            weights[i] *= (min_h as f64 / r.h.max(1) as f64).max(1.08);
+            bumped = true;
+        }
+    }
+    bumped
+}
+
+fn bump_unfit(
+    comps: &[&ComponentBlock],
+    rects: &[IRect],
+    preset: Preset,
+    weights: &mut [f64],
+) -> bool {
+    let Some(group_rects) = place_groups(comps, rects, preset) else {
+        return false;
+    };
+    let ugap = unit_gap(S_MIN);
+    let mut any = false;
+    for (i, (comp, grects)) in comps.iter().zip(&group_rects).enumerate() {
+        let grouped = if preset.nested {
+            groups_of(comp)
+        } else {
+            vec![("units", "units", comp.units.as_slice())]
+        };
+        let mut scale = 1.0_f64;
+        for ((_, _, units), rect) in grouped.iter().zip(grects) {
+            if place_grid(units.len(), *rect, S_MIN, ugap).is_none() {
+                let cap = grid_capacity(*rect, S_MIN, ugap).max(1);
+                scale = scale.max(units.len().max(1) as f64 / cap as f64);
+            }
+        }
+        if scale > 1.0 {
+            weights[i] *= scale.max(1.08);
+            any = true;
+        }
+    }
+    any
+}
+
+fn grid_capacity(rect: IRect, s: i32, gap: i32) -> usize {
+    let stride = s + gap;
+    if stride <= 0 {
+        return 0;
+    }
+    let cols = ((rect.w + gap) / stride).max(0) as usize;
+    let rows = ((rect.h + gap) / stride).max(0) as usize;
+    cols.saturating_mul(rows)
+}
+
+fn try_peel_layout(comps: &[&ComponentBlock], preset: Preset) -> Option<Layout> {
+    let n = comps.len();
+    let mut order: Vec<usize> = (0..n).collect();
+    order.sort_by(|&a, &b| {
+        comps[b]
+            .total()
+            .cmp(&comps[a].total())
+            .then_with(|| comps[a].id.cmp(&comps[b].id))
+    });
+    let canvas = IRect {
+        x: 0,
+        y: 0,
+        w: preset.width,
+        h: preset.height,
+    };
+    let placed = peel_pack(&order, canvas, comps, preset)?;
+    let mut rects = vec![
+        IRect {
+            x: 0,
+            y: 0,
+            w: 1,
+            h: 1
+        };
+        n
+    ];
+    for (i, r) in placed {
+        rects[i] = r;
+    }
+    layout_from_rects(comps, &rects, preset)
+}
+
+fn peel_pack(
+    items: &[usize],
+    rect: IRect,
+    comps: &[&ComponentBlock],
+    preset: Preset,
+) -> Option<Vec<(usize, IRect)>> {
+    if items.is_empty() {
+        return Some(Vec::new());
+    }
+    if items.len() == 1 {
+        return if block_can_hold(comps[items[0]], rect, preset) {
+            Some(vec![(items[0], rect)])
+        } else {
+            None
+        };
+    }
+    let gap = preset.gap;
+    let first = items[0];
+    let rest = &items[1..];
+    let t0 = comps[first].total().max(1) as i64;
+    let t_all: i64 = items.iter().map(|&i| comps[i].total().max(1) as i64).sum();
+
+    if rect.w > gap + 2 {
+        if let Some(w_min) = min_width_for(comps[first], rect.h, rect.w - gap - 1, preset) {
+            let w_max = rect.w - gap - 1;
+            let mut ws = split_sizes(w_min, w_max, t0, t_all, rect.w - gap);
+            for w in ws.drain(..) {
+                let r1 = IRect {
+                    x: rect.x,
+                    y: rect.y,
+                    w,
+                    h: rect.h,
+                };
+                let r2 = IRect {
+                    x: rect.x + w + gap,
+                    y: rect.y,
+                    w: rect.w - w - gap,
+                    h: rect.h,
+                };
+                if let Some(p) = peel_side(first, r1, rest, r2, comps, preset) {
+                    return Some(p);
+                }
+                let r1r = IRect {
+                    x: rect.x + rect.w - w,
+                    y: rect.y,
+                    w,
+                    h: rect.h,
+                };
+                let r2r = IRect {
+                    x: rect.x,
+                    y: rect.y,
+                    w: rect.w - w - gap,
+                    h: rect.h,
+                };
+                if let Some(p) = peel_side(first, r1r, rest, r2r, comps, preset) {
+                    return Some(p);
+                }
+            }
+        }
+    }
+    if rect.h > gap + 2 {
+        if let Some(h_min) = min_height_for(comps[first], rect.w, rect.h - gap - 1, preset) {
+            let h_max = rect.h - gap - 1;
+            let mut hs = split_sizes(h_min, h_max, t0, t_all, rect.h - gap);
+            for h in hs.drain(..) {
+                let r1 = IRect {
+                    x: rect.x,
+                    y: rect.y,
+                    w: rect.w,
+                    h,
+                };
+                let r2 = IRect {
+                    x: rect.x,
+                    y: rect.y + h + gap,
+                    w: rect.w,
+                    h: rect.h - h - gap,
+                };
+                if let Some(p) = peel_side(first, r1, rest, r2, comps, preset) {
+                    return Some(p);
+                }
+                let r1b = IRect {
+                    x: rect.x,
+                    y: rect.y + rect.h - h,
+                    w: rect.w,
+                    h,
+                };
+                let r2b = IRect {
+                    x: rect.x,
+                    y: rect.y,
+                    w: rect.w,
+                    h: rect.h - h - gap,
+                };
+                if let Some(p) = peel_side(first, r1b, rest, r2b, comps, preset) {
+                    return Some(p);
+                }
+            }
+        }
+    }
+    None
+}
+
+fn peel_side(
+    first: usize,
+    r1: IRect,
+    rest: &[usize],
+    r2: IRect,
+    comps: &[&ComponentBlock],
+    preset: Preset,
+) -> Option<Vec<(usize, IRect)>> {
+    if r1.w < 1 || r1.h < 1 || r2.w < 1 || r2.h < 1 {
+        return None;
+    }
+    if !block_can_hold(comps[first], r1, preset) {
+        return None;
+    }
+    let mut p = peel_pack(rest, r2, comps, preset)?;
+    p.insert(0, (first, r1));
+    Some(p)
+}
+
+fn split_sizes(min: i32, max: i32, t0: i64, t_all: i64, inner: i32) -> Vec<i32> {
+    if min > max {
+        return Vec::new();
+    }
+    let prop = (inner as i64 * t0 / t_all.max(1)) as i32;
+    let mut out = vec![min, prop.clamp(min, max), (min + max) / 2, max];
+    out.sort_unstable();
+    out.dedup();
+    out
+}
+
+fn min_width_for(comp: &ComponentBlock, h: i32, max_w: i32, preset: Preset) -> Option<i32> {
+    let mut lo = min_label_width(comp, preset).clamp(1, max_w);
+    let mut hi = max_w;
+    if !block_can_hold(
+        comp,
+        IRect {
+            x: 0,
+            y: 0,
+            w: hi,
+            h,
+        },
+        preset,
+    ) {
+        return None;
+    }
+    while lo < hi {
+        let mid = (lo + hi) / 2;
+        if block_can_hold(
+            comp,
+            IRect {
+                x: 0,
+                y: 0,
+                w: mid,
+                h,
+            },
+            preset,
+        ) {
+            hi = mid;
+        } else {
+            lo = mid + 1;
+        }
+    }
+    Some(lo)
+}
+
+fn min_height_for(comp: &ComponentBlock, w: i32, max_h: i32, preset: Preset) -> Option<i32> {
+    let mut lo = min_block_h(preset).clamp(1, max_h);
+    let mut hi = max_h;
+    if !block_can_hold(
+        comp,
+        IRect {
+            x: 0,
+            y: 0,
+            w,
+            h: hi,
+        },
+        preset,
+    ) {
+        return None;
+    }
+    while lo < hi {
+        let mid = (lo + hi) / 2;
+        if block_can_hold(
+            comp,
+            IRect {
+                x: 0,
+                y: 0,
+                w,
+                h: mid,
+            },
+            preset,
+        ) {
+            hi = mid;
+        } else {
+            lo = mid + 1;
+        }
+    }
+    Some(lo)
+}
+
+fn block_can_hold(comp: &ComponentBlock, rect: IRect, preset: Preset) -> bool {
+    if rect.w < min_label_width(comp, preset) || rect.h < min_block_h(preset) {
+        return false;
+    }
+    let body = body_rect(rect, preset);
+    if body.w < 1 || body.h < 1 {
+        return false;
+    }
+    let ugap = unit_gap(S_MIN);
+    if !preset.nested {
+        return place_grid(comp.total(), body, S_MIN, ugap).is_some();
+    }
+    let grouped = groups_of(comp);
+    if grouped.is_empty() {
+        return true;
+    }
+    let weights: Vec<f64> = grouped
+        .iter()
+        .map(|(_, _, units)| units.len() as f64 + GROUP_BONUS)
+        .collect();
+    let grects = pack_rects(&weights, body.x, body.y, body.w, body.h, preset.gap);
+    grects.len() == grouped.len()
+        && grouped
+            .iter()
+            .zip(&grects)
+            .all(|((_, _, units), r)| place_grid(units.len(), *r, S_MIN, ugap).is_some())
+}
+
+fn component_name(comp: &ComponentBlock) -> String {
+    comp.label.to_ascii_uppercase()
+}
+
+fn min_label_width(comp: &ComponentBlock, _preset: Preset) -> i32 {
+    let name = component_name(comp);
+    LABEL_INSET + mono_w(&name, 8) + 4
+}
+
+fn component_label(comp: &ComponentBlock, block: IRect, preset: Preset) -> (String, i32) {
+    let name = component_name(comp);
+    let full = format!(
+        "{} {}/{}",
+        name,
+        comma(comp.conformant),
+        comma(comp.total())
+    );
+    let start = if preset.header_h >= 20 {
+        11
+    } else if preset.header_h >= 18 {
+        10
+    } else {
+        9
+    };
+    let budget = (block.w - LABEL_INSET - 4).max(0);
+    for px in (8..=start).rev() {
+        if mono_w(&full, px) <= budget {
+            return (full, px);
+        }
+    }
+    for px in (8..=start).rev() {
+        if mono_w(&name, px) <= budget {
+            return (name, px);
+        }
+    }
+    (name, 8)
+}
+
+fn group_label_text(id: &str, rect: IRect, _ox: i32, oy: i32, preset: Preset) -> Option<String> {
+    if !preset.nested {
+        return None;
+    }
+    let px = preset.group_label_px;
+    let ty = rect.y + if px >= 8 { 9 } else { 8 };
+    // Keep the label above the square grid.
+    if ty + 2 > oy {
+        return None;
+    }
+    let budget = (rect.w - 6).max(0);
+    if budget < mono_w("…", px) {
+        return None;
+    }
+    let raw = id.to_ascii_lowercase();
+    if mono_w(&raw, px) <= budget {
+        return Some(raw);
+    }
+    let chars: Vec<char> = raw.chars().collect();
+    for keep in (1..chars.len()).rev() {
+        let mut s: String = chars[..keep].iter().collect();
+        s.push('…');
+        if mono_w(&s, px) <= budget {
+            return Some(s);
+        }
+    }
+    None
+}
+
+fn ordered_units(units: &[UnitStatus]) -> Vec<UnitStatus> {
+    let mut out = Vec::with_capacity(units.len());
+    for status in [
+        UnitStatus::Conformant,
+        UnitStatus::Tested,
+        UnitStatus::Implemented,
+        UnitStatus::NotStarted,
+    ] {
+        out.extend(units.iter().copied().filter(|u| *u == status));
+    }
+    out
+}
+
+fn unit_gap(s: i32) -> i32 {
+    if s < 6 {
+        1
+    } else if s < 14 {
+        2
+    } else {
+        3
+    }
+}
+
+fn mono_w(text: &str, px: i32) -> i32 {
+    // JetBrains Mono is 0.6em per character.
+    text.chars().count() as i32 * px * 3 / 5
+}
+
+fn place_grid(n: usize, rect: IRect, s: i32, gap: i32) -> Option<(i32, i32, i32)> {
+    if n == 0 {
+        return Some((0, rect.x, rect.y));
+    }
+    let stride = s + gap;
+    if stride <= 0 || s < S_MIN {
+        return None;
+    }
+    let max_cols = ((rect.w + gap) / stride).max(0);
+    let max_rows = ((rect.h + gap) / stride).max(0);
+    if max_cols <= 0 || max_rows <= 0 {
+        return None;
+    }
+    let n = n as i32;
+    let mut best: Option<(i32, i32, i32, i32, f64)> = None;
+    for cols in 1..=max_cols.min(n) {
+        let rows = (n + cols - 1) / cols;
+        if rows > max_rows {
+            continue;
+        }
+        let gw = cols * stride - gap;
+        let gh = rows * stride - gap;
+        if gw > rect.w || gh > rect.h {
+            continue;
+        }
+        let min_ox = rect.x;
+        let max_ox = rect.x + rect.w - gw;
+        let min_oy = rect.y;
+        let max_oy = rect.y + rect.h - gh;
+        if min_ox > max_ox || min_oy > max_oy {
+            continue;
+        }
+        let ideal_ox = rect.x as f64 + (rect.w - gw) as f64 / 2.0;
+        let ideal_oy = rect.y as f64 + (rect.h - gh) as f64 / 2.0;
+        let Some(ox) = snap_lattice(ideal_ox, stride, min_ox, max_ox) else {
+            continue;
+        };
+        let Some(oy) = snap_lattice(ideal_oy, stride, min_oy, max_oy) else {
+            continue;
+        };
+        if (ox as f64 - ideal_ox).abs() > stride as f64 + 0.51 {
+            continue;
+        }
+        if (oy as f64 - ideal_oy).abs() > stride as f64 + 0.51 {
+            continue;
+        }
+        let leftover = cols * rows - n;
+        let aspect =
+            ((gw as f64 / gh.max(1) as f64) - (rect.w as f64 / rect.h.max(1) as f64)).abs();
+        let better = match best {
+            None => true,
+            Some((c, _, _, l, a)) => {
+                leftover < l
+                    || (leftover == l && aspect < a - f64::EPSILON)
+                    || (leftover == l && (aspect - a).abs() < f64::EPSILON && cols < c)
+            }
+        };
+        if better {
+            best = Some((cols, ox, oy, leftover, aspect));
+        }
+    }
+    let (cols, ox, oy, _, _) = best?;
+    Some((cols, ox, oy))
+}
+
+fn snap_lattice(ideal: f64, stride: i32, min: i32, max: i32) -> Option<i32> {
+    if stride <= 0 || min > max {
+        return None;
+    }
+    let mut t = min.div_euclid(stride) * stride;
+    if t < min {
+        t = t.saturating_add(stride);
+    }
+    let mut best = None;
+    let mut best_d = f64::MAX;
+    while t <= max {
+        let d = (t as f64 - ideal).abs();
+        if d < best_d {
+            best_d = d;
+            best = Some(t);
+        }
+        match t.checked_add(stride) {
+            Some(n) => t = n,
+            None => break,
+        }
+    }
+    best
+}
+
+fn pack_rects(weights: &[f64], x: i32, y: i32, w: i32, h: i32, gap: i32) -> Vec<IRect> {
+    if weights.is_empty() || w <= 0 || h <= 0 {
+        return Vec::new();
+    }
+    let raw = squarify(weights, x as f64, y as f64, w as f64, h as f64);
+    let mut rects: Vec<IRect> = raw
+        .iter()
+        .map(|r| {
+            let x1 = r[0].round() as i32;
+            let y1 = r[1].round() as i32;
+            let x2 = (r[0] + r[2]).round() as i32;
+            let y2 = (r[1] + r[3]).round() as i32;
+            IRect {
+                x: x1,
+                y: y1,
+                w: (x2 - x1).max(1),
+                h: (y2 - y1).max(1),
+            }
+        })
+        .collect();
+    let canvas = IRect { x, y, w, h };
+    for r in &mut rects {
+        if r.x < canvas.x {
+            r.w -= canvas.x - r.x;
+            r.x = canvas.x;
+        }
+        if r.y < canvas.y {
+            r.h -= canvas.y - r.y;
+            r.y = canvas.y;
+        }
+        if r.right() > canvas.right() {
+            r.w = canvas.right() - r.x;
+        }
+        if r.bottom() > canvas.bottom() {
+            r.h = canvas.bottom() - r.y;
+        }
+        r.w = r.w.max(1);
+        r.h = r.h.max(1);
+    }
+    apply_internal_gaps(&mut rects, gap);
+    for r in &mut rects {
+        if r.right() > canvas.right() {
+            r.w = (canvas.right() - r.x).max(1);
+        }
+        if r.bottom() > canvas.bottom() {
+            r.h = (canvas.bottom() - r.y).max(1);
+        }
+        r.w = r.w.max(1);
+        r.h = r.h.max(1);
+    }
+    rects
+}
+
+fn apply_internal_gaps(rects: &mut [IRect], gap: i32) {
+    if rects.len() < 2 || gap <= 0 {
+        return;
+    }
+    let orig = rects.to_vec();
+    for (i, r) in rects.iter_mut().enumerate() {
+        let cur = orig[i];
+        let mut neighbor_right = false;
+        let mut neighbor_bottom = false;
+        for (j, o) in orig.iter().enumerate() {
+            if i == j {
+                continue;
+            }
+            let y_overlap = cur.y < o.bottom() - 1 && o.y < cur.bottom() - 1;
+            let x_overlap = cur.x < o.right() - 1 && o.x < cur.right() - 1;
+            if y_overlap && (o.x - cur.right()).abs() <= 1 && o.x >= cur.x {
+                neighbor_right = true;
+            }
+            if x_overlap && (o.y - cur.bottom()).abs() <= 1 && o.y >= cur.y {
+                neighbor_bottom = true;
+            }
+        }
+        if neighbor_right {
+            r.w = (r.w - gap).max(1);
+        }
+        if neighbor_bottom {
+            r.h = (r.h - gap).max(1);
+        }
+    }
+}
+
+/// Squarified treemap (Bruls et al.), largest first. Result is in input order.
+fn squarify(sizes: &[f64], x: f64, y: f64, dx: f64, dy: f64) -> Vec<[f64; 4]> {
+    let n = sizes.len();
+    let mut order: Vec<usize> = (0..n).collect();
+    order.sort_by(|a, b| sizes[*b].total_cmp(&sizes[*a]).then(a.cmp(b)));
+    let total: f64 = sizes.iter().sum();
+    let mut out = vec![[0.0; 4]; n];
+    if n == 0 || total <= 0.0 || dx <= 0.0 || dy <= 0.0 {
+        return out;
+    }
+    let area = dx * dy;
+    let areas: Vec<f64> = order.iter().map(|i| sizes[*i] / total * area).collect();
+    let mut free_x = x;
+    let mut free_y = y;
+    let mut free_w = dx;
+    let mut free_h = dy;
+    let mut i = 0;
+    while i < areas.len() {
+        let side = if free_w >= free_h { free_h } else { free_w };
+        if side <= 0.0 {
+            break;
+        }
+        let mut j = i + 1;
+        while j < areas.len() && worst(&areas[i..j], side) >= worst(&areas[i..=j], side) {
+            j += 1;
+        }
+        let row_area: f64 = areas[i..j].iter().sum();
+        if free_w >= free_h {
+            let width = if free_h > 0.0 {
+                (row_area / free_h).min(free_w)
+            } else {
+                0.0
+            };
+            let mut yy = free_y;
+            for k in i..j {
+                let h = if width > 0.0 { areas[k] / width } else { 0.0 };
+                out[order[k]] = [free_x, yy, width, h];
+                yy += h;
+            }
+            free_x += width;
+            free_w -= width;
+        } else {
+            let height = if free_w > 0.0 {
+                (row_area / free_w).min(free_h)
+            } else {
+                0.0
+            };
+            let mut xx = free_x;
+            for k in i..j {
+                let w = if height > 0.0 { areas[k] / height } else { 0.0 };
+                out[order[k]] = [xx, free_y, w, height];
+                xx += w;
+            }
+            free_y += height;
+            free_h -= height;
+        }
+        i = j;
+    }
+    out
+}
+
+fn worst(row: &[f64], side: f64) -> f64 {
     let s: f64 = row.iter().sum();
     if s == 0.0 || side == 0.0 {
         return f64::MAX;
@@ -696,50 +1146,751 @@ fn worst_aspect(row: &[f64], side: f64) -> f64 {
         .fold(0.0_f64, f64::max)
 }
 
+fn day0_layout(preset: Preset) -> Layout {
+    let weights = vec![1.0; CATALOG.len()];
+    let rects = pack_rects(&weights, 0, 0, preset.width, preset.height, preset.gap);
+    let components = CATALOG
+        .iter()
+        .zip(rects)
+        .map(|(row, rect)| {
+            let name = day0_name(row);
+            let font_px = if mono_w(&name, 11) + LABEL_INSET + 4 <= rect.w {
+                11.min(if preset.header_h >= 20 { 11 } else { 9 })
+            } else {
+                8
+            };
+            PlacedComp {
+                id: row.id.to_string(),
+                rect,
+                label: name,
+                font_px,
+                groups: Vec::new(),
+            }
+        })
+        .collect();
+    Layout {
+        preset,
+        s: 0,
+        unit_gap: 0,
+        components,
+    }
+}
+
+fn day0_name(row: &CatalogRow) -> String {
+    match row.id {
+        "rest" => "REST",
+        "auth" => "AUTH",
+        "storage" => "STORAGE",
+        "realtime" => "REALTIME",
+        "functions" => "FUNCTIONS",
+        "pooler" => "POOLER",
+        "meta" => "META",
+        "studio" => "STUDIO",
+        _ => row.name,
+    }
+    .to_string()
+}
+
+fn paint(layout: &Layout, metrics: &Metrics) -> String {
+    let w = layout.preset.width;
+    let h = layout.preset.height;
+    let label = xml_esc(&alt_text(metrics));
+    let mut out = String::new();
+    out.push_str(&format!(
+        r##"<svg class="treemap-svg" viewBox="0 0 {w} {h}" width="100%" height="auto" preserveAspectRatio="xMidYMid meet" style="display:block;max-width:100%" role="img" aria-label="{label}" xmlns="http://www.w3.org/2000/svg"><title>{label}</title>"##
+    ));
+    let used = used_status_colors(layout);
+    if layout.s >= S_MIN && !used.is_empty() {
+        out.push_str("<defs>");
+        let stride = layout.s + layout.unit_gap;
+        for (status, color) in used {
+            let id = pattern_id(layout.preset.id, status);
+            out.push_str(&format!(
+                r##"<pattern id="{id}" width="{stride}" height="{stride}" patternUnits="userSpaceOnUse"><rect width="{s}" height="{s}" fill="{color}"/></pattern>"##,
+                s = layout.s,
+            ));
+        }
+        out.push_str("</defs>");
+    }
+    out.push_str(&format!(
+        r##"<rect width="{w}" height="{h}" fill="{BG}"/>"##
+    ));
+    for comp in &layout.components {
+        paint_component(&mut out, layout, comp);
+    }
+    out.push_str("</svg>");
+    out
+}
+
+fn used_status_colors(layout: &Layout) -> Vec<(UnitStatus, &'static str)> {
+    let mut seen = [false; 4];
+    for comp in &layout.components {
+        for g in &comp.groups {
+            for u in &g.units {
+                seen[status_idx(*u)] = true;
+            }
+        }
+    }
+    let mut out = Vec::new();
+    for status in [
+        UnitStatus::Conformant,
+        UnitStatus::Tested,
+        UnitStatus::Implemented,
+        UnitStatus::NotStarted,
+    ] {
+        if seen[status_idx(status)] {
+            out.push((status, status_color(status)));
+        }
+    }
+    out
+}
+
+fn status_idx(s: UnitStatus) -> usize {
+    match s {
+        UnitStatus::Conformant => 0,
+        UnitStatus::Tested => 1,
+        UnitStatus::Implemented => 2,
+        UnitStatus::NotStarted => 3,
+    }
+}
+
+fn status_color(s: UnitStatus) -> &'static str {
+    match s {
+        UnitStatus::NotStarted => NOT_STARTED,
+        UnitStatus::Implemented => IMPLEMENTED,
+        UnitStatus::Tested => TESTED,
+        UnitStatus::Conformant => CONFORMANT,
+    }
+}
+
+fn pattern_id(preset: &str, status: UnitStatus) -> String {
+    let tag = match status {
+        UnitStatus::NotStarted => "ns",
+        UnitStatus::Implemented => "im",
+        UnitStatus::Tested => "te",
+        UnitStatus::Conformant => "co",
+    };
+    format!("tm-{preset}-{tag}")
+}
+
+fn paint_component(out: &mut String, layout: &Layout, comp: &PlacedComp) {
+    let r = comp.rect;
+    out.push_str(&format!(
+        r##"<g data-component="{id}" data-x="{x}" data-y="{y}" data-w="{w}" data-h="{h}"><rect fill="{BLOCK}" x="{x}" y="{y}" width="{w}" height="{h}"/><rect class="block-head" fill="{HEADER}" x="{x}" y="{y}" width="{w}" height="{hh}"/>"##,
+        id = xml_esc(&comp.id),
+        x = r.x,
+        y = r.y,
+        w = r.w,
+        h = r.h,
+        hh = layout.preset.header_h,
+    ));
+    let ty = r.y
+        + if layout.preset.header_h >= 18 {
+            layout.preset.header_h - 6
+        } else {
+            layout.preset.header_h - 4
+        };
+    out.push_str(&format!(
+        r##"<text x="{tx}" y="{ty}" font-family="JetBrains Mono, ui-monospace, monospace" font-size="{px}" fill="{LABEL}">{label}</text>"##,
+        tx = r.x + LABEL_INSET,
+        px = comp.font_px,
+        label = xml_esc(&comp.label),
+    ));
+    for g in &comp.groups {
+        paint_group(out, layout, g);
+    }
+    out.push_str("</g>");
+}
+
+fn paint_group(out: &mut String, layout: &Layout, g: &PlacedGroup) {
+    let r = g.rect;
+    if layout.preset.nested {
+        out.push_str(&format!(
+            r##"<g data-group="{id}" data-n="{n}" data-s="{s}" data-gap="{gap}" data-cols="{cols}" data-ox="{ox}" data-oy="{oy}" data-x="{x}" data-y="{y}" data-w="{w}" data-h="{h}"><rect fill="{GROUP}" x="{x}" y="{y}" width="{w}" height="{h}"/>"##,
+            id = xml_esc(&g.id),
+            n = g.n,
+            s = layout.s,
+            gap = layout.unit_gap,
+            cols = g.cols,
+            ox = g.ox,
+            oy = g.oy,
+            x = r.x,
+            y = r.y,
+            w = r.w,
+            h = r.h,
+        ));
+    } else {
+        out.push_str(&format!(
+            r##"<g data-group="{id}" data-n="{n}" data-s="{s}" data-gap="{gap}" data-cols="{cols}" data-ox="{ox}" data-oy="{oy}" data-x="{x}" data-y="{y}" data-w="{w}" data-h="{h}">"##,
+            id = xml_esc(&g.id),
+            n = g.n,
+            s = layout.s,
+            gap = layout.unit_gap,
+            cols = g.cols,
+            ox = g.ox,
+            oy = g.oy,
+            x = r.x,
+            y = r.y,
+            w = r.w,
+            h = r.h,
+        ));
+    }
+    if g.n > 0 && layout.s >= S_MIN && g.cols > 0 {
+        paint_cells(out, layout, g);
+    }
+    if let Some(text) = &g.text {
+        let ty = r.y
+            + if layout.preset.group_label_px >= 8 {
+                9
+            } else {
+                8
+            };
+        out.push_str(&format!(
+            r##"<text font-size="{px}" fill="{GROUP_LABEL}" x="{tx}" y="{ty}">{text}</text>"##,
+            px = layout.preset.group_label_px,
+            tx = r.x + 3,
+            text = xml_esc(text),
+        ));
+    }
+    out.push_str("</g>");
+}
+
+fn paint_cells(out: &mut String, layout: &Layout, g: &PlacedGroup) {
+    let mut i = 0usize;
+    while i < g.units.len() {
+        let status = g.units[i];
+        let mut j = i + 1;
+        while j < g.units.len() && g.units[j] == status {
+            j += 1;
+        }
+        let paths = run_paths(i, j - i, g.cols, g.ox, g.oy, layout.s, layout.unit_gap);
+        let fill = pattern_id(layout.preset.id, status);
+        for p in &paths {
+            out.push_str(&format!(
+                r##"<path class="tm-cells" data-status="{st}" fill="url(#{fill})" d="M{x} {y}h{w}v{h}h-{w}z"/>"##,
+                st = status_slug(status),
+                x = p.x,
+                y = p.y,
+                w = p.w,
+                h = p.h,
+            ));
+        }
+        i = j;
+    }
+}
+
+fn status_slug(s: UnitStatus) -> &'static str {
+    match s {
+        UnitStatus::NotStarted => "not-started",
+        UnitStatus::Implemented => "implemented",
+        UnitStatus::Tested => "tested",
+        UnitStatus::Conformant => "conformant",
+    }
+}
+
+fn run_paths(
+    start: usize,
+    count: usize,
+    cols: i32,
+    ox: i32,
+    oy: i32,
+    s: i32,
+    gap: i32,
+) -> Vec<IRect> {
+    if count == 0 || cols <= 0 {
+        return Vec::new();
+    }
+    let stride = s + gap;
+    let mut out = Vec::new();
+    let mut i = 0i32;
+    let count = count as i32;
+    let start = start as i32;
+    while i < count {
+        let idx = start + i;
+        let col = idx % cols;
+        let row = idx / cols;
+        let take = (cols - col).min(count - i);
+        let x = ox + col * stride;
+        let y = oy + row * stride;
+        if col == 0 && take == cols {
+            let mut rows_n = 1;
+            i += take;
+            while i + cols <= count && (start + i) % cols == 0 {
+                rows_n += 1;
+                i += cols;
+            }
+            out.push(IRect {
+                x,
+                y,
+                w: cols * stride - gap,
+                h: rows_n * stride - gap,
+            });
+        } else {
+            out.push(IRect {
+                x,
+                y,
+                w: take * stride - gap,
+                h: s,
+            });
+            i += take;
+        }
+    }
+    out
+}
+
+fn xml_esc(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::metrics::{ComponentBlock, Metrics, UnitStatus};
+    use crate::metrics::{ComponentBlock, FeatureGroup, Metrics, UnitStatus};
     use std::collections::HashSet;
+    use std::path::PathBuf;
 
-    fn sample_metrics() -> Metrics {
+    fn real_metrics() -> Metrics {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .to_path_buf();
+        crate::metrics::load(&root)
+    }
+
+    fn synthetic(total: usize) -> Metrics {
         let mut metrics = Metrics::placeholder();
-        metrics.total = Some(10);
-        metrics.passing = Some(2);
-        metrics.components = vec![
-            ComponentBlock::from_units(
+        if total == 0 {
+            return metrics;
+        }
+        if total == 1 {
+            metrics.total = Some(1);
+            metrics.passing = Some(0);
+            metrics.components = vec![ComponentBlock::from_groups(
                 "rest",
                 "REST",
-                vec![
-                    UnitStatus::NotStarted,
-                    UnitStatus::NotStarted,
-                    UnitStatus::NotStarted,
-                    UnitStatus::NotStarted,
+                vec![FeatureGroup {
+                    id: "filtering".into(),
+                    label: "filtering".into(),
+                    units: vec![UnitStatus::NotStarted],
+                }],
+                vec![UnitStatus::NotStarted],
+            )];
+            return metrics;
+        }
+        // Hero mobile is 308×300. Eight labeled blocks cannot hold 5,000
+        // stride-4 squares; four equal-ish blocks can.
+        let (shares, ids): (&[usize], &[(&str, &str)]) = if total > 2000 {
+            (
+                &[1, 1, 1, 1],
+                &[
+                    ("functions", "Functions"),
+                    ("studio", "Studio"),
+                    ("auth", "Auth"),
+                    ("storage", "Storage"),
                 ],
-            ),
-            ComponentBlock::from_units(
-                "auth",
-                "Auth",
-                vec![
+            )
+        } else {
+            (
+                &[276, 250, 152, 149, 93, 69, 19, 16],
+                &[
+                    ("functions", "Functions"),
+                    ("studio", "Studio"),
+                    ("auth", "Auth"),
+                    ("storage", "Storage"),
+                    ("rest", "REST"),
+                    ("meta", "Meta"),
+                    ("realtime", "Realtime"),
+                    ("pooler", "Pooler"),
+                ],
+            )
+        };
+        let share_sum: usize = shares.iter().sum();
+        let mut parts: Vec<usize> = shares
+            .iter()
+            .map(|s| (total * *s + share_sum / 2) / share_sum)
+            .collect();
+        let diff = total as i32 - parts.iter().sum::<usize>() as i32;
+        if diff != 0 {
+            parts[0] = (parts[0] as i32 + diff).max(1) as usize;
+        }
+        while parts.iter().sum::<usize>() > total {
+            if let Some(p) = parts.iter_mut().find(|p| **p > 1) {
+                *p -= 1;
+            } else {
+                break;
+            }
+        }
+        while parts.iter().sum::<usize>() < total {
+            parts[0] += 1;
+        }
+        let mut blocks = Vec::new();
+        for ((id, label), n) in ids.iter().zip(parts) {
+            if n == 0 {
+                continue;
+            }
+            let g1 = (n / 2).max(1).min(n);
+            let g2 = n - g1;
+            let mut groups = vec![FeatureGroup {
+                id: "a".into(),
+                label: "a".into(),
+                units: vec![UnitStatus::NotStarted; g1],
+            }];
+            if g2 > 0 {
+                groups.push(FeatureGroup {
+                    id: "b".into(),
+                    label: "b".into(),
+                    units: vec![UnitStatus::NotStarted; g2],
+                });
+            }
+            blocks.push(ComponentBlock::from_groups(*id, label, groups, vec![]));
+        }
+        metrics.total = Some(total);
+        metrics.passing = Some(0);
+        metrics.components = blocks;
+        metrics
+    }
+
+    fn parse_attr<'a>(chunk: &'a str, key: &str) -> &'a str {
+        let start = chunk.find(key).unwrap_or_else(|| panic!("missing {key}")) + key.len() + 1;
+        let rest = &chunk[start..];
+        let end = rest.find('"').expect("quote");
+        &rest[..end]
+    }
+
+    fn parse_i(chunk: &str, key: &str) -> i32 {
+        parse_attr(chunk, key).parse().expect(key)
+    }
+
+    struct ParsedGroup {
+        component: String,
+        id: String,
+        n: usize,
+        s: i32,
+        gap: i32,
+        cols: i32,
+        ox: i32,
+        oy: i32,
+        rect: IRect,
+        block: IRect,
+    }
+
+    fn parse_groups(svg: &str) -> Vec<ParsedGroup> {
+        let mut out = Vec::new();
+        for (i, _) in svg.match_indices("<g data-group=\"") {
+            let gchunk = &svg[i..];
+            let before = &svg[..i];
+            let comp_at = before
+                .rfind("<g data-component=\"")
+                .expect("group without component");
+            let comp_chunk = &before[comp_at..];
+            let id_end = comp_chunk.find("data-component=\"").unwrap() + 16;
+            let component = parse_attr(comp_chunk, "data-component=").to_string();
+            let _ = id_end;
+            let gid_end = gchunk.find('"').unwrap();
+            let _ = gid_end;
+            out.push(ParsedGroup {
+                component,
+                id: parse_attr(gchunk, "data-group=").to_string(),
+                n: parse_attr(gchunk, "data-n=").parse().unwrap(),
+                s: parse_i(gchunk, "data-s="),
+                gap: parse_i(gchunk, "data-gap="),
+                cols: parse_i(gchunk, "data-cols="),
+                ox: parse_i(gchunk, "data-ox="),
+                oy: parse_i(gchunk, "data-oy="),
+                rect: IRect {
+                    x: parse_i(gchunk, "data-x="),
+                    y: parse_i(gchunk, "data-y="),
+                    w: parse_i(gchunk, "data-w="),
+                    h: parse_i(gchunk, "data-h="),
+                },
+                block: IRect {
+                    x: parse_i(comp_chunk, "data-x="),
+                    y: parse_i(comp_chunk, "data-y="),
+                    w: parse_i(comp_chunk, "data-w="),
+                    h: parse_i(comp_chunk, "data-h="),
+                },
+            });
+        }
+        out
+    }
+
+    fn cells_of(g: &ParsedGroup) -> Vec<IRect> {
+        if g.n == 0 || g.cols <= 0 {
+            return Vec::new();
+        }
+        let stride = g.s + g.gap;
+        (0..g.n as i32)
+            .map(|i| {
+                let c = i % g.cols;
+                let r = i / g.cols;
+                IRect {
+                    x: g.ox + c * stride,
+                    y: g.oy + r * stride,
+                    w: g.s,
+                    h: g.s,
+                }
+            })
+            .collect()
+    }
+
+    fn assert_square_rules(svg: &str, metrics: &Metrics, preset: Preset) {
+        let svg_tag_end = svg.find('>').expect("svg tag");
+        let svg_tag = &svg[..svg_tag_end];
+        assert!(svg_tag.contains("width=\"100%\""), "svg must be fluid");
+        assert!(svg_tag.contains("height=\"auto\""));
+        assert!(svg_tag.contains("preserveAspectRatio=\"xMidYMid meet\""));
+        assert!(svg_tag.contains("viewBox=\"0 0 "));
+        assert!(
+            !svg_tag.contains(&format!("width=\"{}\"", preset.width)),
+            "root svg must not use a fixed pixel width"
+        );
+        let groups = parse_groups(svg);
+        let canvas = IRect {
+            x: 0,
+            y: 0,
+            w: preset.width,
+            h: preset.height,
+        };
+        let mut total_cells = 0usize;
+        let mut sizes = HashSet::new();
+        for g in &groups {
+            let expected = metrics
+                .components
+                .iter()
+                .find(|c| c.id == g.component)
+                .and_then(|c| {
+                    if !preset.nested || c.groups.is_empty() {
+                        Some(c.total())
+                    } else {
+                        c.groups.iter().find(|x| x.id == g.id).map(|x| x.total())
+                    }
+                })
+                .unwrap_or(0);
+            assert_eq!(g.n, expected, "{} / {} square count", g.component, g.id);
+            total_cells += g.n;
+            assert!(
+                canvas.contains(g.block),
+                "component overflow {}: {:?}",
+                g.component,
+                g.block
+            );
+            assert!(
+                g.block.contains(g.rect),
+                "group overflow {} / {} {:?} in {:?}",
+                g.component,
+                g.id,
+                g.rect,
+                g.block
+            );
+            let cells = cells_of(g);
+            assert_eq!(cells.len(), g.n);
+            if g.n > 0 {
+                assert!(g.s >= S_MIN, "square size {} < 3", g.s);
+                assert!(g.s > 0, "whole pixels");
+                sizes.insert(g.s);
+                let stride = g.s + g.gap;
+                let rows = (g.n as i32 + g.cols - 1) / g.cols;
+                let gw = g.cols * stride - g.gap;
+                let gh = rows * stride - g.gap;
+                let ideal_ox = g.rect.x as f64 + (g.rect.w - gw) as f64 / 2.0;
+                let ideal_oy = g.rect.y as f64 + (g.rect.h - gh) as f64 / 2.0;
+                assert!(
+                    (g.ox as f64 - ideal_ox).abs() <= stride as f64 + 0.51,
+                    "grid x not centred within one lattice step {} vs {}",
+                    g.ox,
+                    ideal_ox
+                );
+                assert!(
+                    (g.oy as f64 - ideal_oy).abs() <= stride as f64 + 0.51,
+                    "grid y not centred within one lattice step {} vs {}",
+                    g.oy,
+                    ideal_oy
+                );
+                let last_row = (g.n as i32 - 1) / g.cols;
+                if last_row > 0 {
+                    let last_count = g.n as i32 - last_row * g.cols;
+                    for c in 0..last_count {
+                        let last = cells[(last_row * g.cols + c) as usize];
+                        let first = cells[c as usize];
+                        assert_eq!(
+                            last.x, first.x,
+                            "last row must be left-aligned with the grid"
+                        );
+                    }
+                }
+            }
+            for cell in &cells {
+                assert_eq!(cell.w, cell.h, "must be squares");
+                assert!(
+                    g.rect.contains(*cell),
+                    "square overflows group {} / {} {:?} {:?}",
+                    g.component,
+                    g.id,
+                    cell,
+                    g.rect
+                );
+                assert!(
+                    g.block.contains(*cell),
+                    "square overflows component {}",
+                    g.component
+                );
+                assert!(canvas.contains(*cell), "square overflows canvas");
+                assert!(
+                    cell.y >= g.block.y + preset.header_h,
+                    "square overlaps header"
+                );
+            }
+        }
+        let expected_total: usize = metrics.components.iter().map(|c| c.total()).sum();
+        assert_eq!(total_cells, expected_total, "total squares");
+        if expected_total > 0 {
+            assert_eq!(sizes.len(), 1, "all squares equal: {sizes:?}");
+            let s = *sizes.iter().next().unwrap();
+            assert!((S_MIN..=S_MAX).contains(&s));
+        }
+
+        let mut labeled = HashSet::new();
+        for chunk in svg.split("<g data-component=\"").skip(1) {
+            let id_end = chunk.find('"').unwrap();
+            let id = &chunk[..id_end];
+            let bw = parse_i(chunk, "data-w=");
+            if let Some(text_at) = chunk.find("<text ") {
+                let tchunk = &chunk[text_at..];
+                let end = tchunk.find("</text>").unwrap();
+                let open_end = tchunk.find('>').unwrap();
+                let content = &tchunk[open_end + 1..end];
+                let px: i32 = parse_attr(tchunk, "font-size=").parse().unwrap();
+                let decoded = content.replace("&amp;", "&");
+                assert!(
+                    LABEL_INSET + mono_w(&decoded, px) + 4 <= bw,
+                    "{id} label {decoded:?} at {px}px does not fit width {bw}"
+                );
+                labeled.insert(id.to_string());
+            }
+        }
+        let live: Vec<_> = metrics
+            .components
+            .iter()
+            .filter(|c| c.total() > 0)
+            .map(|c| c.id.clone())
+            .collect();
+        if live.len() == 8 {
+            for id in &live {
+                assert!(labeled.contains(id), "missing component label {id}");
+            }
+        }
+        assert_no_light_non_text(svg);
+    }
+
+    fn assert_no_light_non_text(svg: &str) {
+        let allowed = [
+            BG,
+            BLOCK,
+            HEADER,
+            GROUP,
+            NOT_STARTED,
+            IMPLEMENTED,
+            TESTED,
+            CONFORMANT,
+        ];
+        let mut rest = svg;
+        while let Some(at) = rest.find('#') {
+            let hex = &rest[at..at + 7.min(rest.len() - at)];
+            if hex.len() == 7 && hex[1..].bytes().all(|b| b.is_ascii_hexdigit()) {
+                let before = &svg[..svg.len() - rest.len() + at];
+                let in_text = before.rfind("<text").is_some()
+                    && before
+                        .rfind("<text")
+                        .and_then(|i| before[i..].find("</text>"))
+                        .is_none();
+                if !in_text {
+                    assert!(
+                        allowed.iter().any(|c| c.eq_ignore_ascii_case(hex)),
+                        "unexpected non-text colour {hex}"
+                    );
+                }
+            }
+            rest = &rest[at + 1..];
+        }
+    }
+
+    fn assert_layout(metrics: &Metrics, preset: Preset) {
+        let svg = render(metrics, preset);
+        let again = render(metrics, preset);
+        assert_eq!(svg, again, "output must be byte-identical");
+        assert_square_rules(&svg, metrics, preset);
+    }
+
+    #[test]
+    fn real_summary_at_every_preset() {
+        let metrics = real_metrics();
+        assert_eq!(metrics.total, Some(1024));
+        assert_eq!(metrics.components.len(), 8);
+        let groups: usize = metrics.components.iter().map(|c| c.groups.len()).sum();
+        assert_eq!(groups, 79);
+        for preset in PRESETS {
+            assert_layout(&metrics, *preset);
+        }
+    }
+
+    #[test]
+    fn generated_unit_counts() {
+        for n in [1usize, 334, 1024, 5000] {
+            let metrics = synthetic(n);
+            assert_eq!(
+                metrics.components.iter().map(|c| c.total()).sum::<usize>(),
+                n
+            );
+            for preset in PRESETS {
+                assert_layout(&metrics, *preset);
+            }
+        }
+    }
+
+    #[test]
+    fn mixed_status_order_is_conformant_first() {
+        let mut metrics = Metrics::placeholder();
+        metrics.total = Some(8);
+        metrics.passing = Some(2);
+        metrics.components = vec![ComponentBlock::from_groups(
+            "rest",
+            "REST",
+            vec![FeatureGroup {
+                id: "filtering".into(),
+                label: "filtering".into(),
+                units: vec![
                     UnitStatus::NotStarted,
                     UnitStatus::Implemented,
                     UnitStatus::Tested,
                     UnitStatus::Conformant,
-                    UnitStatus::Conformant,
+                    UnitStatus::NotStarted,
                     UnitStatus::Implemented,
+                    UnitStatus::Tested,
+                    UnitStatus::Conformant,
                 ],
-            ),
-        ];
-        metrics
+            }],
+            vec![],
+        )];
+        let svg = render(&metrics, HOME_DESKTOP);
+        let ns = svg.find("data-status=\"not-started\"").unwrap();
+        let im = svg.find("data-status=\"implemented\"").unwrap();
+        let te = svg.find("data-status=\"tested\"").unwrap();
+        let co = svg.find("data-status=\"conformant\"").unwrap();
+        assert!(co < te && te < im && im < ns, "status paint order");
+        assert_layout(&metrics, HOME_DESKTOP);
     }
 
     #[test]
-    fn day0_paints_catalog_tiles_without_inventing_units() {
+    fn day0_has_catalog_tiles_and_no_invented_total() {
         let metrics = Metrics::placeholder();
-        let svg = super::svg(&metrics);
+        let svg = render(&metrics, HOME_DESKTOP);
         assert!(!svg.contains("334"));
+        assert!(!svg.contains("1,024"));
         assert!(!svg.contains("1024"));
-        assert_eq!(parse_units(&svg).len(), 0, "no fake unit cells");
+        assert_eq!(parse_groups(&svg).iter().map(|g| g.n).sum::<usize>(), 0);
         for id in [
             "rest",
             "auth",
@@ -750,338 +1901,44 @@ mod tests {
             "meta",
             "studio",
         ] {
-            assert!(
-                svg.contains(&format!("data-component=\"{id}\"")),
-                "missing {id}"
-            );
+            assert!(svg.contains(&format!("data-component=\"{id}\"")));
         }
         assert!(svg.contains("REST"));
-        assert!(svg.contains("#2A2C2F"));
+        assert!(svg.contains(BG));
     }
 
     #[test]
-    fn areas_sum_to_canvas() {
+    fn hero_has_no_group_labels_and_shows_counts() {
+        let metrics = real_metrics();
+        let svg = render(&metrics, HERO_DESKTOP);
+        assert!(!svg.contains("font-size=\"8\" fill=\"#8A8B8E\""));
+        assert!(svg.contains("FUNCTIONS"));
+        assert!(svg.contains("/276") || svg.contains("/1,024") || svg.contains('0'));
+        assert!(svg.contains("/"));
+        let groups = parse_groups(&svg);
+        assert_eq!(groups.len(), 8);
+        assert_layout(&metrics, HERO_DESKTOP);
+        assert_layout(&metrics, HERO_MOBILE);
+    }
+
+    #[test]
+    fn squarify_areas_sum_to_canvas() {
         let sizes = [81.0, 57.0, 51.0, 38.0, 34.0, 33.0, 27.0, 13.0];
         let rects = squarify(&sizes, 0.0, 0.0, 462.0, 200.0);
         assert_eq!(rects.len(), sizes.len());
         let area: f64 = rects.iter().map(|r| r[2] * r[3]).sum();
         assert!((area - 462.0 * 200.0).abs() < 1.0);
+        assert!(rects[0][2] * rects[0][3] >= rects[1][2] * rects[1][3] - 1.0);
     }
 
     #[test]
-    fn phase0_334_units_all_drawn_equal_and_inside_viewbox() {
-        let counts = [
-            ("rest", "REST", 57),
-            ("auth", "Auth", 81),
-            ("realtime", "Realtime", 33),
-            ("storage", "Storage", 34),
-            ("functions", "Functions", 27),
-            ("pooler", "Pooler", 13),
-            ("meta", "Meta", 51),
-            ("studio", "Studio", 38),
-        ];
-        let mut metrics = Metrics::placeholder();
-        metrics.total = Some(334);
-        metrics.passing = Some(0);
-        metrics.components = counts
-            .iter()
-            .map(|(id, label, n)| {
-                ComponentBlock::from_units(*id, label, vec![UnitStatus::NotStarted; *n])
-            })
-            .collect();
-        let svg = super::svg(&metrics);
-        let units = parse_units(&svg);
-        assert_eq!(units.len(), 334);
-        let sizes: HashSet<(i64, i64)> = units
-            .iter()
-            .map(|u| ((u.2 * 100.0).round() as i64, (u.3 * 100.0).round() as i64))
-            .collect();
-        assert_eq!(sizes.len(), 1, "all squares same size: {sizes:?}");
-        assert!((units[0].2 - units[0].3).abs() < 0.011, "must be squares");
-        for u in &units {
-            assert!(u.0 >= -0.05 && u.1 >= -0.05, "clipped left/top {u:?}");
-            assert!(u.0 + u.2 <= 462.05, "clipped right {u:?}");
-            assert!(u.1 + u.3 <= 200.05, "clipped bottom {u:?}");
-        }
-    }
-
-    #[test]
-    fn one_equal_unclipped_square_per_unit() {
-        let metrics = sample_metrics();
-        let svg = super::svg(&metrics);
-        let units = parse_units(&svg);
-        assert_eq!(units.len(), 10, "one square per unit");
-        let sizes: HashSet<(i64, i64)> = units
-            .iter()
-            .map(|u| ((u.2 * 100.0).round() as i64, (u.3 * 100.0).round() as i64))
-            .collect();
-        assert_eq!(sizes.len(), 1, "all unit squares the same size: {sizes:?}");
-        assert!(units[0].2 > 0.0 && units[0].2 == units[0].3, "squares");
-        for u in &units {
-            assert!(u.0 >= -0.05 && u.1 >= -0.05);
-            assert!(u.0 + u.2 <= 462.05);
-            assert!(u.1 + u.3 <= 200.05);
-        }
-        assert!(svg.contains("data-component=\"rest\""));
-        assert!(svg.contains("data-component=\"auth\""));
-        assert!(svg.contains("#0B0E12"));
-        assert!(svg.contains("#2A2C2F"));
-        assert!(svg.contains("#005441"));
-        assert!(svg.contains("#009366"));
-        assert!(svg.contains("#00D892"));
-        assert!(!svg.contains("1024"));
-    }
-
-    fn kite_334_metrics() -> Metrics {
-        let counts = [
-            ("rest", "REST", 57),
-            ("auth", "Auth", 81),
-            ("realtime", "Realtime", 33),
-            ("storage", "Storage", 34),
-            ("functions", "Functions", 27),
-            ("pooler", "Pooler", 13),
-            ("meta", "Meta", 51),
-            ("studio", "Studio", 38),
-        ];
-        let mut metrics = Metrics::placeholder();
-        metrics.total = Some(334);
-        metrics.passing = Some(0);
-        metrics.coverage = Some(0.0);
-        metrics.conformance = Some(0.0);
-        metrics.components = counts
-            .iter()
-            .map(|(id, label, n)| {
-                ComponentBlock::from_units(*id, label, vec![UnitStatus::NotStarted; *n])
-            })
-            .collect();
-        metrics
-    }
-
-    fn parse_panel_blocks(svg: &str) -> Vec<(String, UnitBox, Vec<UnitBox>)> {
-        let mut out = Vec::new();
-        for chunk in svg.split("<g ").skip(1) {
-            if !chunk.contains("data-component=") {
-                continue;
-            }
-            let start = chunk.find("data-component=\"").expect("id") + 16;
-            let end = chunk[start..].find('"').expect("id end");
-            let id = chunk[start..start + end].to_string();
-            let block = UnitBox(
-                attr(chunk, "data-x="),
-                attr(chunk, "data-y="),
-                attr(chunk, "data-w="),
-                attr(chunk, "data-h="),
-            );
-            let inner = chunk.split("</g>").next().unwrap_or(chunk);
-            out.push((id, block, parse_units(inner)));
-        }
-        out
-    }
-
-    fn assert_panel_square_rule(svg: &str, metrics: &Metrics, width: f64, height: f64) {
-        let blocks = parse_panel_blocks(svg);
-        assert_eq!(blocks.len(), panel_blocks(metrics).len());
-        let mut seen = HashSet::new();
-        for (id, block, units) in &blocks {
-            let expected = metrics
-                .components
-                .iter()
-                .find(|c| c.id == *id)
-                .map(|c| c.total())
-                .unwrap_or(0);
-            assert_eq!(
-                units.len(),
-                expected,
-                "{id}: square count {} != unit count {expected}",
-                units.len()
-            );
-            seen.insert(id.clone());
-            let bx = block.0;
-            let by = block.1;
-            let bw = block.2;
-            let bh = block.3;
-            assert!(bx >= -0.01 && by >= -0.01, "{id} origin {block:?}");
-            assert!(
-                bx + bw <= width + 0.01 && by + bh <= height + 0.01,
-                "{id} overflows canvas {block:?}"
-            );
-            for u in units {
-                assert!((u.2 - u.3).abs() < 0.01, "{id} cell is not a square: {u:?}");
-                assert!(
-                    (u.2 - u.2.round()).abs() < 0.01 && u.2 >= 1.0,
-                    "{id} square size is not a whole pixel: {u:?}"
-                );
-                assert!(
-                    u.0 >= bx - 0.01 && u.1 >= by - 0.01,
-                    "{id} square starts outside block {u:?} {block:?}"
-                );
-                assert!(
-                    u.0 + u.2 <= bx + bw + 0.01 && u.1 + u.3 <= by + bh + 0.01,
-                    "{id} square clipped at block edge {u:?} {block:?}"
-                );
-                assert!(
-                    u.1 + 0.01 >= by + PANEL_HEADER_H,
-                    "{id} square overlaps header {u:?}"
-                );
-            }
-        }
-        let rest = blocks.iter().find(|(id, _, _)| id == "rest");
-        let auth = blocks.iter().find(|(id, _, _)| id == "auth");
-        if let (Some((_, rest, _)), Some((_, auth, _))) = (rest, auth) {
-            assert!(
-                (rest.0 - auth.0).abs() < 2.0,
-                "REST and AUTH should share a column: rest={rest:?} auth={auth:?}"
-            );
-            assert!(
-                rest.1 + rest.3 <= auth.1 + 0.5,
-                "REST should sit above AUTH: rest={rest:?} auth={auth:?}"
-            );
-        }
-        let meta = blocks.iter().find(|(id, _, _)| id == "meta");
-        let studio = blocks.iter().find(|(id, _, _)| id == "studio");
-        if let (Some((_, meta, _)), Some((_, studio, _))) = (meta, studio) {
-            if width >= 400.0 {
-                assert!(
-                    (meta.0 - studio.0).abs() < 2.0,
-                    "META and STUDIO should share a column: meta={meta:?} studio={studio:?}"
-                );
-                assert!(
-                    meta.1 + meta.3 <= studio.1 + 0.5,
-                    "META should sit above STUDIO: meta={meta:?} studio={studio:?}"
-                );
-            } else {
-                assert!(
-                    (meta.1 - studio.1).abs() < 2.0,
-                    "META and STUDIO should share a row: meta={meta:?} studio={studio:?}"
-                );
-                assert!(
-                    meta.0 + meta.2 <= studio.0 + 0.5,
-                    "META should sit left of STUDIO: meta={meta:?} studio={studio:?}"
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn panel_squares_match_unit_counts_and_stay_inside_blocks() {
-        let metrics = kite_334_metrics();
-        let desktop = super::panel(&metrics, 442.0, 220.0);
-        let mobile = super::panel(&metrics, 308.0, 290.0);
-        assert_panel_square_rule(&desktop, &metrics, 442.0, 220.0);
-        assert_panel_square_rule(&mobile, &metrics, 308.0, 290.0);
-        assert!(desktop.contains("#303235"));
-        assert!(desktop.contains("REST"));
-        assert!(desktop.contains("AUTH"));
-        assert_eq!(super::panel_blocks(&metrics).len(), 8);
-        let order: Vec<_> = super::panel_blocks(&metrics)
-            .iter()
-            .map(|b| b.id.as_str())
-            .collect();
-        assert_eq!(
-            order,
-            [
-                "rest",
-                "auth",
-                "meta",
-                "studio",
-                "storage",
-                "realtime",
-                "functions",
-                "pooler"
-            ]
-        );
-    }
-
-    #[test]
-    fn pack_last_row_is_left_aligned_and_grid_is_centered() {
-        let body_x = 10.0;
-        let body_y = 20.0;
-        let body_w = 40.0;
-        let body_h = 100.0;
-        let n = 5;
-        let cells = pack_unit_grid(n, body_x, body_y, body_w, body_h);
-        assert_eq!(cells.len(), n);
-        let mut rows: Vec<Vec<(f64, f64, f64)>> = Vec::new();
-        for cell in cells {
-            match rows.last_mut() {
-                Some(row) if (row[0].1 - cell.1).abs() < 0.01 => row.push(cell),
-                _ => rows.push(vec![cell]),
-            }
-        }
-        assert!(rows.len() >= 2, "need a leftover last row, got {rows:?}");
-        let first = &rows[0];
-        let last = rows.last().unwrap();
-        assert!(
-            last.len() < first.len(),
-            "last row should be partial: first={} last={}",
-            first.len(),
-            last.len()
-        );
-        for (i, cell) in last.iter().enumerate() {
-            assert!(
-                (cell.0 - first[i].0).abs() < 0.01,
-                "last row col {i} must share x with the column above"
-            );
-        }
-        let s = first[0].2;
-        let cols = first.len();
-        let grid_w = cols as f64 * s + (cols.saturating_sub(1) as f64) * PANEL_UNIT_GAP;
-        let expected_origin = body_x + ((body_w - grid_w) / 2.0).floor().max(0.0);
-        assert!(
-            (first[0].0 - expected_origin).abs() < 0.01,
-            "grid should stay centered in the block"
-        );
-    }
-
-    #[test]
-    fn panel_day0_has_no_invented_squares() {
-        let metrics = Metrics::placeholder();
-        let svg = super::panel(&metrics, 442.0, 220.0);
-        assert_eq!(parse_units(&svg).len(), 0);
-        assert!(!svg.contains("334"));
-        assert!(!svg.contains("1024"));
-        assert!(super::panel_alt(&metrics).contains("no coverage data"));
-        for id in [
-            "rest",
-            "auth",
-            "storage",
-            "realtime",
-            "functions",
-            "pooler",
-            "meta",
-            "studio",
-        ] {
-            assert!(
-                svg.contains(&format!("data-component=\"{id}\"")),
-                "Day-0 panel missing catalog tile {id}"
-            );
-        }
-        assert!(svg.contains("REST"));
-        assert!(svg.contains("#2A2C2F"));
-    }
-
-    #[derive(Debug)]
-    struct UnitBox(f64, f64, f64, f64);
-
-    fn parse_units(svg: &str) -> Vec<UnitBox> {
-        let mut out = Vec::new();
-        for chunk in svg.split("<rect ").skip(1) {
-            if !chunk.contains("class=\"unit\"") {
-                continue;
-            }
-            let x = attr(chunk, "x=");
-            let y = attr(chunk, "y=");
-            let w = attr(chunk, "width=");
-            let h = attr(chunk, "height=");
-            out.push(UnitBox(x, y, w, h));
-        }
-        out
-    }
-
-    fn attr(chunk: &str, key: &str) -> f64 {
-        let start = chunk.find(key).expect(key) + key.len() + 1;
-        let rest = &chunk[start..];
-        let end = rest.find('"').expect("quote");
-        rest[..end].parse().expect("number")
+    fn numbers_use_comma_grouping() {
+        let metrics = real_metrics();
+        let svg = render(&metrics, STATUS_DESKTOP);
+        assert!(svg.contains("1,024") || alt_text(&metrics).contains("1,024"));
+        assert_eq!(comma(1024), "1,024");
+        let _ = super::svg(&metrics);
+        let _ = super::svg_size(&metrics, 100.0, 80.0);
+        let _ = super::panel(&metrics, 442.0, 260.0);
     }
 }

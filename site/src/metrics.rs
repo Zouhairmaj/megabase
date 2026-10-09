@@ -78,6 +78,7 @@ impl ComponentBlock {
         }
     }
 
+    #[allow(dead_code)]
     pub fn from_units(id: impl Into<String>, label: &'static str, units: Vec<UnitStatus>) -> Self {
         Self::from_groups(id, label, Vec::new(), units)
     }
@@ -129,6 +130,7 @@ impl ComponentBlock {
         }
     }
 
+    #[allow(dead_code)]
     pub fn unit_statuses(&self) -> Vec<UnitStatus> {
         if !self.units.is_empty() {
             return self.units.clone();
@@ -150,6 +152,7 @@ impl ComponentBlock {
 
 #[derive(Clone, Debug)]
 pub struct VendorPin {
+    #[allow(dead_code)]
     pub name: String,
     pub tag: String,
 }
@@ -243,6 +246,28 @@ impl Metrics {
 
     pub fn human_interventions_label(&self) -> String {
         comma(self.human_interventions)
+    }
+
+    pub fn group_count(&self) -> usize {
+        self.components
+            .iter()
+            .map(|c| {
+                if c.groups.is_empty() {
+                    usize::from(c.total() > 0)
+                } else {
+                    c.groups.iter().filter(|g| g.total() > 0).count()
+                }
+            })
+            .sum()
+    }
+
+    pub fn live_component_count(&self) -> usize {
+        let n = self.components.iter().filter(|c| c.total() > 0).count();
+        if n == 0 {
+            CATALOG.len()
+        } else {
+            n
+        }
     }
 }
 
@@ -652,7 +677,7 @@ pub fn component_label(id: &str) -> &'static str {
 }
 
 pub fn group_label(id: &str) -> String {
-    id.replace('-', " ").replace('_', " ")
+    id.replace(['-', '_'], " ")
 }
 
 pub struct CatalogRow {
