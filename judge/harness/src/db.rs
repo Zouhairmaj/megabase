@@ -3,7 +3,7 @@
 //! The harness talks to Postgres itself. It does not import Megabase crates
 //! and it does not trust Megabase HTTP for schema or row state.
 
-use std::collections::BTreeSet;
+use std::collections::BTreeMap;
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
@@ -389,30 +389,34 @@ pub fn snapshot_relations(databases: &Databases, raws: &[String]) -> Result<Vec<
 }
 
 /// Rows added and removed between two snapshots of one table.
+///
+/// Counts identical serialized rows. After UUID/timestamp/bcrypt/token
+/// normalization two inserts can share one key; a set would hide the
+/// second insert and let an empty megabase delta match the reference.
 pub fn row_delta(before: &Value, after: &Value) -> Value {
-    let before_keys = row_key_set(before);
-    let after_keys = row_key_set(after);
-    let added = rows_matching(after, |key| !before_keys.contains(key));
-    let removed = rows_matching(before, |key| !after_keys.contains(key));
+    let mut counts: BTreeMap<String, (i64, Value)> = BTreeMap::new();
+    for row in snapshot_items(after) {
+        counts.entry(row.to_string()).or_insert((0, row.clone())).0 += 1;
+    }
+    for row in snapshot_items(before) {
+        counts.entry(row.to_string()).or_insert((0, row.clone())).0 -= 1;
+    }
+    let mut added = Vec::new();
+    let mut removed = Vec::new();
+    for (_, (n, row)) in counts {
+        if n > 0 {
+            added.extend(std::iter::repeat_n(row, n as usize));
+        } else if n < 0 {
+            removed.extend(std::iter::repeat_n(row, (-n) as usize));
+        }
+    }
     serde_json::json!({ "added": added, "removed": removed })
 }
 
-fn row_key_set(value: &Value) -> BTreeSet<String> {
+fn snapshot_items(value: &Value) -> Vec<Value> {
     match value {
-        Value::Array(items) => items.iter().map(Value::to_string).collect(),
-        other => BTreeSet::from([other.to_string()]),
-    }
-}
-
-fn rows_matching(value: &Value, keep: impl Fn(&str) -> bool) -> Vec<Value> {
-    match value {
-        Value::Array(items) => items
-            .iter()
-            .filter(|item| keep(&item.to_string()))
-            .cloned()
-            .collect(),
-        other if keep(&other.to_string()) => vec![other.clone()],
-        _ => Vec::new(),
+        Value::Array(items) => items.clone(),
+        other => vec![other.clone()],
     }
 }
 
@@ -839,6 +843,31 @@ mod tests {
         assert_ne!(
             row_delta(&before, &after_ref),
             row_delta(&before, &after_mb)
+        );
+    }
+
+    #[test]
+    fn row_delta_counts_duplicate_normalized_rows() {
+        let row = serde_json::json!({"title": "same", "id": "<uuid>"});
+        let before = serde_json::json!([row]);
+        let after_two = serde_json::json!([row, row]);
+        let after_one = serde_json::json!([row]);
+        assert_eq!(
+            row_delta(&before, &after_two),
+            serde_json::json!({ "added": [row], "removed": [] })
+        );
+        assert_eq!(
+            row_delta(&before, &after_one),
+            serde_json::json!({ "added": [], "removed": [] })
+        );
+        assert_ne!(
+            row_delta(&before, &after_two),
+            row_delta(&before, &after_one)
+        );
+        let two = serde_json::json!([row, row]);
+        assert_eq!(
+            row_delta(&two, &after_one),
+            serde_json::json!({ "added": [], "removed": [row] })
         );
     }
 

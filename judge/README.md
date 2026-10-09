@@ -98,7 +98,7 @@ database would make row and catalog comparisons vacuous.
 After every mutating HTTP case (POST / PUT / PATCH / DELETE), the
 harness snapshots `auth.users` and `public.todos` on both databases
 before and after the HTTP steps and compares the per-case row delta
-(added/removed). Leftover rows from an earlier case or a reused volume
+(added/removed, counting duplicate normalized rows). Leftover rows from an earlier case or a reused volume
 do not fail a later case. Set `snapshot = []` to skip, or
 `snapshot = ["schema.table", …]` to choose other relations.
 `storage.objects` is Level 2.
