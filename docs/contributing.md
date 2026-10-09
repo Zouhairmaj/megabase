@@ -62,7 +62,8 @@ cargo +nightly fuzz list
 ```
 
 `.github/workflows/fuzz.yml` runs each target for 60 seconds on pull
-requests and 10 minutes on a nightly schedule (and on `workflow_dispatch`).
+requests and 600 seconds by default on a nightly schedule and
+`workflow_dispatch` (the `seconds` input can override that duration).
 A crash uploads `fuzz/artifacts/`. Seed inputs live in `fuzz/corpus/<target>/`.
 Do not commit `fuzz/target/`, `fuzz/artifacts/`, or `fuzz/coverage/`.
 

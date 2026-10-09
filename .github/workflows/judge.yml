@@ -14,9 +14,10 @@ env:
 permissions:
   contents: read
 
+# Cancel superseded PR runs. Keep main and workflow_dispatch to completion.
 concurrency:
-  group: judge-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: false
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   judge:
@@ -35,9 +36,11 @@ jobs:
       - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
         with:
           toolchain: stable
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: ./.github/actions/rust-cache
       - name: Build harness and binary
         run: cargo build --release --locked -p megabase -p megabase-judge --bin megabase --bin megabase-judge
+      # Login lives in the composite action. Do not put `secrets.*` in
+      # a job-level `if:` — GitHub skips the job when it evaluates that.
       - uses: ./.github/actions/dockerhub-login
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -66,11 +69,22 @@ jobs:
           done
       - name: Reference stack
         run: |
-          docker compose -p megabase-judge \
-            -f vendor/supabase/docker/docker-compose.yml \
-            -f judge/compose.override.yml \
-            --env-file vendor/supabase/docker/.env.example \
-            up -d --pull never --wait --wait-timeout 300
+          set -euo pipefail
+          # Images are already local. Retry a slow start: one 300s wait
+          # can fail before a service becomes healthy.
+          for attempt in 1 2 3 4 5; do
+            if docker compose -p megabase-judge \
+              -f vendor/supabase/docker/docker-compose.yml \
+              -f judge/compose.override.yml \
+              --env-file vendor/supabase/docker/.env.example \
+              up -d --pull never --wait --wait-timeout 300; then
+              exit 0
+            fi
+            echo "compose up failed (attempt ${attempt}/5); sleeping before retry"
+            sleep $((attempt * 20))
+          done
+          echo "::error::Reference stack compose up failed after 5 attempts"
+          exit 1
       - name: Prepare Megabase database
         run: ./target/release/megabase-judge prepare
       - name: Megabase on :8100

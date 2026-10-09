@@ -1,0 +1,23 @@
+# Pin and policy live here so every compiling job uses the same cache.
+# Swatinem/rust-cache v2.9.2 ignores its `key` input when `shared-key` is
+# set, so profile suffixes are folded into shared-key.
+name: Rust cache
+description: Cache Cargo workspaces. Save only on pushes to main.
+inputs:
+  workspace:
+    description: Cargo workspace family — workspace (repo root), site, or fuzz.
+    required: false
+    default: workspace
+  key:
+    description: Shared-key suffix when the compile profile must stay isolated (llvm-cov, bencher).
+    required: false
+    default: ""
+runs:
+  using: composite
+  steps:
+    - name: Cache Rust build
+      uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      with:
+        workspaces: ${{ inputs.workspace == 'site' && 'site -> target' || inputs.workspace == 'fuzz' && 'fuzz -> target' || '. -> target' }}
+        shared-key: ${{ inputs.key != '' && format('{0}-{1}', inputs.workspace, inputs.key) || inputs.workspace }}
+        save-if: ${{ github.ref == 'refs/heads/main' && github.event_name == 'push' }}

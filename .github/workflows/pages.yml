@@ -39,27 +39,27 @@ jobs:
         with:
           toolchain: stable
 
-      # Trusted event SHA only (push or workflow_dispatch). The Judge
-      # artifact is applied in pages-badges.yml, which does not save a cache.
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: Cache site workspace
+        uses: ./.github/actions/rust-cache
         with:
-          key: pages
+          workspace: site
 
-      - name: Restore published Judge summary when present
+      - name: Restore published coverage JSON when present
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          # Keep the checked-in file until gh-pages has a summary. The
-          # download is one JSON blob; this job does not check that
-          # branch out.
-          url="repos/${GITHUB_REPOSITORY}/contents/coverage/summary.json?ref=gh-pages"
-          if gh api "$url" -H "Accept: application/vnd.github.raw" > /tmp/judge-summary.json; then
-            python3 -c 'import json; d=json.load(open("/tmp/judge-summary.json")); assert d.get("schema")==1 and "totals" in d'
-            cp /tmp/judge-summary.json coverage/summary.json
-          else
-            echo "No published coverage/summary.json; using the checked-in file."
-          fi
+          # One gh-pages snapshot. A missing or invalid file keeps the
+          # checked-in copy. This job does not check that branch out.
+          for name in badge-coverage.json badge-conformance.json summary.json judge-results.json; do
+            url="repos/${GITHUB_REPOSITORY}/contents/coverage/${name}?ref=gh-pages"
+            if gh api "$url" -H "Accept: application/vnd.github.raw" > "/tmp/${name}" \
+              && python3 -c 'import json,sys; name,path=sys.argv[1],sys.argv[2]; data=json.load(open(path)); assert isinstance(data, dict); assert name != "summary.json" or (data.get("schema")==1 and "totals" in data)' "$name" "/tmp/${name}"; then
+              cp "/tmp/${name}" "coverage/${name}"
+            else
+              echo "No valid published coverage/${name}; using the checked-in file."
+            fi
+          done
 
       - name: Generate site
         run: cargo run --manifest-path site/Cargo.toml --release -- --repo-root . --out _site
