@@ -53,10 +53,10 @@ regex = "1"
 toml = "0.8"
 ureq = { version = "2", default-features = false, features = ["json"] }
 anyhow = "1"
-tokio-postgres = "0.7"
 base64 = "0.22"
 hmac = "0.12"
 sha2 = "0.10"
+tokio-postgres = "0.7"
 
 megabase-core = { path = "crates/megabase-core" }
 megabase-server = { path = "crates/megabase-server" }
