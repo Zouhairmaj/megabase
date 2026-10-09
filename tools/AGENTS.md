@@ -7,7 +7,9 @@ Extends the root `AGENTS.md`; it does not relax it.
   in the same PR, and explain any change in the unit count in the PR body.
   README coverage/conformance shields.io badges read
   `coverage/badge-coverage.json` and `coverage/badge-conformance.json`
-  (shields endpoint schema; `color` is `badge_color` without `#`).
+  (shields endpoint schema). Colors: `#e05d44` below 50%, `#fe7d37` from
+  50% to under 90%, `#00D892` at 90% and above. SVG/treemap chips keep
+  the brand greens in `badge_color`.
 - `megabase-backlog`: `plan` writes `docs/backlog/PLAN.md`. `sync` writes
   to GitHub and is run by the orchestrator only. Keep it idempotent: it
   matches on `megabase-id`.
