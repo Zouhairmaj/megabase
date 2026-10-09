@@ -20,11 +20,13 @@ ignored, so the digest-pinned mirrors still pull. The ECR library Kong
 image has no `/entrypoint.sh`. The compose override uses
 `entrypoint: !override` (Compose would otherwise append the vendor
 entrypoint, which execs the missing path and leaves `supabase-kong`
-unhealthy) and rewrites that one path to `/docker-entrypoint.sh`. Pages
-badge publication is `.github/workflows/pages-badges.yml` (`workflow_run`
-only, no cache action) so a Judge artifact cannot poison the
-default-branch Actions cache. `.github/workflows/pages.yml` is push and
-`workflow_dispatch` only and checks out the event SHA. Both workflows
-share the `pages` concurrency group. The site build copies the four
-coverage JSON files from `gh-pages` when that snapshot is complete, and
-otherwise keeps the checked-in files.
+unhealthy) and rewrites that one path to `/docker-entrypoint.sh`. Pages badge publication is `.github/workflows/pages-badges.yml`
+(`workflow_run` only, no cache action). It checks out the default branch
+and does not set `actions/checkout` `ref` from the triggering run
+(Scorecard Dangerous-Workflow treats that ref as an untrusted checkout).
+It applies the Judge JSON as data only when that checkout is the Judge
+commit, then publishes shields JSON only. A newer `main` waits for the
+next Judge run. `.github/workflows/pages.yml` is push and
+`workflow_dispatch` only, checks out the event SHA, and does not download
+`gh-pages` or a Judge artifact. It saves the default-branch Rust cache on
+pushes to `main`. `pages-badges.yml` does not deploy the site.
