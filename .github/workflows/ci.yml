@@ -107,7 +107,6 @@ jobs:
             --head HEAD \
             --head-ref "${HEAD_REF}"
 
-  # cargo-deny-action ships a prebuilt binary and only reads manifests.
   # cargo-audit is installed as a binary and does not compile the workspace.
   cargo-deny:
     name: cargo-deny

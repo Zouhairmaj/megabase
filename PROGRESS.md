@@ -205,9 +205,9 @@ waiting on a human.
     poison the default-branch Actions cache.
     `.github/workflows/pages.yml` is push and `workflow_dispatch` only
     and checks out the event SHA. Both workflows share the `pages`
-    concurrency group. The site build copies `coverage/summary.json`
-    from `gh-pages` when that file exists, and otherwise keeps the
-    checked-in summary.
+    concurrency group. The site build copies the four coverage JSON
+    files from `gh-pages` when that snapshot is complete, and otherwise
+    keeps the checked-in files.
 
 ## Tracking
 

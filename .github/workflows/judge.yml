@@ -39,8 +39,6 @@ jobs:
       - uses: ./.github/actions/rust-cache
       - name: Build harness and binary
         run: cargo build --release --locked -p megabase -p megabase-judge --bin megabase --bin megabase-judge
-      # Login lives in the composite action. Do not put `secrets.*` in
-      # a job-level `if:` — GitHub skips the job when it evaluates that.
       - uses: ./.github/actions/dockerhub-login
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -69,22 +67,11 @@ jobs:
           done
       - name: Reference stack
         run: |
-          set -euo pipefail
-          # Images are already local. Retry a slow start: one 300s wait
-          # can fail before a service becomes healthy.
-          for attempt in 1 2 3 4 5; do
-            if docker compose -p megabase-judge \
-              -f vendor/supabase/docker/docker-compose.yml \
-              -f judge/compose.override.yml \
-              --env-file vendor/supabase/docker/.env.example \
-              up -d --pull never --wait --wait-timeout 300; then
-              exit 0
-            fi
-            echo "compose up failed (attempt ${attempt}/5); sleeping before retry"
-            sleep $((attempt * 20))
-          done
-          echo "::error::Reference stack compose up failed after 5 attempts"
-          exit 1
+          docker compose -p megabase-judge \
+            -f vendor/supabase/docker/docker-compose.yml \
+            -f judge/compose.override.yml \
+            --env-file vendor/supabase/docker/.env.example \
+            up -d --pull never --wait --wait-timeout 300
       - name: Prepare Megabase database
         run: ./target/release/megabase-judge prepare
       - name: Megabase on :8100
