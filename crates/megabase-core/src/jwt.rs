@@ -85,10 +85,12 @@ impl Hs256 {
         Ok(Self { secret })
     }
 
+    /// Verify `token` with the current Unix time.
     pub fn verify(&self, token: &str) -> Result<JwtClaims, JwtError> {
         self.verify_at(token, unix_now())
     }
 
+    /// Verify `token` as of `now_unix` (seconds since epoch).
     pub fn verify_at(&self, token: &str, now_unix: i64) -> Result<JwtClaims, JwtError> {
         if token.is_empty() {
             return Err(JwtError::Empty);
@@ -153,13 +155,11 @@ impl Hs256 {
 /// GoTrue `bearerRegexp` (`(?i)^bearer (\S+$)`) in `internal/api/api.go`.
 pub fn bearer_token(authorization: &str) -> Option<&str> {
     const PREFIX: &str = "bearer ";
-    if authorization.len() < PREFIX.len() {
+    let scheme = authorization.get(..PREFIX.len())?;
+    if !scheme.eq_ignore_ascii_case(PREFIX) {
         return None;
     }
-    if !authorization[..PREFIX.len()].eq_ignore_ascii_case(PREFIX) {
-        return None;
-    }
-    let token = &authorization[PREFIX.len()..];
+    let token = authorization.get(PREFIX.len()..)?;
     if token.is_empty() || token.contains(char::is_whitespace) {
         return None;
     }
@@ -449,6 +449,7 @@ mod tests {
         assert_eq!(bearer_token("Bearer abc def"), None);
         assert_eq!(bearer_token("Basic abc"), None);
         assert_eq!(bearer_token(" Bearer abc"), None);
+        assert_eq!(bearer_token("Bearéé"), None);
     }
 
     #[test]
@@ -474,10 +475,7 @@ mod tests {
 
     #[test]
     fn malformed_header_is_rejected() {
-        let bad_b64 = format!(
-            "!!!.{}.sig",
-            URL_SAFE_NO_PAD.encode(br#"{"role":"anon"}"#)
-        );
+        let bad_b64 = format!("!!!.{}.sig", URL_SAFE_NO_PAD.encode(br#"{"role":"anon"}"#));
         assert_eq!(
             verifier().verify_at(&bad_b64, DURING_DEMO).unwrap_err(),
             JwtError::MalformedHeader
