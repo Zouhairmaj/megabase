@@ -27,16 +27,18 @@ pub struct Outputs {
 const BADGE_LABEL: &str = "#181A1D";
 const MONO: &str = "JetBrains Mono,IBM Plex Mono,SFMono-Regular,Menlo,Consolas,monospace";
 
-/// Traffic-light color for README shields.io coverage/conformance badges.
-/// Red below 50%, orange from 50% to under 90%, green at 90% and above.
-fn shields_badge_color(percent: f64) -> &'static str {
-    if percent >= 90.0 {
-        "green"
-    } else if percent >= 50.0 {
-        "orange"
-    } else {
-        "red"
+fn badge_color(percent: f64) -> &'static str {
+    match percent {
+        p if p >= 90.0 => "#00D892",
+        p if p >= 50.0 => "#009366",
+        p if p > 0.0 => "#005441",
+        _ => "#303235",
     }
+}
+
+/// Shields.io `color` is hex without `#`. Same steps as `badge_color`.
+fn shields_color(percent: f64) -> &'static str {
+    badge_color(percent).trim_start_matches('#')
 }
 
 /// Shields.io endpoint payload (`schemaVersion` + `color`) so badge color
@@ -46,19 +48,10 @@ fn shields_endpoint(label: &str, message: &str, percent: f64) -> Result<String> 
         "schemaVersion": 1,
         "label": label,
         "message": message,
-        "color": shields_badge_color(percent),
+        "color": shields_color(percent),
     }))?;
     json.push('\n');
     Ok(json)
-}
-
-fn badge_color(percent: f64) -> &'static str {
-    match percent {
-        p if p >= 90.0 => "#00D892",
-        p if p >= 50.0 => "#009366",
-        p if p > 0.0 => "#005441",
-        _ => "#303235",
-    }
 }
 
 fn badge_text(fill: &str) -> &'static str {
@@ -550,28 +543,32 @@ mod tests {
     }
 
     #[test]
-    fn shields_badge_color_uses_traffic_light_thresholds() {
-        assert_eq!(shields_badge_color(0.0), "red");
-        assert_eq!(shields_badge_color(49.9), "red");
-        assert_eq!(shields_badge_color(50.0), "orange");
-        assert_eq!(shields_badge_color(89.9), "orange");
-        assert_eq!(shields_badge_color(90.0), "green");
-        assert_eq!(shields_badge_color(100.0), "green");
+    fn shields_color_matches_badge_color_hex() {
+        assert_eq!(shields_color(0.0), "303235");
+        assert_eq!(shields_color(0.1), "005441");
+        assert_eq!(shields_color(49.9), "005441");
+        assert_eq!(shields_color(50.0), "009366");
+        assert_eq!(shields_color(89.9), "009366");
+        assert_eq!(shields_color(90.0), "00D892");
+        assert_eq!(shields_color(100.0), "00D892");
     }
 
     #[test]
-    fn shields_endpoint_writes_schema_and_color() {
-        let json = shields_endpoint("coverage", "2.9%", 2.9).unwrap();
+    fn shields_endpoint_writes_schema_and_brand_color() {
+        let json = shields_endpoint("coverage", "3.1%", 3.1).unwrap();
         let value: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(value["schemaVersion"], 1);
         assert_eq!(value["label"], "coverage");
-        assert_eq!(value["message"], "2.9%");
-        assert_eq!(value["color"], "red");
-        let high = shields_endpoint("conformance", "91%", 91.0).unwrap();
-        let high_value: serde_json::Value = serde_json::from_str(&high).unwrap();
-        assert_eq!(high_value["color"], "green");
+        assert_eq!(value["message"], "3.1%");
+        assert_eq!(value["color"], "005441");
+        let empty = shields_endpoint("conformance", "0%", 0.0).unwrap();
+        let empty_value: serde_json::Value = serde_json::from_str(&empty).unwrap();
+        assert_eq!(empty_value["color"], "303235");
         let mid = shields_endpoint("coverage", "50%", 50.0).unwrap();
         let mid_value: serde_json::Value = serde_json::from_str(&mid).unwrap();
-        assert_eq!(mid_value["color"], "orange");
+        assert_eq!(mid_value["color"], "009366");
+        let high = shields_endpoint("conformance", "91%", 91.0).unwrap();
+        let high_value: serde_json::Value = serde_json::from_str(&high).unwrap();
+        assert_eq!(high_value["color"], "00D892");
     }
 }
