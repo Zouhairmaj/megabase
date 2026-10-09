@@ -3,7 +3,7 @@ title: Install
 description: Download a signed GitHub Release binary, pull the GHCR image, or build from source.
 section: get-started
 order: 1
-card: Signed linux binaries and ghcr.io/zouhairmaj/megabase from a GitHub Release, or build from source.
+card: Signed linux binaries from a GitHub Release, the image on GHCR, or build from source.
 ---
 
 # Install
