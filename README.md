@@ -6,6 +6,8 @@
 # Supabase, rewritten in Rust. By agents. In public.
 
 [![CI](https://github.com/Zouhairmaj/megabase/actions/workflows/ci.yml/badge.svg)](https://github.com/Zouhairmaj/megabase/actions/workflows/ci.yml)
+[![Codecov](https://codecov.io/gh/Zouhairmaj/megabase/graph/badge.svg)](https://codecov.io/gh/Zouhairmaj/megabase)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/Zouhairmaj/megabase/badge)](https://scorecard.dev/viewer/?uri=github.com/Zouhairmaj/megabase)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
 One binary next to PostgreSQL that speaks the same APIs as a self-hosted

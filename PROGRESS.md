@@ -139,6 +139,8 @@ None.
 - [x] Backlog *generator* (`tools/megabase-backlog`); GitHub write is a
       human-only action in this environment (token cannot create issues)
 - [x] Brand (Kite-aligned SVGs, palette, design-first rule)
+- [x] Supply chain: CodeRabbit, cargo-deny, cargo-audit, Renovate,
+      OpenSSF Scorecard, Codecov (`cargo llvm-cov`)
 
 **Not claimed complete until this PR is green and ready for review.**
 

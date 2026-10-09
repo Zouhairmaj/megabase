@@ -75,6 +75,19 @@ file is human-owned and frozen. Agents follow this file and the CI check.
 Include coverage and conformance deltas in the PR body
 (`coverage X%→Y%, conformance A%→B%`).
 
+## CodeRabbit
+
+CodeRabbit is installed (`.coderabbit.yaml`: profile `assertive`,
+`en-US`, auto-review on, `vendor/**` ignored). Agents **must address
+CodeRabbit comments before merge**: resolve each thread with a fix or a
+short explanation of why it does not apply. Do not squash-merge while
+unresolved CodeRabbit review comments remain.
+
+CodeRabbit enforces the same GOAL.md rules as this file: `vendor/` and
+`judge/` are protected, product code is Rust-only, unimplemented routes
+return 501 `MEGABASE_NOT_IMPLEMENTED`, tests are not weakened to pass CI,
+and upstream files are credited.
+
 ## Commands that exist today
 
 ```bash
