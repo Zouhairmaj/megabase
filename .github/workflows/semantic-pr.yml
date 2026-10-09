@@ -42,6 +42,7 @@ jobs:
             coverage
             site
             ci
+            agents
             main
           requireScope: false
           subjectPattern: ^(?![A-Z]).+$

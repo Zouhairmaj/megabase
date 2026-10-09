@@ -1,0 +1,392 @@
+# Fallback for Release → Sync Cargo.lock when RELEASE_PLEASE_TOKEN is unset.
+# GITHUB_TOKEN pushes do not start push/pull_request workflows. This workflow
+# is dispatched from main (where it is defined) and reports the required
+# check names onto the lockfile SHA via the Checks API.
+name: Lockfile required checks
+
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: Lockfile commit SHA that must receive required check runs
+        required: true
+        type: string
+      branch:
+        description: Release-please branch name (guard --head-ref)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lockfile-required-checks-${{ inputs.sha }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  RUST_BACKTRACE: 1
+  TARGET_SHA: ${{ inputs.sha }}
+  TARGET_BRANCH: ${{ inputs.branch }}
+
+jobs:
+  validate-target:
+    name: Validate target
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Require release-please branch head
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          case "${TARGET_BRANCH}" in
+            release-please--branches--*) ;;
+            *)
+              echo "::error::Target branch must be a release-please branch, got ${TARGET_BRANCH}"
+              exit 1
+              ;;
+          esac
+          branch_sha="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/${TARGET_BRANCH}" --jq '.object.sha')"
+          if [ "${branch_sha}" != "${TARGET_SHA}" ]; then
+            echo "::error::SHA ${TARGET_SHA} is not the head of ${TARGET_BRANCH} (head is ${branch_sha})"
+            exit 1
+          fi
+
+  build:
+    needs: validate-target
+    name: Lockfile Build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      checks: write
+    steps:
+      - name: Start check run
+        id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          id="$(gh api --method POST "repos/${GITHUB_REPOSITORY}/check-runs" \
+            -f name="Build" \
+            -f head_sha="${TARGET_SHA}" \
+            -f status="in_progress" \
+            -f details_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
+            --jq .id)"
+          echo "id=${id}" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.sha }}
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: lockfile-build
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - run: cargo test --workspace --locked
+      - run: cargo build --release --locked -p megabase -p megabase-judge --bin megabase --bin megabase-healthcheck
+      - name: Complete check run
+        if: always() && steps.check.outputs.id != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CHECK_ID: ${{ steps.check.outputs.id }}
+          CONCLUSION: ${{ job.status }}
+        run: |
+          set -euo pipefail
+          case "${CONCLUSION}" in
+            success|failure|cancelled) ;;
+            *) CONCLUSION=failure ;;
+          esac
+          gh api --method PATCH "repos/${GITHUB_REPOSITORY}/check-runs/${CHECK_ID}" \
+            -f status="completed" \
+            -f conclusion="${CONCLUSION}"
+
+  llvm-cov:
+    needs: validate-target
+    name: Lockfile Codecov
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      checks: write
+    steps:
+      - name: Start check run
+        id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          id="$(gh api --method POST "repos/${GITHUB_REPOSITORY}/check-runs" \
+            -f name="Codecov" \
+            -f head_sha="${TARGET_SHA}" \
+            -f status="in_progress" \
+            -f details_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
+            --jq .id)"
+          echo "id=${id}" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.sha }}
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+        with:
+          toolchain: stable
+          components: llvm-tools-preview
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: lockfile-llvm-cov
+      - uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
+        with:
+          tool: cargo-llvm-cov
+      - name: Generate lcov.info
+        run: cargo llvm-cov --workspace --locked --lcov --output-path lcov.info
+      - name: Upload to Codecov
+        uses: codecov/codecov-action@0fb7174895f61a3b6b78fc075e0cd60383518dac # v5.5.3
+        with:
+          files: lcov.info
+          fail_ci_if_error: false
+          token: ${{ secrets.CODECOV_TOKEN }}
+      - name: Complete check run
+        if: always() && steps.check.outputs.id != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CHECK_ID: ${{ steps.check.outputs.id }}
+          CONCLUSION: ${{ job.status }}
+        run: |
+          set -euo pipefail
+          case "${CONCLUSION}" in
+            success|failure|cancelled) ;;
+            *) CONCLUSION=failure ;;
+          esac
+          gh api --method PATCH "repos/${GITHUB_REPOSITORY}/check-runs/${CHECK_ID}" \
+            -f status="completed" \
+            -f conclusion="${CONCLUSION}"
+
+  bencher:
+    needs: validate-target
+    name: Lockfile Bencher
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      checks: write
+      pull-requests: write
+    env:
+      BENCHER_API_KEY: ${{ secrets.BENCHER_API_TOKEN }}
+    steps:
+      - name: Start check run
+        id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          id="$(gh api --method POST "repos/${GITHUB_REPOSITORY}/check-runs" \
+            -f name="Bencher" \
+            -f head_sha="${TARGET_SHA}" \
+            -f status="in_progress" \
+            -f details_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
+            --jq .id)"
+          echo "id=${id}" >> "$GITHUB_OUTPUT"
+      - name: Skip without BENCHER_API_TOKEN
+        if: env.BENCHER_API_KEY == ''
+        run: echo "BENCHER_API_TOKEN is not set; skipping continuous benchmarking."
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        if: env.BENCHER_API_KEY != ''
+        with:
+          ref: ${{ inputs.sha }}
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+        if: env.BENCHER_API_KEY != ''
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        if: env.BENCHER_API_KEY != ''
+        with:
+          key: lockfile-bencher
+      - uses: bencherdev/bencher@b4cfdddf418fc547e694b8fa6cc7c846a9c77435 # main
+        if: env.BENCHER_API_KEY != ''
+      - name: Track benchmarks (lockfile SHA)
+        if: env.BENCHER_API_KEY != ''
+        env:
+          HEAD_REF: ${{ inputs.branch }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git fetch --no-tags origin main
+          BASE_SHA="$(git rev-parse origin/main)"
+          bencher run \
+            --project megabase \
+            --ci-on-the-fly \
+            --branch "$HEAD_REF" \
+            --start-point main \
+            --start-point-hash "$BASE_SHA" \
+            --start-point-clone-thresholds \
+            --start-point-reset \
+            --testbed github-actions \
+            --adapter rust_criterion \
+            --threshold-measure latency \
+            --threshold-test t_test \
+            --threshold-upper-boundary 0.99 \
+            --error-on-alert \
+            --github-actions "$GH_TOKEN" \
+            "cargo bench --locked --bench health"
+      - name: Complete check run
+        if: always() && steps.check.outputs.id != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CHECK_ID: ${{ steps.check.outputs.id }}
+          CONCLUSION: ${{ job.status }}
+        run: |
+          set -euo pipefail
+          case "${CONCLUSION}" in
+            success|failure|cancelled) ;;
+            *) CONCLUSION=failure ;;
+          esac
+          gh api --method PATCH "repos/${GITHUB_REPOSITORY}/check-runs/${CHECK_ID}" \
+            -f status="completed" \
+            -f conclusion="${CONCLUSION}"
+
+  guard:
+    needs: validate-target
+    name: Lockfile Protected paths
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      checks: write
+    steps:
+      - name: Start check run
+        id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          id="$(gh api --method POST "repos/${GITHUB_REPOSITORY}/check-runs" \
+            -f name="Protected paths" \
+            -f head_sha="${TARGET_SHA}" \
+            -f status="in_progress" \
+            -f details_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
+            --jq .id)"
+          echo "id=${id}" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: lockfile-guard
+      - name: Policy (docs/adr/0003-protected-paths.md)
+        env:
+          HEAD_REF: ${{ inputs.branch }}
+        run: |
+          git fetch --no-tags origin main
+          cargo run --locked -p megabase-guard -- \
+            --base origin/main \
+            --head HEAD \
+            --head-ref "${HEAD_REF}"
+      - name: Complete check run
+        if: always() && steps.check.outputs.id != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CHECK_ID: ${{ steps.check.outputs.id }}
+          CONCLUSION: ${{ job.status }}
+        run: |
+          set -euo pipefail
+          case "${CONCLUSION}" in
+            success|failure|cancelled) ;;
+            *) CONCLUSION=failure ;;
+          esac
+          gh api --method PATCH "repos/${GITHUB_REPOSITORY}/check-runs/${CHECK_ID}" \
+            -f status="completed" \
+            -f conclusion="${CONCLUSION}"
+
+  judge:
+    needs: validate-target
+    name: Lockfile Judge
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      checks: write
+    steps:
+      - name: Start check run
+        id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          id="$(gh api --method POST "repos/${GITHUB_REPOSITORY}/check-runs" \
+            -f name="Judge" \
+            -f head_sha="${TARGET_SHA}" \
+            -f status="in_progress" \
+            -f details_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
+            --jq .id)"
+          echo "id=${id}" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.sha }}
+          submodules: recursive
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: lockfile-judge
+      - name: Build harness and binary
+        run: cargo build --release --locked -p megabase -p megabase-judge --bin megabase --bin megabase-judge
+      - name: Reference stack
+        run: |
+          docker compose -p megabase-judge \
+            -f vendor/supabase/docker/docker-compose.yml \
+            -f judge/compose.override.yml \
+            --env-file vendor/supabase/docker/.env.example \
+            up -d --wait --wait-timeout 300
+      - name: Megabase on :8100
+        run: |
+          MEGABASE_PORT=8100 MEGABASE_HOST=0.0.0.0 \
+            ./target/release/megabase > /tmp/megabase.log 2>&1 &
+          echo $! > /tmp/megabase.pid
+      - name: Wait
+        run: ./target/release/megabase-judge wait --timeout 240
+      - name: Run cases
+        run: |
+          ./target/release/megabase-judge run \
+            --cases judge/cases \
+            --out /tmp/judge-results.json \
+            --baseline coverage/judge-results.json \
+            --summary /tmp/judge-summary.md
+          cat /tmp/judge-summary.md >> "$GITHUB_STEP_SUMMARY"
+      - name: vendor/ stayed clean
+        run: |
+          git -C vendor/supabase status --short
+          test -z "$(git -C vendor/supabase status --porcelain)"
+      - name: Logs on failure
+        if: failure()
+        run: |
+          docker compose -p megabase-judge \
+            -f vendor/supabase/docker/docker-compose.yml \
+            -f judge/compose.override.yml \
+            --env-file vendor/supabase/docker/.env.example logs --tail 80
+          cat /tmp/megabase.log || true
+      - name: Complete check run
+        if: always() && steps.check.outputs.id != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CHECK_ID: ${{ steps.check.outputs.id }}
+          CONCLUSION: ${{ job.status }}
+        run: |
+          set -euo pipefail
+          case "${CONCLUSION}" in
+            success|failure|cancelled) ;;
+            *) CONCLUSION=failure ;;
+          esac
+          gh api --method PATCH "repos/${GITHUB_REPOSITORY}/check-runs/${CHECK_ID}" \
+            -f status="completed" \
+            -f conclusion="${CONCLUSION}"

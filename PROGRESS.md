@@ -133,7 +133,27 @@ waiting on a human.
     (`release-as`). The v0.1.0 release PR must delete `release-as`
     before it merges.
     Container `FROM` lines are pinned by digest (root image and
-    `.cursor/Dockerfile`).
+    `.cursor/Dockerfile`). Cloud Agent `rustup-init` and
+    `cargo-binstall` downloads in `.cursor/Dockerfile` are pinned by
+    SHA-256 and verified before exec (no `curl|sh`). That pin is the
+    two bootstrap binaries only; the `stable` toolchain they install and
+    later `cargo binstall` tool fetches remain unpinned.
+16. **README coverage/conformance badge colors.** Owner-specified
+    traffic-light steps for the shields.io endpoint JSON only:
+    `#e05d44` below 50%, `#fe7d37` from 50% to under 90%, `#00D892` at
+    90% and above (`flat-square`). Treemap chips and generated SVG
+    badges stay on the brand greens in `docs/brand/README.md`.
+17. **Owned lockfiles.** Scorecard/OSV flagged RUSTSEC-2026-0206
+    (`rustybuzz` unmaintained) and RUSTSEC-2026-0192 (`ttf-parser`
+    unmaintained) in `site/Cargo.lock`, not the workspace lockfile and
+    not `vendor/`. `site/` is excluded from the workspace, so root
+    `cargo audit` missed them. Fix: `resvg` 0.45 → 0.48 (harfrust +
+    skrifa). `just audit` scans every owned lockfile (`Cargo.lock`,
+    `site/Cargo.lock`). The target CI `cargo-audit` job must pass
+    `--file` for each of those; implementing this target is a follow-up
+    (#157), and a workspace-only run misses `site/`. `vendor/**`
+    lockfiles stay frozen; do not add an OSV ignore unless a finding
+    exists only there.
 
 ## Tracking
 
@@ -195,8 +215,11 @@ Physically impossible for the agent (repository settings or credentials):
       (Settings → Actions → General → Workflow permissions;
       `can_approve_pull_request_reviews=true`. Run 37961663758 predates it.)
 - [ ] Set secret `RELEASE_PLEASE_TOKEN` (PAT or GitHub App) so lockfile
-      pushes on the release branch start required checks (`GITHUB_TOKEN`
-      pushes do not trigger workflows)
+      pushes on the release branch start required checks natively
+      (`GITHUB_TOKEN` pushes do not trigger `push`/`pull_request`
+      workflows). Preferred even though Release now
+      `workflow_dispatch`es those checks when the secret is unset.
+      Exact steps: `HUMAN_LOG.md` Pending, 2026-10-09.
 - [ ] Allow `github-actions` to publish GitHub Releases / tags on `main`
 - [ ] Enforce CODEOWNERS
 - [ ] Allow `github-actions` to push coverage commits to `main`
@@ -209,6 +232,14 @@ Physically impossible for the agent (repository settings or credentials):
 - [x] Install the [Claude GitHub App](https://github.com/apps/claude) on this
       repository (2026-10-09)
 - [x] Set repo secret `CLAUDE_CODE_OAUTH_TOKEN` (2026-10-09)
+- [x] Set repo secret `SCORECARD_TOKEN` (fine-grained PAT, read-only
+      Administration / Contents / Metadata / Pull requests) so OpenSSF
+      Scorecard's Branch-Protection check can read classic branch
+      protection rules (2026-10-09)
+- [ ] Set repo secret `MEGABASE_AGENT_GH_TOKEN` (PAT for
+      `megabase-agent` with repo and pull-request scope) so Claude-opened
+      PRs run CI without approval (`GITHUB_TOKEN` `pull_request` runs
+      require approval)
 - [ ] Enable GitHub private vulnerability reporting (Settings → Code
       security) so the path in `SECURITY.md` works
 - [ ] Optionally register an [OpenSSF Best Practices](https://www.bestpractices.dev/)
