@@ -272,18 +272,25 @@ mod tests {
             IDENTITIES.contains("DROP TABLE auth.identities"),
             "empty wrong-order identities must be rebuilt"
         );
+        let peek = IDENTITIES
+            .find("AND a.attname IN ('email', 'id')")
+            .expect("identities attnum peek");
         let lock = IDENTITIES
             .find("LOCK TABLE auth.identities IN ACCESS EXCLUSIVE MODE")
             .expect("identities lock");
-        let count = IDENTITIES
-            .find("SELECT COUNT(*) INTO n FROM auth.identities")
-            .expect("identities count");
+        let exists = IDENTITIES
+            .find("EXISTS (SELECT 1 FROM auth.identities)")
+            .expect("identities exists");
         let drop = IDENTITIES
             .find("DROP TABLE auth.identities")
             .expect("identities drop");
         assert!(
-            lock < count && count < drop,
-            "ACCESS EXCLUSIVE must precede COUNT and DROP"
+            peek < lock && lock < exists && exists < drop,
+            "inspect attnums before lock; EXISTS before DROP"
+        );
+        assert!(
+            !IDENTITIES.contains("COUNT(*)"),
+            "empty check must not scan the whole table"
         );
     }
 
@@ -442,15 +449,19 @@ mod tests {
         let lock = SESSIONS
             .find("LOCK TABLE auth.sessions IN ACCESS EXCLUSIVE MODE")
             .expect("sessions lock");
-        let count = SESSIONS
-            .find("SELECT COUNT(*) INTO n FROM auth.sessions")
-            .expect("sessions count");
+        let exists = SESSIONS
+            .find("EXISTS (SELECT 1 FROM auth.sessions)")
+            .expect("sessions exists");
         let drop = SESSIONS
             .find("DROP TABLE auth.sessions")
             .expect("sessions drop");
         assert!(
-            lock < count && count < drop,
-            "ACCESS EXCLUSIVE must precede COUNT and DROP"
+            lock < exists && exists < drop,
+            "ACCESS EXCLUSIVE must precede EXISTS and DROP"
+        );
+        assert!(
+            !SESSIONS.contains("COUNT(*)"),
+            "empty check must not scan the whole table"
         );
         let restore_refresh = SESSIONS[drop..]
             .find("ADD CONSTRAINT refresh_tokens_session_id_fkey")

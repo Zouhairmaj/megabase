@@ -14,19 +14,19 @@
 
 -- Pin attnum order is refresh_token_* then scopes. An empty table created
 -- with scopes first is dropped so CREATE can rebuild it; inbound FKs are
--- dropped here and re-added later. ACCESS EXCLUSIVE before COUNT so a
+-- dropped here and re-added later. ACCESS EXCLUSIVE then EXISTS so a
 -- concurrent insert cannot land between the emptiness check and DROP.
 DO $$
 DECLARE
     hmac_att smallint;
     scopes_att smallint;
-    n bigint;
+    has_rows boolean;
 BEGIN
     IF to_regclass('auth.sessions') IS NULL THEN
         RETURN;
     END IF;
     LOCK TABLE auth.sessions IN ACCESS EXCLUSIVE MODE;
-    SELECT COUNT(*) INTO n FROM auth.sessions;
+    SELECT EXISTS (SELECT 1 FROM auth.sessions) INTO has_rows;
     SELECT a.attnum INTO hmac_att
       FROM pg_attribute a
       JOIN pg_class c ON c.oid = a.attrelid
@@ -40,7 +40,7 @@ BEGIN
       JOIN pg_namespace ns ON ns.oid = c.relnamespace
      WHERE ns.nspname = 'auth' AND c.relname = 'sessions'
        AND a.attname = 'scopes' AND NOT a.attisdropped AND a.attnum > 0;
-    IF n = 0 AND hmac_att IS NOT NULL AND scopes_att IS NOT NULL
+    IF NOT has_rows AND hmac_att IS NOT NULL AND scopes_att IS NOT NULL
        AND scopes_att < hmac_att THEN
         ALTER TABLE IF EXISTS auth.refresh_tokens
             DROP CONSTRAINT IF EXISTS refresh_tokens_session_id_fkey;

@@ -141,7 +141,6 @@ Final shape: rename `id` → `provider_id` and UUID PK
 
 | Column | Type | Notes |
 |---|---|---|
-| id | uuid | PK, `DEFAULT gen_random_uuid()` |
 | provider_id | text | NOT NULL |
 | user_id | uuid | NOT NULL, FK → `auth.users(id)` ON DELETE CASCADE |
 | identity_data | jsonb | NOT NULL |
@@ -150,6 +149,7 @@ Final shape: rename `id` → `provider_id` and UUID PK
 | created_at | timestamptz | NULL |
 | updated_at | timestamptz | NULL |
 | email | text | `GENERATED ALWAYS AS (lower(identity_data->>'email')) STORED` |
+| id | uuid | PK, `DEFAULT gen_random_uuid()` |
 
 Pinned catalog attnum order is `provider_id` … `updated_at`, then `email`,
 then uuid `id` (`20221215195800` before `20231117164230`). Unique
@@ -157,8 +157,9 @@ then uuid `id` (`20221215195800` before `20231117164230`). Unique
 Indexes: `identities_user_id_idx`, `identities_email_idx` (`text_pattern_ops`).
 Comments as in those migrations. Installer must **not** `RENAME` `id`: that
 breaks a database that already has the UUID primary key. An empty table
-whose `email` attnum is after `id` is locked `ACCESS EXCLUSIVE`, counted,
-then dropped and recreated; a non-empty table keeps its existing attnums.
+whose `email` attnum is after `id` is locked `ACCESS EXCLUSIVE` only when
+that order is seen, rechecked, then dropped if `EXISTS` finds no rows; a
+non-empty or already-ordered table keeps its existing attnums.
 
 ---
 
@@ -575,14 +576,14 @@ lines 10 and 27.
 | ip | inet | NULL |
 | tag | text | NULL |
 | oauth_client_id | uuid | NULL, FK → `auth.oauth_clients(id)` ON DELETE CASCADE |
-| scopes | text | NULL, `char_length <= 4096` |
 | refresh_token_hmac_key | text | NULL |
 | refresh_token_counter | bigint | NULL |
+| scopes | text | NULL, `char_length <= 4096` |
 
 Pinned catalog attnum order is `oauth_client_id`, then
 `refresh_token_hmac_key` / `refresh_token_counter`, then `scopes`.
 An empty table with `scopes` before the refresh-token columns is locked
-`ACCESS EXCLUSIVE`, counted, then dropped and recreated
+`ACCESS EXCLUSIVE`, checked with `EXISTS`, then dropped and recreated
 (`refresh_tokens_session_id_fkey` and `mfa_amr_claims_session_id_fkey`
 are dropped and added again). A non-empty table keeps its existing
 attnums.

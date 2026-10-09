@@ -9,32 +9,45 @@
 -- attnum order matches the pin: email was added before the uuid `id`
 -- (`20221215195800` then `20231117164230`). ADD COLUMN IF NOT EXISTS
 -- cannot reorder an existing table; drop an empty wrong-order table so
--- CREATE below can rebuild it. ACCESS EXCLUSIVE before COUNT so a
--- concurrent insert cannot land between the emptiness check and DROP.
+-- CREATE below can rebuild it. Inspect attnums first; ACCESS EXCLUSIVE
+-- only on the old order, then recheck and use EXISTS so a concurrent
+-- insert cannot land between the emptiness check and DROP.
 DO $$
 DECLARE
     email_att smallint;
     id_att smallint;
-    n bigint;
+    has_rows boolean;
 BEGIN
     IF to_regclass('auth.identities') IS NULL THEN
         RETURN;
     END IF;
+    SELECT
+        MAX(a.attnum) FILTER (WHERE a.attname = 'email'),
+        MAX(a.attnum) FILTER (WHERE a.attname = 'id')
+      INTO email_att, id_att
+      FROM pg_attribute a
+      JOIN pg_class c ON c.oid = a.attrelid
+      JOIN pg_namespace ns ON ns.oid = c.relnamespace
+     WHERE ns.nspname = 'auth' AND c.relname = 'identities'
+       AND a.attname IN ('email', 'id')
+       AND NOT a.attisdropped AND a.attnum > 0;
+    IF email_att IS NULL OR id_att IS NULL OR email_att <= id_att THEN
+        RETURN;
+    END IF;
     LOCK TABLE auth.identities IN ACCESS EXCLUSIVE MODE;
-    SELECT COUNT(*) INTO n FROM auth.identities;
-    SELECT a.attnum INTO email_att
+    SELECT
+        MAX(a.attnum) FILTER (WHERE a.attname = 'email'),
+        MAX(a.attnum) FILTER (WHERE a.attname = 'id')
+      INTO email_att, id_att
       FROM pg_attribute a
       JOIN pg_class c ON c.oid = a.attrelid
       JOIN pg_namespace ns ON ns.oid = c.relnamespace
      WHERE ns.nspname = 'auth' AND c.relname = 'identities'
-       AND a.attname = 'email' AND NOT a.attisdropped AND a.attnum > 0;
-    SELECT a.attnum INTO id_att
-      FROM pg_attribute a
-      JOIN pg_class c ON c.oid = a.attrelid
-      JOIN pg_namespace ns ON ns.oid = c.relnamespace
-     WHERE ns.nspname = 'auth' AND c.relname = 'identities'
-       AND a.attname = 'id' AND NOT a.attisdropped AND a.attnum > 0;
-    IF n = 0 AND email_att IS NOT NULL AND id_att IS NOT NULL AND email_att > id_att THEN
+       AND a.attname IN ('email', 'id')
+       AND NOT a.attisdropped AND a.attnum > 0;
+    SELECT EXISTS (SELECT 1 FROM auth.identities) INTO has_rows;
+    IF NOT has_rows AND email_att IS NOT NULL AND id_att IS NOT NULL
+       AND email_att > id_att THEN
         DROP TABLE auth.identities;
     END IF;
 END $$;
