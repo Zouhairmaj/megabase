@@ -195,9 +195,11 @@ pub fn footer(paths: &Paths, logo: &str) -> String {
     let mobile_right = [
         ("Devlog", paths.page("devlog")),
         ("Human log", paths.page("human-log")),
+        ("Cost", paths.page("cost")),
         ("Docs", paths.page("docs")),
         ("FAQ", paths.page("faq")),
         ("GitHub ↗", GITHUB.into()),
+        ("NOTICE & licenses", NOTICE.into()),
     ];
     let mut mleft = String::new();
     for (label, href) in &mobile_left {

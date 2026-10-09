@@ -249,9 +249,6 @@ fn main() -> io::Result<()> {
     let human_md = fs::read_to_string(repo_root.join("HUMAN_LOG.md")).unwrap_or_default();
     let human = human_log::load(&human_md);
     metrics.human_interventions = human.completed;
-    if metrics.spend_label == "—" {
-        metrics.spend_label = "not tracked yet · starts Phase 1".into();
-    }
 
     build(&site_root, &repo_root, &out, &metrics, &human)?;
     eprintln!(

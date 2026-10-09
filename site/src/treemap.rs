@@ -1,4 +1,6 @@
-use crate::metrics::{comma, ComponentBlock, FeatureGroup, Metrics, UnitStatus};
+use crate::metrics::{
+    comma, CatalogRow, ComponentBlock, FeatureGroup, Metrics, UnitStatus, CATALOG,
+};
 
 const BG: &str = "#0B0E12";
 const NOT_STARTED: &str = "#2A2C2F";
@@ -40,11 +42,7 @@ pub fn svg_size(metrics: &Metrics, width: f64, height: f64) -> String {
     ));
 
     if blocks.is_empty() {
-        out.push_str(&format!(
-            r##"<text x="{cx}" y="{cy}" text-anchor="middle" dominant-baseline="middle" font-family="JetBrains Mono, ui-monospace, monospace" font-size="18" fill="#8E9094">—</text>"##,
-            cx = width / 2.0,
-            cy = height / 2.0
-        ));
+        paint_day0_catalog(&mut out, width, height);
         out.push_str("</svg>");
         return out;
     }
@@ -176,6 +174,40 @@ fn grid_for(n: usize, w: f64, h: f64, cell: f64) -> (usize, usize) {
         }
     }
     best
+}
+
+/// Day-0 map: one labelled grey tile per known component, equal area.
+/// No unit cells and no invented denominator — those arrive with coverage/.
+fn paint_day0_catalog(out: &mut String, width: f64, height: f64) {
+    let weights: Vec<f64> = CATALOG.iter().map(|_| 1.0).collect();
+    let cells = squarify(&weights, 0.0, 0.0, width, height);
+    for (row, rect) in CATALOG.iter().zip(cells) {
+        let (x, y, w, h) = inset(rect[0], rect[1], rect[2], rect[3], BLOCK_GAP / 2.0);
+        if w < 2.0 || h < 2.0 {
+            continue;
+        }
+        out.push_str(&format!(
+            r##"<g data-component="{id}" data-x="{x:.2}" data-y="{y:.2}" data-w="{w:.2}" data-h="{h:.2}"><rect x="{x:.2}" y="{y:.2}" width="{w:.2}" height="{h:.2}" fill="{NOT_STARTED}"/><text x="{tx:.2}" y="{ty:.2}" text-anchor="middle" dominant-baseline="middle" font-family="JetBrains Mono, ui-monospace, monospace" font-size="11" font-weight="700" fill="{LABEL}">{label}</text></g>"##,
+            id = xml_esc(&row.id),
+            tx = x + w / 2.0,
+            ty = y + h / 2.0,
+            label = xml_esc(day0_label(row)),
+        ));
+    }
+}
+
+fn day0_label(row: &CatalogRow) -> &'static str {
+    match row.id {
+        "rest" => "REST",
+        "auth" => "AUTH",
+        "storage" => "STORAGE",
+        "realtime" => "REALTIME",
+        "functions" => "FUNCTIONS",
+        "pooler" => "POOLER",
+        "meta" => "META",
+        "studio" => "STUDIO",
+        _ => row.name,
+    }
 }
 
 fn paint_block(
@@ -412,6 +444,32 @@ mod tests {
             ),
         ];
         metrics
+    }
+
+    #[test]
+    fn day0_paints_catalog_tiles_without_inventing_units() {
+        let metrics = Metrics::placeholder();
+        let svg = super::svg(&metrics);
+        assert!(!svg.contains("334"));
+        assert!(!svg.contains("1024"));
+        assert_eq!(parse_units(&svg).len(), 0, "no fake unit cells");
+        for id in [
+            "rest",
+            "auth",
+            "storage",
+            "realtime",
+            "functions",
+            "pooler",
+            "meta",
+            "studio",
+        ] {
+            assert!(
+                svg.contains(&format!("data-component=\"{id}\"")),
+                "missing {id}"
+            );
+        }
+        assert!(svg.contains("REST"));
+        assert!(svg.contains("#2A2C2F"));
     }
 
     #[test]

@@ -14,26 +14,28 @@ pub fn home(paths: &Paths, metrics: &Metrics) -> String {
     let components = component_cards(paths, metrics);
     let faq = home_faq(paths, metrics);
     format!(
-        r#"<main id="main">
+        r#"<main id="main" class="home-main">
 <section class="hero">
   <div class="hero-copy">
-    <p class="kicker">DAY 0 · NOTHING PASSES YET · BUILT BY AGENTS, IN PUBLIC</p>
+    <p class="kicker hide-mobile">DAY 0 · NOTHING PASSES YET · BUILT BY AGENTS, IN PUBLIC</p>
+    <p class="kicker hide-desktop">DAY 0 · PHASE 0</p>
     <h1 class="display">Supabase,<br />rewritten in Rust.<br /><span class="headline-accent">By agents. In public.</span></h1>
-    <p class="lede">Autonomous AI agents are porting every service Supabase has written into one Rust binary that sits next to PostgreSQL. The goal: any supabase-js app runs on it without changing a line of code. An external judge compares every response with the real Supabase stack.</p>
+    <p class="lede hide-mobile">Autonomous AI agents are porting every service Supabase has written into one Rust binary that sits next to PostgreSQL. The goal: any supabase-js app runs on it without changing a line of code. An external judge compares every response with the real Supabase stack.</p>
+    <p class="lede hide-desktop">AI agents are porting every Supabase service into one Rust binary next to PostgreSQL, judged response by response against the real stack.</p>
     <div class="actions">
       <a class="btn btn-primary" href="{manifesto}">READ THE MANIFESTO</a>
       <a class="btn btn-ghost" href="{status}">SEE LIVE STATUS</a>
-      <a class="btn btn-ghost" href="{GITHUB}" rel="noopener noreferrer">GITHUB ↗</a>
+      <a class="btn btn-ghost hide-mobile" href="{GITHUB}" rel="noopener noreferrer">GITHUB ↗</a>
     </div>
     <p class="hero-disclaimer">Independent experiment. Not affiliated with or endorsed by Supabase, Inc.</p>
   </div>
-  {status_panel}
+  <div class="hide-mobile">{status_panel}</div>
 </section>
 
-<section class="band">
+<section class="band home-what">
   <p class="kicker">01 · WHAT AND WHY</p>
-  <h2 class="section-title">One binary. The same API.<br />A precise, verifiable target.</h2>
-  <p class="lede">Self-hosting Supabase today means running about a dozen containers written in six languages. Megabase aims for one Rust binary next to standard PostgreSQL, serving /rest/v1, /auth/v1, /storage/v1, /realtime/v1 and /functions/v1 exactly as Supabase does.</p>
+  <h2 class="section-title">One binary. The same API.<br /><span class="hide-mobile">A precise, verifiable target.</span></h2>
+  <p class="lede hide-mobile">Self-hosting Supabase today means running about a dozen containers written in six languages. Megabase aims for one Rust binary next to standard PostgreSQL, serving /rest/v1, /auth/v1, /storage/v1, /realtime/v1 and /functions/v1 exactly as Supabase does.</p>
   <div class="triple">
     <article class="stat-card">
       <p class="card-kicker">SUPABASE SELF-HOSTED</p>
@@ -51,7 +53,7 @@ pub fn home(paths: &Paths, metrics: &Metrics) -> String {
       <p>Point supabase-js at Megabase. Same endpoints, bodies, status codes and errors.</p>
     </article>
   </div>
-  <div class="triple">
+  <div class="triple hide-mobile">
     <article>
       <h3>Measure what agents can build</h3>
       <p>Not a toy or a demo: a large, multi-language, production-grade system with a precise target.</p>
@@ -67,60 +69,64 @@ pub fn home(paths: &Paths, metrics: &Metrics) -> String {
   </div>
 </section>
 
-<section class="band">
+<section class="band home-how">
   <p class="kicker">02 · HOW IT WORKS</p>
-  <h2 class="section-title">Agents write. An external judge grades.</h2>
+  <h2 class="section-title">Agents write the code.<br />An external judge grades it.</h2>
   <ol class="step-row">
-    <li><span class="step-num">01</span><h3>Read the pinned source</h3><p>Upstream lives in vendor/, frozen. That is the specification.</p></li>
-    <li><span class="step-num">02</span><h3>Implement one unit</h3><p>Spec first, then Rust. Failures return a structured 501.</p></li>
-    <li><span class="step-num">03</span><h3>The judge compares</h3><p>Official Supabase runs next to Megabase from the same pins.</p></li>
-    <li><span class="step-num">04</span><h3>Keep or revert</h3><p>A commit is kept only if total conformance does not fall.</p></li>
+    <li><span class="step-num">01</span><h3>Read pinned upstream source</h3><p>Upstream lives in vendor/, frozen. That is the specification.</p></li>
+    <li><span class="step-num">02</span><h3>Spec one unit</h3><p>Spec first, then Rust. Failures return a structured 501.</p></li>
+    <li><span class="step-num">03</span><h3>Diff against real Supabase</h3><p>Official Supabase runs next to Megabase from the same pins.</p></li>
+    <li><span class="step-num">04</span><h3>Keep or revert, never regress</h3><p>A commit is kept only if total conformance does not fall.</p></li>
     <li><span class="step-num">05</span><h3>Record in public</h3><p>Coverage, the treemap, the human log, the spend.</p></li>
   </ol>
-  <p><a class="text-link" href="{how}">How the loop works →</a></p>
+  <p class="hide-mobile"><a class="text-link" href="{how}">How the loop works →</a></p>
 </section>
 
-<section class="band" id="status">
-  <p class="kicker">03 · LIVE STATUS</p>
-  <h2 class="section-title">Every square is one unit.</h2>
-  <p class="lede">Nested squarified treemap: component, then feature group, then one whole square per unit. Regenerated at build time from coverage/units.json. Grey is not started. Green is conformant.</p>
+<section class="band home-live" id="status">
+  {mobile_stats}
+  <p class="kicker hide-mobile">03 · LIVE STATUS</p>
+  <h2 class="section-title hide-mobile">Each cell is one unit.<br />Grey until the judge says green.</h2>
+  <p class="lede hide-mobile">Nested squarified treemap: component, then feature group, then one whole square per unit. Regenerated at build time from coverage/units.json. Grey is not started. Green is conformant.</p>
   <div class="treemap treemap-wide">{treemap}</div>
   <p class="legend">■ not started · <span class="swatch implemented"></span> implemented · <span class="swatch tested"></span> tested · <span class="swatch conformant"></span> conformant</p>
-  <p><a class="text-link" href="{status}">Full status →</a></p>
+  <p class="hide-mobile"><a class="text-link" href="{status}">Full status →</a></p>
 </section>
 
-<section class="band">
+<section class="band home-levels">
   <div class="band-head">
     <div>
       <p class="kicker">04 · ROADMAP</p>
-      <h2 class="section-title">Five public levels.<br />Each one gated by the judge.</h2>
+      <h2 class="section-title hide-mobile">Five public levels.<br />Each one gated by the judge.</h2>
     </div>
     <a class="text-link" href="{roadmap}">Full roadmap →</a>
   </div>
   {levels}
-  <p class="note">Each percentage is the conformance required on that level’s own scope before the next level may start, and earlier levels must hold their score. Thresholds come from PROGRESS.md when it exists. Level 5 has no gate yet: it is deferred until a feasibility study.</p>
+  <p class="note hide-mobile">Each percentage is the conformance required on that level’s own scope before the next level may start, and earlier levels must hold their score. Thresholds come from PROGRESS.md when it exists. Level 5 has no gate yet: it is deferred until a feasibility study.</p>
 </section>
 
-<section class="band">
+<section class="band home-components hide-mobile">
   <p class="kicker">05 · COMPONENTS</p>
-  <h2 class="section-title">Every service Supabase wrote.</h2>
+  <h2 class="section-title">Every service Supabase wrote.<br />Ported to Rust.</h2>
   <div class="component-grid">{components}</div>
   <p class="note">Plus the API gateway that replaces Kong (Lua / Nginx). PostgreSQL stays external. Licenses: NOTICE.</p>
   <p><a class="text-link" href="{components_href}">Component catalog →</a></p>
 </section>
 
-<section class="band faq-teaser">
+<section class="band faq-teaser hide-mobile">
   <div class="faq-aside">
     <p class="kicker">06 · FAQ</p>
-    <h2 class="section-title">Questions people ask.</h2>
+    <h2 class="section-title">Fair questions.</h2>
     <p><a class="text-link" href="{faq_href}">All questions →</a></p>
   </div>
   <div class="faq-list">{faq}</div>
 </section>
 
-<section class="cta-band">
+<section class="cta-band home-cta">
   <h2 class="section-title">Watch the map turn green.</h2>
-  <a class="btn btn-primary" href="{GITHUB}" rel="noopener noreferrer">FOLLOW ON GITHUB ↗</a>
+  <div class="actions">
+    <a class="btn btn-primary" href="{GITHUB}" rel="noopener noreferrer">FOLLOW ON GITHUB ↗</a>
+    <a class="btn btn-ghost hide-mobile" href="{status}">SEE STATUS</a>
+  </div>
 </section>
 </main>"#,
         manifesto = paths.page("manifesto"),
@@ -130,6 +136,23 @@ pub fn home(paths: &Paths, metrics: &Metrics) -> String {
         components_href = paths.page("components"),
         faq_href = paths.page("faq"),
         levels = level_cards(metrics, false),
+        mobile_stats = home_mobile_stats(metrics),
+    )
+}
+
+fn home_mobile_stats(metrics: &Metrics) -> String {
+    format!(
+        r#"<div class="home-mobile-stats hide-desktop">
+  <div class="status-head"><span>STATUS</span><span class="live-dot">● Live</span></div>
+  <div class="mobile-stat"><span>Units passing</span><strong>{passing}</strong></div>
+  <div class="mobile-stat"><span>Coverage</span><strong>{coverage}</strong></div>
+  <div class="mobile-stat"><span>Conformance</span><strong>{conformance}</strong></div>
+  <div class="mobile-stat"><span>Stage</span><strong class="accent">{stage}</strong></div>
+</div>"#,
+        passing = esc(&metrics.passing_total_label()),
+        coverage = esc(&metrics.coverage_label()),
+        conformance = esc(&metrics.conformance_label()),
+        stage = esc(&metrics.stage_short),
     )
 }
 
@@ -258,27 +281,24 @@ fn component_cards(paths: &Paths, metrics: &Metrics) -> String {
 }
 
 fn home_faq(paths: &Paths, metrics: &Metrics) -> String {
-    let units = unit_count_phrase(metrics);
     let items = [
         (
-            "Can I use Megabase today?",
-            "No. It is Day 0: every endpoint answers 501 MEGABASE_NOT_IMPLEMENTED. Level 1 (REST and email/password auth) is the first point where real apps could run. Follow the Status page.".into(),
+            "Can I use it in production?",
+            "No. Today every endpoint returns 501 MEGABASE_NOT_IMPLEMENTED. Watch the levels: Level 1 is the first point where real apps should run.".into(),
         ),
         (
-            "Is this made by Supabase?",
-            "No. Megabase is an independent experiment. It is not affiliated with or endorsed by Supabase, Inc.".into(),
+            "Is this affiliated with Supabase?",
+            "No. It is an independent experiment. “Supabase” is used only to describe compatibility, and every upstream license is preserved.".into(),
         ),
         (
-            "Do humans write any of the code?",
+            "Who decides what “correct” means?",
+            "The real Supabase stack, run side by side from pinned versions. Agents can’t change what the judge compares against.".into(),
+        ),
+        (
+            "Do humans write any code?",
             format!(
-                "No. Humans wrote the mission and GOAL.md. Agents write implementation. Interventions so far: {}.",
+                "Humans wrote the manifesto, GOAL.md and the initial setup. Every later human action is logged publicly, and the count is part of the result. Interventions so far: {}.",
                 metrics.human_interventions_label()
-            ),
-        ),
-        (
-            "What is a unit?",
-            format!(
-                "One externally visible behaviour extracted from upstream source: a route, a query operator, an auth flow, a message type, a Studio page. {units}"
             ),
         ),
     ];
@@ -403,51 +423,49 @@ fn day0_strip(metrics: &Metrics) -> String {
 
 pub fn status(paths: &Paths, metrics: &Metrics) -> String {
     let treemap = treemap::svg_size(metrics, 1248.0, 360.0);
-    let mut rows = String::new();
-    if metrics.components.is_empty() {
-        rows.push_str(
-            r#"<p class="empty-body">No coverage/units.json yet. The map stays empty rather than inventing squares.</p>"#,
-        );
-    } else {
-        rows.push_str(r#"<div class="comp-table">"#);
-        for block in &metrics.components {
-            rows.push_str(&format!(
-                r#"<div class="comp-row">
-  <span class="scope-name">{label}</span>
-  <span>{progress}</span>
-  <span>{cov}</span>
-  <span class="tag">{tag}</span>
-</div>"#,
-                label = esc(block.label),
-                progress = esc(&format!(
-                    "{} / {}",
-                    metrics::comma(block.conformant),
-                    metrics::comma(block.total())
-                )),
-                cov = esc(&metrics.component_coverage_label(&block.id)),
-                tag = metrics::status_tag(Some(block)),
-            ));
-        }
-        rows.push_str("</div>");
+    let mut rows = String::from(
+        r#"<div class="data-table status-table" role="table" aria-label="By component">
+<div class="data-row head" role="row"><span>Component</span><span>Path</span><span>Level</span><span>Units</span><span>Status</span></div>"#,
+    );
+    for row in CATALOG {
+        let block = metrics.component(row.id);
+        let units = match block {
+            Some(b) if b.total() > 0 => format!(
+                "{} / {}",
+                metrics::comma(b.conformant),
+                metrics::comma(b.total())
+            ),
+            _ => "—".into(),
+        };
+        rows.push_str(&format!(
+            r#"<div class="data-row" role="row"><span class="scope-name">{name}</span><span>{path}</span><span>{levels}</span><span>{units}</span><span class="tag">{tag}</span></div>"#,
+            name = esc(row.name),
+            path = esc(row.path),
+            levels = esc(row.levels),
+            tag = metrics::status_tag(block),
+        ));
     }
+    rows.push_str("</div>");
     format!(
         r#"<main id="main" class="doc-page">
   <header class="page-hero">
-    <p class="kicker">STATUS · DAY 0 · {stage}</p>
+    <p class="kicker">LIVE STATUS · DAY 0 · {stage}</p>
     <h1 class="display-sm">Where the experiment stands.</h1>
     <p class="lede">Every number on this page is generated at build time from files in the repository. If a file is missing the cell is an em dash, never a made-up total.</p>
-    <div class="metric-grid">
-      <div class="metric"><p class="muted">Units passing</p><p class="stat-xl">{passing}</p></div>
+    <div class="metric-grid metric-grid-5">
+      <div class="metric"><p class="muted">Units done</p><p class="stat-xl">{passing}</p></div>
       <div class="metric"><p class="muted">Coverage</p><p class="stat-xl">{coverage}</p></div>
       <div class="metric"><p class="muted">Conformance</p><p class="stat-xl">{conformance}</p></div>
-      <div class="metric"><p class="muted">Interventions</p><p class="stat-xl">{humans}</p></div>
-      <div class="metric metric-wide"><p class="muted">Spend</p><p class="stat-xl">{spend}</p></div>
+      <div class="metric"><p class="muted">Human interventions</p><p class="stat-xl">{humans}</p></div>
+      <div class="metric"><p class="muted">Spend</p><p class="stat-xl">{spend}</p></div>
     </div>
+    <p class="note">Spend is not tracked yet. Token and dollar tracking starts after Phase 0.</p>
   </header>
   <section class="band">
     <h2>Component map</h2>
-    <div class="treemap treemap-wide">{treemap}</div>
-    <p class="legend">Each block is a component, nested groups inside, one cell per unit. ■ not started · implemented · tested · conformant</p>
+    <p class="note">Each block is a Supabase component. When coverage/units.json is present, cells are one unit each. Until then the tiles are the known crates, unfilled — never a made-up count.</p>
+    <div class="treemap treemap-wide treemap-status">{treemap}</div>
+    <p class="legend">■ not started · <span class="swatch implemented"></span> implemented · <span class="swatch tested"></span> tested · <span class="swatch conformant"></span> conformant</p>
   </section>
   <section class="band">
     <h2>By component</h2>

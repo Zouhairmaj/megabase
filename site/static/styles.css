@@ -432,9 +432,10 @@ a:hover {
 
 .cta-band {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
   gap: 28px;
-  align-items: flex-start;
 }
 
 .triple,
@@ -568,6 +569,10 @@ a:hover {
   border: 1px solid var(--border);
 }
 
+.treemap-status {
+  height: 360px;
+}
+
 .treemap-svg {
   width: 100%;
   height: 100%;
@@ -689,6 +694,53 @@ a:hover {
   border: 1px solid var(--border);
 }
 
+.metric-grid-5 {
+  grid-template-columns: repeat(5, 1fr);
+}
+
+.spend-note {
+  margin: 0;
+  font-size: 12px;
+  letter-spacing: 0;
+}
+
+.home-mobile-stats {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  border: 1px solid var(--border);
+}
+
+.home-mobile-stats .status-head {
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+}
+
+.mobile-stat {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--border);
+  color: var(--body);
+  font-size: 14px;
+}
+
+.mobile-stat:last-child {
+  border-bottom: 0;
+}
+
+.mobile-stat strong {
+  color: var(--text);
+  font-weight: 700;
+}
+
+@media (min-width: 901px) {
+  .hide-desktop {
+    display: none !important;
+  }
+}
+
 .day0-strip div,
 .metric {
   padding: 20px 24px;
@@ -805,11 +857,17 @@ a:hover {
 }
 
 .data-head,
+.data-row.head,
 .scope-head {
   background: var(--panel);
   color: var(--muted-aa);
   letter-spacing: 1px;
   font-size: 11px;
+  text-transform: uppercase;
+}
+
+.status-table .data-row {
+  grid-template-columns: 1.6fr 1.2fr 0.8fr 0.8fr 1fr;
 }
 
 .scope-name {
@@ -1291,6 +1349,10 @@ body:has(#licensing-and-credits:target) .toc-list a[href="#licensing-and-credits
     width: 420px;
   }
 
+  .metric-grid-5 {
+    grid-template-columns: repeat(3, 1fr);
+  }
+
   .step-row,
   .level-row,
   .component-grid,
@@ -1320,6 +1382,39 @@ body:has(#licensing-and-credits:target) .toc-list a[href="#licensing-and-credits
 }
 
 @media (max-width: 900px) {
+  .hide-mobile {
+    display: none !important;
+  }
+
+  .home-main {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .home-main .hero {
+    order: 1;
+  }
+
+  .home-main .home-live {
+    order: 2;
+  }
+
+  .home-main .home-what {
+    order: 3;
+  }
+
+  .home-main .home-how {
+    order: 4;
+  }
+
+  .home-main .home-levels {
+    order: 5;
+  }
+
+  .home-main .home-cta {
+    order: 6;
+  }
+
   :root {
     --pad: 20px;
   }
@@ -1458,6 +1553,8 @@ body:has(#licensing-and-credits:target) .toc-list a[href="#licensing-and-credits
   .cta-band {
     padding-top: 48px;
     padding-bottom: 48px;
+    flex-direction: column;
+    align-items: flex-start;
   }
 
   .callout {
@@ -1471,6 +1568,7 @@ body:has(#licensing-and-credits:target) .toc-list a[href="#licensing-and-credits
   .level-row,
   .component-grid,
   .metric-grid,
+  .metric-grid-5,
   .day0-strip,
   .split-band,
   .faq-teaser,
@@ -1490,7 +1588,27 @@ body:has(#licensing-and-credits:target) .toc-list a[href="#licensing-and-credits
   }
 
   .treemap-wide {
-    height: 200px;
+    height: 280px;
+  }
+
+  .treemap-status {
+    height: 320px;
+  }
+
+  .status-table .data-row.head {
+    display: none;
+  }
+
+  .status-table .data-row {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 8px 16px;
+  }
+
+  .status-table .data-row span:nth-child(2),
+  .status-table .data-row span:nth-child(3),
+  .status-table .data-row span:nth-child(4) {
+    display: none;
   }
 
   .data-row {
