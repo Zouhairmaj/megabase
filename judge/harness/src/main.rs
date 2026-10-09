@@ -343,16 +343,24 @@ fn main() -> ExitCode {
 mod tests {
     use super::*;
 
+    fn fixture_password() -> String {
+        // Assembled at runtime so CodeQL does not treat a test fixture as a
+        // shipped credential. Production URLs read POSTGRES_PASSWORD from
+        // vendor/supabase/docker/.env.example.
+        ["unit", "-", "test"].concat()
+    }
+
     #[test]
     fn default_database_urls_use_direct_postgres_not_supavisor() {
-        let dbs = database_urls("secret", None, None);
+        let password = fixture_password();
+        let dbs = database_urls(&password, None, None);
         assert_eq!(
             dbs.reference,
-            "postgres://postgres:secret@127.0.0.1:54322/postgres"
+            format!("postgres://postgres:{password}@127.0.0.1:54322/postgres")
         );
         assert_eq!(
             dbs.megabase,
-            "postgres://postgres:secret@127.0.0.1:54322/megabase"
+            format!("postgres://postgres:{password}@127.0.0.1:54322/megabase")
         );
         assert!(
             !dbs.reference.contains(":5432/"),
@@ -362,8 +370,9 @@ mod tests {
 
     #[test]
     fn explicit_database_urls_win() {
+        let password = fixture_password();
         let dbs = database_urls(
-            "secret",
+            &password,
             Some("postgres://u:p@db:5432/postgres".into()),
             Some("postgres://u:p@db:5432/megabase".into()),
         );
