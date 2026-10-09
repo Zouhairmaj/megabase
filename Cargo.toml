@@ -17,7 +17,7 @@ members = [
     "tools/megabase-backlog",
     "judge/harness",
 ]
-exclude = ["site"]
+exclude = ["site", "fuzz"]
 default-members = [
     "crates/megabase",
     "crates/megabase-core",
