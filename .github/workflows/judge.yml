@@ -40,11 +40,21 @@ jobs:
         run: cargo build --release --locked -p megabase -p megabase-judge --bin megabase --bin megabase-judge
       - name: Reference stack
         run: |
-          docker compose -p megabase-judge \
-            -f vendor/supabase/docker/docker-compose.yml \
-            -f judge/compose.override.yml \
-            --env-file vendor/supabase/docker/.env.example \
-            up -d --wait --wait-timeout 300
+          set -euo pipefail
+          # Hub 429s on unauthenticated pulls of supabase/*; retry a few times.
+          for attempt in 1 2 3 4 5; do
+            if docker compose -p megabase-judge \
+              -f vendor/supabase/docker/docker-compose.yml \
+              -f judge/compose.override.yml \
+              --env-file vendor/supabase/docker/.env.example \
+              up -d --wait --wait-timeout 300; then
+              exit 0
+            fi
+            echo "compose up failed (attempt ${attempt}/5); sleeping before retry"
+            sleep $((attempt * 20))
+          done
+          echo "::error::Reference stack compose up failed after 5 attempts"
+          exit 1
       - name: Prepare Megabase database
         run: ./target/release/megabase-judge prepare
       - name: Megabase on :8100
