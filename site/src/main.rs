@@ -21,7 +21,7 @@ use std::path::{Path, PathBuf};
 use metrics::Metrics;
 
 pub const GITHUB: &str = "https://github.com/Zouhairmaj/megabase";
-const ORIGIN: &str = "https://zouhairmaj.github.io/megabase";
+const ORIGIN: &str = "https://megabase.sh";
 
 #[derive(Clone, Copy)]
 enum Kind {
@@ -194,6 +194,11 @@ fn build(site_root: &Path, repo_root: &Path, out: &Path, metrics: &Metrics) -> i
     }
 
     fs::write(out.join("sitemap.xml"), sitemap())?;
+    let cname = site_root.join("CNAME");
+    let cname_out = out.join("CNAME");
+    if cname.is_file() && !same_path(&cname, &cname_out) {
+        fs::copy(&cname, cname_out)?;
+    }
     Ok(())
 }
 
