@@ -133,7 +133,11 @@ waiting on a human.
     (`release-as`). The v0.1.0 release PR must delete `release-as`
     before it merges.
     Container `FROM` lines are pinned by digest (root image and
-    `.cursor/Dockerfile`).
+    `.cursor/Dockerfile`). Cloud Agent `rustup-init` and
+    `cargo-binstall` downloads in `.cursor/Dockerfile` are pinned by
+    SHA-256 and verified before exec (no `curl|sh`). That pin is the
+    two bootstrap binaries only; the `stable` toolchain they install and
+    later `cargo binstall` tool fetches remain unpinned.
 
 ## Tracking
 
@@ -209,6 +213,14 @@ Physically impossible for the agent (repository settings or credentials):
 - [x] Install the [Claude GitHub App](https://github.com/apps/claude) on this
       repository (2026-10-09)
 - [x] Set repo secret `CLAUDE_CODE_OAUTH_TOKEN` (2026-10-09)
+- [x] Set repo secret `SCORECARD_TOKEN` (fine-grained PAT, read-only
+      Administration / Contents / Metadata / Pull requests) so OpenSSF
+      Scorecard's Branch-Protection check can read classic branch
+      protection rules (2026-10-09)
+- [ ] Set repo secret `MEGABASE_AGENT_GH_TOKEN` (PAT for
+      `megabase-agent` with repo and pull-request scope) so Claude-opened
+      PRs run CI without approval (`GITHUB_TOKEN` `pull_request` runs
+      require approval)
 - [ ] Enable GitHub private vulnerability reporting (Settings → Code
       security) so the path in `SECURITY.md` works
 - [ ] Optionally register an [OpenSSF Best Practices](https://www.bestpractices.dev/)
