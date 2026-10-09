@@ -30,7 +30,6 @@ pub enum UnitStatus {
 #[derive(Clone, Debug)]
 pub struct FeatureGroup {
     pub id: String,
-    #[allow(dead_code)]
     pub label: String,
     pub units: Vec<UnitStatus>,
 }
@@ -79,11 +78,6 @@ impl ComponentBlock {
         }
     }
 
-    #[allow(dead_code)]
-    pub fn from_units(id: impl Into<String>, label: &'static str, units: Vec<UnitStatus>) -> Self {
-        Self::from_groups(id, label, Vec::new(), units)
-    }
-
     pub fn from_groups(
         id: impl Into<String>,
         label: &'static str,
@@ -130,31 +124,10 @@ impl ComponentBlock {
             self.units.len()
         }
     }
-
-    #[allow(dead_code)]
-    pub fn unit_statuses(&self) -> Vec<UnitStatus> {
-        if !self.units.is_empty() {
-            return self.units.clone();
-        }
-        let mut units = Vec::with_capacity(self.total());
-        units.extend(std::iter::repeat_n(
-            UnitStatus::NotStarted,
-            self.not_started,
-        ));
-        units.extend(std::iter::repeat_n(
-            UnitStatus::Implemented,
-            self.implemented,
-        ));
-        units.extend(std::iter::repeat_n(UnitStatus::Tested, self.tested));
-        units.extend(std::iter::repeat_n(UnitStatus::Conformant, self.conformant));
-        units
-    }
 }
 
 #[derive(Clone, Debug)]
 pub struct VendorPin {
-    #[allow(dead_code)]
-    pub name: String,
     pub tag: String,
 }
 
@@ -171,7 +144,6 @@ pub struct Metrics {
     pub stage: String,
     pub stage_short: String,
     pub human_interventions: usize,
-    pub next_milestone: String,
 }
 
 impl Metrics {
@@ -188,7 +160,6 @@ impl Metrics {
             stage: FALLBACK_STAGE.into(),
             stage_short: FALLBACK_STAGE_SHORT.into(),
             human_interventions: 0,
-            next_milestone: "Level 1 · REST + Auth".into(),
         }
     }
 
@@ -332,7 +303,7 @@ fn apply_vendor(metrics: &mut Metrics, value: &Value) {
             .and_then(Value::as_str)
             .unwrap_or("")
             .to_string();
-        metrics.vendor.insert(name.clone(), VendorPin { name, tag });
+        metrics.vendor.insert(name, VendorPin { tag });
     }
 }
 

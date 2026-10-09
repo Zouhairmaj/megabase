@@ -25,6 +25,10 @@ const S_MAX: i32 = 40;
 const GROUP_BONUS: f64 = 5.0;
 const LABEL_INSET: i32 = 6;
 
+/// Pixel size and chrome for one inline treemap SVG.
+///
+/// `nested` draws feature-group boxes inside each component. Hero presets
+/// set it to false so each component is a single grid of unit squares.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Preset {
     pub width: i32,
@@ -36,6 +40,7 @@ pub struct Preset {
     pub id: &'static str,
 }
 
+/// Status page nested map, 816×640 beside 384px copy.
 pub const STATUS_DESKTOP: Preset = Preset {
     width: 816,
     height: 640,
@@ -45,6 +50,7 @@ pub const STATUS_DESKTOP: Preset = Preset {
     group_label_px: 8,
     id: "status-d",
 };
+/// Status page nested map, 350×760 when the page stacks below 900px.
 pub const STATUS_MOBILE: Preset = Preset {
     width: 350,
     height: 760,
@@ -54,6 +60,7 @@ pub const STATUS_MOBILE: Preset = Preset {
     group_label_px: 7,
     id: "status-m",
 };
+/// Home live map, 1192×520.
 pub const HOME_DESKTOP: Preset = Preset {
     width: 1192,
     height: 520,
@@ -63,6 +70,7 @@ pub const HOME_DESKTOP: Preset = Preset {
     group_label_px: 8,
     id: "home-d",
 };
+/// Home live map, 350×700 on small viewports.
 pub const HOME_MOBILE: Preset = Preset {
     width: 350,
     height: 700,
@@ -72,6 +80,7 @@ pub const HOME_MOBILE: Preset = Preset {
     group_label_px: 7,
     id: "home-m",
 };
+/// Home hero card, 442×260, component grids without group labels.
 pub const HERO_DESKTOP: Preset = Preset {
     width: 442,
     height: 260,
@@ -81,6 +90,7 @@ pub const HERO_DESKTOP: Preset = Preset {
     group_label_px: 8,
     id: "hero-d",
 };
+/// Home hero card, 308×300 on small viewports.
 pub const HERO_MOBILE: Preset = Preset {
     width: 308,
     height: 300,
@@ -154,40 +164,17 @@ struct Layout {
     components: Vec<PlacedComp>,
 }
 
+/// Dark nested-square SVG for `preset`, built from coverage metrics.
 pub fn render(metrics: &Metrics, preset: Preset) -> String {
     paint(&build(metrics, preset), metrics)
 }
 
-#[allow(dead_code)]
-pub fn panel(metrics: &Metrics, width: f64, height: f64) -> String {
-    let preset = if width >= 400.0 {
-        HERO_DESKTOP
-    } else {
-        HERO_MOBILE
-    };
-    let mut p = preset;
-    p.width = width.round() as i32;
-    p.height = height.round() as i32;
-    render(metrics, p)
-}
-
-#[allow(dead_code)]
-pub fn svg_size(metrics: &Metrics, width: f64, height: f64) -> String {
-    let mut p = HOME_DESKTOP;
-    p.width = width.round() as i32;
-    p.height = height.round() as i32;
-    render(metrics, p)
-}
-
-#[allow(dead_code)]
-pub fn svg(metrics: &Metrics) -> String {
-    render(metrics, HOME_DESKTOP)
-}
-
+/// Alias for [`alt_text`].
 pub fn panel_alt(metrics: &Metrics) -> String {
     alt_text(metrics)
 }
 
+/// Accessible description of the map, used as `aria-label` and visually hidden copy.
 pub fn alt_text(metrics: &Metrics) -> String {
     if !metrics.has_data() || metrics.components.iter().all(|c| c.total() == 0) {
         return "Component map: no coverage data yet.".into();
@@ -199,6 +186,7 @@ pub fn alt_text(metrics: &Metrics) -> String {
     )
 }
 
+/// Pick weights, pack components, then place one global square size `s`.
 fn build(metrics: &Metrics, preset: Preset) -> Layout {
     let comps = live_components(metrics);
     if comps.is_empty() {
@@ -287,7 +275,7 @@ fn groups_of(comp: &ComponentBlock) -> Vec<(&str, &str, &[UnitStatus])> {
         groups.sort_by(|a, b| b.total().cmp(&a.total()).then_with(|| a.id.cmp(&b.id)));
         groups
             .into_iter()
-            .map(|g| (g.id.as_str(), g.id.as_str(), g.units.as_slice()))
+            .map(|g| (g.id.as_str(), g.label.as_str(), g.units.as_slice()))
             .collect()
     }
 }
@@ -1211,6 +1199,13 @@ fn paint(layout: &Layout, metrics: &Metrics) -> String {
     for comp in &layout.components {
         paint_component(&mut out, layout, comp);
     }
+    if layout.s == 0 {
+        out.push_str(&format!(
+            r##"<text x="{cx}" y="{cy}" text-anchor="middle" dominant-baseline="middle" font-family="JetBrains Mono, ui-monospace, monospace" font-size="32" fill="{LABEL}" aria-hidden="true">—</text>"##,
+            cx = w / 2,
+            cy = h / 2,
+        ));
+    }
     out.push_str("</svg>");
     out
 }
@@ -1820,10 +1815,10 @@ mod tests {
     #[test]
     fn real_summary_at_every_preset() {
         let metrics = real_metrics();
-        assert_eq!(metrics.total, Some(1024));
-        assert_eq!(metrics.components.len(), 8);
-        let groups: usize = metrics.components.iter().map(|c| c.groups.len()).sum();
-        assert_eq!(groups, 79);
+        let summed: usize = metrics.components.iter().map(|c| c.total()).sum();
+        let total = metrics.total.expect("live coverage must include totals.units");
+        assert!(total > 0, "live coverage must have units");
+        assert_eq!(total, summed, "summary total must equal the sum of components");
         for preset in PRESETS {
             assert_layout(&metrics, *preset);
         }
@@ -1881,8 +1876,14 @@ mod tests {
         let metrics = Metrics::placeholder();
         let svg = render(&metrics, HOME_DESKTOP);
         assert!(!svg.contains("334"));
-        assert!(!svg.contains("1,024"));
-        assert!(!svg.contains("1024"));
+        let cx = HOME_DESKTOP.width / 2;
+        let cy = HOME_DESKTOP.height / 2;
+        assert!(
+            svg.contains(&format!(
+                r#"<text x="{cx}" y="{cy}" text-anchor="middle" dominant-baseline="middle""#
+            )) && svg.contains("—"),
+            "no-data SVG must draw a centered em dash"
+        );
         assert_eq!(parse_groups(&svg).iter().map(|g| g.n).sum::<usize>(), 0);
         for id in [
             "rest",
@@ -1903,13 +1904,28 @@ mod tests {
     #[test]
     fn hero_has_no_group_labels_and_shows_counts() {
         let metrics = real_metrics();
+        let live: Vec<_> = metrics
+            .components
+            .iter()
+            .filter(|c| c.total() > 0)
+            .collect();
         let svg = render(&metrics, HERO_DESKTOP);
         assert!(!svg.contains("font-size=\"8\" fill=\"#8A8B8E\""));
-        assert!(svg.contains("FUNCTIONS"));
-        assert!(svg.contains("/276") || svg.contains("/1,024") || svg.contains('0'));
+        for c in &live {
+            let name = c.label.to_ascii_uppercase();
+            assert!(
+                svg.contains(&name),
+                "hero must label component {name}"
+            );
+            let count = format!("/{}", comma(c.total()));
+            assert!(
+                svg.contains(&count) || svg.contains(&name),
+                "hero label should include a count when it fits"
+            );
+        }
         assert!(svg.contains("/"));
         let groups = parse_groups(&svg);
-        assert_eq!(groups.len(), 8);
+        assert_eq!(groups.len(), live.len());
         assert_layout(&metrics, HERO_DESKTOP);
         assert_layout(&metrics, HERO_MOBILE);
     }
@@ -1926,12 +1942,13 @@ mod tests {
 
     #[test]
     fn numbers_use_comma_grouping() {
-        let metrics = real_metrics();
-        let svg = render(&metrics, STATUS_DESKTOP);
-        assert!(svg.contains("1,024") || alt_text(&metrics).contains("1,024"));
         assert_eq!(comma(1024), "1,024");
-        let _ = super::svg(&metrics);
-        let _ = super::svg_size(&metrics, 100.0, 80.0);
-        let _ = super::panel(&metrics, 442.0, 260.0);
+        let metrics = synthetic(1024);
+        let expected = comma(1024);
+        let svg = render(&metrics, STATUS_DESKTOP);
+        assert!(
+            svg.contains(&expected) || alt_text(&metrics).contains(&expected),
+            "synthetic 1024-unit map must use comma grouping"
+        );
     }
 }

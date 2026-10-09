@@ -831,7 +831,10 @@ mod tests {
             !home.contains("334"),
             "placeholder must not hardcode the Kite mock 334"
         );
-        assert!(!home.contains("1024"));
+        assert!(
+            home.contains("—"),
+            "day-0 pages must use an em dash, not an invented unit total"
+        );
         assert!(home.contains("Not affiliated with or endorsed by Supabase, Inc."));
         assert!(!home.to_ascii_lowercase().contains("oxide"));
         assert!(home.contains("EXPERIMENT STATUS"));
@@ -981,11 +984,17 @@ mod tests {
         build(&site_root, &real_root, &out, &metrics, &human).expect("build live");
         let home = fs::read_to_string(out.join("index.html")).unwrap();
         let status = fs::read_to_string(out.join("status/index.html")).unwrap();
+        let total = metrics.total.expect("live coverage must include totals.units");
+        assert!(total > 0, "live coverage must have units");
+        let shown = metrics::comma(total);
         assert!(
-            home.contains("1,024"),
-            "home must show summary.totals.units"
+            home.contains(&shown),
+            "home must show summary.totals.units ({shown})"
         );
-        assert!(status.contains("1,024"));
+        assert!(
+            status.contains(&shown),
+            "status must show summary.totals.units ({shown})"
+        );
         assert!(!home.contains(">334<") && !status.contains(">334<"));
         assert_treemap_svgs_are_fluid(&home);
         assert_treemap_svgs_are_fluid(&status);
@@ -1054,34 +1063,96 @@ mod tests {
             );
             fs::write(&wrapper, injected).unwrap();
             let uri = format!("file://{}", wrapper.display());
-            let dumped = Command::new("timeout")
-                .args([
-                    "20",
-                    chrome,
-                    "--headless=new",
-                    "--disable-gpu",
-                    "--no-sandbox",
-                    "--disable-dev-shm-usage",
-                    "--proxy-server=http://127.0.0.1:9",
-                    "--virtual-time-budget=2000",
-                    &format!("--window-size={width},900"),
-                    "--dump-dom",
-                    &uri,
-                ])
-                .output()
-                .expect("chrome");
-            if !dumped.status.success() {
-                continue;
-            }
-            let dom = String::from_utf8_lossy(&dumped.stdout);
-            let sw = attr_after(&dom, "data-sw=\"").unwrap_or(0);
-            let cw = attr_after(&dom, "data-cw=\"").unwrap_or(0);
+            let profile = out.join(format!("chrome-profile-{width}-{}", page.replace('/', "-")));
+            fs::create_dir_all(&profile).unwrap();
+            let dom = chrome_dump_dom(
+                chrome,
+                &uri,
+                width,
+                &profile,
+                std::time::Duration::from_secs(20),
+            );
+            let sw = attr_after(&dom, "data-sw=\"").unwrap_or_else(|| {
+                panic!("{page} at {width}px: missing data-sw on <html> after Chrome dump-dom")
+            });
+            let cw = attr_after(&dom, "data-cw=\"").unwrap_or_else(|| {
+                panic!("{page} at {width}px: missing data-cw on <html> after Chrome dump-dom")
+            });
             assert!(
-                cw == 0 || sw <= cw,
+                sw <= cw,
                 "{page} at {width}px overflowed: scrollWidth={sw} clientWidth={cw}"
             );
         }
         let _ = fs::remove_dir_all(&out);
+    }
+
+    fn chrome_dump_dom(
+        chrome: &str,
+        uri: &str,
+        width: u32,
+        profile: &Path,
+        timeout: std::time::Duration,
+    ) -> String {
+        use std::io::Read;
+        use std::process::Stdio;
+        use std::time::Instant;
+
+        let mut child = Command::new(chrome)
+            .args([
+                "--headless=new",
+                "--disable-gpu",
+                "--no-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-extensions",
+                "--proxy-server=http://127.0.0.1:9",
+                "--virtual-time-budget=2000",
+                &format!("--user-data-dir={}", profile.display()),
+                &format!("--window-size={width},900"),
+                "--dump-dom",
+                uri,
+            ])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("chrome");
+        let stdout = child.stdout.take().expect("chrome stdout");
+        let stderr = child.stderr.take().expect("chrome stderr");
+        let reader = std::thread::spawn(move || {
+            let mut buf = Vec::new();
+            let mut r = stdout;
+            let _ = r.read_to_end(&mut buf);
+            buf
+        });
+        let err_reader = std::thread::spawn(move || {
+            let mut buf = Vec::new();
+            let mut r = stderr;
+            let _ = r.read_to_end(&mut buf);
+            buf
+        });
+        let start = Instant::now();
+        let status = loop {
+            match child.try_wait() {
+                Ok(Some(status)) => break status,
+                Ok(None) if start.elapsed() >= timeout => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    panic!(
+                        "chrome timed out after {}s for {uri} at {width}px",
+                        timeout.as_secs()
+                    );
+                }
+                Ok(None) => std::thread::sleep(std::time::Duration::from_millis(50)),
+                Err(e) => panic!("wait chrome: {e}"),
+            }
+        };
+        let dumped = reader.join().expect("chrome stdout thread");
+        let err = err_reader.join().unwrap_or_default();
+        assert!(
+            status.success(),
+            "chrome failed for {uri} at {width}px: {status}\n{}",
+            String::from_utf8_lossy(&err)
+        );
+        String::from_utf8_lossy(&dumped).into_owned()
     }
 
     fn attr_after(html: &str, key: &str) -> Option<i32> {
