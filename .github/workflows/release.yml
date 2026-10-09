@@ -24,11 +24,17 @@ jobs:
       # conventional-commits-parser rejects. Those are warnings, not
       # release-please failures; skipping them keeps the log clean. The
       # job still fails on real errors (config, permissions, API).
+      #
+      # RELEASE_PLEASE_TOKEN must be a PAT or GitHub App token that can
+      # create PRs and whose pushes start workflows. GITHUB_TOKEN cannot
+      # create PRs until the Actions setting is enabled, and even then a
+      # GITHUB_TOKEN push still does not trigger workflows.
       - uses: googleapis/release-please-action@5c625bfb5d1ff62eadeeb3772007f7f66fdcf071 # v4.4.0
         id: release
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
 
   sync-lockfile:
     name: Sync Cargo.lock
@@ -37,10 +43,15 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      actions: write
+      checks: read
+      pull-requests: read
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
+          persist-credentials: true
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
       - name: Checkout the release-please branch
         id: branch
         run: |
@@ -70,6 +81,7 @@ jobs:
         if: steps.branch.outputs.exists == 'true'
         run: cargo update -w
       - name: Commit Cargo.lock if it changed
+        id: commit
         if: steps.branch.outputs.exists == 'true'
         env:
           BRANCH: ${{ steps.branch.outputs.name }}
@@ -80,10 +92,37 @@ jobs:
           git add Cargo.lock
           if git diff --cached --quiet; then
             echo "Cargo.lock already matches workspace versions."
+            echo "pushed=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           git commit -m "chore: sync Cargo.lock with workspace version"
           git push origin "HEAD:refs/heads/${BRANCH}"
+          echo "pushed=true" >> "$GITHUB_OUTPUT"
+      - name: Confirm required checks started on the lockfile head
+        if: steps.branch.outputs.exists == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PUSHED: ${{ steps.commit.outputs.pushed }}
+          BRANCH: ${{ steps.branch.outputs.name }}
+        run: |
+          set -euo pipefail
+          if [ "${PUSHED:-false}" != "true" ]; then
+            echo "No lockfile commit; nothing to confirm."
+            exit 0
+          fi
+          SHA="$(git rev-parse HEAD)"
+          echo "Waiting for check runs on ${SHA} (${BRANCH})"
+          for i in $(seq 1 20); do
+            COUNT="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${SHA}/check-runs" --jq '.total_count')"
+            echo "attempt ${i}: ${COUNT} check runs"
+            if [ "${COUNT}" -gt 0 ]; then
+              gh api "repos/${GITHUB_REPOSITORY}/commits/${SHA}/check-runs" --jq '.check_runs[:12] | map(.name)'
+              exit 0
+            fi
+            sleep 6
+          done
+          echo "::error::No check runs started for ${SHA}. A GITHUB_TOKEN push does not trigger workflows. Set repo secret RELEASE_PLEASE_TOKEN (PAT or GitHub App installation token with contents:write) so the lockfile commit is the head that CI checks."
+          exit 1
 
   annotate-release:
     name: Coverage delta on release

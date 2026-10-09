@@ -65,12 +65,19 @@ bump set:
 - `CHANGELOG.md`
 - `.release-please-manifest.json`
 - `Cargo.toml` (workspace package version)
-- `Cargo.lock` (workspace member versions, kept in sync by extra-files
-  and `cargo update -w`)
+- `Cargo.lock` (workspace member versions, kept in sync by
+  `cargo update -w` on the release branch)
+- `release-please-config.json` only when the sole change is deleting
+  `release-as` (required before the v0.1.0 PR merges). Any other edit
+  to that file is rejected.
 
 Any other path on those branches is rejected, including reviewed paths
 and product code. This is narrower than a `review/*` exception: the bot
 cannot land CI or judge changes through a release PR.
+
+`review/*` may append items under `## Pending` in `HUMAN_LOG.md` so
+agents can record human-only blockers. Completed interventions stay
+human-owned.
 
 ## Consequences
 

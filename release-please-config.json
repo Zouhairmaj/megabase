@@ -29,10 +29,6 @@
           "type": "toml",
           "path": "Cargo.toml",
           "jsonpath": "$.workspace.package.version"
-        },
-        {
-          "type": "generic",
-          "path": "Cargo.lock"
         }
       ]
     }

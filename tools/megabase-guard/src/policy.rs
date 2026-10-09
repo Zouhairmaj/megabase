@@ -25,6 +25,10 @@ pub const RELEASE_PLEASE_ALLOWED: &[&str] = &[
     "Cargo.lock",
 ];
 
+/// Release config may change on a release-please branch only by deleting
+/// `release-as` (see `is_release_as_deletion_only`).
+pub const RELEASE_PLEASE_CONFIG: &str = "release-please-config.json";
+
 /// The one branch allowed to create the protected tree, and only while the
 /// base branch does not have it yet.
 pub const BOOTSTRAP_BRANCH: &str = "cursor/phase-0-bootstrap-121c";
@@ -47,6 +51,10 @@ pub enum Status {
 pub struct Change {
     pub status: Status,
     pub path: String,
+    /// Contents at the merge base, when loaded.
+    pub before: Option<String>,
+    /// Contents at head, when loaded.
+    pub after: Option<String>,
 }
 
 #[derive(Debug)]
@@ -76,6 +84,72 @@ pub fn is_release_please(ctx: &Context) -> bool {
     ctx.head_ref.starts_with(RELEASE_PLEASE_BRANCH_PREFIX)
 }
 
+/// True when `after` is `before` with only `release-as` keys removed.
+pub fn is_release_as_deletion_only(before: &str, after: &str) -> bool {
+    let Ok(mut old) = serde_json::from_str::<serde_json::Value>(before) else {
+        return false;
+    };
+    let Ok(new) = serde_json::from_str::<serde_json::Value>(after) else {
+        return false;
+    };
+    if !strip_release_as(&mut old) {
+        return false;
+    }
+    old == new
+}
+
+fn strip_release_as(value: &mut serde_json::Value) -> bool {
+    let Some(obj) = value.as_object_mut() else {
+        return false;
+    };
+    let mut removed = obj.remove("release-as").is_some();
+    if let Some(packages) = obj.get_mut("packages").and_then(|p| p.as_object_mut()) {
+        for pkg in packages.values_mut() {
+            if let Some(pkg) = pkg.as_object_mut() {
+                removed |= pkg.remove("release-as").is_some();
+            }
+        }
+    }
+    removed
+}
+
+/// True when `after` only appends items under `## Pending`.
+pub fn is_human_log_pending_append(before: &str, after: &str) -> bool {
+    const HEADING: &str = "## Pending";
+    let Some(old_at) = before.find(HEADING) else {
+        return false;
+    };
+    let Some(new_at) = after.find(HEADING) else {
+        return false;
+    };
+    if before[..old_at] != after[..new_at] {
+        return false;
+    }
+    let Some((old_pending, old_rest)) = split_pending_body(&before[old_at..]) else {
+        return false;
+    };
+    let Some((new_pending, new_rest)) = split_pending_body(&after[new_at..]) else {
+        return false;
+    };
+    old_rest == new_rest && new_pending.starts_with(old_pending) && new_pending != old_pending
+}
+
+fn split_pending_body(from_heading: &str) -> Option<(&str, &str)> {
+    let nl = from_heading.find('\n')?;
+    let after_heading = &from_heading[nl + 1..];
+    let end = after_heading.find("\n---")?;
+    Some((&after_heading[..end], &after_heading[end..]))
+}
+
+fn release_please_config_ok(change: &Change) -> bool {
+    change.status == Status::Modified
+        && change
+            .before
+            .as_deref()
+            .zip(change.after.as_deref())
+            .is_some_and(|(before, after)| is_release_as_deletion_only(before, after))
+}
+
 pub fn evaluate(changes: &[Change], ctx: &Context) -> Vec<String> {
     let bootstrap = is_bootstrap(ctx);
     let review = ctx.head_ref.starts_with(REVIEW_BRANCH_PREFIX);
@@ -84,11 +158,13 @@ pub fn evaluate(changes: &[Change], ctx: &Context) -> Vec<String> {
     for change in changes {
         let path = change.path.as_str();
         if release_please {
-            if matches(path, RELEASE_PLEASE_ALLOWED) {
+            if matches(path, RELEASE_PLEASE_ALLOWED)
+                || (path == RELEASE_PLEASE_CONFIG && release_please_config_ok(change))
+            {
                 continue;
             }
             violations.push(format!(
-                "{path}: release-please branches may only change CHANGELOG.md, .release-please-manifest.json, Cargo.toml and Cargo.lock"
+                "{path}: release-please branches may only change CHANGELOG.md, .release-please-manifest.json, Cargo.toml, Cargo.lock, and delete release-as from {RELEASE_PLEASE_CONFIG}"
             ));
             continue;
         }
@@ -100,7 +176,15 @@ pub fn evaluate(changes: &[Change], ctx: &Context) -> Vec<String> {
             // Phase 0 only: the lead approved landing the Design (Kite)
             // and Documentation sections in GOAL.md on the bootstrap branch.
             let bootstrap_goal = bootstrap && path == "GOAL.md";
-            if !creating_empty_log && !bootstrap_goal {
+            let pending_append = review
+                && path == "HUMAN_LOG.md"
+                && change.status == Status::Modified
+                && change
+                    .before
+                    .as_deref()
+                    .zip(change.after.as_deref())
+                    .is_some_and(|(before, after)| is_human_log_pending_append(before, after));
+            if !creating_empty_log && !bootstrap_goal && !pending_append {
                 violations.push(format!(
                     "{path}: human-owned file; only maintainers edit it"
                 ));
@@ -142,6 +226,17 @@ mod tests {
         Change {
             status: Status::Added,
             path: path.into(),
+            before: None,
+            after: None,
+        }
+    }
+
+    fn modified(path: &str, before: &str, after: &str) -> Change {
+        Change {
+            status: Status::Modified,
+            path: path.into(),
+            before: Some(before.into()),
+            after: Some(after.into()),
         }
     }
 
@@ -153,6 +248,30 @@ mod tests {
             pin_errors: Vec::new(),
         }
     }
+
+    fn release_ctx() -> Context {
+        ctx(
+            "release-please--branches--main--components--megabase",
+            false,
+        )
+    }
+
+    const RELEASE_CONFIG_WITH_AS: &str = r#"{
+  "packages": {
+    ".": {
+      "release-type": "simple",
+      "release-as": "0.1.0"
+    }
+  }
+}"#;
+
+    const RELEASE_CONFIG_WITHOUT_AS: &str = r#"{
+  "packages": {
+    ".": {
+      "release-type": "simple"
+    }
+  }
+}"#;
 
     #[test]
     fn bootstrap_branch_may_create_protected_tree_once() {
@@ -220,10 +339,7 @@ mod tests {
 
     #[test]
     fn release_please_branches_may_only_bump_version_files() {
-        let c = ctx(
-            "release-please--branches--main--components--megabase",
-            false,
-        );
+        let c = release_ctx();
         assert!(evaluate(
             &[
                 add("CHANGELOG.md"),
@@ -241,6 +357,105 @@ mod tests {
     }
 
     #[test]
+    fn release_please_may_delete_release_as_only() {
+        let c = release_ctx();
+        assert!(evaluate(
+            &[modified(
+                RELEASE_PLEASE_CONFIG,
+                RELEASE_CONFIG_WITH_AS,
+                RELEASE_CONFIG_WITHOUT_AS
+            )],
+            &c
+        )
+        .is_empty());
+        assert!(is_release_as_deletion_only(
+            RELEASE_CONFIG_WITH_AS,
+            RELEASE_CONFIG_WITHOUT_AS
+        ));
+    }
+
+    #[test]
+    fn release_please_rejects_other_release_please_config_edits() {
+        let c = release_ctx();
+        let changed_type = r#"{
+  "packages": {
+    ".": {
+      "release-type": "rust"
+    }
+  }
+}"#;
+        assert_eq!(
+            evaluate(
+                &[modified(
+                    RELEASE_PLEASE_CONFIG,
+                    RELEASE_CONFIG_WITH_AS,
+                    changed_type
+                )],
+                &c
+            )
+            .len(),
+            1
+        );
+        let added_key = r#"{
+  "packages": {
+    ".": {
+      "release-type": "simple",
+      "release-as": "0.1.0",
+      "extra": true
+    }
+  }
+}"#;
+        assert_eq!(
+            evaluate(
+                &[modified(
+                    RELEASE_PLEASE_CONFIG,
+                    RELEASE_CONFIG_WITH_AS,
+                    added_key
+                )],
+                &c
+            )
+            .len(),
+            1
+        );
+        assert_eq!(evaluate(&[add(RELEASE_PLEASE_CONFIG)], &c).len(), 1);
+        assert_eq!(
+            evaluate(
+                &[modified(
+                    RELEASE_PLEASE_CONFIG,
+                    RELEASE_CONFIG_WITHOUT_AS,
+                    RELEASE_CONFIG_WITHOUT_AS
+                )],
+                &c
+            )
+            .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn review_branch_may_append_human_log_pending_only() {
+        let before = "# Human Intervention Log\n\n## Pending\n\n- old\n\n---\n\n*No completed*\n";
+        let after =
+            "# Human Intervention Log\n\n## Pending\n\n- old\n\n- new pending\n\n---\n\n*No completed*\n";
+        let c = ctx("review/release-ci", false);
+        assert!(evaluate(&[modified("HUMAN_LOG.md", before, after)], &c).is_empty());
+        let rewritten =
+            "# Human Intervention Log\n\n## Pending\n\n- rewritten\n\n---\n\n*No completed*\n";
+        assert_eq!(
+            evaluate(&[modified("HUMAN_LOG.md", before, rewritten)], &c).len(),
+            1
+        );
+        assert_eq!(
+            evaluate(
+                &[modified("HUMAN_LOG.md", before, after)],
+                &ctx("issue-1-x", false)
+            )
+            .len(),
+            1
+        );
+    }
+
+    #[test]
     fn rust_only_outside_vendor() {
         let c = ctx("issue-1-x", false);
         assert_eq!(
@@ -255,6 +470,8 @@ mod tests {
         let deleted = Change {
             status: Status::Deleted,
             path: "scripts/old.py".into(),
+            before: None,
+            after: None,
         };
         assert!(evaluate(&[deleted], &c).is_empty());
     }

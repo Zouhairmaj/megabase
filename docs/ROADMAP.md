@@ -102,11 +102,12 @@ release-please (`release-please-config.json`):
 walks workspace members and fails on `version.workspace = true`
 ([googleapis/release-please#2478](https://github.com/googleapis/release-please/issues/2478)).
 A TOML extra-file updater bumps `[workspace.package].version`; member
-crates inherit. A generic extra-file updater rewrites matching versions
-in `Cargo.lock`. The Release workflow then runs `cargo update -w` on
-`release-please--branches--*` and commits if the lockfile still drifts,
-so `--locked` CI (Build, Codecov, Bencher, Protected paths, Judge) stays
-green. PR titles use `chore: release ${version}` (no `main` scope);
+crates inherit. The Release workflow runs `cargo update -w` on
+`release-please--branches--*` and commits `Cargo.lock` if workspace
+member versions drifted, so `--locked` CI (Build, Codecov, Bencher,
+Protected paths, Judge) stays green. That commit is pushed with
+`RELEASE_PLEASE_TOKEN` when set, so required checks start on the new
+head; `GITHUB_TOKEN` pushes do not trigger workflows. PR titles use `chore: release ${version}` (no `main` scope);
 `semantic-pr.yml` also allows scope `main` as a fallback.
 `bootstrap-sha` is the Phase 0 merge (`7aa41e8`, exclusive): commits
 before it (`Day 0`, `[phase0]`, `[brand]`) are not conventional and
@@ -129,7 +130,7 @@ Cadence:
 
 Only the **orchestrator** merges release PRs, and only after reviewer
 approval of the current head SHA and green CI. The lockfile is part of
-the release PR (extra-files plus `cargo update -w`). If it is still
+the release PR (`cargo update -w` on the release branch). If it is still
 stale, run `cargo update -w` on that branch. Each GitHub Release body
 is annotated with the coverage / conformance delta versus the previous
 tag.
