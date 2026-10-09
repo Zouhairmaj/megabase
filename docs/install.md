@@ -34,6 +34,10 @@ The binary listens on `0.0.0.0:8000` (`MEGABASE_HOST` / `MEGABASE_PORT`).
 See [Configuration](configuration.md). `just` lists every recipe that
 works today.
 
+When `DATABASE_URL` is set, startup creates the Auth schema objects Megabase
+currently implements. The install is idempotent. Without `DATABASE_URL` the
+process still serves HTTP.
+
 The public site generator is separate:
 
 ```shell
@@ -63,6 +67,7 @@ docker build -t megabase .
 docker run --rm -p 8000:8000 megabase
 ```
 
+Pass `-e DATABASE_URL=...` if the process should install Auth SQL objects.
 The image includes `megabase-healthcheck`, which probes
 `/_megabase/health`.
 
