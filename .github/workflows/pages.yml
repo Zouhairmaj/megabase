@@ -41,9 +41,9 @@ jobs:
 
       # Trusted event SHA only (push or workflow_dispatch). The Judge
       # artifact is applied in pages-badges.yml, which does not save a cache.
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: ./.github/actions/rust-cache
         with:
-          key: pages
+          workspace: site
 
       - name: Restore published Judge summary when present
         env:

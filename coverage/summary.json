@@ -2,12 +2,12 @@
   "schema": 1,
   "totals": {
     "units": 1024,
-    "implemented": 32,
-    "tested": 30,
+    "implemented": 42,
+    "tested": 40,
     "conformant": 0
   },
   "percent": {
-    "coverage": 3.1,
+    "coverage": 4.1,
     "conformance": 0.0,
     "done": 0.0
   },
@@ -18,14 +18,14 @@
   "components": {
     "auth": {
       "units": 152,
-      "implemented": 32,
-      "tested": 30,
+      "implemented": 42,
+      "tested": 40,
       "conformant": 0,
       "groups": {
         "admin": {
           "units": 28,
-          "implemented": 0,
-          "tested": 0,
+          "implemented": 10,
+          "tested": 10,
           "conformant": 0
         },
         "database": {
@@ -556,6 +556,16 @@
     }
   },
   "units": {
+    "auth:route:DELETE /auth/v1/admin/custom-providers/{identifier}": "tested",
+    "auth:route:DELETE /auth/v1/admin/oauth/clients/{client_id}": "tested",
+    "auth:route:DELETE /auth/v1/admin/sso/providers/{idp_id}": "tested",
+    "auth:route:DELETE /auth/v1/admin/users/{user_id}": "tested",
+    "auth:route:DELETE /auth/v1/admin/users/{user_id}/factors/{factor_id}": "tested",
+    "auth:route:DELETE /auth/v1/admin/users/{user_id}/passkeys/{passkey_id}": "tested",
+    "auth:route:GET /auth/v1/admin/audit": "tested",
+    "auth:route:GET /auth/v1/admin/custom-providers": "tested",
+    "auth:route:GET /auth/v1/admin/custom-providers/{identifier}": "tested",
+    "auth:route:GET /auth/v1/admin/oauth/clients": "tested",
     "auth:sql-function:auth.email()": "tested",
     "auth:sql-function:auth.jwt()": "tested",
     "auth:sql-function:auth.role()": "tested",
