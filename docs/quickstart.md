@@ -26,7 +26,9 @@ cargo run --locked -p megabase
 
 Or `cargo build --release --locked -p megabase` and run
 `./target/release/megabase`. Environment variables are in
-[Configuration](configuration.md).
+[Configuration](configuration.md). Set `JWT_SECRET` to the same HS256
+secret that signed your `ANON_KEY` when you start wiring Auth or REST;
+the 501 gateway starts without it.
 
 ## Check it runs
 

@@ -1,13 +1,15 @@
-//! Shared types for Megabase: configuration, errors and the structured
+//! Shared types for Megabase: configuration, JWT, errors and the structured
 //! `MEGABASE_NOT_IMPLEMENTED` fallback every component uses.
 
 pub mod config;
 pub mod error;
+pub mod jwt;
 
 use axum::{extract::OriginalUri, http::Method, Router};
 
 pub use config::Config;
 pub use error::{Error, MegabaseNotImplemented, Result};
+pub use jwt::{bearer_token, Hs256, JwtClaims, JwtError};
 
 /// A router that answers every method and path with HTTP 501.
 ///

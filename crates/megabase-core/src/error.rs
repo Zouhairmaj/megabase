@@ -5,6 +5,8 @@ use axum::{
 };
 use serde::Serialize;
 
+use crate::jwt::JwtError;
+
 /// Body of every response for behavior Megabase does not implement yet
 /// (GOAL.md section 3, rule 5).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -42,6 +44,8 @@ pub enum Error {
     NotImplemented(MegabaseNotImplemented),
     #[error("configuration error: {0}")]
     Config(String),
+    #[error(transparent)]
+    Jwt(#[from] JwtError),
 }
 
 impl From<MegabaseNotImplemented> for Error {
