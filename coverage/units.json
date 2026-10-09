@@ -1,0 +1,3194 @@
+{
+  "version": "1.0.0",
+  "generated_at": null,
+  "vendor_pins": {
+    "auth": "v2.197.0",
+    "postgrest": "v16.4",
+    "realtime": "v2.143.3",
+    "storage": "v1.80.2",
+    "supavisor": "v2.9.13",
+    "postgres-meta": "v0.100.0",
+    "supabase": "v1.26.08",
+    "edge-runtime": "v1.77.4",
+    "supabase-js": "v2.117.3"
+  },
+  "summary": {
+    "total_units": 334,
+    "implemented": 0,
+    "conformant": 0,
+    "coverage_percent": 0.0,
+    "conformance_percent": 0.0,
+    "by_component": {
+      "rest": {
+        "total": 57,
+        "implemented": 0,
+        "conformant": 0
+      },
+      "auth": {
+        "total": 81,
+        "implemented": 0,
+        "conformant": 0
+      },
+      "realtime": {
+        "total": 33,
+        "implemented": 0,
+        "conformant": 0
+      },
+      "storage": {
+        "total": 34,
+        "implemented": 0,
+        "conformant": 0
+      },
+      "functions": {
+        "total": 27,
+        "implemented": 0,
+        "conformant": 0
+      },
+      "pooler": {
+        "total": 13,
+        "implemented": 0,
+        "conformant": 0
+      },
+      "meta": {
+        "total": 51,
+        "implemented": 0,
+        "conformant": 0
+      },
+      "studio": {
+        "total": 38,
+        "implemented": 0,
+        "conformant": 0
+      }
+    },
+    "by_group": {
+      "rest.table_operations": {
+        "total": 6,
+        "implemented": 0,
+        "conformant": 0
+      },
+      "rest.rpc": {
+        "total": 2,
+        "implemented": 0,
+        "conformant": 0
+      },
+      "rest.query_operators": {
+        "total": 30,
+        "implemented": 0,
+        "conformant": 0
+      },
+      "rest.query_features": {
+        "total": 19,
+        "implemented": 0,
+        "conformant": 0
+      },
+      "auth.endpoints": {
+        "total": 28,
+        "implemented": 0,
+        "conformant": 0
+      },
+      "auth.admin": {
+        "total": 12,
+        "implemented": 0,
+        "conformant": 0
+      },
+      "auth.oauth_providers": {
+        "total": 22,
+        "implemented": 0,
+        "conformant": 0
+      },
+      "auth.features": {
+        "total": 19,
+        "implemented": 0,
+        "conformant": 0
+      },
+      "realtime.websocket_messages": {
+        "total": 12,
+        "implemented": 0,
+        "conformant": 0
+      },
+      "realtime.features": {
+        "total": 17,
+        "implemented": 0,
+        "conformant": 0
+      },
+      "realtime.postgres_events": {
+        "total": 4,
+        "implemented": 0,
+        "conformant": 0
+      },
+      "storage.buckets": {
+        "total": 6,
+        "implemented": 0,
+        "conformant": 0
+      },
+      "storage.objects": {
+        "total": 14,
+        "implemented": 0,
+        "conformant": 0
+      },
+      "storage.resumable_uploads": {
+        "total": 4,
+        "implemented": 0,
+        "conformant": 0
+      },
+      "storage.image_transforms": {
+        "total": 5,
+        "implemented": 0,
+        "conformant": 0
+      },
+      "storage.features": {
+        "total": 5,
+        "implemented": 0,
+        "conformant": 0
+      },
+      "functions.invocation": {
+        "total": 6,
+        "implemented": 0,
+        "conformant": 0
+      },
+      "functions.web_apis": {
+        "total": 16,
+        "implemented": 0,
+        "conformant": 0
+      },
+      "functions.supabase_apis": {
+        "total": 5,
+        "implemented": 0,
+        "conformant": 0
+      },
+      "pooler.pooling_modes": {
+        "total": 3,
+        "implemented": 0,
+        "conformant": 0
+      },
+      "pooler.features": {
+        "total": 10,
+        "implemented": 0,
+        "conformant": 0
+      },
+      "meta.endpoints": {
+        "total": 51,
+        "implemented": 0,
+        "conformant": 0
+      },
+      "studio.pages": {
+        "total": 34,
+        "implemented": 0,
+        "conformant": 0
+      },
+      "studio.api": {
+        "total": 4,
+        "implemented": 0,
+        "conformant": 0
+      }
+    }
+  },
+  "units": [
+    {
+      "id": "rest.table.get",
+      "component": "rest",
+      "group": "table_operations",
+      "name": "GET /:table",
+      "description": "GET request on a table",
+      "upstream_file": "postgrest/src/PostgREST/App.hs",
+      "status": "not_implemented"
+    },
+    {
+      "id": "rest.table.post",
+      "component": "rest",
+      "group": "table_operations",
+      "name": "POST /:table",
+      "description": "POST request on a table",
+      "upstream_file": "postgrest/src/PostgREST/App.hs",
+      "status": "not_implemented"
+    },
+    {
+      "id": "rest.table.patch",
+      "component": "rest",
+      "group": "table_operations",
+      "name": "PATCH /:table",
+      "description": "PATCH request on a table",
+      "upstream_file": "postgrest/src/PostgREST/App.hs",
+      "status": "not_implemented"
+    },
+    {
+      "id": "rest.table.delete",
+      "component": "rest",
+      "group": "table_operations",
+      "name": "DELETE /:table",
+      "description": "DELETE request on a table",
+      "upstream_file": "postgrest/src/PostgREST/App.hs",
+      "status": "not_implemented"
+    },
+    {
+      "id": "rest.table.head",
+      "component": "rest",
+      "group": "table_operations",
+      "name": "HEAD /:table",
+      "description": "HEAD request on a table",
+      "upstream_file": "postgrest/src/PostgREST/App.hs",
+      "status": "not_implemented"
+    },
+    {
+      "id": "rest.table.options",
+      "component": "rest",
+      "group": "table_operations",
+      "name": "OPTIONS /:table",
+      "description": "OPTIONS request on a table",
+      "upstream_file": "postgrest/src/PostgREST/App.hs",
+      "status": "not_implemented"
+    },
+    {
+      "id": "rest.rpc.get",
+      "component": "rest",
+      "group": "rpc",
+      "name": "GET /rpc/:function",
+      "description": "Call stored procedure via GET",
+      "upstream_file": "postgrest/src/PostgREST/App.hs",
+      "status": "not_implemented"
+    },
+    {
+      "id": "rest.rpc.post",
+      "component": "rest",
+      "group": "rpc",
+      "name": "POST /rpc/:function",
+      "description": "Call stored procedure via POST",
+      "upstream_file": "postgrest/src/PostgREST/App.hs",
+      "status": "not_implemented"
+    },
+    {
+      "id": "rest.operator.eq",
+      "component": "rest",
+      "group": "query_operators",
+      "name": "?column=eq.value",
+      "description": "Equals",
+      "upstream_file": "postgrest/src/PostgREST/Query/SqlFragment.hs",
+      "status": "not_implemented"
+    },
+    {
+      "id": "rest.operator.neq",
+      "component": "rest",
+      "group": "query_operators",
+      "name": "?column=neq.value",
+      "description": "Not equals",
+      "upstream_file": "postgrest/src/PostgREST/Query/SqlFragment.hs",
+      "status": "not_implemented"
+    },
+    {
+      "id": "rest.operator.gt",
+      "component": "rest",
+      "group": "query_operators",
+      "name": "?column=gt.value",
+      "description": "Greater than",
+      "upstream_file": "postgrest/src/PostgREST/Query/SqlFragment.hs",
+      "status": "not_implemented"
+    },
+    {
+      "id": "rest.operator.gte",
+      "component": "rest",
+      "group": "query_operators",
+      "name": "?column=gte.value",
+      "description": "Greater than or equal",
+      "upstream_file": "postgrest/src/PostgREST/Query/SqlFragment.hs",
+      "status": "not_implemented"
+    },
+    {
+      "id": "rest.operator.lt",
+      "component": "rest",
+      "group": "query_operators",
+      "name": "?column=lt.value",
+      "description": "Less than",
+      "upstream_file": "postgrest/src/PostgREST/Query/SqlFragment.hs",
+      "status": "not_implemented"
+    },
+    {
+      "id": "rest.operator.lte",
+      "component": "rest",
+      "group": "query_operators",
+      "name": "?column=lte.value",
+      "description": "Less than or equal",
+      "upstream_file": "postgrest/src/PostgREST/Query/SqlFragment.hs",
+      "status": "not_implemented"
+    },
+    {
+      "id": "rest.operator.like",
+      "component": "rest",
+      "group": "query_operators",
+      "name": "?column=like.value",
+      "description": "LIKE pattern match",
+      "upstream_file": "postgrest/src/PostgREST/Query/SqlFragment.hs",
+      "status": "not_implemented"
+    },
+    {
+      "id": "rest.operator.ilike",
+      "component": "rest",
+      "group": "query_operators",
+      "name": "?column=ilike.value",
+      "description": "Case-insensitive LIKE",
+      "upstream_file": "postgrest/src/PostgREST/Query/SqlFragment.hs",
+      "status": "not_implemented"
+    },
+    {
+      "id": "rest.operator.match",
+      "component": "rest",
+      "group": "query_operators",
+      "name": "?column=match.value",
+      "description": "POSIX regex match",
+      "upstream_file": "postgrest/src/PostgREST/Query/SqlFragment.hs",
+      "status": "not_implemented"
+    },
+    {
+      "id": "rest.operator.imatch",
+      "component": "rest",
+      "group": "query_operators",
+      "name": "?column=imatch.value",
+      "description": "Case-insensitive POSIX regex",
+      "upstream_file": "postgrest/src/PostgREST/Query/SqlFragment.hs",
+      "status": "not_implemented"
+    },
+    {
+      "id": "rest.operator.in",
+      "component": "rest",
+      "group": "query_operators",
+      "name": "?column=in.value",
+      "description": "In list",
+      "upstream_file": "postgrest/src/PostgREST/Query/SqlFragment.hs",
+      "status": "not_implemented"
+    },
+    {
+      "id": "rest.operator.is",
+      "component": "rest",
+      "group": "query_operators",
+      "name": "?column=is.value",
+      "description": "IS comparison (null, true, false)",
+      "upstream_file": "postgrest/src/PostgREST/Query/SqlFragment.hs",
+      "status": "not_implemented"
+    },
+    {
+      "id": "rest.operator.isdistinct",
+      "component": "rest",
+      "group": "query_operators",
+      "name": "?column=isdistinct.value",
+      "description": "IS DISTINCT FROM",
+      "upstream_file": "postgrest/src/PostgREST/Query/SqlFragment.hs",
+      "status": "not_implemented"
+    },
+    {
+      "id": "rest.operator.fts",
+      "component": "rest",
+      "group": "query_operators",
+      "name": "?column=fts.value",
+      "description": "Full-text search",
+      "upstream_file": "postgrest/src/PostgREST/Query/SqlFragment.hs",
+      "status": "not_implemented"
+    },
+    {
+      "id": "rest.operator.plfts",
+      "component": "rest",
+      "group": "query_operators",
+      "name": "?column=plfts.value",
+      "description": "Phrase full-text search",
+      "upstream_file": "postgrest/src/PostgREST/Query/SqlFragment.hs",
+      "status": "not_implemented"
+    },
+    {
+      "id": "rest.operator.phfts",
+      "component": "rest",
+      "group": "query_operators",
+      "name": "?column=phfts.value",
+      "description": "Phrase headline full-text search",
+      "upstream_file": "postgrest/src/PostgREST/Query/SqlFragment.hs",
+      "status": "not_implemented"
+    },
+    {
+      "id": "rest.operator.wfts",
+      "component": "rest",
+      "group": "query_operators",
+      "name": "?column=wfts.value",
+      "description": "Websearch full-text search",
+      "upstream_file": "postgrest/src/PostgREST/Query/SqlFragment.hs",
+      "status": "not_implemented"
+    },
+    {
+      "id": "rest.operator.cs",
+      "component": "rest",
+      "group": "query_operators",
+      "name": "?column=cs.value",
+      "description": "Contains (array/range)",
+      "upstream_file": "postgrest/src/PostgREST/Query/SqlFragment.hs",
+      "status": "not_implemented"
+    },
+    {
+      "id": "rest.operator.cd",
+      "component": "rest",
+      "group": "query_operators",
+      "name": "?column=cd.value",
+      "description": "Contained by",
+      "upstream_file": "postgrest/src/PostgREST/Query/SqlFragment.hs",
+      "status": "not_implemented"
+    },
+    {
+      "id": "rest.operator.ov",
+      "component": "rest",
+      "group": "query_operators",
+      "name": "?column=ov.value",
+      "description": "Overlaps",
+      "upstream_file": "postgrest/src/PostgREST/Query/SqlFragment.hs",
+      "status": "not_implemented"
+    },
+    {
+      "id": "rest.operator.sl",
+      "component": "rest",
+      "group": "query_operators",
+      "name": "?column=sl.value",
+      "description": "Strictly left of",
+      "upstream_file": "postgrest/src/PostgREST/Query/SqlFragment.hs",
+      "status": "not_implemented"
+    },
+    {
+      "id": "rest.operator.sr",
+      "component": "rest",
+      "group": "query_operators",
+      "name": "?column=sr.value",
+      "description": "Strictly right of",
+      "upstream_file": "postgrest/src/PostgREST/Query/SqlFragment.hs",
+      "status": "not_implemented"
+    },
+    {
+      "id": "rest.operator.nxr",
+      "component": "rest",
+      "group": "query_operators",
+      "name": "?column=nxr.value",
+      "description": "Does not extend right",
+      "upstream_file": "postgrest/src/PostgREST/Query/SqlFragment.hs",
+      "status": "not_implemented"
+    },
+    {
+      "id": "rest.operator.nxl",
+      "component": "rest",
+      "group": "query_operators",
+      "name": "?column=nxl.value",
+      "description": "Does not extend left",
+      "upstream_file": "postgrest/src/PostgREST/Query/SqlFragment.hs",
+      "status": "not_implemented"
+    },
+    {
+      "id": "rest.operator.adj",
+      "component": "rest",
+      "group": "query_operators",
+      "name": "?column=adj.value",
+      "description": "Adjacent",
+      "upstream_file": "postgrest/src/PostgREST/Query/SqlFragment.hs",
+      "status": "not_implemented"
+    },
+    {
+      "id": "rest.operator.not",
+      "component": "rest",
+      "group": "query_operators",
+      "name": "?column=not.value",
+      "description": "Negation prefix",
+      "upstream_file": "postgrest/src/PostgREST/Query/SqlFragment.hs",
+      "status": "not_implemented"
+    },
+    {
+      "id": "rest.operator.or",
+      "component": "rest",
+      "group": "query_operators",
+      "name": "?column=or.value",
+      "description": "OR logic",
+      "upstream_file": "postgrest/src/PostgREST/Query/SqlFragment.hs",
+      "status": "not_implemented"
+    },
+    {
+      "id": "rest.operator.and",
+      "component": "rest",
+      "group": "query_operators",
+      "name": "?column=and.value",
+      "description": "AND logic",
+      "upstream_file": "postgrest/src/PostgREST/Query/SqlFragment.hs",
+      "status": "not_implemented"
+    },
+    {
+      "id": "rest.operator.all",
+      "component": "rest",
+      "group": "query_operators",
+      "name": "?column=all.value",
+      "description": "All modifier",
+      "upstream_file": "postgrest/src/PostgREST/Query/SqlFragment.hs",
+      "status": "not_implemented"
+    },
+    {
+      "id": "rest.operator.any",
+      "component": "rest",
+      "group": "query_operators",
+      "name": "?column=any.value",
+      "description": "Any modifier",
+      "upstream_file": "postgrest/src/PostgREST/Query/SqlFragment.hs",
+      "status": "not_implemented"
+    },
+    {
+      "id": "rest.feature.select",
+      "component": "rest",
+      "group": "query_features",
+      "name": "Select",
+      "description": "Column selection",
+      "upstream_file": "postgrest/src/PostgREST/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "rest.feature.order",
+      "component": "rest",
+      "group": "query_features",
+      "name": "Order",
+      "description": "Ordering",
+      "upstream_file": "postgrest/src/PostgREST/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "rest.feature.limit",
+      "component": "rest",
+      "group": "query_features",
+      "name": "Limit",
+      "description": "Result limiting",
+      "upstream_file": "postgrest/src/PostgREST/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "rest.feature.offset",
+      "component": "rest",
+      "group": "query_features",
+      "name": "Offset",
+      "description": "Result offset",
+      "upstream_file": "postgrest/src/PostgREST/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "rest.feature.range",
+      "component": "rest",
+      "group": "query_features",
+      "name": "Range",
+      "description": "Range header pagination",
+      "upstream_file": "postgrest/src/PostgREST/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "rest.feature.prefer_return",
+      "component": "rest",
+      "group": "query_features",
+      "name": "Prefer Return",
+      "description": "Prefer: return=representation",
+      "upstream_file": "postgrest/src/PostgREST/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "rest.feature.prefer_count",
+      "component": "rest",
+      "group": "query_features",
+      "name": "Prefer Count",
+      "description": "Prefer: count=exact/planned/estimated",
+      "upstream_file": "postgrest/src/PostgREST/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "rest.feature.prefer_resolution",
+      "component": "rest",
+      "group": "query_features",
+      "name": "Prefer Resolution",
+      "description": "Prefer: resolution=merge-duplicates",
+      "upstream_file": "postgrest/src/PostgREST/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "rest.feature.prefer_missing",
+      "component": "rest",
+      "group": "query_features",
+      "name": "Prefer Missing",
+      "description": "Prefer: missing=default",
+      "upstream_file": "postgrest/src/PostgREST/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "rest.feature.prefer_handling",
+      "component": "rest",
+      "group": "query_features",
+      "name": "Prefer Handling",
+      "description": "Prefer: handling=strict/lenient",
+      "upstream_file": "postgrest/src/PostgREST/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "rest.feature.on_conflict",
+      "component": "rest",
+      "group": "query_features",
+      "name": "On Conflict",
+      "description": "ON CONFLICT upsert",
+      "upstream_file": "postgrest/src/PostgREST/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "rest.feature.columns",
+      "component": "rest",
+      "group": "query_features",
+      "name": "Columns",
+      "description": "Bulk insert column list",
+      "upstream_file": "postgrest/src/PostgREST/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "rest.feature.embedding",
+      "component": "rest",
+      "group": "query_features",
+      "name": "Embedding",
+      "description": "Resource embedding",
+      "upstream_file": "postgrest/src/PostgREST/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "rest.feature.spread_embedding",
+      "component": "rest",
+      "group": "query_features",
+      "name": "Spread Embedding",
+      "description": "Spread embedded resources",
+      "upstream_file": "postgrest/src/PostgREST/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "rest.feature.inner_embedding",
+      "component": "rest",
+      "group": "query_features",
+      "name": "Inner Embedding",
+      "description": "Inner join embedding (!inner)",
+      "upstream_file": "postgrest/src/PostgREST/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "rest.feature.left_embedding",
+      "component": "rest",
+      "group": "query_features",
+      "name": "Left Embedding",
+      "description": "Left join embedding",
+      "upstream_file": "postgrest/src/PostgREST/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "rest.feature.json_columns",
+      "component": "rest",
+      "group": "query_features",
+      "name": "Json Columns",
+      "description": "JSON column queries",
+      "upstream_file": "postgrest/src/PostgREST/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "rest.feature.computed_columns",
+      "component": "rest",
+      "group": "query_features",
+      "name": "Computed Columns",
+      "description": "Computed/generated columns",
+      "upstream_file": "postgrest/src/PostgREST/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "rest.feature.aggregate",
+      "component": "rest",
+      "group": "query_features",
+      "name": "Aggregate",
+      "description": "Aggregate functions",
+      "upstream_file": "postgrest/src/PostgREST/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "auth.endpoint.signup",
+      "component": "auth",
+      "group": "endpoints",
+      "name": "POST /auth/v1/signup",
+      "description": "User registration",
+      "upstream_file": "auth/internal/api/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "auth.endpoint.token",
+      "component": "auth",
+      "group": "endpoints",
+      "name": "POST /auth/v1/token",
+      "description": "Token exchange (password, refresh, pkce)",
+      "upstream_file": "auth/internal/api/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "auth.endpoint.token_password",
+      "component": "auth",
+      "group": "endpoints",
+      "name": "POST /auth/v1/token/password",
+      "description": "Password grant type",
+      "upstream_file": "auth/internal/api/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "auth.endpoint.token_refresh",
+      "component": "auth",
+      "group": "endpoints",
+      "name": "POST /auth/v1/token/refresh",
+      "description": "Refresh token grant",
+      "upstream_file": "auth/internal/api/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "auth.endpoint.token_pkce",
+      "component": "auth",
+      "group": "endpoints",
+      "name": "POST /auth/v1/token/pkce",
+      "description": "PKCE authorization code",
+      "upstream_file": "auth/internal/api/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "auth.endpoint.user",
+      "component": "auth",
+      "group": "endpoints",
+      "name": "GET /auth/v1/user",
+      "description": "Get current user",
+      "upstream_file": "auth/internal/api/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "auth.endpoint.user_update",
+      "component": "auth",
+      "group": "endpoints",
+      "name": "PUT /auth/v1/user/update",
+      "description": "Update current user",
+      "upstream_file": "auth/internal/api/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "auth.endpoint.logout",
+      "component": "auth",
+      "group": "endpoints",
+      "name": "POST /auth/v1/logout",
+      "description": "Sign out",
+      "upstream_file": "auth/internal/api/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "auth.endpoint.recover",
+      "component": "auth",
+      "group": "endpoints",
+      "name": "POST /auth/v1/recover",
+      "description": "Password recovery",
+      "upstream_file": "auth/internal/api/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "auth.endpoint.verify",
+      "component": "auth",
+      "group": "endpoints",
+      "name": "POST /auth/v1/verify",
+      "description": "Verify email/phone",
+      "upstream_file": "auth/internal/api/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "auth.endpoint.verify_get",
+      "component": "auth",
+      "group": "endpoints",
+      "name": "GET /auth/v1/verify/get",
+      "description": "Verify via link",
+      "upstream_file": "auth/internal/api/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "auth.endpoint.otp",
+      "component": "auth",
+      "group": "endpoints",
+      "name": "POST /auth/v1/otp",
+      "description": "One-time password",
+      "upstream_file": "auth/internal/api/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "auth.endpoint.magiclink",
+      "component": "auth",
+      "group": "endpoints",
+      "name": "POST /auth/v1/magiclink",
+      "description": "Magic link login",
+      "upstream_file": "auth/internal/api/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "auth.endpoint.resend",
+      "component": "auth",
+      "group": "endpoints",
+      "name": "POST /auth/v1/resend",
+      "description": "Resend confirmation",
+      "upstream_file": "auth/internal/api/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "auth.endpoint.reauthenticate",
+      "component": "auth",
+      "group": "endpoints",
+      "name": "GET /auth/v1/reauthenticate",
+      "description": "Re-authentication",
+      "upstream_file": "auth/internal/api/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "auth.endpoint.factors",
+      "component": "auth",
+      "group": "endpoints",
+      "name": "GET /auth/v1/factors",
+      "description": "List MFA factors",
+      "upstream_file": "auth/internal/api/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "auth.endpoint.factors_enroll",
+      "component": "auth",
+      "group": "endpoints",
+      "name": "POST /auth/v1/factors/enroll",
+      "description": "Enroll MFA factor",
+      "upstream_file": "auth/internal/api/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "auth.endpoint.factors_challenge",
+      "component": "auth",
+      "group": "endpoints",
+      "name": "POST /auth/v1/factors/challenge",
+      "description": "Challenge MFA factor",
+      "upstream_file": "auth/internal/api/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "auth.endpoint.factors_verify",
+      "component": "auth",
+      "group": "endpoints",
+      "name": "POST /auth/v1/factors/verify",
+      "description": "Verify MFA challenge",
+      "upstream_file": "auth/internal/api/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "auth.endpoint.factors_unenroll",
+      "component": "auth",
+      "group": "endpoints",
+      "name": "DELETE /auth/v1/factors/unenroll",
+      "description": "Remove MFA factor",
+      "upstream_file": "auth/internal/api/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "auth.endpoint.sso",
+      "component": "auth",
+      "group": "endpoints",
+      "name": "POST /auth/v1/sso",
+      "description": "SSO initiation",
+      "upstream_file": "auth/internal/api/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "auth.endpoint.sso_saml_acs",
+      "component": "auth",
+      "group": "endpoints",
+      "name": "POST /auth/v1/sso/saml/acs",
+      "description": "SAML assertion consumer",
+      "upstream_file": "auth/internal/api/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "auth.endpoint.sso_saml_metadata",
+      "component": "auth",
+      "group": "endpoints",
+      "name": "GET /auth/v1/sso/saml/metadata",
+      "description": "SAML metadata",
+      "upstream_file": "auth/internal/api/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "auth.endpoint.authorize",
+      "component": "auth",
+      "group": "endpoints",
+      "name": "GET /auth/v1/authorize",
+      "description": "OAuth authorization",
+      "upstream_file": "auth/internal/api/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "auth.endpoint.callback",
+      "component": "auth",
+      "group": "endpoints",
+      "name": "GET /auth/v1/callback",
+      "description": "OAuth callback",
+      "upstream_file": "auth/internal/api/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "auth.endpoint.callback_post",
+      "component": "auth",
+      "group": "endpoints",
+      "name": "POST /auth/v1/callback/post",
+      "description": "OAuth callback POST",
+      "upstream_file": "auth/internal/api/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "auth.endpoint.settings",
+      "component": "auth",
+      "group": "endpoints",
+      "name": "GET /auth/v1/settings",
+      "description": "Auth settings",
+      "upstream_file": "auth/internal/api/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "auth.endpoint.health",
+      "component": "auth",
+      "group": "endpoints",
+      "name": "GET /auth/v1/health",
+      "description": "Health check",
+      "upstream_file": "auth/internal/api/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "auth.admin.users_list",
+      "component": "auth",
+      "group": "admin",
+      "name": "GET /auth/v1/admin/users/list",
+      "description": "Admin: List users",
+      "upstream_file": "auth/internal/api/admin.go",
+      "status": "not_implemented"
+    },
+    {
+      "id": "auth.admin.users_create",
+      "component": "auth",
+      "group": "admin",
+      "name": "POST /auth/v1/admin/users/create",
+      "description": "Admin: Create user",
+      "upstream_file": "auth/internal/api/admin.go",
+      "status": "not_implemented"
+    },
+    {
+      "id": "auth.admin.users_get",
+      "component": "auth",
+      "group": "admin",
+      "name": "GET /auth/v1/admin/users/get",
+      "description": "Admin: Get user by ID",
+      "upstream_file": "auth/internal/api/admin.go",
+      "status": "not_implemented"
+    },
+    {
+      "id": "auth.admin.users_update",
+      "component": "auth",
+      "group": "admin",
+      "name": "PUT /auth/v1/admin/users/update",
+      "description": "Admin: Update user",
+      "upstream_file": "auth/internal/api/admin.go",
+      "status": "not_implemented"
+    },
+    {
+      "id": "auth.admin.users_delete",
+      "component": "auth",
+      "group": "admin",
+      "name": "DELETE /auth/v1/admin/users/delete",
+      "description": "Admin: Delete user",
+      "upstream_file": "auth/internal/api/admin.go",
+      "status": "not_implemented"
+    },
+    {
+      "id": "auth.admin.generate_link",
+      "component": "auth",
+      "group": "admin",
+      "name": "POST /auth/v1/admin/generate/link",
+      "description": "Admin: Generate action link",
+      "upstream_file": "auth/internal/api/admin.go",
+      "status": "not_implemented"
+    },
+    {
+      "id": "auth.admin.audit",
+      "component": "auth",
+      "group": "admin",
+      "name": "GET /auth/v1/admin/audit",
+      "description": "Admin: Audit log",
+      "upstream_file": "auth/internal/api/admin.go",
+      "status": "not_implemented"
+    },
+    {
+      "id": "auth.admin.sso_providers_list",
+      "component": "auth",
+      "group": "admin",
+      "name": "GET /auth/v1/admin/sso/providers/list",
+      "description": "Admin: List SSO providers",
+      "upstream_file": "auth/internal/api/admin.go",
+      "status": "not_implemented"
+    },
+    {
+      "id": "auth.admin.sso_providers_create",
+      "component": "auth",
+      "group": "admin",
+      "name": "POST /auth/v1/admin/sso/providers/create",
+      "description": "Admin: Create SSO provider",
+      "upstream_file": "auth/internal/api/admin.go",
+      "status": "not_implemented"
+    },
+    {
+      "id": "auth.admin.sso_providers_get",
+      "component": "auth",
+      "group": "admin",
+      "name": "GET /auth/v1/admin/sso/providers/get",
+      "description": "Admin: Get SSO provider",
+      "upstream_file": "auth/internal/api/admin.go",
+      "status": "not_implemented"
+    },
+    {
+      "id": "auth.admin.sso_providers_update",
+      "component": "auth",
+      "group": "admin",
+      "name": "PUT /auth/v1/admin/sso/providers/update",
+      "description": "Admin: Update SSO provider",
+      "upstream_file": "auth/internal/api/admin.go",
+      "status": "not_implemented"
+    },
+    {
+      "id": "auth.admin.sso_providers_delete",
+      "component": "auth",
+      "group": "admin",
+      "name": "DELETE /auth/v1/admin/sso/providers/delete",
+      "description": "Admin: Delete SSO provider",
+      "upstream_file": "auth/internal/api/admin.go",
+      "status": "not_implemented"
+    },
+    {
+      "id": "auth.provider.apple",
+      "component": "auth",
+      "group": "oauth_providers",
+      "name": "OAuth: Apple",
+      "description": "Apple OAuth provider",
+      "upstream_file": "auth/internal/api/provider/apple.go",
+      "status": "not_implemented"
+    },
+    {
+      "id": "auth.provider.azure",
+      "component": "auth",
+      "group": "oauth_providers",
+      "name": "OAuth: Azure",
+      "description": "Azure OAuth provider",
+      "upstream_file": "auth/internal/api/provider/azure.go",
+      "status": "not_implemented"
+    },
+    {
+      "id": "auth.provider.bitbucket",
+      "component": "auth",
+      "group": "oauth_providers",
+      "name": "OAuth: Bitbucket",
+      "description": "Bitbucket OAuth provider",
+      "upstream_file": "auth/internal/api/provider/bitbucket.go",
+      "status": "not_implemented"
+    },
+    {
+      "id": "auth.provider.discord",
+      "component": "auth",
+      "group": "oauth_providers",
+      "name": "OAuth: Discord",
+      "description": "Discord OAuth provider",
+      "upstream_file": "auth/internal/api/provider/discord.go",
+      "status": "not_implemented"
+    },
+    {
+      "id": "auth.provider.facebook",
+      "component": "auth",
+      "group": "oauth_providers",
+      "name": "OAuth: Facebook",
+      "description": "Facebook OAuth provider",
+      "upstream_file": "auth/internal/api/provider/facebook.go",
+      "status": "not_implemented"
+    },
+    {
+      "id": "auth.provider.figma",
+      "component": "auth",
+      "group": "oauth_providers",
+      "name": "OAuth: Figma",
+      "description": "Figma OAuth provider",
+      "upstream_file": "auth/internal/api/provider/figma.go",
+      "status": "not_implemented"
+    },
+    {
+      "id": "auth.provider.github",
+      "component": "auth",
+      "group": "oauth_providers",
+      "name": "OAuth: Github",
+      "description": "Github OAuth provider",
+      "upstream_file": "auth/internal/api/provider/github.go",
+      "status": "not_implemented"
+    },
+    {
+      "id": "auth.provider.gitlab",
+      "component": "auth",
+      "group": "oauth_providers",
+      "name": "OAuth: Gitlab",
+      "description": "Gitlab OAuth provider",
+      "upstream_file": "auth/internal/api/provider/gitlab.go",
+      "status": "not_implemented"
+    },
+    {
+      "id": "auth.provider.google",
+      "component": "auth",
+      "group": "oauth_providers",
+      "name": "OAuth: Google",
+      "description": "Google OAuth provider",
+      "upstream_file": "auth/internal/api/provider/google.go",
+      "status": "not_implemented"
+    },
+    {
+      "id": "auth.provider.kakao",
+      "component": "auth",
+      "group": "oauth_providers",
+      "name": "OAuth: Kakao",
+      "description": "Kakao OAuth provider",
+      "upstream_file": "auth/internal/api/provider/kakao.go",
+      "status": "not_implemented"
+    },
+    {
+      "id": "auth.provider.keycloak",
+      "component": "auth",
+      "group": "oauth_providers",
+      "name": "OAuth: Keycloak",
+      "description": "Keycloak OAuth provider",
+      "upstream_file": "auth/internal/api/provider/keycloak.go",
+      "status": "not_implemented"
+    },
+    {
+      "id": "auth.provider.linkedin",
+      "component": "auth",
+      "group": "oauth_providers",
+      "name": "OAuth: Linkedin",
+      "description": "Linkedin OAuth provider",
+      "upstream_file": "auth/internal/api/provider/linkedin.go",
+      "status": "not_implemented"
+    },
+    {
+      "id": "auth.provider.linkedin_oidc",
+      "component": "auth",
+      "group": "oauth_providers",
+      "name": "OAuth: Linkedin Oidc",
+      "description": "Linkedin_Oidc OAuth provider",
+      "upstream_file": "auth/internal/api/provider/linkedin_oidc.go",
+      "status": "not_implemented"
+    },
+    {
+      "id": "auth.provider.notion",
+      "component": "auth",
+      "group": "oauth_providers",
+      "name": "OAuth: Notion",
+      "description": "Notion OAuth provider",
+      "upstream_file": "auth/internal/api/provider/notion.go",
+      "status": "not_implemented"
+    },
+    {
+      "id": "auth.provider.slack",
+      "component": "auth",
+      "group": "oauth_providers",
+      "name": "OAuth: Slack",
+      "description": "Slack OAuth provider",
+      "upstream_file": "auth/internal/api/provider/slack.go",
+      "status": "not_implemented"
+    },
+    {
+      "id": "auth.provider.slack_oidc",
+      "component": "auth",
+      "group": "oauth_providers",
+      "name": "OAuth: Slack Oidc",
+      "description": "Slack_Oidc OAuth provider",
+      "upstream_file": "auth/internal/api/provider/slack_oidc.go",
+      "status": "not_implemented"
+    },
+    {
+      "id": "auth.provider.spotify",
+      "component": "auth",
+      "group": "oauth_providers",
+      "name": "OAuth: Spotify",
+      "description": "Spotify OAuth provider",
+      "upstream_file": "auth/internal/api/provider/spotify.go",
+      "status": "not_implemented"
+    },
+    {
+      "id": "auth.provider.twitch",
+      "component": "auth",
+      "group": "oauth_providers",
+      "name": "OAuth: Twitch",
+      "description": "Twitch OAuth provider",
+      "upstream_file": "auth/internal/api/provider/twitch.go",
+      "status": "not_implemented"
+    },
+    {
+      "id": "auth.provider.twitter",
+      "component": "auth",
+      "group": "oauth_providers",
+      "name": "OAuth: Twitter",
+      "description": "Twitter OAuth provider",
+      "upstream_file": "auth/internal/api/provider/twitter.go",
+      "status": "not_implemented"
+    },
+    {
+      "id": "auth.provider.workos",
+      "component": "auth",
+      "group": "oauth_providers",
+      "name": "OAuth: Workos",
+      "description": "Workos OAuth provider",
+      "upstream_file": "auth/internal/api/provider/workos.go",
+      "status": "not_implemented"
+    },
+    {
+      "id": "auth.provider.zoom",
+      "component": "auth",
+      "group": "oauth_providers",
+      "name": "OAuth: Zoom",
+      "description": "Zoom OAuth provider",
+      "upstream_file": "auth/internal/api/provider/zoom.go",
+      "status": "not_implemented"
+    },
+    {
+      "id": "auth.provider.fly",
+      "component": "auth",
+      "group": "oauth_providers",
+      "name": "OAuth: Fly",
+      "description": "Fly OAuth provider",
+      "upstream_file": "auth/internal/api/provider/fly.go",
+      "status": "not_implemented"
+    },
+    {
+      "id": "auth.feature.jwt_hs256",
+      "component": "auth",
+      "group": "features",
+      "name": "Jwt Hs256",
+      "description": "HS256 JWT signing",
+      "upstream_file": "auth/internal/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "auth.feature.jwt_rs256",
+      "component": "auth",
+      "group": "features",
+      "name": "Jwt Rs256",
+      "description": "RS256 JWT signing",
+      "upstream_file": "auth/internal/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "auth.feature.jwt_claims",
+      "component": "auth",
+      "group": "features",
+      "name": "Jwt Claims",
+      "description": "Custom JWT claims",
+      "upstream_file": "auth/internal/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "auth.feature.refresh_token_rotation",
+      "component": "auth",
+      "group": "features",
+      "name": "Refresh Token Rotation",
+      "description": "Refresh token rotation",
+      "upstream_file": "auth/internal/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "auth.feature.session_management",
+      "component": "auth",
+      "group": "features",
+      "name": "Session Management",
+      "description": "Session management",
+      "upstream_file": "auth/internal/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "auth.feature.rate_limiting",
+      "component": "auth",
+      "group": "features",
+      "name": "Rate Limiting",
+      "description": "Rate limiting",
+      "upstream_file": "auth/internal/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "auth.feature.captcha",
+      "component": "auth",
+      "group": "features",
+      "name": "Captcha",
+      "description": "CAPTCHA verification",
+      "upstream_file": "auth/internal/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "auth.feature.hooks_mfa",
+      "component": "auth",
+      "group": "features",
+      "name": "Hooks Mfa",
+      "description": "MFA verification hook",
+      "upstream_file": "auth/internal/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "auth.feature.hooks_password",
+      "component": "auth",
+      "group": "features",
+      "name": "Hooks Password",
+      "description": "Password verification hook",
+      "upstream_file": "auth/internal/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "auth.feature.hooks_custom_access_token",
+      "component": "auth",
+      "group": "features",
+      "name": "Hooks Custom Access Token",
+      "description": "Custom access token hook",
+      "upstream_file": "auth/internal/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "auth.feature.hooks_send_sms",
+      "component": "auth",
+      "group": "features",
+      "name": "Hooks Send Sms",
+      "description": "Send SMS hook",
+      "upstream_file": "auth/internal/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "auth.feature.hooks_send_email",
+      "component": "auth",
+      "group": "features",
+      "name": "Hooks Send Email",
+      "description": "Send email hook",
+      "upstream_file": "auth/internal/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "auth.feature.email_templates",
+      "component": "auth",
+      "group": "features",
+      "name": "Email Templates",
+      "description": "Email templates",
+      "upstream_file": "auth/internal/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "auth.feature.phone_auth",
+      "component": "auth",
+      "group": "features",
+      "name": "Phone Auth",
+      "description": "Phone authentication",
+      "upstream_file": "auth/internal/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "auth.feature.anonymous_users",
+      "component": "auth",
+      "group": "features",
+      "name": "Anonymous Users",
+      "description": "Anonymous users",
+      "upstream_file": "auth/internal/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "auth.feature.user_metadata",
+      "component": "auth",
+      "group": "features",
+      "name": "User Metadata",
+      "description": "User metadata",
+      "upstream_file": "auth/internal/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "auth.feature.app_metadata",
+      "component": "auth",
+      "group": "features",
+      "name": "App Metadata",
+      "description": "App metadata",
+      "upstream_file": "auth/internal/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "auth.feature.identities",
+      "component": "auth",
+      "group": "features",
+      "name": "Identities",
+      "description": "User identities",
+      "upstream_file": "auth/internal/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "auth.feature.linking",
+      "component": "auth",
+      "group": "features",
+      "name": "Linking",
+      "description": "Account linking",
+      "upstream_file": "auth/internal/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "realtime.message.phx_join",
+      "component": "realtime",
+      "group": "websocket_messages",
+      "name": "Phx Join",
+      "description": "Channel join",
+      "upstream_file": "realtime/lib/realtime/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "realtime.message.phx_leave",
+      "component": "realtime",
+      "group": "websocket_messages",
+      "name": "Phx Leave",
+      "description": "Channel leave",
+      "upstream_file": "realtime/lib/realtime/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "realtime.message.phx_reply",
+      "component": "realtime",
+      "group": "websocket_messages",
+      "name": "Phx Reply",
+      "description": "Reply message",
+      "upstream_file": "realtime/lib/realtime/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "realtime.message.phx_error",
+      "component": "realtime",
+      "group": "websocket_messages",
+      "name": "Phx Error",
+      "description": "Error message",
+      "upstream_file": "realtime/lib/realtime/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "realtime.message.phx_close",
+      "component": "realtime",
+      "group": "websocket_messages",
+      "name": "Phx Close",
+      "description": "Close message",
+      "upstream_file": "realtime/lib/realtime/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "realtime.message.heartbeat",
+      "component": "realtime",
+      "group": "websocket_messages",
+      "name": "Heartbeat",
+      "description": "Heartbeat",
+      "upstream_file": "realtime/lib/realtime/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "realtime.message.presence_state",
+      "component": "realtime",
+      "group": "websocket_messages",
+      "name": "Presence State",
+      "description": "Presence state sync",
+      "upstream_file": "realtime/lib/realtime/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "realtime.message.presence_diff",
+      "component": "realtime",
+      "group": "websocket_messages",
+      "name": "Presence Diff",
+      "description": "Presence diff",
+      "upstream_file": "realtime/lib/realtime/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "realtime.message.broadcast",
+      "component": "realtime",
+      "group": "websocket_messages",
+      "name": "Broadcast",
+      "description": "Broadcast message",
+      "upstream_file": "realtime/lib/realtime/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "realtime.message.postgres_changes",
+      "component": "realtime",
+      "group": "websocket_messages",
+      "name": "Postgres Changes",
+      "description": "Postgres changes",
+      "upstream_file": "realtime/lib/realtime/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "realtime.message.access_token",
+      "component": "realtime",
+      "group": "websocket_messages",
+      "name": "Access Token",
+      "description": "Access token update",
+      "upstream_file": "realtime/lib/realtime/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "realtime.message.system",
+      "component": "realtime",
+      "group": "websocket_messages",
+      "name": "System",
+      "description": "System message",
+      "upstream_file": "realtime/lib/realtime/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "realtime.feature.realtime_listen",
+      "component": "realtime",
+      "group": "features",
+      "name": "Realtime Listen",
+      "description": "Listen to database changes",
+      "upstream_file": "realtime/lib/realtime/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "realtime.feature.realtime_filter",
+      "component": "realtime",
+      "group": "features",
+      "name": "Realtime Filter",
+      "description": "Filter by column value",
+      "upstream_file": "realtime/lib/realtime/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "realtime.feature.realtime_filter_eq",
+      "component": "realtime",
+      "group": "features",
+      "name": "Realtime Filter Eq",
+      "description": "Filter: eq",
+      "upstream_file": "realtime/lib/realtime/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "realtime.feature.realtime_filter_neq",
+      "component": "realtime",
+      "group": "features",
+      "name": "Realtime Filter Neq",
+      "description": "Filter: neq",
+      "upstream_file": "realtime/lib/realtime/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "realtime.feature.realtime_filter_gt",
+      "component": "realtime",
+      "group": "features",
+      "name": "Realtime Filter Gt",
+      "description": "Filter: gt",
+      "upstream_file": "realtime/lib/realtime/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "realtime.feature.realtime_filter_gte",
+      "component": "realtime",
+      "group": "features",
+      "name": "Realtime Filter Gte",
+      "description": "Filter: gte",
+      "upstream_file": "realtime/lib/realtime/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "realtime.feature.realtime_filter_lt",
+      "component": "realtime",
+      "group": "features",
+      "name": "Realtime Filter Lt",
+      "description": "Filter: lt",
+      "upstream_file": "realtime/lib/realtime/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "realtime.feature.realtime_filter_lte",
+      "component": "realtime",
+      "group": "features",
+      "name": "Realtime Filter Lte",
+      "description": "Filter: lte",
+      "upstream_file": "realtime/lib/realtime/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "realtime.feature.realtime_filter_in",
+      "component": "realtime",
+      "group": "features",
+      "name": "Realtime Filter In",
+      "description": "Filter: in",
+      "upstream_file": "realtime/lib/realtime/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "realtime.feature.broadcast_self",
+      "component": "realtime",
+      "group": "features",
+      "name": "Broadcast Self",
+      "description": "Broadcast to self",
+      "upstream_file": "realtime/lib/realtime/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "realtime.feature.broadcast_ack",
+      "component": "realtime",
+      "group": "features",
+      "name": "Broadcast Ack",
+      "description": "Broadcast with ack",
+      "upstream_file": "realtime/lib/realtime/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "realtime.feature.presence_track",
+      "component": "realtime",
+      "group": "features",
+      "name": "Presence Track",
+      "description": "Presence tracking",
+      "upstream_file": "realtime/lib/realtime/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "realtime.feature.presence_untrack",
+      "component": "realtime",
+      "group": "features",
+      "name": "Presence Untrack",
+      "description": "Presence untracking",
+      "upstream_file": "realtime/lib/realtime/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "realtime.feature.rls_policies",
+      "component": "realtime",
+      "group": "features",
+      "name": "Rls Policies",
+      "description": "RLS policy enforcement",
+      "upstream_file": "realtime/lib/realtime/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "realtime.feature.jwt_verification",
+      "component": "realtime",
+      "group": "features",
+      "name": "Jwt Verification",
+      "description": "JWT verification",
+      "upstream_file": "realtime/lib/realtime/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "realtime.feature.connection_limiting",
+      "component": "realtime",
+      "group": "features",
+      "name": "Connection Limiting",
+      "description": "Connection limiting",
+      "upstream_file": "realtime/lib/realtime/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "realtime.feature.rate_limiting",
+      "component": "realtime",
+      "group": "features",
+      "name": "Rate Limiting",
+      "description": "Rate limiting",
+      "upstream_file": "realtime/lib/realtime/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "realtime.event.insert",
+      "component": "realtime",
+      "group": "postgres_events",
+      "name": "Postgres INSERT",
+      "description": "Receive INSERT events from logical replication",
+      "upstream_file": "realtime/lib/realtime/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "realtime.event.update",
+      "component": "realtime",
+      "group": "postgres_events",
+      "name": "Postgres UPDATE",
+      "description": "Receive UPDATE events from logical replication",
+      "upstream_file": "realtime/lib/realtime/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "realtime.event.delete",
+      "component": "realtime",
+      "group": "postgres_events",
+      "name": "Postgres DELETE",
+      "description": "Receive DELETE events from logical replication",
+      "upstream_file": "realtime/lib/realtime/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "realtime.event.truncate",
+      "component": "realtime",
+      "group": "postgres_events",
+      "name": "Postgres TRUNCATE",
+      "description": "Receive TRUNCATE events from logical replication",
+      "upstream_file": "realtime/lib/realtime/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "storage.bucket.list",
+      "component": "storage",
+      "group": "buckets",
+      "name": "GET /storage/v1/bucket",
+      "description": "List buckets",
+      "upstream_file": "storage/src/http/routes/bucket/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "storage.bucket.create",
+      "component": "storage",
+      "group": "buckets",
+      "name": "POST /storage/v1/bucket",
+      "description": "Create bucket",
+      "upstream_file": "storage/src/http/routes/bucket/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "storage.bucket.get",
+      "component": "storage",
+      "group": "buckets",
+      "name": "GET /storage/v1/bucket",
+      "description": "Get bucket",
+      "upstream_file": "storage/src/http/routes/bucket/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "storage.bucket.update",
+      "component": "storage",
+      "group": "buckets",
+      "name": "PUT /storage/v1/bucket",
+      "description": "Update bucket",
+      "upstream_file": "storage/src/http/routes/bucket/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "storage.bucket.delete",
+      "component": "storage",
+      "group": "buckets",
+      "name": "DELETE /storage/v1/bucket",
+      "description": "Delete bucket",
+      "upstream_file": "storage/src/http/routes/bucket/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "storage.bucket.empty",
+      "component": "storage",
+      "group": "buckets",
+      "name": "POST /storage/v1/bucket",
+      "description": "Empty bucket",
+      "upstream_file": "storage/src/http/routes/bucket/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "storage.object.upload",
+      "component": "storage",
+      "group": "objects",
+      "name": "POST /storage/v1/object",
+      "description": "Upload object",
+      "upstream_file": "storage/src/http/routes/object/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "storage.object.upload_put",
+      "component": "storage",
+      "group": "objects",
+      "name": "PUT /storage/v1/object",
+      "description": "Upload via PUT",
+      "upstream_file": "storage/src/http/routes/object/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "storage.object.download",
+      "component": "storage",
+      "group": "objects",
+      "name": "GET /storage/v1/object",
+      "description": "Download object",
+      "upstream_file": "storage/src/http/routes/object/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "storage.object.info",
+      "component": "storage",
+      "group": "objects",
+      "name": "HEAD /storage/v1/object",
+      "description": "Get object info",
+      "upstream_file": "storage/src/http/routes/object/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "storage.object.list",
+      "component": "storage",
+      "group": "objects",
+      "name": "POST /storage/v1/object",
+      "description": "List objects",
+      "upstream_file": "storage/src/http/routes/object/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "storage.object.move",
+      "component": "storage",
+      "group": "objects",
+      "name": "POST /storage/v1/object",
+      "description": "Move object",
+      "upstream_file": "storage/src/http/routes/object/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "storage.object.copy",
+      "component": "storage",
+      "group": "objects",
+      "name": "POST /storage/v1/object",
+      "description": "Copy object",
+      "upstream_file": "storage/src/http/routes/object/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "storage.object.delete",
+      "component": "storage",
+      "group": "objects",
+      "name": "DELETE /storage/v1/object",
+      "description": "Delete object",
+      "upstream_file": "storage/src/http/routes/object/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "storage.object.delete_multiple",
+      "component": "storage",
+      "group": "objects",
+      "name": "DELETE /storage/v1/object",
+      "description": "Delete multiple objects",
+      "upstream_file": "storage/src/http/routes/object/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "storage.object.create_signed_url",
+      "component": "storage",
+      "group": "objects",
+      "name": "POST /storage/v1/object",
+      "description": "Create signed URL",
+      "upstream_file": "storage/src/http/routes/object/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "storage.object.create_signed_urls",
+      "component": "storage",
+      "group": "objects",
+      "name": "POST /storage/v1/object",
+      "description": "Create multiple signed URLs",
+      "upstream_file": "storage/src/http/routes/object/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "storage.object.create_signed_upload_url",
+      "component": "storage",
+      "group": "objects",
+      "name": "POST /storage/v1/object",
+      "description": "Create signed upload URL",
+      "upstream_file": "storage/src/http/routes/object/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "storage.object.upload_to_signed_url",
+      "component": "storage",
+      "group": "objects",
+      "name": "PUT /storage/v1/object",
+      "description": "Upload to signed URL",
+      "upstream_file": "storage/src/http/routes/object/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "storage.object.get_public_url",
+      "component": "storage",
+      "group": "objects",
+      "name": "GET /storage/v1/object",
+      "description": "Get public URL",
+      "upstream_file": "storage/src/http/routes/object/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "storage.tus.create",
+      "component": "storage",
+      "group": "resumable_uploads",
+      "name": "TUS POST",
+      "description": "Resumable: Create resumable upload",
+      "upstream_file": "storage/src/http/routes/tus/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "storage.tus.upload",
+      "component": "storage",
+      "group": "resumable_uploads",
+      "name": "TUS PATCH",
+      "description": "Resumable: Upload chunk",
+      "upstream_file": "storage/src/http/routes/tus/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "storage.tus.info",
+      "component": "storage",
+      "group": "resumable_uploads",
+      "name": "TUS HEAD",
+      "description": "Resumable: Get upload info",
+      "upstream_file": "storage/src/http/routes/tus/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "storage.tus.delete",
+      "component": "storage",
+      "group": "resumable_uploads",
+      "name": "TUS DELETE",
+      "description": "Resumable: Cancel upload",
+      "upstream_file": "storage/src/http/routes/tus/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "storage.transform.resize",
+      "component": "storage",
+      "group": "image_transforms",
+      "name": "Transform: resize",
+      "description": "Resize image",
+      "upstream_file": "storage/src/http/routes/render/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "storage.transform.width",
+      "component": "storage",
+      "group": "image_transforms",
+      "name": "Transform: width",
+      "description": "Set width",
+      "upstream_file": "storage/src/http/routes/render/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "storage.transform.height",
+      "component": "storage",
+      "group": "image_transforms",
+      "name": "Transform: height",
+      "description": "Set height",
+      "upstream_file": "storage/src/http/routes/render/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "storage.transform.quality",
+      "component": "storage",
+      "group": "image_transforms",
+      "name": "Transform: quality",
+      "description": "Set quality",
+      "upstream_file": "storage/src/http/routes/render/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "storage.transform.format",
+      "component": "storage",
+      "group": "image_transforms",
+      "name": "Transform: format",
+      "description": "Convert format (webp, png, jpg)",
+      "upstream_file": "storage/src/http/routes/render/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "storage.feature.rls",
+      "component": "storage",
+      "group": "features",
+      "name": "Rls",
+      "description": "Row Level Security",
+      "upstream_file": "storage/src/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "storage.feature.policies",
+      "component": "storage",
+      "group": "features",
+      "name": "Policies",
+      "description": "Storage policies",
+      "upstream_file": "storage/src/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "storage.feature.mime_detection",
+      "component": "storage",
+      "group": "features",
+      "name": "Mime Detection",
+      "description": "MIME type detection",
+      "upstream_file": "storage/src/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "storage.feature.size_limits",
+      "component": "storage",
+      "group": "features",
+      "name": "Size Limits",
+      "description": "File size limits",
+      "upstream_file": "storage/src/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "storage.feature.multipart",
+      "component": "storage",
+      "group": "features",
+      "name": "Multipart",
+      "description": "Multipart uploads",
+      "upstream_file": "storage/src/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "functions.invoke.get",
+      "component": "functions",
+      "group": "invocation",
+      "name": "GET /functions/v1/:name",
+      "description": "Invoke function via GET",
+      "upstream_file": "edge-runtime/crates/sb_core/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "functions.invoke.post",
+      "component": "functions",
+      "group": "invocation",
+      "name": "POST /functions/v1/:name",
+      "description": "Invoke function via POST",
+      "upstream_file": "edge-runtime/crates/sb_core/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "functions.invoke.put",
+      "component": "functions",
+      "group": "invocation",
+      "name": "PUT /functions/v1/:name",
+      "description": "Invoke function via PUT",
+      "upstream_file": "edge-runtime/crates/sb_core/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "functions.invoke.patch",
+      "component": "functions",
+      "group": "invocation",
+      "name": "PATCH /functions/v1/:name",
+      "description": "Invoke function via PATCH",
+      "upstream_file": "edge-runtime/crates/sb_core/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "functions.invoke.delete",
+      "component": "functions",
+      "group": "invocation",
+      "name": "DELETE /functions/v1/:name",
+      "description": "Invoke function via DELETE",
+      "upstream_file": "edge-runtime/crates/sb_core/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "functions.invoke.options",
+      "component": "functions",
+      "group": "invocation",
+      "name": "OPTIONS /functions/v1/:name",
+      "description": "Invoke function via OPTIONS",
+      "upstream_file": "edge-runtime/crates/sb_core/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "functions.api.fetch",
+      "component": "functions",
+      "group": "web_apis",
+      "name": "Fetch API",
+      "description": "Web API: Fetch API",
+      "upstream_file": "edge-runtime/crates/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "functions.api.crypto",
+      "component": "functions",
+      "group": "web_apis",
+      "name": "Web Crypto API",
+      "description": "Web API: Web Crypto API",
+      "upstream_file": "edge-runtime/crates/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "functions.api.headers",
+      "component": "functions",
+      "group": "web_apis",
+      "name": "Headers API",
+      "description": "Web API: Headers API",
+      "upstream_file": "edge-runtime/crates/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "functions.api.request",
+      "component": "functions",
+      "group": "web_apis",
+      "name": "Request API",
+      "description": "Web API: Request API",
+      "upstream_file": "edge-runtime/crates/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "functions.api.response",
+      "component": "functions",
+      "group": "web_apis",
+      "name": "Response API",
+      "description": "Web API: Response API",
+      "upstream_file": "edge-runtime/crates/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "functions.api.url",
+      "component": "functions",
+      "group": "web_apis",
+      "name": "URL API",
+      "description": "Web API: URL API",
+      "upstream_file": "edge-runtime/crates/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "functions.api.urlsearchparams",
+      "component": "functions",
+      "group": "web_apis",
+      "name": "URLSearchParams",
+      "description": "Web API: URLSearchParams",
+      "upstream_file": "edge-runtime/crates/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "functions.api.textencoder",
+      "component": "functions",
+      "group": "web_apis",
+      "name": "TextEncoder/TextDecoder",
+      "description": "Web API: TextEncoder/TextDecoder",
+      "upstream_file": "edge-runtime/crates/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "functions.api.console",
+      "component": "functions",
+      "group": "web_apis",
+      "name": "Console API",
+      "description": "Web API: Console API",
+      "upstream_file": "edge-runtime/crates/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "functions.api.timers",
+      "component": "functions",
+      "group": "web_apis",
+      "name": "setTimeout/setInterval",
+      "description": "Web API: setTimeout/setInterval",
+      "upstream_file": "edge-runtime/crates/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "functions.api.streams",
+      "component": "functions",
+      "group": "web_apis",
+      "name": "Streams API",
+      "description": "Web API: Streams API",
+      "upstream_file": "edge-runtime/crates/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "functions.api.blob",
+      "component": "functions",
+      "group": "web_apis",
+      "name": "Blob API",
+      "description": "Web API: Blob API",
+      "upstream_file": "edge-runtime/crates/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "functions.api.formdata",
+      "component": "functions",
+      "group": "web_apis",
+      "name": "FormData API",
+      "description": "Web API: FormData API",
+      "upstream_file": "edge-runtime/crates/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "functions.api.websocket",
+      "component": "functions",
+      "group": "web_apis",
+      "name": "WebSocket API",
+      "description": "Web API: WebSocket API",
+      "upstream_file": "edge-runtime/crates/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "functions.api.abortsignal",
+      "component": "functions",
+      "group": "web_apis",
+      "name": "AbortSignal API",
+      "description": "Web API: AbortSignal API",
+      "upstream_file": "edge-runtime/crates/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "functions.api.base64",
+      "component": "functions",
+      "group": "web_apis",
+      "name": "atob/btoa",
+      "description": "Web API: atob/btoa",
+      "upstream_file": "edge-runtime/crates/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "functions.supabase.supabase_client",
+      "component": "functions",
+      "group": "supabase_apis",
+      "name": "Supabase client instantiation",
+      "description": "Supabase: Supabase client instantiation",
+      "upstream_file": "edge-runtime/crates/sb_core/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "functions.supabase.env_vars",
+      "component": "functions",
+      "group": "supabase_apis",
+      "name": "Environment variables",
+      "description": "Supabase: Environment variables",
+      "upstream_file": "edge-runtime/crates/sb_core/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "functions.supabase.secrets",
+      "component": "functions",
+      "group": "supabase_apis",
+      "name": "Secrets access",
+      "description": "Supabase: Secrets access",
+      "upstream_file": "edge-runtime/crates/sb_core/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "functions.supabase.jwt_verification",
+      "component": "functions",
+      "group": "supabase_apis",
+      "name": "JWT verification",
+      "description": "Supabase: JWT verification",
+      "upstream_file": "edge-runtime/crates/sb_core/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "functions.supabase.cors_headers",
+      "component": "functions",
+      "group": "supabase_apis",
+      "name": "CORS headers",
+      "description": "Supabase: CORS headers",
+      "upstream_file": "edge-runtime/crates/sb_core/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "pooler.mode.transaction",
+      "component": "pooler",
+      "group": "pooling_modes",
+      "name": "Transaction",
+      "description": "Transaction pooling mode",
+      "upstream_file": "supavisor/lib/supavisor/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "pooler.mode.session",
+      "component": "pooler",
+      "group": "pooling_modes",
+      "name": "Session",
+      "description": "Session pooling mode",
+      "upstream_file": "supavisor/lib/supavisor/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "pooler.mode.statement",
+      "component": "pooler",
+      "group": "pooling_modes",
+      "name": "Statement",
+      "description": "Statement pooling mode",
+      "upstream_file": "supavisor/lib/supavisor/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "pooler.feature.postgres_wire",
+      "component": "pooler",
+      "group": "features",
+      "name": "Postgres Wire",
+      "description": "PostgreSQL wire protocol",
+      "upstream_file": "supavisor/lib/supavisor/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "pooler.feature.ssl_termination",
+      "component": "pooler",
+      "group": "features",
+      "name": "Ssl Termination",
+      "description": "SSL/TLS termination",
+      "upstream_file": "supavisor/lib/supavisor/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "pooler.feature.auth_md5",
+      "component": "pooler",
+      "group": "features",
+      "name": "Auth Md5",
+      "description": "MD5 authentication",
+      "upstream_file": "supavisor/lib/supavisor/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "pooler.feature.auth_scram",
+      "component": "pooler",
+      "group": "features",
+      "name": "Auth Scram",
+      "description": "SCRAM-SHA-256 authentication",
+      "upstream_file": "supavisor/lib/supavisor/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "pooler.feature.prepared_statements",
+      "component": "pooler",
+      "group": "features",
+      "name": "Prepared Statements",
+      "description": "Prepared statement handling",
+      "upstream_file": "supavisor/lib/supavisor/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "pooler.feature.query_parsing",
+      "component": "pooler",
+      "group": "features",
+      "name": "Query Parsing",
+      "description": "Query parsing",
+      "upstream_file": "supavisor/lib/supavisor/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "pooler.feature.connection_limiting",
+      "component": "pooler",
+      "group": "features",
+      "name": "Connection Limiting",
+      "description": "Connection limits",
+      "upstream_file": "supavisor/lib/supavisor/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "pooler.feature.tenant_isolation",
+      "component": "pooler",
+      "group": "features",
+      "name": "Tenant Isolation",
+      "description": "Multi-tenant isolation",
+      "upstream_file": "supavisor/lib/supavisor/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "pooler.feature.health_checks",
+      "component": "pooler",
+      "group": "features",
+      "name": "Health Checks",
+      "description": "Health checks",
+      "upstream_file": "supavisor/lib/supavisor/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "pooler.feature.metrics",
+      "component": "pooler",
+      "group": "features",
+      "name": "Metrics",
+      "description": "Metrics and monitoring",
+      "upstream_file": "supavisor/lib/supavisor/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "meta.endpoint.schemas",
+      "component": "meta",
+      "group": "endpoints",
+      "name": "GET /pg/schemas",
+      "description": "List schemas",
+      "upstream_file": "postgres-meta/src/server/routes/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "meta.endpoint.schemas_id",
+      "component": "meta",
+      "group": "endpoints",
+      "name": "GET /pg/schemas/id",
+      "description": "Get schema by name",
+      "upstream_file": "postgres-meta/src/server/routes/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "meta.endpoint.schemas_create",
+      "component": "meta",
+      "group": "endpoints",
+      "name": "POST /pg/schemas/create",
+      "description": "Create schema",
+      "upstream_file": "postgres-meta/src/server/routes/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "meta.endpoint.schemas_update",
+      "component": "meta",
+      "group": "endpoints",
+      "name": "PATCH /pg/schemas/update",
+      "description": "Update schema",
+      "upstream_file": "postgres-meta/src/server/routes/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "meta.endpoint.schemas_delete",
+      "component": "meta",
+      "group": "endpoints",
+      "name": "DELETE /pg/schemas/delete",
+      "description": "Delete schema",
+      "upstream_file": "postgres-meta/src/server/routes/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "meta.endpoint.tables",
+      "component": "meta",
+      "group": "endpoints",
+      "name": "GET /pg/tables",
+      "description": "List tables",
+      "upstream_file": "postgres-meta/src/server/routes/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "meta.endpoint.tables_id",
+      "component": "meta",
+      "group": "endpoints",
+      "name": "GET /pg/tables/id",
+      "description": "Get table by ID",
+      "upstream_file": "postgres-meta/src/server/routes/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "meta.endpoint.tables_create",
+      "component": "meta",
+      "group": "endpoints",
+      "name": "POST /pg/tables/create",
+      "description": "Create table",
+      "upstream_file": "postgres-meta/src/server/routes/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "meta.endpoint.tables_update",
+      "component": "meta",
+      "group": "endpoints",
+      "name": "PATCH /pg/tables/update",
+      "description": "Update table",
+      "upstream_file": "postgres-meta/src/server/routes/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "meta.endpoint.tables_delete",
+      "component": "meta",
+      "group": "endpoints",
+      "name": "DELETE /pg/tables/delete",
+      "description": "Delete table",
+      "upstream_file": "postgres-meta/src/server/routes/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "meta.endpoint.columns",
+      "component": "meta",
+      "group": "endpoints",
+      "name": "GET /pg/columns",
+      "description": "List columns",
+      "upstream_file": "postgres-meta/src/server/routes/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "meta.endpoint.columns_id",
+      "component": "meta",
+      "group": "endpoints",
+      "name": "GET /pg/columns/id",
+      "description": "Get column by ID",
+      "upstream_file": "postgres-meta/src/server/routes/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "meta.endpoint.columns_create",
+      "component": "meta",
+      "group": "endpoints",
+      "name": "POST /pg/columns/create",
+      "description": "Create column",
+      "upstream_file": "postgres-meta/src/server/routes/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "meta.endpoint.columns_update",
+      "component": "meta",
+      "group": "endpoints",
+      "name": "PATCH /pg/columns/update",
+      "description": "Update column",
+      "upstream_file": "postgres-meta/src/server/routes/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "meta.endpoint.columns_delete",
+      "component": "meta",
+      "group": "endpoints",
+      "name": "DELETE /pg/columns/delete",
+      "description": "Delete column",
+      "upstream_file": "postgres-meta/src/server/routes/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "meta.endpoint.relationships",
+      "component": "meta",
+      "group": "endpoints",
+      "name": "GET /pg/relationships",
+      "description": "List foreign key relationships",
+      "upstream_file": "postgres-meta/src/server/routes/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "meta.endpoint.functions",
+      "component": "meta",
+      "group": "endpoints",
+      "name": "GET /pg/functions",
+      "description": "List functions",
+      "upstream_file": "postgres-meta/src/server/routes/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "meta.endpoint.functions_id",
+      "component": "meta",
+      "group": "endpoints",
+      "name": "GET /pg/functions/id",
+      "description": "Get function by ID",
+      "upstream_file": "postgres-meta/src/server/routes/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "meta.endpoint.functions_create",
+      "component": "meta",
+      "group": "endpoints",
+      "name": "POST /pg/functions/create",
+      "description": "Create function",
+      "upstream_file": "postgres-meta/src/server/routes/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "meta.endpoint.functions_update",
+      "component": "meta",
+      "group": "endpoints",
+      "name": "PATCH /pg/functions/update",
+      "description": "Update function",
+      "upstream_file": "postgres-meta/src/server/routes/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "meta.endpoint.functions_delete",
+      "component": "meta",
+      "group": "endpoints",
+      "name": "DELETE /pg/functions/delete",
+      "description": "Delete function",
+      "upstream_file": "postgres-meta/src/server/routes/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "meta.endpoint.policies",
+      "component": "meta",
+      "group": "endpoints",
+      "name": "GET /pg/policies",
+      "description": "List RLS policies",
+      "upstream_file": "postgres-meta/src/server/routes/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "meta.endpoint.policies_id",
+      "component": "meta",
+      "group": "endpoints",
+      "name": "GET /pg/policies/id",
+      "description": "Get policy by ID",
+      "upstream_file": "postgres-meta/src/server/routes/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "meta.endpoint.policies_create",
+      "component": "meta",
+      "group": "endpoints",
+      "name": "POST /pg/policies/create",
+      "description": "Create policy",
+      "upstream_file": "postgres-meta/src/server/routes/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "meta.endpoint.policies_update",
+      "component": "meta",
+      "group": "endpoints",
+      "name": "PATCH /pg/policies/update",
+      "description": "Update policy",
+      "upstream_file": "postgres-meta/src/server/routes/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "meta.endpoint.policies_delete",
+      "component": "meta",
+      "group": "endpoints",
+      "name": "DELETE /pg/policies/delete",
+      "description": "Delete policy",
+      "upstream_file": "postgres-meta/src/server/routes/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "meta.endpoint.roles",
+      "component": "meta",
+      "group": "endpoints",
+      "name": "GET /pg/roles",
+      "description": "List roles",
+      "upstream_file": "postgres-meta/src/server/routes/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "meta.endpoint.roles_id",
+      "component": "meta",
+      "group": "endpoints",
+      "name": "GET /pg/roles/id",
+      "description": "Get role by ID",
+      "upstream_file": "postgres-meta/src/server/routes/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "meta.endpoint.roles_create",
+      "component": "meta",
+      "group": "endpoints",
+      "name": "POST /pg/roles/create",
+      "description": "Create role",
+      "upstream_file": "postgres-meta/src/server/routes/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "meta.endpoint.roles_update",
+      "component": "meta",
+      "group": "endpoints",
+      "name": "PATCH /pg/roles/update",
+      "description": "Update role",
+      "upstream_file": "postgres-meta/src/server/routes/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "meta.endpoint.roles_delete",
+      "component": "meta",
+      "group": "endpoints",
+      "name": "DELETE /pg/roles/delete",
+      "description": "Delete role",
+      "upstream_file": "postgres-meta/src/server/routes/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "meta.endpoint.types",
+      "component": "meta",
+      "group": "endpoints",
+      "name": "GET /pg/types",
+      "description": "List types",
+      "upstream_file": "postgres-meta/src/server/routes/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "meta.endpoint.types_id",
+      "component": "meta",
+      "group": "endpoints",
+      "name": "GET /pg/types/id",
+      "description": "Get type by ID",
+      "upstream_file": "postgres-meta/src/server/routes/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "meta.endpoint.triggers",
+      "component": "meta",
+      "group": "endpoints",
+      "name": "GET /pg/triggers",
+      "description": "List triggers",
+      "upstream_file": "postgres-meta/src/server/routes/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "meta.endpoint.triggers_id",
+      "component": "meta",
+      "group": "endpoints",
+      "name": "GET /pg/triggers/id",
+      "description": "Get trigger by ID",
+      "upstream_file": "postgres-meta/src/server/routes/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "meta.endpoint.triggers_create",
+      "component": "meta",
+      "group": "endpoints",
+      "name": "POST /pg/triggers/create",
+      "description": "Create trigger",
+      "upstream_file": "postgres-meta/src/server/routes/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "meta.endpoint.triggers_delete",
+      "component": "meta",
+      "group": "endpoints",
+      "name": "DELETE /pg/triggers/delete",
+      "description": "Delete trigger",
+      "upstream_file": "postgres-meta/src/server/routes/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "meta.endpoint.extensions",
+      "component": "meta",
+      "group": "endpoints",
+      "name": "GET /pg/extensions",
+      "description": "List extensions",
+      "upstream_file": "postgres-meta/src/server/routes/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "meta.endpoint.extensions_id",
+      "component": "meta",
+      "group": "endpoints",
+      "name": "GET /pg/extensions/id",
+      "description": "Get extension by ID",
+      "upstream_file": "postgres-meta/src/server/routes/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "meta.endpoint.extensions_create",
+      "component": "meta",
+      "group": "endpoints",
+      "name": "POST /pg/extensions/create",
+      "description": "Enable extension",
+      "upstream_file": "postgres-meta/src/server/routes/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "meta.endpoint.extensions_delete",
+      "component": "meta",
+      "group": "endpoints",
+      "name": "DELETE /pg/extensions/delete",
+      "description": "Disable extension",
+      "upstream_file": "postgres-meta/src/server/routes/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "meta.endpoint.publications",
+      "component": "meta",
+      "group": "endpoints",
+      "name": "GET /pg/publications",
+      "description": "List publications",
+      "upstream_file": "postgres-meta/src/server/routes/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "meta.endpoint.publications_id",
+      "component": "meta",
+      "group": "endpoints",
+      "name": "GET /pg/publications/id",
+      "description": "Get publication by ID",
+      "upstream_file": "postgres-meta/src/server/routes/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "meta.endpoint.publications_create",
+      "component": "meta",
+      "group": "endpoints",
+      "name": "POST /pg/publications/create",
+      "description": "Create publication",
+      "upstream_file": "postgres-meta/src/server/routes/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "meta.endpoint.publications_update",
+      "component": "meta",
+      "group": "endpoints",
+      "name": "PATCH /pg/publications/update",
+      "description": "Update publication",
+      "upstream_file": "postgres-meta/src/server/routes/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "meta.endpoint.publications_delete",
+      "component": "meta",
+      "group": "endpoints",
+      "name": "DELETE /pg/publications/delete",
+      "description": "Delete publication",
+      "upstream_file": "postgres-meta/src/server/routes/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "meta.endpoint.config",
+      "component": "meta",
+      "group": "endpoints",
+      "name": "GET /pg/config",
+      "description": "Get Postgres config",
+      "upstream_file": "postgres-meta/src/server/routes/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "meta.endpoint.config_version",
+      "component": "meta",
+      "group": "endpoints",
+      "name": "GET /pg/config/version",
+      "description": "Get Postgres version",
+      "upstream_file": "postgres-meta/src/server/routes/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "meta.endpoint.query",
+      "component": "meta",
+      "group": "endpoints",
+      "name": "POST /pg/query",
+      "description": "Execute SQL query",
+      "upstream_file": "postgres-meta/src/server/routes/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "meta.endpoint.query_format",
+      "component": "meta",
+      "group": "endpoints",
+      "name": "POST /pg/query/format",
+      "description": "Format SQL query",
+      "upstream_file": "postgres-meta/src/server/routes/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "meta.endpoint.generators_typescript",
+      "component": "meta",
+      "group": "endpoints",
+      "name": "GET /pg/generators/typescript",
+      "description": "Generate TypeScript types",
+      "upstream_file": "postgres-meta/src/server/routes/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "studio.page.dashboard",
+      "component": "studio",
+      "group": "pages",
+      "name": "Dashboard",
+      "description": "Studio: Project dashboard",
+      "upstream_file": "supabase/apps/studio/pages/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "studio.page.table_editor",
+      "component": "studio",
+      "group": "pages",
+      "name": "Table Editor",
+      "description": "Studio: Table editor",
+      "upstream_file": "supabase/apps/studio/pages/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "studio.page.table_editor_columns",
+      "component": "studio",
+      "group": "pages",
+      "name": "Table Editor Columns",
+      "description": "Studio: Column management",
+      "upstream_file": "supabase/apps/studio/pages/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "studio.page.table_editor_rows",
+      "component": "studio",
+      "group": "pages",
+      "name": "Table Editor Rows",
+      "description": "Studio: Row management",
+      "upstream_file": "supabase/apps/studio/pages/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "studio.page.table_editor_constraints",
+      "component": "studio",
+      "group": "pages",
+      "name": "Table Editor Constraints",
+      "description": "Studio: Constraints",
+      "upstream_file": "supabase/apps/studio/pages/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "studio.page.table_editor_indexes",
+      "component": "studio",
+      "group": "pages",
+      "name": "Table Editor Indexes",
+      "description": "Studio: Indexes",
+      "upstream_file": "supabase/apps/studio/pages/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "studio.page.table_editor_triggers",
+      "component": "studio",
+      "group": "pages",
+      "name": "Table Editor Triggers",
+      "description": "Studio: Table triggers",
+      "upstream_file": "supabase/apps/studio/pages/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "studio.page.sql_editor",
+      "component": "studio",
+      "group": "pages",
+      "name": "Sql Editor",
+      "description": "Studio: SQL editor",
+      "upstream_file": "supabase/apps/studio/pages/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "studio.page.sql_editor_history",
+      "component": "studio",
+      "group": "pages",
+      "name": "Sql Editor History",
+      "description": "Studio: Query history",
+      "upstream_file": "supabase/apps/studio/pages/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "studio.page.sql_editor_saved",
+      "component": "studio",
+      "group": "pages",
+      "name": "Sql Editor Saved",
+      "description": "Studio: Saved queries",
+      "upstream_file": "supabase/apps/studio/pages/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "studio.page.sql_editor_templates",
+      "component": "studio",
+      "group": "pages",
+      "name": "Sql Editor Templates",
+      "description": "Studio: Query templates",
+      "upstream_file": "supabase/apps/studio/pages/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "studio.page.auth_users",
+      "component": "studio",
+      "group": "pages",
+      "name": "Auth Users",
+      "description": "Studio: Auth users management",
+      "upstream_file": "supabase/apps/studio/pages/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "studio.page.auth_policies",
+      "component": "studio",
+      "group": "pages",
+      "name": "Auth Policies",
+      "description": "Studio: Auth policies",
+      "upstream_file": "supabase/apps/studio/pages/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "studio.page.auth_providers",
+      "component": "studio",
+      "group": "pages",
+      "name": "Auth Providers",
+      "description": "Studio: Auth providers config",
+      "upstream_file": "supabase/apps/studio/pages/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "studio.page.auth_templates",
+      "component": "studio",
+      "group": "pages",
+      "name": "Auth Templates",
+      "description": "Studio: Email templates",
+      "upstream_file": "supabase/apps/studio/pages/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "studio.page.auth_url_config",
+      "component": "studio",
+      "group": "pages",
+      "name": "Auth Url Config",
+      "description": "Studio: URL configuration",
+      "upstream_file": "supabase/apps/studio/pages/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "studio.page.auth_hooks",
+      "component": "studio",
+      "group": "pages",
+      "name": "Auth Hooks",
+      "description": "Studio: Auth hooks",
+      "upstream_file": "supabase/apps/studio/pages/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "studio.page.storage_buckets",
+      "component": "studio",
+      "group": "pages",
+      "name": "Storage Buckets",
+      "description": "Studio: Storage buckets",
+      "upstream_file": "supabase/apps/studio/pages/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "studio.page.storage_policies",
+      "component": "studio",
+      "group": "pages",
+      "name": "Storage Policies",
+      "description": "Studio: Storage policies",
+      "upstream_file": "supabase/apps/studio/pages/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "studio.page.storage_files",
+      "component": "studio",
+      "group": "pages",
+      "name": "Storage Files",
+      "description": "Studio: File browser",
+      "upstream_file": "supabase/apps/studio/pages/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "studio.page.edge_functions",
+      "component": "studio",
+      "group": "pages",
+      "name": "Edge Functions",
+      "description": "Studio: Edge Functions",
+      "upstream_file": "supabase/apps/studio/pages/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "studio.page.edge_functions_logs",
+      "component": "studio",
+      "group": "pages",
+      "name": "Edge Functions Logs",
+      "description": "Studio: Function logs",
+      "upstream_file": "supabase/apps/studio/pages/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "studio.page.realtime_inspector",
+      "component": "studio",
+      "group": "pages",
+      "name": "Realtime Inspector",
+      "description": "Studio: Realtime inspector",
+      "upstream_file": "supabase/apps/studio/pages/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "studio.page.database_roles",
+      "component": "studio",
+      "group": "pages",
+      "name": "Database Roles",
+      "description": "Studio: Database roles",
+      "upstream_file": "supabase/apps/studio/pages/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "studio.page.database_replication",
+      "component": "studio",
+      "group": "pages",
+      "name": "Database Replication",
+      "description": "Studio: Replication",
+      "upstream_file": "supabase/apps/studio/pages/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "studio.page.database_webhooks",
+      "component": "studio",
+      "group": "pages",
+      "name": "Database Webhooks",
+      "description": "Studio: Database webhooks",
+      "upstream_file": "supabase/apps/studio/pages/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "studio.page.database_extensions",
+      "component": "studio",
+      "group": "pages",
+      "name": "Database Extensions",
+      "description": "Studio: Extensions",
+      "upstream_file": "supabase/apps/studio/pages/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "studio.page.database_publications",
+      "component": "studio",
+      "group": "pages",
+      "name": "Database Publications",
+      "description": "Studio: Publications",
+      "upstream_file": "supabase/apps/studio/pages/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "studio.page.database_backups",
+      "component": "studio",
+      "group": "pages",
+      "name": "Database Backups",
+      "description": "Studio: Backups",
+      "upstream_file": "supabase/apps/studio/pages/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "studio.page.api_settings",
+      "component": "studio",
+      "group": "pages",
+      "name": "Api Settings",
+      "description": "Studio: API settings",
+      "upstream_file": "supabase/apps/studio/pages/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "studio.page.api_docs",
+      "component": "studio",
+      "group": "pages",
+      "name": "Api Docs",
+      "description": "Studio: API documentation",
+      "upstream_file": "supabase/apps/studio/pages/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "studio.page.project_settings",
+      "component": "studio",
+      "group": "pages",
+      "name": "Project Settings",
+      "description": "Studio: Project settings",
+      "upstream_file": "supabase/apps/studio/pages/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "studio.page.logs_explorer",
+      "component": "studio",
+      "group": "pages",
+      "name": "Logs Explorer",
+      "description": "Studio: Logs explorer",
+      "upstream_file": "supabase/apps/studio/pages/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "studio.page.reports",
+      "component": "studio",
+      "group": "pages",
+      "name": "Reports",
+      "description": "Studio: Reports",
+      "upstream_file": "supabase/apps/studio/pages/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "studio.api.projects",
+      "component": "studio",
+      "group": "api",
+      "name": "API: projects",
+      "description": "Project management",
+      "upstream_file": "supabase/apps/studio/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "studio.api.content",
+      "component": "studio",
+      "group": "api",
+      "name": "API: content",
+      "description": "Content API",
+      "upstream_file": "supabase/apps/studio/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "studio.api.platform",
+      "component": "studio",
+      "group": "api",
+      "name": "API: platform",
+      "description": "Platform API",
+      "upstream_file": "supabase/apps/studio/",
+      "status": "not_implemented"
+    },
+    {
+      "id": "studio.api.config",
+      "component": "studio",
+      "group": "api",
+      "name": "API: config",
+      "description": "Configuration API",
+      "upstream_file": "supabase/apps/studio/",
+      "status": "not_implemented"
+    }
+  ]
+}

@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 200" width="400" height="200">
+  <rect width="400" height="200" fill="#111827"/>
+  <text x="2" y="20" font-family="system-ui, sans-serif" font-size="14" font-weight="600" fill="#ffffff">
+    FUNCTIONS: 0.0% (0/27)
+  </text>
+  <rect x="2.0" y="32.0" width="35.0" height="66.6" fill="#6b7280" rx="1"><title>GET /functions/v1/:name</title></rect>
+  <rect x="38.0" y="32.0" width="35.0" height="66.6" fill="#6b7280" rx="1"><title>POST /functions/v1/:name</title></rect>
+  <rect x="74.0" y="32.0" width="35.0" height="66.6" fill="#6b7280" rx="1"><title>PUT /functions/v1/:name</title></rect>
+  <rect x="110.0" y="32.0" width="35.0" height="66.6" fill="#6b7280" rx="1"><title>PATCH /functions/v1/:name</title></rect>
+  <rect x="146.0" y="32.0" width="35.0" height="66.6" fill="#6b7280" rx="1"><title>DELETE /functions/v1/:name</title></rect>
+  <rect x="182.0" y="32.0" width="35.0" height="66.6" fill="#6b7280" rx="1"><title>OPTIONS /functions/v1/:name</title></rect>
+  <rect x="218.0" y="32.0" width="35.0" height="66.6" fill="#6b7280" rx="1"><title>Fetch API</title></rect>
+  <rect x="254.0" y="32.0" width="35.0" height="66.6" fill="#6b7280" rx="1"><title>Web Crypto API</title></rect>
+  <rect x="290.0" y="32.0" width="35.0" height="66.6" fill="#6b7280" rx="1"><title>Headers API</title></rect>
+  <rect x="326.0" y="32.0" width="35.0" height="66.6" fill="#6b7280" rx="1"><title>Request API</title></rect>
+  <rect x="362.0" y="32.0" width="35.0" height="66.6" fill="#6b7280" rx="1"><title>Response API</title></rect>
+  <rect x="2.0" y="99.6" width="55.6" height="42.0" fill="#6b7280" rx="1"><title>URL API</title></rect>
+  <rect x="58.6" y="99.6" width="55.6" height="42.0" fill="#6b7280" rx="1"><title>URLSearchParams</title></rect>
+  <rect x="115.1" y="99.6" width="55.6" height="42.0" fill="#6b7280" rx="1"><title>TextEncoder/TextDecoder</title></rect>
+  <rect x="171.7" y="99.6" width="55.6" height="42.0" fill="#6b7280" rx="1"><title>Console API</title></rect>
+  <rect x="228.3" y="99.6" width="55.6" height="42.0" fill="#6b7280" rx="1"><title>setTimeout/setInterval</title></rect>
+  <rect x="284.9" y="99.6" width="55.6" height="42.0" fill="#6b7280" rx="1"><title>Streams API</title></rect>
+  <rect x="341.4" y="99.6" width="55.6" height="42.0" fill="#6b7280" rx="1"><title>Blob API</title></rect>
+  <rect x="2.0" y="142.7" width="98.0" height="23.6" fill="#6b7280" rx="1"><title>FormData API</title></rect>
+  <rect x="101.0" y="142.7" width="98.0" height="23.6" fill="#6b7280" rx="1"><title>WebSocket API</title></rect>
+  <rect x="200.0" y="142.7" width="98.0" height="23.6" fill="#6b7280" rx="1"><title>AbortSignal API</title></rect>
+  <rect x="299.0" y="142.7" width="98.0" height="23.6" fill="#6b7280" rx="1"><title>atob/btoa</title></rect>
+  <rect x="2.0" y="167.3" width="197.0" height="11.3" fill="#6b7280" rx="1"><title>Supabase client instantiation</title></rect>
+  <rect x="200.0" y="167.3" width="197.0" height="11.3" fill="#6b7280" rx="1"><title>Environment variables</title></rect>
+  <rect x="2.0" y="179.6" width="131.0" height="17.4" fill="#6b7280" rx="1"><title>Secrets access</title></rect>
+  <rect x="134.0" y="179.6" width="131.0" height="17.4" fill="#6b7280" rx="1"><title>JWT verification</title></rect>
+  <rect x="266.0" y="179.6" width="131.0" height="17.4" fill="#6b7280" rx="1"><title>CORS headers</title></rect>
+</svg>

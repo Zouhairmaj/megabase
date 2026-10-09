@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 200" width="400" height="200">
+  <rect width="400" height="200" fill="#111827"/>
+  <text x="2" y="20" font-family="system-ui, sans-serif" font-size="14" font-weight="600" fill="#ffffff">
+    STUDIO: 0.0% (0/38)
+  </text>
+  <rect x="2.0" y="32.0" width="23.8" height="68.9" fill="#6b7280" rx="1"><title>Dashboard</title></rect>
+  <rect x="26.8" y="32.0" width="23.8" height="68.9" fill="#6b7280" rx="1"><title>Table Editor</title></rect>
+  <rect x="51.5" y="32.0" width="23.8" height="68.9" fill="#6b7280" rx="1"><title>Table Editor Columns</title></rect>
+  <rect x="76.2" y="32.0" width="23.8" height="68.9" fill="#6b7280" rx="1"><title>Table Editor Rows</title></rect>
+  <rect x="101.0" y="32.0" width="23.8" height="68.9" fill="#6b7280" rx="1"><title>Table Editor Constraints</title></rect>
+  <rect x="125.8" y="32.0" width="23.8" height="68.9" fill="#6b7280" rx="1"><title>Table Editor Indexes</title></rect>
+  <rect x="150.5" y="32.0" width="23.8" height="68.9" fill="#6b7280" rx="1"><title>Table Editor Triggers</title></rect>
+  <rect x="175.2" y="32.0" width="23.8" height="68.9" fill="#6b7280" rx="1"><title>Sql Editor</title></rect>
+  <rect x="200.0" y="32.0" width="23.8" height="68.9" fill="#6b7280" rx="1"><title>Sql Editor History</title></rect>
+  <rect x="224.8" y="32.0" width="23.8" height="68.9" fill="#6b7280" rx="1"><title>Sql Editor Saved</title></rect>
+  <rect x="249.5" y="32.0" width="23.8" height="68.9" fill="#6b7280" rx="1"><title>Sql Editor Templates</title></rect>
+  <rect x="274.2" y="32.0" width="23.8" height="68.9" fill="#6b7280" rx="1"><title>Auth Users</title></rect>
+  <rect x="299.0" y="32.0" width="23.8" height="68.9" fill="#6b7280" rx="1"><title>Auth Policies</title></rect>
+  <rect x="323.8" y="32.0" width="23.8" height="68.9" fill="#6b7280" rx="1"><title>Auth Providers</title></rect>
+  <rect x="348.5" y="32.0" width="23.8" height="68.9" fill="#6b7280" rx="1"><title>Auth Templates</title></rect>
+  <rect x="373.2" y="32.0" width="23.8" height="68.9" fill="#6b7280" rx="1"><title>Auth Url Config</title></rect>
+  <rect x="2.0" y="101.9" width="43.0" height="38.3" fill="#6b7280" rx="1"><title>Auth Hooks</title></rect>
+  <rect x="46.0" y="101.9" width="43.0" height="38.3" fill="#6b7280" rx="1"><title>Storage Buckets</title></rect>
+  <rect x="90.0" y="101.9" width="43.0" height="38.3" fill="#6b7280" rx="1"><title>Storage Policies</title></rect>
+  <rect x="134.0" y="101.9" width="43.0" height="38.3" fill="#6b7280" rx="1"><title>Storage Files</title></rect>
+  <rect x="178.0" y="101.9" width="43.0" height="38.3" fill="#6b7280" rx="1"><title>Edge Functions</title></rect>
+  <rect x="222.0" y="101.9" width="43.0" height="38.3" fill="#6b7280" rx="1"><title>Edge Functions Logs</title></rect>
+  <rect x="266.0" y="101.9" width="43.0" height="38.3" fill="#6b7280" rx="1"><title>Realtime Inspector</title></rect>
+  <rect x="310.0" y="101.9" width="43.0" height="38.3" fill="#6b7280" rx="1"><title>Database Roles</title></rect>
+  <rect x="354.0" y="101.9" width="43.0" height="38.3" fill="#6b7280" rx="1"><title>Database Replication</title></rect>
+  <rect x="2.0" y="141.2" width="65.0" height="25.2" fill="#6b7280" rx="1"><title>Database Webhooks</title></rect>
+  <rect x="68.0" y="141.2" width="65.0" height="25.2" fill="#6b7280" rx="1"><title>Database Extensions</title></rect>
+  <rect x="134.0" y="141.2" width="65.0" height="25.2" fill="#6b7280" rx="1"><title>Database Publications</title></rect>
+  <rect x="200.0" y="141.2" width="65.0" height="25.2" fill="#6b7280" rx="1"><title>Database Backups</title></rect>
+  <rect x="266.0" y="141.2" width="65.0" height="25.2" fill="#6b7280" rx="1"><title>Api Settings</title></rect>
+  <rect x="332.0" y="141.2" width="65.0" height="25.2" fill="#6b7280" rx="1"><title>Api Docs</title></rect>
+  <rect x="2.0" y="167.4" width="131.0" height="12.1" fill="#6b7280" rx="1"><title>Project Settings</title></rect>
+  <rect x="134.0" y="167.4" width="131.0" height="12.1" fill="#6b7280" rx="1"><title>Logs Explorer</title></rect>
+  <rect x="266.0" y="167.4" width="131.0" height="12.1" fill="#6b7280" rx="1"><title>Reports</title></rect>
+  <rect x="2.0" y="180.5" width="98.0" height="16.5" fill="#6b7280" rx="1"><title>API: projects</title></rect>
+  <rect x="101.0" y="180.5" width="98.0" height="16.5" fill="#6b7280" rx="1"><title>API: content</title></rect>
+  <rect x="200.0" y="180.5" width="98.0" height="16.5" fill="#6b7280" rx="1"><title>API: platform</title></rect>
+  <rect x="299.0" y="180.5" width="98.0" height="16.5" fill="#6b7280" rx="1"><title>API: config</title></rect>
+</svg>

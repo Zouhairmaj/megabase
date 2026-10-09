@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 200" width="400" height="200">
+  <rect width="400" height="200" fill="#111827"/>
+  <text x="2" y="20" font-family="system-ui, sans-serif" font-size="14" font-weight="600" fill="#ffffff">
+    STORAGE: 0.0% (0/34)
+  </text>
+  <rect x="2.0" y="32.0" width="27.3" height="67.4" fill="#6b7280" rx="1"><title>GET /storage/v1/bucket</title></rect>
+  <rect x="30.3" y="32.0" width="27.3" height="67.4" fill="#6b7280" rx="1"><title>POST /storage/v1/bucket</title></rect>
+  <rect x="58.6" y="32.0" width="27.3" height="67.4" fill="#6b7280" rx="1"><title>GET /storage/v1/bucket</title></rect>
+  <rect x="86.9" y="32.0" width="27.3" height="67.4" fill="#6b7280" rx="1"><title>PUT /storage/v1/bucket</title></rect>
+  <rect x="115.1" y="32.0" width="27.3" height="67.4" fill="#6b7280" rx="1"><title>DELETE /storage/v1/bucket</title></rect>
+  <rect x="143.4" y="32.0" width="27.3" height="67.4" fill="#6b7280" rx="1"><title>POST /storage/v1/bucket</title></rect>
+  <rect x="171.7" y="32.0" width="27.3" height="67.4" fill="#6b7280" rx="1"><title>POST /storage/v1/object</title></rect>
+  <rect x="200.0" y="32.0" width="27.3" height="67.4" fill="#6b7280" rx="1"><title>PUT /storage/v1/object</title></rect>
+  <rect x="228.3" y="32.0" width="27.3" height="67.4" fill="#6b7280" rx="1"><title>GET /storage/v1/object</title></rect>
+  <rect x="256.6" y="32.0" width="27.3" height="67.4" fill="#6b7280" rx="1"><title>HEAD /storage/v1/object</title></rect>
+  <rect x="284.9" y="32.0" width="27.3" height="67.4" fill="#6b7280" rx="1"><title>POST /storage/v1/object</title></rect>
+  <rect x="313.1" y="32.0" width="27.3" height="67.4" fill="#6b7280" rx="1"><title>POST /storage/v1/object</title></rect>
+  <rect x="341.4" y="32.0" width="27.3" height="67.4" fill="#6b7280" rx="1"><title>POST /storage/v1/object</title></rect>
+  <rect x="369.7" y="32.0" width="27.3" height="67.4" fill="#6b7280" rx="1"><title>DELETE /storage/v1/object</title></rect>
+  <rect x="2.0" y="100.4" width="48.5" height="38.1" fill="#6b7280" rx="1"><title>DELETE /storage/v1/object</title></rect>
+  <rect x="51.5" y="100.4" width="48.5" height="38.1" fill="#6b7280" rx="1"><title>POST /storage/v1/object</title></rect>
+  <rect x="101.0" y="100.4" width="48.5" height="38.1" fill="#6b7280" rx="1"><title>POST /storage/v1/object</title></rect>
+  <rect x="150.5" y="100.4" width="48.5" height="38.1" fill="#6b7280" rx="1"><title>POST /storage/v1/object</title></rect>
+  <rect x="200.0" y="100.4" width="48.5" height="38.1" fill="#6b7280" rx="1"><title>PUT /storage/v1/object</title></rect>
+  <rect x="249.5" y="100.4" width="48.5" height="38.1" fill="#6b7280" rx="1"><title>GET /storage/v1/object</title></rect>
+  <rect x="299.0" y="100.4" width="48.5" height="38.1" fill="#6b7280" rx="1"><title>TUS POST</title></rect>
+  <rect x="348.5" y="100.4" width="48.5" height="38.1" fill="#6b7280" rx="1"><title>TUS PATCH</title></rect>
+  <rect x="2.0" y="139.4" width="78.2" height="23.4" fill="#6b7280" rx="1"><title>TUS HEAD</title></rect>
+  <rect x="81.2" y="139.4" width="78.2" height="23.4" fill="#6b7280" rx="1"><title>TUS DELETE</title></rect>
+  <rect x="160.4" y="139.4" width="78.2" height="23.4" fill="#6b7280" rx="1"><title>Transform: resize</title></rect>
+  <rect x="239.6" y="139.4" width="78.2" height="23.4" fill="#6b7280" rx="1"><title>Transform: width</title></rect>
+  <rect x="318.8" y="139.4" width="78.2" height="23.4" fill="#6b7280" rx="1"><title>Transform: height</title></rect>
+  <rect x="2.0" y="163.8" width="131.0" height="13.6" fill="#6b7280" rx="1"><title>Transform: quality</title></rect>
+  <rect x="134.0" y="163.8" width="131.0" height="13.6" fill="#6b7280" rx="1"><title>Transform: format</title></rect>
+  <rect x="266.0" y="163.8" width="131.0" height="13.6" fill="#6b7280" rx="1"><title>Rls</title></rect>
+  <rect x="2.0" y="178.5" width="98.0" height="18.5" fill="#6b7280" rx="1"><title>Policies</title></rect>
+  <rect x="101.0" y="178.5" width="98.0" height="18.5" fill="#6b7280" rx="1"><title>Mime Detection</title></rect>
+  <rect x="200.0" y="178.5" width="98.0" height="18.5" fill="#6b7280" rx="1"><title>Size Limits</title></rect>
+  <rect x="299.0" y="178.5" width="98.0" height="18.5" fill="#6b7280" rx="1"><title>Multipart</title></rect>
+</svg>

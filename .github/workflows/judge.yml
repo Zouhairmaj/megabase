@@ -1,0 +1,111 @@
+name: Judge
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  judge:
+    name: Run Judge Comparison
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: supabase/postgres:15.6.1.143
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+      
+      - name: Install Rust
+        uses: dtolnay/rust-action@stable
+      
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+      
+      - name: Build Megabase
+        run: cargo build --release
+      
+      - name: Initialize database
+        run: |
+          PGPASSWORD=postgres psql -h localhost -U postgres -d postgres -f judge/init/00-schema.sql
+      
+      - name: Start Megabase
+        run: |
+          DATABASE_URL="postgres://postgres:postgres@localhost:5432/postgres" \
+          JWT_SECRET="super-secret-jwt-token-with-at-least-32-characters-long" \
+          ./target/release/megabase &
+          sleep 5
+      
+      - name: Health check
+        run: |
+          curl -f http://localhost:8000/health || exit 1
+      
+      - name: Run judge (Megabase only - reference stack not available in CI)
+        run: |
+          # In CI, we can only test that Megabase responds correctly to basic requests
+          # Full judge comparison requires the reference stack (docker-compose)
+          
+          echo "Testing Megabase health endpoint..."
+          RESPONSE=$(curl -s http://localhost:8000/health)
+          echo "Response: $RESPONSE"
+          
+          echo ""
+          echo "Testing 501 responses on unimplemented endpoints..."
+          
+          # REST endpoint should return 501
+          REST_RESPONSE=$(curl -s -w "\n%{http_code}" http://localhost:8000/rest/v1/test)
+          REST_STATUS=$(echo "$REST_RESPONSE" | tail -1)
+          echo "REST /rest/v1/test: $REST_STATUS"
+          [ "$REST_STATUS" = "501" ] || exit 1
+          
+          # Auth endpoint should return 501
+          AUTH_RESPONSE=$(curl -s -w "\n%{http_code}" http://localhost:8000/auth/v1/health)
+          AUTH_STATUS=$(echo "$AUTH_RESPONSE" | tail -1)
+          echo "Auth /auth/v1/health: $AUTH_STATUS"
+          [ "$AUTH_STATUS" = "501" ] || exit 1
+          
+          echo ""
+          echo "All basic tests passed!"
+      
+      - name: Post results
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `## Judge Results
+              
+              ✅ Megabase binary builds successfully
+              ✅ Health endpoint responds
+              ✅ Unimplemented endpoints return 501 MEGABASE_NOT_IMPLEMENTED
+              
+              > Full judge comparison (vs reference Supabase stack) requires local docker-compose setup.
+              > Run \`cd judge && docker compose up -d && python compare.py\` locally for full results.`
+            })

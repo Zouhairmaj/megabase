@@ -1,0 +1,67 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/megabase",
+    "crates/megabase-core",
+    "crates/megabase-server",
+    "crates/megabase-rest",
+    "crates/megabase-auth",
+    "crates/megabase-realtime",
+    "crates/megabase-storage",
+    "crates/megabase-functions",
+    "crates/megabase-pooler",
+    "crates/megabase-meta",
+    "crates/megabase-studio",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/AgenP/megabase"
+rust-version = "1.75"
+
+[workspace.dependencies]
+# Async runtime
+tokio = { version = "1.35", features = ["full"] }
+
+# HTTP framework
+axum = { version = "0.7.5", features = ["macros"] }
+tower = "0.4.13"
+tower-http = { version = "0.5.2", features = ["cors", "trace", "compression-gzip"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Tracing
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# Error handling
+thiserror = "1.0.56"
+anyhow = "1.0"
+
+# JWT
+jsonwebtoken = "9.2"
+
+# UUID
+uuid = { version = "1.6", features = ["v4", "serde"] }
+
+# Time
+chrono = { version = "0.4.31", features = ["serde"] }
+
+# Config
+config = "0.13"
+
+# Workspace crates
+megabase-core = { path = "crates/megabase-core" }
+megabase-server = { path = "crates/megabase-server" }
+megabase-rest = { path = "crates/megabase-rest" }
+megabase-auth = { path = "crates/megabase-auth" }
+megabase-realtime = { path = "crates/megabase-realtime" }
+megabase-storage = { path = "crates/megabase-storage" }
+megabase-functions = { path = "crates/megabase-functions" }
+megabase-pooler = { path = "crates/megabase-pooler" }
+megabase-meta = { path = "crates/megabase-meta" }
+megabase-studio = { path = "crates/megabase-studio" }

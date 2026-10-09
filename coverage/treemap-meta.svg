@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 200" width="400" height="200">
+  <rect width="400" height="200" fill="#111827"/>
+  <text x="2" y="20" font-family="system-ui, sans-serif" font-size="14" font-weight="600" fill="#ffffff">
+    META: 0.0% (0/51)
+  </text>
+  <rect x="2.0" y="32.0" width="17.9" height="67.4" fill="#6b7280" rx="1"><title>GET /pg/schemas</title></rect>
+  <rect x="20.9" y="32.0" width="17.9" height="67.4" fill="#6b7280" rx="1"><title>GET /pg/schemas/id</title></rect>
+  <rect x="39.7" y="32.0" width="17.9" height="67.4" fill="#6b7280" rx="1"><title>POST /pg/schemas/create</title></rect>
+  <rect x="58.6" y="32.0" width="17.9" height="67.4" fill="#6b7280" rx="1"><title>PATCH /pg/schemas/update</title></rect>
+  <rect x="77.4" y="32.0" width="17.9" height="67.4" fill="#6b7280" rx="1"><title>DELETE /pg/schemas/delete</title></rect>
+  <rect x="96.3" y="32.0" width="17.9" height="67.4" fill="#6b7280" rx="1"><title>GET /pg/tables</title></rect>
+  <rect x="115.1" y="32.0" width="17.9" height="67.4" fill="#6b7280" rx="1"><title>GET /pg/tables/id</title></rect>
+  <rect x="134.0" y="32.0" width="17.9" height="67.4" fill="#6b7280" rx="1"><title>POST /pg/tables/create</title></rect>
+  <rect x="152.9" y="32.0" width="17.9" height="67.4" fill="#6b7280" rx="1"><title>PATCH /pg/tables/update</title></rect>
+  <rect x="171.7" y="32.0" width="17.9" height="67.4" fill="#6b7280" rx="1"><title>DELETE /pg/tables/delete</title></rect>
+  <rect x="190.6" y="32.0" width="17.9" height="67.4" fill="#6b7280" rx="1"><title>GET /pg/columns</title></rect>
+  <rect x="209.4" y="32.0" width="17.9" height="67.4" fill="#6b7280" rx="1"><title>GET /pg/columns/id</title></rect>
+  <rect x="228.3" y="32.0" width="17.9" height="67.4" fill="#6b7280" rx="1"><title>POST /pg/columns/create</title></rect>
+  <rect x="247.1" y="32.0" width="17.9" height="67.4" fill="#6b7280" rx="1"><title>PATCH /pg/columns/update</title></rect>
+  <rect x="266.0" y="32.0" width="17.9" height="67.4" fill="#6b7280" rx="1"><title>DELETE /pg/columns/delete</title></rect>
+  <rect x="284.9" y="32.0" width="17.9" height="67.4" fill="#6b7280" rx="1"><title>GET /pg/relationships</title></rect>
+  <rect x="303.7" y="32.0" width="17.9" height="67.4" fill="#6b7280" rx="1"><title>GET /pg/functions</title></rect>
+  <rect x="322.6" y="32.0" width="17.9" height="67.4" fill="#6b7280" rx="1"><title>GET /pg/functions/id</title></rect>
+  <rect x="341.4" y="32.0" width="17.9" height="67.4" fill="#6b7280" rx="1"><title>POST /pg/functions/create</title></rect>
+  <rect x="360.3" y="32.0" width="17.9" height="67.4" fill="#6b7280" rx="1"><title>PATCH /pg/functions/update</title></rect>
+  <rect x="379.1" y="32.0" width="17.9" height="67.4" fill="#6b7280" rx="1"><title>DELETE /pg/functions/delete</title></rect>
+  <rect x="2.0" y="100.4" width="32.0" height="38.1" fill="#6b7280" rx="1"><title>GET /pg/policies</title></rect>
+  <rect x="35.0" y="100.4" width="32.0" height="38.1" fill="#6b7280" rx="1"><title>GET /pg/policies/id</title></rect>
+  <rect x="68.0" y="100.4" width="32.0" height="38.1" fill="#6b7280" rx="1"><title>POST /pg/policies/create</title></rect>
+  <rect x="101.0" y="100.4" width="32.0" height="38.1" fill="#6b7280" rx="1"><title>PATCH /pg/policies/update</title></rect>
+  <rect x="134.0" y="100.4" width="32.0" height="38.1" fill="#6b7280" rx="1"><title>DELETE /pg/policies/delete</title></rect>
+  <rect x="167.0" y="100.4" width="32.0" height="38.1" fill="#6b7280" rx="1"><title>GET /pg/roles</title></rect>
+  <rect x="200.0" y="100.4" width="32.0" height="38.1" fill="#6b7280" rx="1"><title>GET /pg/roles/id</title></rect>
+  <rect x="233.0" y="100.4" width="32.0" height="38.1" fill="#6b7280" rx="1"><title>POST /pg/roles/create</title></rect>
+  <rect x="266.0" y="100.4" width="32.0" height="38.1" fill="#6b7280" rx="1"><title>PATCH /pg/roles/update</title></rect>
+  <rect x="299.0" y="100.4" width="32.0" height="38.1" fill="#6b7280" rx="1"><title>DELETE /pg/roles/delete</title></rect>
+  <rect x="332.0" y="100.4" width="32.0" height="38.1" fill="#6b7280" rx="1"><title>GET /pg/types</title></rect>
+  <rect x="365.0" y="100.4" width="32.0" height="38.1" fill="#6b7280" rx="1"><title>GET /pg/types/id</title></rect>
+  <rect x="2.0" y="139.4" width="48.5" height="25.0" fill="#6b7280" rx="1"><title>GET /pg/triggers</title></rect>
+  <rect x="51.5" y="139.4" width="48.5" height="25.0" fill="#6b7280" rx="1"><title>GET /pg/triggers/id</title></rect>
+  <rect x="101.0" y="139.4" width="48.5" height="25.0" fill="#6b7280" rx="1"><title>POST /pg/triggers/create</title></rect>
+  <rect x="150.5" y="139.4" width="48.5" height="25.0" fill="#6b7280" rx="1"><title>DELETE /pg/triggers/delete</title></rect>
+  <rect x="200.0" y="139.4" width="48.5" height="25.0" fill="#6b7280" rx="1"><title>GET /pg/extensions</title></rect>
+  <rect x="249.5" y="139.4" width="48.5" height="25.0" fill="#6b7280" rx="1"><title>GET /pg/extensions/id</title></rect>
+  <rect x="299.0" y="139.4" width="48.5" height="25.0" fill="#6b7280" rx="1"><title>POST /pg/extensions/create</title></rect>
+  <rect x="348.5" y="139.4" width="48.5" height="25.0" fill="#6b7280" rx="1"><title>DELETE /pg/extensions/delete</title></rect>
+  <rect x="2.0" y="165.5" width="98.0" height="12.0" fill="#6b7280" rx="1"><title>GET /pg/publications</title></rect>
+  <rect x="101.0" y="165.5" width="98.0" height="12.0" fill="#6b7280" rx="1"><title>GET /pg/publications/id</title></rect>
+  <rect x="200.0" y="165.5" width="98.0" height="12.0" fill="#6b7280" rx="1"><title>POST /pg/publications/create</title></rect>
+  <rect x="299.0" y="165.5" width="98.0" height="12.0" fill="#6b7280" rx="1"><title>PATCH /pg/publications/update</title></rect>
+  <rect x="2.0" y="178.5" width="131.0" height="8.8" fill="#6b7280" rx="1"><title>DELETE /pg/publications/delete</title></rect>
+  <rect x="134.0" y="178.5" width="131.0" height="8.8" fill="#6b7280" rx="1"><title>GET /pg/config</title></rect>
+  <rect x="266.0" y="178.5" width="131.0" height="8.8" fill="#6b7280" rx="1"><title>GET /pg/config/version</title></rect>
+  <rect x="2.0" y="188.2" width="131.0" height="8.8" fill="#6b7280" rx="1"><title>POST /pg/query</title></rect>
+  <rect x="134.0" y="188.2" width="131.0" height="8.8" fill="#6b7280" rx="1"><title>POST /pg/query/format</title></rect>
+  <rect x="266.0" y="188.2" width="131.0" height="8.8" fill="#6b7280" rx="1"><title>GET /pg/generators/typescript</title></rect>
+</svg>

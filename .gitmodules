@@ -1,0 +1,27 @@
+[submodule "vendor/auth"]
+	path = vendor/auth
+	url = https://github.com/supabase/auth.git
+[submodule "vendor/supavisor"]
+	path = vendor/supavisor
+	url = https://github.com/supabase/supavisor.git
+[submodule "vendor/realtime"]
+	path = vendor/realtime
+	url = https://github.com/supabase/realtime.git
+[submodule "vendor/postgrest"]
+	path = vendor/postgrest
+	url = https://github.com/PostgREST/postgrest.git
+[submodule "vendor/storage"]
+	path = vendor/storage
+	url = https://github.com/supabase/storage.git
+[submodule "vendor/supabase-js"]
+	path = vendor/supabase-js
+	url = https://github.com/supabase/supabase-js.git
+[submodule "vendor/edge-runtime"]
+	path = vendor/edge-runtime
+	url = https://github.com/supabase/edge-runtime.git
+[submodule "vendor/postgres-meta"]
+	path = vendor/postgres-meta
+	url = https://github.com/supabase/postgres-meta.git
+[submodule "vendor/supabase"]
+	path = vendor/supabase
+	url = https://github.com/supabase/supabase.git

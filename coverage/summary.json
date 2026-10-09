@@ -1,0 +1,65 @@
+{
+  "total_units": 334,
+  "implemented": 0,
+  "conformant": 0,
+  "coverage_percent": 0.0,
+  "conformance_percent": 0.0,
+  "by_component": {
+    "rest": {
+      "total": 57,
+      "implemented": 0,
+      "conformant": 0,
+      "coverage_percent": 0.0,
+      "conformance_percent": 0.0
+    },
+    "auth": {
+      "total": 81,
+      "implemented": 0,
+      "conformant": 0,
+      "coverage_percent": 0.0,
+      "conformance_percent": 0.0
+    },
+    "realtime": {
+      "total": 33,
+      "implemented": 0,
+      "conformant": 0,
+      "coverage_percent": 0.0,
+      "conformance_percent": 0.0
+    },
+    "storage": {
+      "total": 34,
+      "implemented": 0,
+      "conformant": 0,
+      "coverage_percent": 0.0,
+      "conformance_percent": 0.0
+    },
+    "functions": {
+      "total": 27,
+      "implemented": 0,
+      "conformant": 0,
+      "coverage_percent": 0.0,
+      "conformance_percent": 0.0
+    },
+    "pooler": {
+      "total": 13,
+      "implemented": 0,
+      "conformant": 0,
+      "coverage_percent": 0.0,
+      "conformance_percent": 0.0
+    },
+    "meta": {
+      "total": 51,
+      "implemented": 0,
+      "conformant": 0,
+      "coverage_percent": 0.0,
+      "conformance_percent": 0.0
+    },
+    "studio": {
+      "total": 38,
+      "implemented": 0,
+      "conformant": 0,
+      "coverage_percent": 0.0,
+      "conformance_percent": 0.0
+    }
+  }
+}

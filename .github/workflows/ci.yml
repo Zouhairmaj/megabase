@@ -1,0 +1,134 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false  # vendor/ is large, only fetch when needed
+      
+      - name: Install Rust
+        uses: dtolnay/rust-action@stable
+        with:
+          components: clippy, rustfmt
+      
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+      
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+      
+      - name: Clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+      
+      - name: Build
+        run: cargo build --release
+      
+      - name: Run tests
+        run: cargo test --all
+      
+      - name: Upload binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: megabase
+          path: target/release/megabase
+
+  coverage:
+    name: Generate Coverage
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true  # Need vendor/ for unit extraction
+          fetch-depth: 0
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Extract units and generate treemaps
+        run: |
+          python scripts/extract-units.py
+          python scripts/generate-treemap.py
+      
+      - name: Commit coverage updates
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add coverage/
+          if git diff --staged --quiet; then
+            echo "No coverage changes"
+          else
+            git commit -m "chore: update coverage [skip ci]"
+            git push
+          fi
+
+  check-protected:
+    name: Check Protected Files
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Check for unauthorized changes
+        run: |
+          # Files that require human approval
+          PROTECTED_FILES=(
+            "vendor/"
+            "GOAL.md"
+            "MANIFESTO.md"
+          )
+          
+          # Get changed files
+          CHANGED=$(git diff --name-only origin/main...HEAD)
+          
+          VIOLATIONS=""
+          for file in "${PROTECTED_FILES[@]}"; do
+            if echo "$CHANGED" | grep -q "^$file"; then
+              VIOLATIONS="$VIOLATIONS\n- $file"
+            fi
+          done
+          
+          if [ -n "$VIOLATIONS" ]; then
+            echo "::error::This PR modifies protected files that require human approval:$VIOLATIONS"
+            echo ""
+            echo "Protected files can only be modified with explicit human approval."
+            echo "If this change is intentional, a human maintainer must approve and merge."
+            exit 1
+          fi
+      
+      - name: Check judge changes
+        run: |
+          CHANGED=$(git diff --name-only origin/main...HEAD)
+          
+          if echo "$CHANGED" | grep -q "^judge/"; then
+            echo "::warning::This PR modifies judge/ - requires reviewer agent approval"
+            echo ""
+            echo "Per GOAL.md rule 2: Changes to judge/ must be reviewed by the reviewer agent"
+            echo "and merged by the orchestrator."
+          fi

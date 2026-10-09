@@ -1,0 +1,129 @@
+Megabase
+Copyright 2024 The Megabase Authors
+
+This product is a port of open-source software. It includes code derived from
+the following projects:
+
+================================================================================
+PostgREST
+================================================================================
+
+PostgREST is licensed under the MIT License.
+Copyright (c) 2014-2024, PostgREST Contributors
+
+Upstream repository: https://github.com/PostgREST/postgrest
+Pinned version: v16.4
+
+Megabase components derived from PostgREST:
+- crates/megabase-rest/ (REST API implementation)
+
+================================================================================
+Supabase Auth (GoTrue)
+================================================================================
+
+Supabase Auth is licensed under the Apache License, Version 2.0.
+Copyright (c) 2020-2024, Supabase Inc.
+
+Upstream repository: https://github.com/supabase/auth
+Pinned version: v2.197.0
+
+Megabase components derived from Supabase Auth:
+- crates/megabase-auth/ (Authentication API implementation)
+
+================================================================================
+Supabase Realtime
+================================================================================
+
+Supabase Realtime is licensed under the Apache License, Version 2.0.
+Copyright (c) 2020-2024, Supabase Inc.
+
+Upstream repository: https://github.com/supabase/realtime
+Pinned version: v2.143.3
+
+Megabase components derived from Supabase Realtime:
+- crates/megabase-realtime/ (Realtime API implementation)
+
+================================================================================
+Supabase Storage
+================================================================================
+
+Supabase Storage is licensed under the Apache License, Version 2.0.
+Copyright (c) 2020-2024, Supabase Inc.
+
+Upstream repository: https://github.com/supabase/storage
+Pinned version: v1.80.2
+
+Megabase components derived from Supabase Storage:
+- crates/megabase-storage/ (Storage API implementation)
+
+================================================================================
+Supavisor
+================================================================================
+
+Supavisor is licensed under the Apache License, Version 2.0.
+Copyright (c) 2022-2024, Supabase Inc.
+
+Upstream repository: https://github.com/supabase/supavisor
+Pinned version: v2.9.13
+
+Megabase components derived from Supavisor:
+- crates/megabase-pooler/ (Connection pooler implementation)
+
+================================================================================
+Postgres Meta
+================================================================================
+
+Postgres Meta is licensed under the Apache License, Version 2.0.
+Copyright (c) 2020-2024, Supabase Inc.
+
+Upstream repository: https://github.com/supabase/postgres-meta
+Pinned version: v0.100.0
+
+Megabase components derived from Postgres Meta:
+- crates/megabase-meta/ (Database introspection API implementation)
+
+================================================================================
+Supabase Edge Runtime
+================================================================================
+
+Supabase Edge Runtime is licensed under the Apache License, Version 2.0.
+Copyright (c) 2022-2024, Supabase Inc.
+
+Upstream repository: https://github.com/supabase/edge-runtime
+Pinned version: v1.77.4
+
+Megabase components derived from Supabase Edge Runtime:
+- crates/megabase-functions/ (Edge Functions runtime implementation)
+
+================================================================================
+Supabase (Monorepo - Studio)
+================================================================================
+
+Supabase Studio is licensed under the Apache License, Version 2.0.
+Copyright (c) 2020-2024, Supabase Inc.
+
+Upstream repository: https://github.com/supabase/supabase
+Pinned version: v1.26.08
+
+Megabase components derived from Supabase Studio:
+- crates/megabase-studio/ (Dashboard API implementation)
+
+================================================================================
+supabase-js
+================================================================================
+
+supabase-js is licensed under the MIT License.
+Copyright (c) 2020-2024, Supabase Inc.
+
+Upstream repository: https://github.com/supabase/supabase-js
+Pinned version: v2.117.3
+
+Used for: API compatibility reference and testing
+
+================================================================================
+
+The full text of each license is available in the LICENSES/ directory.
+
+Megabase is an independent project. It is NOT affiliated with, endorsed by,
+or sponsored by Supabase, Inc. "Supabase" is a trademark of Supabase, Inc.
+and is used here only to describe compatibility.

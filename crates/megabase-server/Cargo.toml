@@ -1,0 +1,27 @@
+[package]
+name = "megabase-server"
+description = "Gateway and assembly for Megabase - routes requests to components"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+megabase-core = { workspace = true }
+megabase-rest = { workspace = true }
+megabase-auth = { workspace = true }
+megabase-realtime = { workspace = true }
+megabase-storage = { workspace = true }
+megabase-functions = { workspace = true }
+megabase-pooler = { workspace = true }
+megabase-meta = { workspace = true }
+megabase-studio = { workspace = true }
+axum = { workspace = true }
+tokio = { workspace = true }
+tower = { workspace = true }
+tower-http = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }

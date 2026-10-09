@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 200" width="400" height="200">
+  <rect width="400" height="200" fill="#111827"/>
+  <text x="2" y="20" font-family="system-ui, sans-serif" font-size="14" font-weight="600" fill="#ffffff">
+    POOLER: 0.0% (0/13)
+  </text>
+  <rect x="2.0" y="32.0" width="65.0" height="75.6" fill="#6b7280" rx="1"><title>Transaction</title></rect>
+  <rect x="68.0" y="32.0" width="65.0" height="75.6" fill="#6b7280" rx="1"><title>Session</title></rect>
+  <rect x="134.0" y="32.0" width="65.0" height="75.6" fill="#6b7280" rx="1"><title>Statement</title></rect>
+  <rect x="200.0" y="32.0" width="65.0" height="75.6" fill="#6b7280" rx="1"><title>Postgres Wire</title></rect>
+  <rect x="266.0" y="32.0" width="65.0" height="75.6" fill="#6b7280" rx="1"><title>Ssl Termination</title></rect>
+  <rect x="332.0" y="32.0" width="65.0" height="75.6" fill="#6b7280" rx="1"><title>Auth Md5</title></rect>
+  <rect x="2.0" y="108.6" width="131.0" height="37.3" fill="#6b7280" rx="1"><title>Auth Scram</title></rect>
+  <rect x="134.0" y="108.6" width="131.0" height="37.3" fill="#6b7280" rx="1"><title>Prepared Statements</title></rect>
+  <rect x="266.0" y="108.6" width="131.0" height="37.3" fill="#6b7280" rx="1"><title>Query Parsing</title></rect>
+  <rect x="2.0" y="146.9" width="98.0" height="50.1" fill="#6b7280" rx="1"><title>Connection Limiting</title></rect>
+  <rect x="101.0" y="146.9" width="98.0" height="50.1" fill="#6b7280" rx="1"><title>Tenant Isolation</title></rect>
+  <rect x="200.0" y="146.9" width="98.0" height="50.1" fill="#6b7280" rx="1"><title>Health Checks</title></rect>
+  <rect x="299.0" y="146.9" width="98.0" height="50.1" fill="#6b7280" rx="1"><title>Metrics</title></rect>
+</svg>

@@ -1,0 +1,87 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 200" width="400" height="200">
+  <rect width="400" height="200" fill="#111827"/>
+  <text x="2" y="20" font-family="system-ui, sans-serif" font-size="14" font-weight="600" fill="#ffffff">
+    AUTH: 0.0% (0/81)
+  </text>
+  <rect x="2.0" y="32.0" width="11.0" height="66.6" fill="#6b7280" rx="1"><title>POST /auth/v1/signup</title></rect>
+  <rect x="14.0" y="32.0" width="11.0" height="66.6" fill="#6b7280" rx="1"><title>POST /auth/v1/token</title></rect>
+  <rect x="26.0" y="32.0" width="11.0" height="66.6" fill="#6b7280" rx="1"><title>POST /auth/v1/token/password</title></rect>
+  <rect x="38.0" y="32.0" width="11.0" height="66.6" fill="#6b7280" rx="1"><title>POST /auth/v1/token/refresh</title></rect>
+  <rect x="50.0" y="32.0" width="11.0" height="66.6" fill="#6b7280" rx="1"><title>POST /auth/v1/token/pkce</title></rect>
+  <rect x="62.0" y="32.0" width="11.0" height="66.6" fill="#6b7280" rx="1"><title>GET /auth/v1/user</title></rect>
+  <rect x="74.0" y="32.0" width="11.0" height="66.6" fill="#6b7280" rx="1"><title>PUT /auth/v1/user/update</title></rect>
+  <rect x="86.0" y="32.0" width="11.0" height="66.6" fill="#6b7280" rx="1"><title>POST /auth/v1/logout</title></rect>
+  <rect x="98.0" y="32.0" width="11.0" height="66.6" fill="#6b7280" rx="1"><title>POST /auth/v1/recover</title></rect>
+  <rect x="110.0" y="32.0" width="11.0" height="66.6" fill="#6b7280" rx="1"><title>POST /auth/v1/verify</title></rect>
+  <rect x="122.0" y="32.0" width="11.0" height="66.6" fill="#6b7280" rx="1"><title>GET /auth/v1/verify/get</title></rect>
+  <rect x="134.0" y="32.0" width="11.0" height="66.6" fill="#6b7280" rx="1"><title>POST /auth/v1/otp</title></rect>
+  <rect x="146.0" y="32.0" width="11.0" height="66.6" fill="#6b7280" rx="1"><title>POST /auth/v1/magiclink</title></rect>
+  <rect x="158.0" y="32.0" width="11.0" height="66.6" fill="#6b7280" rx="1"><title>POST /auth/v1/resend</title></rect>
+  <rect x="170.0" y="32.0" width="11.0" height="66.6" fill="#6b7280" rx="1"><title>GET /auth/v1/reauthenticate</title></rect>
+  <rect x="182.0" y="32.0" width="11.0" height="66.6" fill="#6b7280" rx="1"><title>GET /auth/v1/factors</title></rect>
+  <rect x="194.0" y="32.0" width="11.0" height="66.6" fill="#6b7280" rx="1"><title>POST /auth/v1/factors/enroll</title></rect>
+  <rect x="206.0" y="32.0" width="11.0" height="66.6" fill="#6b7280" rx="1"><title>POST /auth/v1/factors/challenge</title></rect>
+  <rect x="218.0" y="32.0" width="11.0" height="66.6" fill="#6b7280" rx="1"><title>POST /auth/v1/factors/verify</title></rect>
+  <rect x="230.0" y="32.0" width="11.0" height="66.6" fill="#6b7280" rx="1"><title>DELETE /auth/v1/factors/unenroll</title></rect>
+  <rect x="242.0" y="32.0" width="11.0" height="66.6" fill="#6b7280" rx="1"><title>POST /auth/v1/sso</title></rect>
+  <rect x="254.0" y="32.0" width="11.0" height="66.6" fill="#6b7280" rx="1"><title>POST /auth/v1/sso/saml/acs</title></rect>
+  <rect x="266.0" y="32.0" width="11.0" height="66.6" fill="#6b7280" rx="1"><title>GET /auth/v1/sso/saml/metadata</title></rect>
+  <rect x="278.0" y="32.0" width="11.0" height="66.6" fill="#6b7280" rx="1"><title>GET /auth/v1/authorize</title></rect>
+  <rect x="290.0" y="32.0" width="11.0" height="66.6" fill="#6b7280" rx="1"><title>GET /auth/v1/callback</title></rect>
+  <rect x="302.0" y="32.0" width="11.0" height="66.6" fill="#6b7280" rx="1"><title>POST /auth/v1/callback/post</title></rect>
+  <rect x="314.0" y="32.0" width="11.0" height="66.6" fill="#6b7280" rx="1"><title>GET /auth/v1/settings</title></rect>
+  <rect x="326.0" y="32.0" width="11.0" height="66.6" fill="#6b7280" rx="1"><title>GET /auth/v1/health</title></rect>
+  <rect x="338.0" y="32.0" width="11.0" height="66.6" fill="#6b7280" rx="1"><title>GET /auth/v1/admin/users/list</title></rect>
+  <rect x="350.0" y="32.0" width="11.0" height="66.6" fill="#6b7280" rx="1"><title>POST /auth/v1/admin/users/create</title></rect>
+  <rect x="362.0" y="32.0" width="11.0" height="66.6" fill="#6b7280" rx="1"><title>GET /auth/v1/admin/users/get</title></rect>
+  <rect x="374.0" y="32.0" width="11.0" height="66.6" fill="#6b7280" rx="1"><title>PUT /auth/v1/admin/users/update</title></rect>
+  <rect x="386.0" y="32.0" width="11.0" height="66.6" fill="#6b7280" rx="1"><title>DELETE /auth/v1/admin/users/delete</title></rect>
+  <rect x="2.0" y="99.6" width="18.8" height="40.0" fill="#6b7280" rx="1"><title>POST /auth/v1/admin/generate/link</title></rect>
+  <rect x="21.8" y="99.6" width="18.8" height="40.0" fill="#6b7280" rx="1"><title>GET /auth/v1/admin/audit</title></rect>
+  <rect x="41.6" y="99.6" width="18.8" height="40.0" fill="#6b7280" rx="1"><title>GET /auth/v1/admin/sso/providers/list</title></rect>
+  <rect x="61.4" y="99.6" width="18.8" height="40.0" fill="#6b7280" rx="1"><title>POST /auth/v1/admin/sso/providers/create</title></rect>
+  <rect x="81.2" y="99.6" width="18.8" height="40.0" fill="#6b7280" rx="1"><title>GET /auth/v1/admin/sso/providers/get</title></rect>
+  <rect x="101.0" y="99.6" width="18.8" height="40.0" fill="#6b7280" rx="1"><title>PUT /auth/v1/admin/sso/providers/update</title></rect>
+  <rect x="120.8" y="99.6" width="18.8" height="40.0" fill="#6b7280" rx="1"><title>DELETE /auth/v1/admin/sso/providers/delete</title></rect>
+  <rect x="140.6" y="99.6" width="18.8" height="40.0" fill="#6b7280" rx="1"><title>OAuth: Apple</title></rect>
+  <rect x="160.4" y="99.6" width="18.8" height="40.0" fill="#6b7280" rx="1"><title>OAuth: Azure</title></rect>
+  <rect x="180.2" y="99.6" width="18.8" height="40.0" fill="#6b7280" rx="1"><title>OAuth: Bitbucket</title></rect>
+  <rect x="200.0" y="99.6" width="18.8" height="40.0" fill="#6b7280" rx="1"><title>OAuth: Discord</title></rect>
+  <rect x="219.8" y="99.6" width="18.8" height="40.0" fill="#6b7280" rx="1"><title>OAuth: Facebook</title></rect>
+  <rect x="239.6" y="99.6" width="18.8" height="40.0" fill="#6b7280" rx="1"><title>OAuth: Figma</title></rect>
+  <rect x="259.4" y="99.6" width="18.8" height="40.0" fill="#6b7280" rx="1"><title>OAuth: Github</title></rect>
+  <rect x="279.2" y="99.6" width="18.8" height="40.0" fill="#6b7280" rx="1"><title>OAuth: Gitlab</title></rect>
+  <rect x="299.0" y="99.6" width="18.8" height="40.0" fill="#6b7280" rx="1"><title>OAuth: Google</title></rect>
+  <rect x="318.8" y="99.6" width="18.8" height="40.0" fill="#6b7280" rx="1"><title>OAuth: Kakao</title></rect>
+  <rect x="338.6" y="99.6" width="18.8" height="40.0" fill="#6b7280" rx="1"><title>OAuth: Keycloak</title></rect>
+  <rect x="358.4" y="99.6" width="18.8" height="40.0" fill="#6b7280" rx="1"><title>OAuth: Linkedin</title></rect>
+  <rect x="378.2" y="99.6" width="18.8" height="40.0" fill="#6b7280" rx="1"><title>OAuth: Linkedin Oidc</title></rect>
+  <rect x="2.0" y="140.6" width="32.0" height="23.6" fill="#6b7280" rx="1"><title>OAuth: Notion</title></rect>
+  <rect x="35.0" y="140.6" width="32.0" height="23.6" fill="#6b7280" rx="1"><title>OAuth: Slack</title></rect>
+  <rect x="68.0" y="140.6" width="32.0" height="23.6" fill="#6b7280" rx="1"><title>OAuth: Slack Oidc</title></rect>
+  <rect x="101.0" y="140.6" width="32.0" height="23.6" fill="#6b7280" rx="1"><title>OAuth: Spotify</title></rect>
+  <rect x="134.0" y="140.6" width="32.0" height="23.6" fill="#6b7280" rx="1"><title>OAuth: Twitch</title></rect>
+  <rect x="167.0" y="140.6" width="32.0" height="23.6" fill="#6b7280" rx="1"><title>OAuth: Twitter</title></rect>
+  <rect x="200.0" y="140.6" width="32.0" height="23.6" fill="#6b7280" rx="1"><title>OAuth: Workos</title></rect>
+  <rect x="233.0" y="140.6" width="32.0" height="23.6" fill="#6b7280" rx="1"><title>OAuth: Zoom</title></rect>
+  <rect x="266.0" y="140.6" width="32.0" height="23.6" fill="#6b7280" rx="1"><title>OAuth: Fly</title></rect>
+  <rect x="299.0" y="140.6" width="32.0" height="23.6" fill="#6b7280" rx="1"><title>Jwt Hs256</title></rect>
+  <rect x="332.0" y="140.6" width="32.0" height="23.6" fill="#6b7280" rx="1"><title>Jwt Rs256</title></rect>
+  <rect x="365.0" y="140.6" width="32.0" height="23.6" fill="#6b7280" rx="1"><title>Jwt Claims</title></rect>
+  <rect x="2.0" y="165.2" width="55.6" height="13.3" fill="#6b7280" rx="1"><title>Refresh Token Rotation</title></rect>
+  <rect x="58.6" y="165.2" width="55.6" height="13.3" fill="#6b7280" rx="1"><title>Session Management</title></rect>
+  <rect x="115.1" y="165.2" width="55.6" height="13.3" fill="#6b7280" rx="1"><title>Rate Limiting</title></rect>
+  <rect x="171.7" y="165.2" width="55.6" height="13.3" fill="#6b7280" rx="1"><title>Captcha</title></rect>
+  <rect x="228.3" y="165.2" width="55.6" height="13.3" fill="#6b7280" rx="1"><title>Hooks Mfa</title></rect>
+  <rect x="284.9" y="165.2" width="55.6" height="13.3" fill="#6b7280" rx="1"><title>Hooks Password</title></rect>
+  <rect x="341.4" y="165.2" width="55.6" height="13.3" fill="#6b7280" rx="1"><title>Hooks Custom Access Token</title></rect>
+  <rect x="2.0" y="179.6" width="98.0" height="7.2" fill="#6b7280" rx="1"><title>Hooks Send Sms</title></rect>
+  <rect x="101.0" y="179.6" width="98.0" height="7.2" fill="#6b7280" rx="1"><title>Hooks Send Email</title></rect>
+  <rect x="200.0" y="179.6" width="98.0" height="7.2" fill="#6b7280" rx="1"><title>Email Templates</title></rect>
+  <rect x="299.0" y="179.6" width="98.0" height="7.2" fill="#6b7280" rx="1"><title>Phone Auth</title></rect>
+  <rect x="2.0" y="187.8" width="197.0" height="3.1" fill="#6b7280" rx="1"><title>Anonymous Users</title></rect>
+  <rect x="200.0" y="187.8" width="197.0" height="3.1" fill="#6b7280" rx="1"><title>User Metadata</title></rect>
+  <rect x="2.0" y="191.9" width="131.0" height="5.1" fill="#6b7280" rx="1"><title>App Metadata</title></rect>
+  <rect x="134.0" y="191.9" width="131.0" height="5.1" fill="#6b7280" rx="1"><title>Identities</title></rect>
+  <rect x="266.0" y="191.9" width="131.0" height="5.1" fill="#6b7280" rx="1"><title>Linking</title></rect>
+</svg>

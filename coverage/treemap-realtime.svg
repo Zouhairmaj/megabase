@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 200" width="400" height="200">
+  <rect width="400" height="200" fill="#111827"/>
+  <text x="2" y="20" font-family="system-ui, sans-serif" font-size="14" font-weight="600" fill="#ffffff">
+    REALTIME: 0.0% (0/33)
+  </text>
+  <rect x="2.0" y="32.0" width="27.3" height="69.4" fill="#6b7280" rx="1"><title>Phx Join</title></rect>
+  <rect x="30.3" y="32.0" width="27.3" height="69.4" fill="#6b7280" rx="1"><title>Phx Leave</title></rect>
+  <rect x="58.6" y="32.0" width="27.3" height="69.4" fill="#6b7280" rx="1"><title>Phx Reply</title></rect>
+  <rect x="86.9" y="32.0" width="27.3" height="69.4" fill="#6b7280" rx="1"><title>Phx Error</title></rect>
+  <rect x="115.1" y="32.0" width="27.3" height="69.4" fill="#6b7280" rx="1"><title>Phx Close</title></rect>
+  <rect x="143.4" y="32.0" width="27.3" height="69.4" fill="#6b7280" rx="1"><title>Heartbeat</title></rect>
+  <rect x="171.7" y="32.0" width="27.3" height="69.4" fill="#6b7280" rx="1"><title>Presence State</title></rect>
+  <rect x="200.0" y="32.0" width="27.3" height="69.4" fill="#6b7280" rx="1"><title>Presence Diff</title></rect>
+  <rect x="228.3" y="32.0" width="27.3" height="69.4" fill="#6b7280" rx="1"><title>Broadcast</title></rect>
+  <rect x="256.6" y="32.0" width="27.3" height="69.4" fill="#6b7280" rx="1"><title>Postgres Changes</title></rect>
+  <rect x="284.9" y="32.0" width="27.3" height="69.4" fill="#6b7280" rx="1"><title>Access Token</title></rect>
+  <rect x="313.1" y="32.0" width="27.3" height="69.4" fill="#6b7280" rx="1"><title>System</title></rect>
+  <rect x="341.4" y="32.0" width="27.3" height="69.4" fill="#6b7280" rx="1"><title>Realtime Listen</title></rect>
+  <rect x="369.7" y="32.0" width="27.3" height="69.4" fill="#6b7280" rx="1"><title>Realtime Filter</title></rect>
+  <rect x="2.0" y="102.4" width="48.5" height="39.2" fill="#6b7280" rx="1"><title>Realtime Filter Eq</title></rect>
+  <rect x="51.5" y="102.4" width="48.5" height="39.2" fill="#6b7280" rx="1"><title>Realtime Filter Neq</title></rect>
+  <rect x="101.0" y="102.4" width="48.5" height="39.2" fill="#6b7280" rx="1"><title>Realtime Filter Gt</title></rect>
+  <rect x="150.5" y="102.4" width="48.5" height="39.2" fill="#6b7280" rx="1"><title>Realtime Filter Gte</title></rect>
+  <rect x="200.0" y="102.4" width="48.5" height="39.2" fill="#6b7280" rx="1"><title>Realtime Filter Lt</title></rect>
+  <rect x="249.5" y="102.4" width="48.5" height="39.2" fill="#6b7280" rx="1"><title>Realtime Filter Lte</title></rect>
+  <rect x="299.0" y="102.4" width="48.5" height="39.2" fill="#6b7280" rx="1"><title>Realtime Filter In</title></rect>
+  <rect x="348.5" y="102.4" width="48.5" height="39.2" fill="#6b7280" rx="1"><title>Broadcast Self</title></rect>
+  <rect x="2.0" y="142.7" width="78.2" height="24.2" fill="#6b7280" rx="1"><title>Broadcast Ack</title></rect>
+  <rect x="81.2" y="142.7" width="78.2" height="24.2" fill="#6b7280" rx="1"><title>Presence Track</title></rect>
+  <rect x="160.4" y="142.7" width="78.2" height="24.2" fill="#6b7280" rx="1"><title>Presence Untrack</title></rect>
+  <rect x="239.6" y="142.7" width="78.2" height="24.2" fill="#6b7280" rx="1"><title>Rls Policies</title></rect>
+  <rect x="318.8" y="142.7" width="78.2" height="24.2" fill="#6b7280" rx="1"><title>Jwt Verification</title></rect>
+  <rect x="2.0" y="167.8" width="131.0" height="14.1" fill="#6b7280" rx="1"><title>Connection Limiting</title></rect>
+  <rect x="134.0" y="167.8" width="131.0" height="14.1" fill="#6b7280" rx="1"><title>Rate Limiting</title></rect>
+  <rect x="266.0" y="167.8" width="131.0" height="14.1" fill="#6b7280" rx="1"><title>Postgres INSERT</title></rect>
+  <rect x="2.0" y="182.9" width="131.0" height="14.1" fill="#6b7280" rx="1"><title>Postgres UPDATE</title></rect>
+  <rect x="134.0" y="182.9" width="131.0" height="14.1" fill="#6b7280" rx="1"><title>Postgres DELETE</title></rect>
+  <rect x="266.0" y="182.9" width="131.0" height="14.1" fill="#6b7280" rx="1"><title>Postgres TRUNCATE</title></rect>
+</svg>

@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Megabase Logo (Dark mode) - Original design, Apache-2.0 licensed -->
+<!-- Lighter variant for dark backgrounds -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <linearGradient id="megaGradDark" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#60a5fa"/>
+      <stop offset="50%" style="stop-color:#818cf8"/>
+      <stop offset="100%" style="stop-color:#a78bfa"/>
+    </linearGradient>
+    <linearGradient id="megaGradDarkLight" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#93c5fd"/>
+      <stop offset="100%" style="stop-color:#c4b5fd"/>
+    </linearGradient>
+  </defs>
+  <!-- Base platform -->
+  <rect x="12" y="100" width="104" height="12" rx="3" fill="url(#megaGradDark)"/>
+  <!-- Left pillar -->
+  <rect x="16" y="44" width="24" height="56" rx="4" fill="url(#megaGradDark)"/>
+  <!-- Center pillar (tallest) -->
+  <rect x="52" y="16" width="24" height="84" rx="4" fill="url(#megaGradDarkLight)"/>
+  <!-- Right pillar -->
+  <rect x="88" y="44" width="24" height="56" rx="4" fill="url(#megaGradDark)"/>
+  <!-- Connecting beam top-left to center -->
+  <polygon points="28,44 64,16 64,28 40,48" fill="url(#megaGradDark)" opacity="0.9"/>
+  <!-- Connecting beam center to top-right -->
+  <polygon points="64,16 100,44 88,48 64,28" fill="url(#megaGradDark)" opacity="0.9"/>
+</svg>

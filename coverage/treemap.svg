@@ -1,0 +1,356 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 500" width="900" height="500">
+  <rect width="900" height="500" fill="#111827"/>
+  <text x="450.0" y="28" font-family="system-ui, sans-serif" font-size="18" font-weight="700" fill="#ffffff" text-anchor="middle">
+    Megabase Coverage: 0.0% (0/334 units)
+  </text>
+  <rect x="10.0" y="50.0" width="212.5" height="215.0" fill="#1f2937" rx="4"/>
+  <text x="15.0" y="66.0" font-family="system-ui, sans-serif" font-size="11" font-weight="600" fill="#ffffff">REST API: 0.0% (0/57)</text>
+  <rect x="14.0" y="72.0" width="8.4" height="75.8" fill="#6b7280" rx="0.5"><title>GET /:table</title></rect>
+  <rect x="22.9" y="72.0" width="8.4" height="75.8" fill="#6b7280" rx="0.5"><title>POST /:table</title></rect>
+  <rect x="31.8" y="72.0" width="8.4" height="75.8" fill="#6b7280" rx="0.5"><title>PATCH /:table</title></rect>
+  <rect x="40.7" y="72.0" width="8.4" height="75.8" fill="#6b7280" rx="0.5"><title>DELETE /:table</title></rect>
+  <rect x="49.6" y="72.0" width="8.4" height="75.8" fill="#6b7280" rx="0.5"><title>HEAD /:table</title></rect>
+  <rect x="58.5" y="72.0" width="8.4" height="75.8" fill="#6b7280" rx="0.5"><title>OPTIONS /:table</title></rect>
+  <rect x="67.3" y="72.0" width="8.4" height="75.8" fill="#6b7280" rx="0.5"><title>GET /rpc/:function</title></rect>
+  <rect x="76.2" y="72.0" width="8.4" height="75.8" fill="#6b7280" rx="0.5"><title>POST /rpc/:function</title></rect>
+  <rect x="85.1" y="72.0" width="8.4" height="75.8" fill="#6b7280" rx="0.5"><title>?column=eq.value</title></rect>
+  <rect x="94.0" y="72.0" width="8.4" height="75.8" fill="#6b7280" rx="0.5"><title>?column=neq.value</title></rect>
+  <rect x="102.9" y="72.0" width="8.4" height="75.8" fill="#6b7280" rx="0.5"><title>?column=gt.value</title></rect>
+  <rect x="111.8" y="72.0" width="8.4" height="75.8" fill="#6b7280" rx="0.5"><title>?column=gte.value</title></rect>
+  <rect x="120.7" y="72.0" width="8.4" height="75.8" fill="#6b7280" rx="0.5"><title>?column=lt.value</title></rect>
+  <rect x="129.6" y="72.0" width="8.4" height="75.8" fill="#6b7280" rx="0.5"><title>?column=lte.value</title></rect>
+  <rect x="138.5" y="72.0" width="8.4" height="75.8" fill="#6b7280" rx="0.5"><title>?column=like.value</title></rect>
+  <rect x="147.4" y="72.0" width="8.4" height="75.8" fill="#6b7280" rx="0.5"><title>?column=ilike.value</title></rect>
+  <rect x="156.3" y="72.0" width="8.4" height="75.8" fill="#6b7280" rx="0.5"><title>?column=match.value</title></rect>
+  <rect x="165.2" y="72.0" width="8.4" height="75.8" fill="#6b7280" rx="0.5"><title>?column=imatch.value</title></rect>
+  <rect x="174.0" y="72.0" width="8.4" height="75.8" fill="#6b7280" rx="0.5"><title>?column=in.value</title></rect>
+  <rect x="182.9" y="72.0" width="8.4" height="75.8" fill="#6b7280" rx="0.5"><title>?column=is.value</title></rect>
+  <rect x="191.8" y="72.0" width="8.4" height="75.8" fill="#6b7280" rx="0.5"><title>?column=isdistinct.value</title></rect>
+  <rect x="200.7" y="72.0" width="8.4" height="75.8" fill="#6b7280" rx="0.5"><title>?column=fts.value</title></rect>
+  <rect x="209.6" y="72.0" width="8.4" height="75.8" fill="#6b7280" rx="0.5"><title>?column=plfts.value</title></rect>
+  <rect x="14.0" y="148.3" width="14.1" height="45.9" fill="#6b7280" rx="0.5"><title>?column=phfts.value</title></rect>
+  <rect x="28.6" y="148.3" width="14.1" height="45.9" fill="#6b7280" rx="0.5"><title>?column=wfts.value</title></rect>
+  <rect x="43.2" y="148.3" width="14.1" height="45.9" fill="#6b7280" rx="0.5"><title>?column=cs.value</title></rect>
+  <rect x="57.8" y="148.3" width="14.1" height="45.9" fill="#6b7280" rx="0.5"><title>?column=cd.value</title></rect>
+  <rect x="72.4" y="148.3" width="14.1" height="45.9" fill="#6b7280" rx="0.5"><title>?column=ov.value</title></rect>
+  <rect x="87.0" y="148.3" width="14.1" height="45.9" fill="#6b7280" rx="0.5"><title>?column=sl.value</title></rect>
+  <rect x="101.6" y="148.3" width="14.1" height="45.9" fill="#6b7280" rx="0.5"><title>?column=sr.value</title></rect>
+  <rect x="116.2" y="148.3" width="14.1" height="45.9" fill="#6b7280" rx="0.5"><title>?column=nxr.value</title></rect>
+  <rect x="130.9" y="148.3" width="14.1" height="45.9" fill="#6b7280" rx="0.5"><title>?column=nxl.value</title></rect>
+  <rect x="145.5" y="148.3" width="14.1" height="45.9" fill="#6b7280" rx="0.5"><title>?column=adj.value</title></rect>
+  <rect x="160.1" y="148.3" width="14.1" height="45.9" fill="#6b7280" rx="0.5"><title>?column=not.value</title></rect>
+  <rect x="174.7" y="148.3" width="14.1" height="45.9" fill="#6b7280" rx="0.5"><title>?column=or.value</title></rect>
+  <rect x="189.3" y="148.3" width="14.1" height="45.9" fill="#6b7280" rx="0.5"><title>?column=and.value</title></rect>
+  <rect x="203.9" y="148.3" width="14.1" height="45.9" fill="#6b7280" rx="0.5"><title>?column=all.value</title></rect>
+  <rect x="14.0" y="194.7" width="25.1" height="26.0" fill="#6b7280" rx="0.5"><title>?column=any.value</title></rect>
+  <rect x="39.6" y="194.7" width="25.1" height="26.0" fill="#6b7280" rx="0.5"><title>Select</title></rect>
+  <rect x="65.1" y="194.7" width="25.1" height="26.0" fill="#6b7280" rx="0.5"><title>Order</title></rect>
+  <rect x="90.7" y="194.7" width="25.1" height="26.0" fill="#6b7280" rx="0.5"><title>Limit</title></rect>
+  <rect x="116.2" y="194.7" width="25.1" height="26.0" fill="#6b7280" rx="0.5"><title>Offset</title></rect>
+  <rect x="141.8" y="194.7" width="25.1" height="26.0" fill="#6b7280" rx="0.5"><title>Range</title></rect>
+  <rect x="167.4" y="194.7" width="25.1" height="26.0" fill="#6b7280" rx="0.5"><title>Prefer Return</title></rect>
+  <rect x="192.9" y="194.7" width="25.1" height="26.0" fill="#6b7280" rx="0.5"><title>Prefer Count</title></rect>
+  <rect x="14.0" y="221.2" width="40.4" height="16.1" fill="#6b7280" rx="0.5"><title>Prefer Resolution</title></rect>
+  <rect x="54.9" y="221.2" width="40.4" height="16.1" fill="#6b7280" rx="0.5"><title>Prefer Missing</title></rect>
+  <rect x="95.8" y="221.2" width="40.4" height="16.1" fill="#6b7280" rx="0.5"><title>Prefer Handling</title></rect>
+  <rect x="136.7" y="221.2" width="40.4" height="16.1" fill="#6b7280" rx="0.5"><title>On Conflict</title></rect>
+  <rect x="177.6" y="221.2" width="40.4" height="16.1" fill="#6b7280" rx="0.5"><title>Columns</title></rect>
+  <rect x="14.0" y="237.8" width="67.7" height="9.4" fill="#6b7280" rx="0.5"><title>Embedding</title></rect>
+  <rect x="82.2" y="237.8" width="67.7" height="9.4" fill="#6b7280" rx="0.5"><title>Spread Embedding</title></rect>
+  <rect x="150.3" y="237.8" width="67.7" height="9.4" fill="#6b7280" rx="0.5"><title>Inner Embedding</title></rect>
+  <rect x="14.0" y="247.7" width="50.6" height="12.8" fill="#6b7280" rx="0.5"><title>Left Embedding</title></rect>
+  <rect x="65.1" y="247.7" width="50.6" height="12.8" fill="#6b7280" rx="0.5"><title>Json Columns</title></rect>
+  <rect x="116.2" y="247.7" width="50.6" height="12.8" fill="#6b7280" rx="0.5"><title>Computed Columns</title></rect>
+  <rect x="167.4" y="247.7" width="50.6" height="12.8" fill="#6b7280" rx="0.5"><title>Aggregate</title></rect>
+  <rect x="232.5" y="50.0" width="212.5" height="215.0" fill="#1f2937" rx="4"/>
+  <text x="237.5" y="66.0" font-family="system-ui, sans-serif" font-size="11" font-weight="600" fill="#ffffff">Auth: 0.0% (0/81)</text>
+  <rect x="236.5" y="72.0" width="5.7" height="76.5" fill="#6b7280" rx="0.5"><title>POST /auth/v1/signup</title></rect>
+  <rect x="242.7" y="72.0" width="5.7" height="76.5" fill="#6b7280" rx="0.5"><title>POST /auth/v1/token</title></rect>
+  <rect x="248.9" y="72.0" width="5.7" height="76.5" fill="#6b7280" rx="0.5"><title>POST /auth/v1/token/password</title></rect>
+  <rect x="255.1" y="72.0" width="5.7" height="76.5" fill="#6b7280" rx="0.5"><title>POST /auth/v1/token/refresh</title></rect>
+  <rect x="261.3" y="72.0" width="5.7" height="76.5" fill="#6b7280" rx="0.5"><title>POST /auth/v1/token/pkce</title></rect>
+  <rect x="267.5" y="72.0" width="5.7" height="76.5" fill="#6b7280" rx="0.5"><title>GET /auth/v1/user</title></rect>
+  <rect x="273.7" y="72.0" width="5.7" height="76.5" fill="#6b7280" rx="0.5"><title>PUT /auth/v1/user/update</title></rect>
+  <rect x="279.9" y="72.0" width="5.7" height="76.5" fill="#6b7280" rx="0.5"><title>POST /auth/v1/logout</title></rect>
+  <rect x="286.1" y="72.0" width="5.7" height="76.5" fill="#6b7280" rx="0.5"><title>POST /auth/v1/recover</title></rect>
+  <rect x="292.3" y="72.0" width="5.7" height="76.5" fill="#6b7280" rx="0.5"><title>POST /auth/v1/verify</title></rect>
+  <rect x="298.5" y="72.0" width="5.7" height="76.5" fill="#6b7280" rx="0.5"><title>GET /auth/v1/verify/get</title></rect>
+  <rect x="304.7" y="72.0" width="5.7" height="76.5" fill="#6b7280" rx="0.5"><title>POST /auth/v1/otp</title></rect>
+  <rect x="310.9" y="72.0" width="5.7" height="76.5" fill="#6b7280" rx="0.5"><title>POST /auth/v1/magiclink</title></rect>
+  <rect x="317.1" y="72.0" width="5.7" height="76.5" fill="#6b7280" rx="0.5"><title>POST /auth/v1/resend</title></rect>
+  <rect x="323.3" y="72.0" width="5.7" height="76.5" fill="#6b7280" rx="0.5"><title>GET /auth/v1/reauthenticate</title></rect>
+  <rect x="329.5" y="72.0" width="5.7" height="76.5" fill="#6b7280" rx="0.5"><title>GET /auth/v1/factors</title></rect>
+  <rect x="335.7" y="72.0" width="5.7" height="76.5" fill="#6b7280" rx="0.5"><title>POST /auth/v1/factors/enroll</title></rect>
+  <rect x="341.8" y="72.0" width="5.7" height="76.5" fill="#6b7280" rx="0.5"><title>POST /auth/v1/factors/challenge</title></rect>
+  <rect x="348.0" y="72.0" width="5.7" height="76.5" fill="#6b7280" rx="0.5"><title>POST /auth/v1/factors/verify</title></rect>
+  <rect x="354.2" y="72.0" width="5.7" height="76.5" fill="#6b7280" rx="0.5"><title>DELETE /auth/v1/factors/unenroll</title></rect>
+  <rect x="360.4" y="72.0" width="5.7" height="76.5" fill="#6b7280" rx="0.5"><title>POST /auth/v1/sso</title></rect>
+  <rect x="366.6" y="72.0" width="5.7" height="76.5" fill="#6b7280" rx="0.5"><title>POST /auth/v1/sso/saml/acs</title></rect>
+  <rect x="372.8" y="72.0" width="5.7" height="76.5" fill="#6b7280" rx="0.5"><title>GET /auth/v1/sso/saml/metadata</title></rect>
+  <rect x="379.0" y="72.0" width="5.7" height="76.5" fill="#6b7280" rx="0.5"><title>GET /auth/v1/authorize</title></rect>
+  <rect x="385.2" y="72.0" width="5.7" height="76.5" fill="#6b7280" rx="0.5"><title>GET /auth/v1/callback</title></rect>
+  <rect x="391.4" y="72.0" width="5.7" height="76.5" fill="#6b7280" rx="0.5"><title>POST /auth/v1/callback/post</title></rect>
+  <rect x="397.6" y="72.0" width="5.7" height="76.5" fill="#6b7280" rx="0.5"><title>GET /auth/v1/settings</title></rect>
+  <rect x="403.8" y="72.0" width="5.7" height="76.5" fill="#6b7280" rx="0.5"><title>GET /auth/v1/health</title></rect>
+  <rect x="410.0" y="72.0" width="5.7" height="76.5" fill="#6b7280" rx="0.5"><title>GET /auth/v1/admin/users/list</title></rect>
+  <rect x="416.2" y="72.0" width="5.7" height="76.5" fill="#6b7280" rx="0.5"><title>POST /auth/v1/admin/users/create</title></rect>
+  <rect x="422.4" y="72.0" width="5.7" height="76.5" fill="#6b7280" rx="0.5"><title>GET /auth/v1/admin/users/get</title></rect>
+  <rect x="428.6" y="72.0" width="5.7" height="76.5" fill="#6b7280" rx="0.5"><title>PUT /auth/v1/admin/users/update</title></rect>
+  <rect x="434.8" y="72.0" width="5.7" height="76.5" fill="#6b7280" rx="0.5"><title>DELETE /auth/v1/admin/users/delete</title></rect>
+  <rect x="236.5" y="149.0" width="9.7" height="46.2" fill="#6b7280" rx="0.5"><title>POST /auth/v1/admin/generate/link</title></rect>
+  <rect x="246.7" y="149.0" width="9.7" height="46.2" fill="#6b7280" rx="0.5"><title>GET /auth/v1/admin/audit</title></rect>
+  <rect x="256.9" y="149.0" width="9.7" height="46.2" fill="#6b7280" rx="0.5"><title>GET /auth/v1/admin/sso/providers/list</title></rect>
+  <rect x="267.2" y="149.0" width="9.7" height="46.2" fill="#6b7280" rx="0.5"><title>POST /auth/v1/admin/sso/providers/create</title></rect>
+  <rect x="277.4" y="149.0" width="9.7" height="46.2" fill="#6b7280" rx="0.5"><title>GET /auth/v1/admin/sso/providers/get</title></rect>
+  <rect x="287.6" y="149.0" width="9.7" height="46.2" fill="#6b7280" rx="0.5"><title>PUT /auth/v1/admin/sso/providers/update</title></rect>
+  <rect x="297.9" y="149.0" width="9.7" height="46.2" fill="#6b7280" rx="0.5"><title>DELETE /auth/v1/admin/sso/providers/delete</title></rect>
+  <rect x="308.1" y="149.0" width="9.7" height="46.2" fill="#6b7280" rx="0.5"><title>OAuth: Apple</title></rect>
+  <rect x="318.3" y="149.0" width="9.7" height="46.2" fill="#6b7280" rx="0.5"><title>OAuth: Azure</title></rect>
+  <rect x="328.5" y="149.0" width="9.7" height="46.2" fill="#6b7280" rx="0.5"><title>OAuth: Bitbucket</title></rect>
+  <rect x="338.8" y="149.0" width="9.7" height="46.2" fill="#6b7280" rx="0.5"><title>OAuth: Discord</title></rect>
+  <rect x="349.0" y="149.0" width="9.7" height="46.2" fill="#6b7280" rx="0.5"><title>OAuth: Facebook</title></rect>
+  <rect x="359.2" y="149.0" width="9.7" height="46.2" fill="#6b7280" rx="0.5"><title>OAuth: Figma</title></rect>
+  <rect x="369.4" y="149.0" width="9.7" height="46.2" fill="#6b7280" rx="0.5"><title>OAuth: Github</title></rect>
+  <rect x="379.6" y="149.0" width="9.7" height="46.2" fill="#6b7280" rx="0.5"><title>OAuth: Gitlab</title></rect>
+  <rect x="389.9" y="149.0" width="9.7" height="46.2" fill="#6b7280" rx="0.5"><title>OAuth: Google</title></rect>
+  <rect x="400.1" y="149.0" width="9.7" height="46.2" fill="#6b7280" rx="0.5"><title>OAuth: Kakao</title></rect>
+  <rect x="410.3" y="149.0" width="9.7" height="46.2" fill="#6b7280" rx="0.5"><title>OAuth: Keycloak</title></rect>
+  <rect x="420.5" y="149.0" width="9.7" height="46.2" fill="#6b7280" rx="0.5"><title>OAuth: Linkedin</title></rect>
+  <rect x="430.8" y="149.0" width="9.7" height="46.2" fill="#6b7280" rx="0.5"><title>OAuth: Linkedin Oidc</title></rect>
+  <rect x="236.5" y="195.7" width="16.5" height="27.5" fill="#6b7280" rx="0.5"><title>OAuth: Notion</title></rect>
+  <rect x="253.5" y="195.7" width="16.5" height="27.5" fill="#6b7280" rx="0.5"><title>OAuth: Slack</title></rect>
+  <rect x="270.6" y="195.7" width="16.5" height="27.5" fill="#6b7280" rx="0.5"><title>OAuth: Slack Oidc</title></rect>
+  <rect x="287.6" y="195.7" width="16.5" height="27.5" fill="#6b7280" rx="0.5"><title>OAuth: Spotify</title></rect>
+  <rect x="304.7" y="195.7" width="16.5" height="27.5" fill="#6b7280" rx="0.5"><title>OAuth: Twitch</title></rect>
+  <rect x="321.7" y="195.7" width="16.5" height="27.5" fill="#6b7280" rx="0.5"><title>OAuth: Twitter</title></rect>
+  <rect x="338.8" y="195.7" width="16.5" height="27.5" fill="#6b7280" rx="0.5"><title>OAuth: Workos</title></rect>
+  <rect x="355.8" y="195.7" width="16.5" height="27.5" fill="#6b7280" rx="0.5"><title>OAuth: Zoom</title></rect>
+  <rect x="372.8" y="195.7" width="16.5" height="27.5" fill="#6b7280" rx="0.5"><title>OAuth: Fly</title></rect>
+  <rect x="389.9" y="195.7" width="16.5" height="27.5" fill="#6b7280" rx="0.5"><title>Jwt Hs256</title></rect>
+  <rect x="406.9" y="195.7" width="16.5" height="27.5" fill="#6b7280" rx="0.5"><title>Jwt Rs256</title></rect>
+  <rect x="424.0" y="195.7" width="16.5" height="27.5" fill="#6b7280" rx="0.5"><title>Jwt Claims</title></rect>
+  <rect x="236.5" y="223.7" width="28.7" height="15.8" fill="#6b7280" rx="0.5"><title>Refresh Token Rotation</title></rect>
+  <rect x="265.7" y="223.7" width="28.7" height="15.8" fill="#6b7280" rx="0.5"><title>Session Management</title></rect>
+  <rect x="294.9" y="223.7" width="28.7" height="15.8" fill="#6b7280" rx="0.5"><title>Rate Limiting</title></rect>
+  <rect x="324.1" y="223.7" width="28.7" height="15.8" fill="#6b7280" rx="0.5"><title>Captcha</title></rect>
+  <rect x="353.4" y="223.7" width="28.7" height="15.8" fill="#6b7280" rx="0.5"><title>Hooks Mfa</title></rect>
+  <rect x="382.6" y="223.7" width="28.7" height="15.8" fill="#6b7280" rx="0.5"><title>Hooks Password</title></rect>
+  <rect x="411.8" y="223.7" width="28.7" height="15.8" fill="#6b7280" rx="0.5"><title>Hooks Custom Access Token</title></rect>
+  <rect x="236.5" y="240.0" width="50.6" height="8.8" fill="#6b7280" rx="0.5"><title>Hooks Send Sms</title></rect>
+  <rect x="287.6" y="240.0" width="50.6" height="8.8" fill="#6b7280" rx="0.5"><title>Hooks Send Email</title></rect>
+  <rect x="338.8" y="240.0" width="50.6" height="8.8" fill="#6b7280" rx="0.5"><title>Email Templates</title></rect>
+  <rect x="389.9" y="240.0" width="50.6" height="8.8" fill="#6b7280" rx="0.5"><title>Phone Auth</title></rect>
+  <rect x="236.5" y="249.3" width="101.8" height="4.2" fill="#6b7280" rx="0.5"><title>Anonymous Users</title></rect>
+  <rect x="338.8" y="249.3" width="101.8" height="4.2" fill="#6b7280" rx="0.5"><title>User Metadata</title></rect>
+  <rect x="236.5" y="254.0" width="67.7" height="6.5" fill="#6b7280" rx="0.5"><title>App Metadata</title></rect>
+  <rect x="304.7" y="254.0" width="67.7" height="6.5" fill="#6b7280" rx="0.5"><title>Identities</title></rect>
+  <rect x="372.8" y="254.0" width="67.7" height="6.5" fill="#6b7280" rx="0.5"><title>Linking</title></rect>
+  <rect x="455.0" y="50.0" width="212.5" height="215.0" fill="#1f2937" rx="4"/>
+  <text x="460.0" y="66.0" font-family="system-ui, sans-serif" font-size="11" font-weight="600" fill="#ffffff">Realtime: 0.0% (0/33)</text>
+  <rect x="459.0" y="72.0" width="14.1" height="79.7" fill="#6b7280" rx="0.5"><title>Phx Join</title></rect>
+  <rect x="473.6" y="72.0" width="14.1" height="79.7" fill="#6b7280" rx="0.5"><title>Phx Leave</title></rect>
+  <rect x="488.2" y="72.0" width="14.1" height="79.7" fill="#6b7280" rx="0.5"><title>Phx Reply</title></rect>
+  <rect x="502.8" y="72.0" width="14.1" height="79.7" fill="#6b7280" rx="0.5"><title>Phx Error</title></rect>
+  <rect x="517.4" y="72.0" width="14.1" height="79.7" fill="#6b7280" rx="0.5"><title>Phx Close</title></rect>
+  <rect x="532.0" y="72.0" width="14.1" height="79.7" fill="#6b7280" rx="0.5"><title>Heartbeat</title></rect>
+  <rect x="546.6" y="72.0" width="14.1" height="79.7" fill="#6b7280" rx="0.5"><title>Presence State</title></rect>
+  <rect x="561.2" y="72.0" width="14.1" height="79.7" fill="#6b7280" rx="0.5"><title>Presence Diff</title></rect>
+  <rect x="575.9" y="72.0" width="14.1" height="79.7" fill="#6b7280" rx="0.5"><title>Broadcast</title></rect>
+  <rect x="590.5" y="72.0" width="14.1" height="79.7" fill="#6b7280" rx="0.5"><title>Postgres Changes</title></rect>
+  <rect x="605.1" y="72.0" width="14.1" height="79.7" fill="#6b7280" rx="0.5"><title>Access Token</title></rect>
+  <rect x="619.7" y="72.0" width="14.1" height="79.7" fill="#6b7280" rx="0.5"><title>System</title></rect>
+  <rect x="634.3" y="72.0" width="14.1" height="79.7" fill="#6b7280" rx="0.5"><title>Realtime Listen</title></rect>
+  <rect x="648.9" y="72.0" width="14.1" height="79.7" fill="#6b7280" rx="0.5"><title>Realtime Filter</title></rect>
+  <rect x="459.0" y="152.2" width="25.1" height="45.3" fill="#6b7280" rx="0.5"><title>Realtime Filter Eq</title></rect>
+  <rect x="484.6" y="152.2" width="25.1" height="45.3" fill="#6b7280" rx="0.5"><title>Realtime Filter Neq</title></rect>
+  <rect x="510.1" y="152.2" width="25.1" height="45.3" fill="#6b7280" rx="0.5"><title>Realtime Filter Gt</title></rect>
+  <rect x="535.7" y="152.2" width="25.1" height="45.3" fill="#6b7280" rx="0.5"><title>Realtime Filter Gte</title></rect>
+  <rect x="561.2" y="152.2" width="25.1" height="45.3" fill="#6b7280" rx="0.5"><title>Realtime Filter Lt</title></rect>
+  <rect x="586.8" y="152.2" width="25.1" height="45.3" fill="#6b7280" rx="0.5"><title>Realtime Filter Lte</title></rect>
+  <rect x="612.4" y="152.2" width="25.1" height="45.3" fill="#6b7280" rx="0.5"><title>Realtime Filter In</title></rect>
+  <rect x="637.9" y="152.2" width="25.1" height="45.3" fill="#6b7280" rx="0.5"><title>Broadcast Self</title></rect>
+  <rect x="459.0" y="198.0" width="40.4" height="28.1" fill="#6b7280" rx="0.5"><title>Broadcast Ack</title></rect>
+  <rect x="499.9" y="198.0" width="40.4" height="28.1" fill="#6b7280" rx="0.5"><title>Presence Track</title></rect>
+  <rect x="540.8" y="198.0" width="40.4" height="28.1" fill="#6b7280" rx="0.5"><title>Presence Untrack</title></rect>
+  <rect x="581.7" y="198.0" width="40.4" height="28.1" fill="#6b7280" rx="0.5"><title>Rls Policies</title></rect>
+  <rect x="622.6" y="198.0" width="40.4" height="28.1" fill="#6b7280" rx="0.5"><title>Jwt Verification</title></rect>
+  <rect x="459.0" y="226.6" width="67.7" height="16.7" fill="#6b7280" rx="0.5"><title>Connection Limiting</title></rect>
+  <rect x="527.2" y="226.6" width="67.7" height="16.7" fill="#6b7280" rx="0.5"><title>Rate Limiting</title></rect>
+  <rect x="595.3" y="226.6" width="67.7" height="16.7" fill="#6b7280" rx="0.5"><title>Postgres INSERT</title></rect>
+  <rect x="459.0" y="243.8" width="67.7" height="16.7" fill="#6b7280" rx="0.5"><title>Postgres UPDATE</title></rect>
+  <rect x="527.2" y="243.8" width="67.7" height="16.7" fill="#6b7280" rx="0.5"><title>Postgres DELETE</title></rect>
+  <rect x="595.3" y="243.8" width="67.7" height="16.7" fill="#6b7280" rx="0.5"><title>Postgres TRUNCATE</title></rect>
+  <rect x="677.5" y="50.0" width="212.5" height="215.0" fill="#1f2937" rx="4"/>
+  <text x="682.5" y="66.0" font-family="system-ui, sans-serif" font-size="11" font-weight="600" fill="#ffffff">Storage: 0.0% (0/34)</text>
+  <rect x="681.5" y="72.0" width="14.1" height="77.3" fill="#6b7280" rx="0.5"><title>GET /storage/v1/bucket</title></rect>
+  <rect x="696.1" y="72.0" width="14.1" height="77.3" fill="#6b7280" rx="0.5"><title>POST /storage/v1/bucket</title></rect>
+  <rect x="710.7" y="72.0" width="14.1" height="77.3" fill="#6b7280" rx="0.5"><title>GET /storage/v1/bucket</title></rect>
+  <rect x="725.3" y="72.0" width="14.1" height="77.3" fill="#6b7280" rx="0.5"><title>PUT /storage/v1/bucket</title></rect>
+  <rect x="739.9" y="72.0" width="14.1" height="77.3" fill="#6b7280" rx="0.5"><title>DELETE /storage/v1/bucket</title></rect>
+  <rect x="754.5" y="72.0" width="14.1" height="77.3" fill="#6b7280" rx="0.5"><title>POST /storage/v1/bucket</title></rect>
+  <rect x="769.1" y="72.0" width="14.1" height="77.3" fill="#6b7280" rx="0.5"><title>POST /storage/v1/object</title></rect>
+  <rect x="783.8" y="72.0" width="14.1" height="77.3" fill="#6b7280" rx="0.5"><title>PUT /storage/v1/object</title></rect>
+  <rect x="798.4" y="72.0" width="14.1" height="77.3" fill="#6b7280" rx="0.5"><title>GET /storage/v1/object</title></rect>
+  <rect x="813.0" y="72.0" width="14.1" height="77.3" fill="#6b7280" rx="0.5"><title>HEAD /storage/v1/object</title></rect>
+  <rect x="827.6" y="72.0" width="14.1" height="77.3" fill="#6b7280" rx="0.5"><title>POST /storage/v1/object</title></rect>
+  <rect x="842.2" y="72.0" width="14.1" height="77.3" fill="#6b7280" rx="0.5"><title>POST /storage/v1/object</title></rect>
+  <rect x="856.8" y="72.0" width="14.1" height="77.3" fill="#6b7280" rx="0.5"><title>POST /storage/v1/object</title></rect>
+  <rect x="871.4" y="72.0" width="14.1" height="77.3" fill="#6b7280" rx="0.5"><title>DELETE /storage/v1/object</title></rect>
+  <rect x="681.5" y="149.8" width="25.1" height="44.0" fill="#6b7280" rx="0.5"><title>DELETE /storage/v1/object</title></rect>
+  <rect x="707.1" y="149.8" width="25.1" height="44.0" fill="#6b7280" rx="0.5"><title>POST /storage/v1/object</title></rect>
+  <rect x="732.6" y="149.8" width="25.1" height="44.0" fill="#6b7280" rx="0.5"><title>POST /storage/v1/object</title></rect>
+  <rect x="758.2" y="149.8" width="25.1" height="44.0" fill="#6b7280" rx="0.5"><title>POST /storage/v1/object</title></rect>
+  <rect x="783.8" y="149.8" width="25.1" height="44.0" fill="#6b7280" rx="0.5"><title>PUT /storage/v1/object</title></rect>
+  <rect x="809.3" y="149.8" width="25.1" height="44.0" fill="#6b7280" rx="0.5"><title>GET /storage/v1/object</title></rect>
+  <rect x="834.9" y="149.8" width="25.1" height="44.0" fill="#6b7280" rx="0.5"><title>TUS POST</title></rect>
+  <rect x="860.4" y="149.8" width="25.1" height="44.0" fill="#6b7280" rx="0.5"><title>TUS PATCH</title></rect>
+  <rect x="681.5" y="194.3" width="40.4" height="27.3" fill="#6b7280" rx="0.5"><title>TUS HEAD</title></rect>
+  <rect x="722.4" y="194.3" width="40.4" height="27.3" fill="#6b7280" rx="0.5"><title>TUS DELETE</title></rect>
+  <rect x="763.3" y="194.3" width="40.4" height="27.3" fill="#6b7280" rx="0.5"><title>Transform: resize</title></rect>
+  <rect x="804.2" y="194.3" width="40.4" height="27.3" fill="#6b7280" rx="0.5"><title>Transform: width</title></rect>
+  <rect x="845.1" y="194.3" width="40.4" height="27.3" fill="#6b7280" rx="0.5"><title>Transform: height</title></rect>
+  <rect x="681.5" y="222.1" width="67.7" height="16.2" fill="#6b7280" rx="0.5"><title>Transform: quality</title></rect>
+  <rect x="749.7" y="222.1" width="67.7" height="16.2" fill="#6b7280" rx="0.5"><title>Transform: format</title></rect>
+  <rect x="817.8" y="222.1" width="67.7" height="16.2" fill="#6b7280" rx="0.5"><title>Rls</title></rect>
+  <rect x="681.5" y="238.8" width="50.6" height="21.7" fill="#6b7280" rx="0.5"><title>Policies</title></rect>
+  <rect x="732.6" y="238.8" width="50.6" height="21.7" fill="#6b7280" rx="0.5"><title>Mime Detection</title></rect>
+  <rect x="783.8" y="238.8" width="50.6" height="21.7" fill="#6b7280" rx="0.5"><title>Size Limits</title></rect>
+  <rect x="834.9" y="238.8" width="50.6" height="21.7" fill="#6b7280" rx="0.5"><title>Multipart</title></rect>
+  <rect x="10.0" y="275.0" width="212.5" height="215.0" fill="#1f2937" rx="4"/>
+  <text x="15.0" y="291.0" font-family="system-ui, sans-serif" font-size="11" font-weight="600" fill="#ffffff">Functions: 0.0% (0/27)</text>
+  <rect x="14.0" y="297.0" width="18.1" height="76.5" fill="#6b7280" rx="0.5"><title>GET /functions/v1/:name</title></rect>
+  <rect x="32.6" y="297.0" width="18.1" height="76.5" fill="#6b7280" rx="0.5"><title>POST /functions/v1/:name</title></rect>
+  <rect x="51.2" y="297.0" width="18.1" height="76.5" fill="#6b7280" rx="0.5"><title>PUT /functions/v1/:name</title></rect>
+  <rect x="69.8" y="297.0" width="18.1" height="76.5" fill="#6b7280" rx="0.5"><title>PATCH /functions/v1/:name</title></rect>
+  <rect x="88.4" y="297.0" width="18.1" height="76.5" fill="#6b7280" rx="0.5"><title>DELETE /functions/v1/:name</title></rect>
+  <rect x="107.0" y="297.0" width="18.1" height="76.5" fill="#6b7280" rx="0.5"><title>OPTIONS /functions/v1/:name</title></rect>
+  <rect x="125.5" y="297.0" width="18.1" height="76.5" fill="#6b7280" rx="0.5"><title>Fetch API</title></rect>
+  <rect x="144.1" y="297.0" width="18.1" height="76.5" fill="#6b7280" rx="0.5"><title>Web Crypto API</title></rect>
+  <rect x="162.7" y="297.0" width="18.1" height="76.5" fill="#6b7280" rx="0.5"><title>Headers API</title></rect>
+  <rect x="181.3" y="297.0" width="18.1" height="76.5" fill="#6b7280" rx="0.5"><title>Request API</title></rect>
+  <rect x="199.9" y="297.0" width="18.1" height="76.5" fill="#6b7280" rx="0.5"><title>Response API</title></rect>
+  <rect x="14.0" y="374.0" width="28.7" height="48.5" fill="#6b7280" rx="0.5"><title>URL API</title></rect>
+  <rect x="43.2" y="374.0" width="28.7" height="48.5" fill="#6b7280" rx="0.5"><title>URLSearchParams</title></rect>
+  <rect x="72.4" y="374.0" width="28.7" height="48.5" fill="#6b7280" rx="0.5"><title>TextEncoder/TextDecoder</title></rect>
+  <rect x="101.6" y="374.0" width="28.7" height="48.5" fill="#6b7280" rx="0.5"><title>Console API</title></rect>
+  <rect x="130.9" y="374.0" width="28.7" height="48.5" fill="#6b7280" rx="0.5"><title>setTimeout/setInterval</title></rect>
+  <rect x="160.1" y="374.0" width="28.7" height="48.5" fill="#6b7280" rx="0.5"><title>Streams API</title></rect>
+  <rect x="189.3" y="374.0" width="28.7" height="48.5" fill="#6b7280" rx="0.5"><title>Blob API</title></rect>
+  <rect x="14.0" y="423.0" width="50.6" height="27.5" fill="#6b7280" rx="0.5"><title>FormData API</title></rect>
+  <rect x="65.1" y="423.0" width="50.6" height="27.5" fill="#6b7280" rx="0.5"><title>WebSocket API</title></rect>
+  <rect x="116.2" y="423.0" width="50.6" height="27.5" fill="#6b7280" rx="0.5"><title>AbortSignal API</title></rect>
+  <rect x="167.4" y="423.0" width="50.6" height="27.5" fill="#6b7280" rx="0.5"><title>atob/btoa</title></rect>
+  <rect x="14.0" y="451.0" width="101.8" height="13.5" fill="#6b7280" rx="0.5"><title>Supabase client instantiation</title></rect>
+  <rect x="116.2" y="451.0" width="101.8" height="13.5" fill="#6b7280" rx="0.5"><title>Environment variables</title></rect>
+  <rect x="14.0" y="465.0" width="67.7" height="20.5" fill="#6b7280" rx="0.5"><title>Secrets access</title></rect>
+  <rect x="82.2" y="465.0" width="67.7" height="20.5" fill="#6b7280" rx="0.5"><title>JWT verification</title></rect>
+  <rect x="150.3" y="465.0" width="67.7" height="20.5" fill="#6b7280" rx="0.5"><title>CORS headers</title></rect>
+  <rect x="232.5" y="275.0" width="212.5" height="215.0" fill="#1f2937" rx="4"/>
+  <text x="237.5" y="291.0" font-family="system-ui, sans-serif" font-size="11" font-weight="600" fill="#ffffff">Pooler: 0.0% (0/13)</text>
+  <rect x="236.5" y="297.0" width="33.6" height="86.7" fill="#6b7280" rx="0.5"><title>Transaction</title></rect>
+  <rect x="270.6" y="297.0" width="33.6" height="86.7" fill="#6b7280" rx="0.5"><title>Session</title></rect>
+  <rect x="304.7" y="297.0" width="33.6" height="86.7" fill="#6b7280" rx="0.5"><title>Statement</title></rect>
+  <rect x="338.8" y="297.0" width="33.6" height="86.7" fill="#6b7280" rx="0.5"><title>Postgres Wire</title></rect>
+  <rect x="372.8" y="297.0" width="33.6" height="86.7" fill="#6b7280" rx="0.5"><title>Ssl Termination</title></rect>
+  <rect x="406.9" y="297.0" width="33.6" height="86.7" fill="#6b7280" rx="0.5"><title>Auth Md5</title></rect>
+  <rect x="236.5" y="384.2" width="67.7" height="43.1" fill="#6b7280" rx="0.5"><title>Auth Scram</title></rect>
+  <rect x="304.7" y="384.2" width="67.7" height="43.1" fill="#6b7280" rx="0.5"><title>Prepared Statements</title></rect>
+  <rect x="372.8" y="384.2" width="67.7" height="43.1" fill="#6b7280" rx="0.5"><title>Query Parsing</title></rect>
+  <rect x="236.5" y="427.8" width="50.6" height="57.7" fill="#6b7280" rx="0.5"><title>Connection Limiting</title></rect>
+  <rect x="287.6" y="427.8" width="50.6" height="57.7" fill="#6b7280" rx="0.5"><title>Tenant Isolation</title></rect>
+  <rect x="338.8" y="427.8" width="50.6" height="57.7" fill="#6b7280" rx="0.5"><title>Health Checks</title></rect>
+  <rect x="389.9" y="427.8" width="50.6" height="57.7" fill="#6b7280" rx="0.5"><title>Metrics</title></rect>
+  <rect x="455.0" y="275.0" width="212.5" height="215.0" fill="#1f2937" rx="4"/>
+  <text x="460.0" y="291.0" font-family="system-ui, sans-serif" font-size="11" font-weight="600" fill="#ffffff">Meta: 0.0% (0/51)</text>
+  <rect x="459.0" y="297.0" width="9.2" height="77.3" fill="#6b7280" rx="0.5"><title>GET /pg/schemas</title></rect>
+  <rect x="468.7" y="297.0" width="9.2" height="77.3" fill="#6b7280" rx="0.5"><title>GET /pg/schemas/id</title></rect>
+  <rect x="478.5" y="297.0" width="9.2" height="77.3" fill="#6b7280" rx="0.5"><title>POST /pg/schemas/create</title></rect>
+  <rect x="488.2" y="297.0" width="9.2" height="77.3" fill="#6b7280" rx="0.5"><title>PATCH /pg/schemas/update</title></rect>
+  <rect x="498.0" y="297.0" width="9.2" height="77.3" fill="#6b7280" rx="0.5"><title>DELETE /pg/schemas/delete</title></rect>
+  <rect x="507.7" y="297.0" width="9.2" height="77.3" fill="#6b7280" rx="0.5"><title>GET /pg/tables</title></rect>
+  <rect x="517.4" y="297.0" width="9.2" height="77.3" fill="#6b7280" rx="0.5"><title>GET /pg/tables/id</title></rect>
+  <rect x="527.2" y="297.0" width="9.2" height="77.3" fill="#6b7280" rx="0.5"><title>POST /pg/tables/create</title></rect>
+  <rect x="536.9" y="297.0" width="9.2" height="77.3" fill="#6b7280" rx="0.5"><title>PATCH /pg/tables/update</title></rect>
+  <rect x="546.6" y="297.0" width="9.2" height="77.3" fill="#6b7280" rx="0.5"><title>DELETE /pg/tables/delete</title></rect>
+  <rect x="556.4" y="297.0" width="9.2" height="77.3" fill="#6b7280" rx="0.5"><title>GET /pg/columns</title></rect>
+  <rect x="566.1" y="297.0" width="9.2" height="77.3" fill="#6b7280" rx="0.5"><title>GET /pg/columns/id</title></rect>
+  <rect x="575.9" y="297.0" width="9.2" height="77.3" fill="#6b7280" rx="0.5"><title>POST /pg/columns/create</title></rect>
+  <rect x="585.6" y="297.0" width="9.2" height="77.3" fill="#6b7280" rx="0.5"><title>PATCH /pg/columns/update</title></rect>
+  <rect x="595.3" y="297.0" width="9.2" height="77.3" fill="#6b7280" rx="0.5"><title>DELETE /pg/columns/delete</title></rect>
+  <rect x="605.1" y="297.0" width="9.2" height="77.3" fill="#6b7280" rx="0.5"><title>GET /pg/relationships</title></rect>
+  <rect x="614.8" y="297.0" width="9.2" height="77.3" fill="#6b7280" rx="0.5"><title>GET /pg/functions</title></rect>
+  <rect x="624.5" y="297.0" width="9.2" height="77.3" fill="#6b7280" rx="0.5"><title>GET /pg/functions/id</title></rect>
+  <rect x="634.3" y="297.0" width="9.2" height="77.3" fill="#6b7280" rx="0.5"><title>POST /pg/functions/create</title></rect>
+  <rect x="644.0" y="297.0" width="9.2" height="77.3" fill="#6b7280" rx="0.5"><title>PATCH /pg/functions/update</title></rect>
+  <rect x="653.8" y="297.0" width="9.2" height="77.3" fill="#6b7280" rx="0.5"><title>DELETE /pg/functions/delete</title></rect>
+  <rect x="459.0" y="374.8" width="16.5" height="44.0" fill="#6b7280" rx="0.5"><title>GET /pg/policies</title></rect>
+  <rect x="476.0" y="374.8" width="16.5" height="44.0" fill="#6b7280" rx="0.5"><title>GET /pg/policies/id</title></rect>
+  <rect x="493.1" y="374.8" width="16.5" height="44.0" fill="#6b7280" rx="0.5"><title>POST /pg/policies/create</title></rect>
+  <rect x="510.1" y="374.8" width="16.5" height="44.0" fill="#6b7280" rx="0.5"><title>PATCH /pg/policies/update</title></rect>
+  <rect x="527.2" y="374.8" width="16.5" height="44.0" fill="#6b7280" rx="0.5"><title>DELETE /pg/policies/delete</title></rect>
+  <rect x="544.2" y="374.8" width="16.5" height="44.0" fill="#6b7280" rx="0.5"><title>GET /pg/roles</title></rect>
+  <rect x="561.2" y="374.8" width="16.5" height="44.0" fill="#6b7280" rx="0.5"><title>GET /pg/roles/id</title></rect>
+  <rect x="578.3" y="374.8" width="16.5" height="44.0" fill="#6b7280" rx="0.5"><title>POST /pg/roles/create</title></rect>
+  <rect x="595.3" y="374.8" width="16.5" height="44.0" fill="#6b7280" rx="0.5"><title>PATCH /pg/roles/update</title></rect>
+  <rect x="612.4" y="374.8" width="16.5" height="44.0" fill="#6b7280" rx="0.5"><title>DELETE /pg/roles/delete</title></rect>
+  <rect x="629.4" y="374.8" width="16.5" height="44.0" fill="#6b7280" rx="0.5"><title>GET /pg/types</title></rect>
+  <rect x="646.5" y="374.8" width="16.5" height="44.0" fill="#6b7280" rx="0.5"><title>GET /pg/types/id</title></rect>
+  <rect x="459.0" y="419.3" width="25.1" height="29.1" fill="#6b7280" rx="0.5"><title>GET /pg/triggers</title></rect>
+  <rect x="484.6" y="419.3" width="25.1" height="29.1" fill="#6b7280" rx="0.5"><title>GET /pg/triggers/id</title></rect>
+  <rect x="510.1" y="419.3" width="25.1" height="29.1" fill="#6b7280" rx="0.5"><title>POST /pg/triggers/create</title></rect>
+  <rect x="535.7" y="419.3" width="25.1" height="29.1" fill="#6b7280" rx="0.5"><title>DELETE /pg/triggers/delete</title></rect>
+  <rect x="561.2" y="419.3" width="25.1" height="29.1" fill="#6b7280" rx="0.5"><title>GET /pg/extensions</title></rect>
+  <rect x="586.8" y="419.3" width="25.1" height="29.1" fill="#6b7280" rx="0.5"><title>GET /pg/extensions/id</title></rect>
+  <rect x="612.4" y="419.3" width="25.1" height="29.1" fill="#6b7280" rx="0.5"><title>POST /pg/extensions/create</title></rect>
+  <rect x="637.9" y="419.3" width="25.1" height="29.1" fill="#6b7280" rx="0.5"><title>DELETE /pg/extensions/delete</title></rect>
+  <rect x="459.0" y="448.9" width="50.6" height="14.3" fill="#6b7280" rx="0.5"><title>GET /pg/publications</title></rect>
+  <rect x="510.1" y="448.9" width="50.6" height="14.3" fill="#6b7280" rx="0.5"><title>GET /pg/publications/id</title></rect>
+  <rect x="561.2" y="448.9" width="50.6" height="14.3" fill="#6b7280" rx="0.5"><title>POST /pg/publications/create</title></rect>
+  <rect x="612.4" y="448.9" width="50.6" height="14.3" fill="#6b7280" rx="0.5"><title>PATCH /pg/publications/update</title></rect>
+  <rect x="459.0" y="463.8" width="67.7" height="10.6" fill="#6b7280" rx="0.5"><title>DELETE /pg/publications/delete</title></rect>
+  <rect x="527.2" y="463.8" width="67.7" height="10.6" fill="#6b7280" rx="0.5"><title>GET /pg/config</title></rect>
+  <rect x="595.3" y="463.8" width="67.7" height="10.6" fill="#6b7280" rx="0.5"><title>GET /pg/config/version</title></rect>
+  <rect x="459.0" y="474.9" width="67.7" height="10.6" fill="#6b7280" rx="0.5"><title>POST /pg/query</title></rect>
+  <rect x="527.2" y="474.9" width="67.7" height="10.6" fill="#6b7280" rx="0.5"><title>POST /pg/query/format</title></rect>
+  <rect x="595.3" y="474.9" width="67.7" height="10.6" fill="#6b7280" rx="0.5"><title>GET /pg/generators/typescript</title></rect>
+  <rect x="677.5" y="275.0" width="212.5" height="215.0" fill="#1f2937" rx="4"/>
+  <text x="682.5" y="291.0" font-family="system-ui, sans-serif" font-size="11" font-weight="600" fill="#ffffff">Studio: 0.0% (0/38)</text>
+  <rect x="681.5" y="297.0" width="12.3" height="79.1" fill="#6b7280" rx="0.5"><title>Dashboard</title></rect>
+  <rect x="694.3" y="297.0" width="12.3" height="79.1" fill="#6b7280" rx="0.5"><title>Table Editor</title></rect>
+  <rect x="707.1" y="297.0" width="12.3" height="79.1" fill="#6b7280" rx="0.5"><title>Table Editor Columns</title></rect>
+  <rect x="719.8" y="297.0" width="12.3" height="79.1" fill="#6b7280" rx="0.5"><title>Table Editor Rows</title></rect>
+  <rect x="732.6" y="297.0" width="12.3" height="79.1" fill="#6b7280" rx="0.5"><title>Table Editor Constraints</title></rect>
+  <rect x="745.4" y="297.0" width="12.3" height="79.1" fill="#6b7280" rx="0.5"><title>Table Editor Indexes</title></rect>
+  <rect x="758.2" y="297.0" width="12.3" height="79.1" fill="#6b7280" rx="0.5"><title>Table Editor Triggers</title></rect>
+  <rect x="771.0" y="297.0" width="12.3" height="79.1" fill="#6b7280" rx="0.5"><title>Sql Editor</title></rect>
+  <rect x="783.8" y="297.0" width="12.3" height="79.1" fill="#6b7280" rx="0.5"><title>Sql Editor History</title></rect>
+  <rect x="796.5" y="297.0" width="12.3" height="79.1" fill="#6b7280" rx="0.5"><title>Sql Editor Saved</title></rect>
+  <rect x="809.3" y="297.0" width="12.3" height="79.1" fill="#6b7280" rx="0.5"><title>Sql Editor Templates</title></rect>
+  <rect x="822.1" y="297.0" width="12.3" height="79.1" fill="#6b7280" rx="0.5"><title>Auth Users</title></rect>
+  <rect x="834.9" y="297.0" width="12.3" height="79.1" fill="#6b7280" rx="0.5"><title>Auth Policies</title></rect>
+  <rect x="847.7" y="297.0" width="12.3" height="79.1" fill="#6b7280" rx="0.5"><title>Auth Providers</title></rect>
+  <rect x="860.4" y="297.0" width="12.3" height="79.1" fill="#6b7280" rx="0.5"><title>Auth Templates</title></rect>
+  <rect x="873.2" y="297.0" width="12.3" height="79.1" fill="#6b7280" rx="0.5"><title>Auth Url Config</title></rect>
+  <rect x="681.5" y="376.6" width="22.2" height="44.3" fill="#6b7280" rx="0.5"><title>Auth Hooks</title></rect>
+  <rect x="704.2" y="376.6" width="22.2" height="44.3" fill="#6b7280" rx="0.5"><title>Storage Buckets</title></rect>
+  <rect x="726.9" y="376.6" width="22.2" height="44.3" fill="#6b7280" rx="0.5"><title>Storage Policies</title></rect>
+  <rect x="749.7" y="376.6" width="22.2" height="44.3" fill="#6b7280" rx="0.5"><title>Storage Files</title></rect>
+  <rect x="772.4" y="376.6" width="22.2" height="44.3" fill="#6b7280" rx="0.5"><title>Edge Functions</title></rect>
+  <rect x="795.1" y="376.6" width="22.2" height="44.3" fill="#6b7280" rx="0.5"><title>Edge Functions Logs</title></rect>
+  <rect x="817.8" y="376.6" width="22.2" height="44.3" fill="#6b7280" rx="0.5"><title>Realtime Inspector</title></rect>
+  <rect x="840.6" y="376.6" width="22.2" height="44.3" fill="#6b7280" rx="0.5"><title>Database Roles</title></rect>
+  <rect x="863.3" y="376.6" width="22.2" height="44.3" fill="#6b7280" rx="0.5"><title>Database Replication</title></rect>
+  <rect x="681.5" y="421.3" width="33.6" height="29.3" fill="#6b7280" rx="0.5"><title>Database Webhooks</title></rect>
+  <rect x="715.6" y="421.3" width="33.6" height="29.3" fill="#6b7280" rx="0.5"><title>Database Extensions</title></rect>
+  <rect x="749.7" y="421.3" width="33.6" height="29.3" fill="#6b7280" rx="0.5"><title>Database Publications</title></rect>
+  <rect x="783.8" y="421.3" width="33.6" height="29.3" fill="#6b7280" rx="0.5"><title>Database Backups</title></rect>
+  <rect x="817.8" y="421.3" width="33.6" height="29.3" fill="#6b7280" rx="0.5"><title>Api Settings</title></rect>
+  <rect x="851.9" y="421.3" width="33.6" height="29.3" fill="#6b7280" rx="0.5"><title>Api Docs</title></rect>
+  <rect x="681.5" y="451.2" width="67.7" height="14.4" fill="#6b7280" rx="0.5"><title>Project Settings</title></rect>
+  <rect x="749.7" y="451.2" width="67.7" height="14.4" fill="#6b7280" rx="0.5"><title>Logs Explorer</title></rect>
+  <rect x="817.8" y="451.2" width="67.7" height="14.4" fill="#6b7280" rx="0.5"><title>Reports</title></rect>
+  <rect x="681.5" y="466.1" width="50.6" height="19.4" fill="#6b7280" rx="0.5"><title>API: projects</title></rect>
+  <rect x="732.6" y="466.1" width="50.6" height="19.4" fill="#6b7280" rx="0.5"><title>API: content</title></rect>
+  <rect x="783.8" y="466.1" width="50.6" height="19.4" fill="#6b7280" rx="0.5"><title>API: platform</title></rect>
+  <rect x="834.9" y="466.1" width="50.6" height="19.4" fill="#6b7280" rx="0.5"><title>API: config</title></rect>
+</svg>

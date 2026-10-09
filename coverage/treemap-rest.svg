@@ -1,0 +1,63 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 200" width="400" height="200">
+  <rect width="400" height="200" fill="#111827"/>
+  <text x="2" y="20" font-family="system-ui, sans-serif" font-size="14" font-weight="600" fill="#ffffff">
+    REST: 0.0% (0/57)
+  </text>
+  <rect x="2.0" y="32.0" width="16.2" height="66.0" fill="#6b7280" rx="1"><title>GET /:table</title></rect>
+  <rect x="19.2" y="32.0" width="16.2" height="66.0" fill="#6b7280" rx="1"><title>POST /:table</title></rect>
+  <rect x="36.4" y="32.0" width="16.2" height="66.0" fill="#6b7280" rx="1"><title>PATCH /:table</title></rect>
+  <rect x="53.7" y="32.0" width="16.2" height="66.0" fill="#6b7280" rx="1"><title>DELETE /:table</title></rect>
+  <rect x="70.9" y="32.0" width="16.2" height="66.0" fill="#6b7280" rx="1"><title>HEAD /:table</title></rect>
+  <rect x="88.1" y="32.0" width="16.2" height="66.0" fill="#6b7280" rx="1"><title>OPTIONS /:table</title></rect>
+  <rect x="105.3" y="32.0" width="16.2" height="66.0" fill="#6b7280" rx="1"><title>GET /rpc/:function</title></rect>
+  <rect x="122.5" y="32.0" width="16.2" height="66.0" fill="#6b7280" rx="1"><title>POST /rpc/:function</title></rect>
+  <rect x="139.7" y="32.0" width="16.2" height="66.0" fill="#6b7280" rx="1"><title>?column=eq.value</title></rect>
+  <rect x="157.0" y="32.0" width="16.2" height="66.0" fill="#6b7280" rx="1"><title>?column=neq.value</title></rect>
+  <rect x="174.2" y="32.0" width="16.2" height="66.0" fill="#6b7280" rx="1"><title>?column=gt.value</title></rect>
+  <rect x="191.4" y="32.0" width="16.2" height="66.0" fill="#6b7280" rx="1"><title>?column=gte.value</title></rect>
+  <rect x="208.6" y="32.0" width="16.2" height="66.0" fill="#6b7280" rx="1"><title>?column=lt.value</title></rect>
+  <rect x="225.8" y="32.0" width="16.2" height="66.0" fill="#6b7280" rx="1"><title>?column=lte.value</title></rect>
+  <rect x="243.0" y="32.0" width="16.2" height="66.0" fill="#6b7280" rx="1"><title>?column=like.value</title></rect>
+  <rect x="260.3" y="32.0" width="16.2" height="66.0" fill="#6b7280" rx="1"><title>?column=ilike.value</title></rect>
+  <rect x="277.5" y="32.0" width="16.2" height="66.0" fill="#6b7280" rx="1"><title>?column=match.value</title></rect>
+  <rect x="294.7" y="32.0" width="16.2" height="66.0" fill="#6b7280" rx="1"><title>?column=imatch.value</title></rect>
+  <rect x="311.9" y="32.0" width="16.2" height="66.0" fill="#6b7280" rx="1"><title>?column=in.value</title></rect>
+  <rect x="329.1" y="32.0" width="16.2" height="66.0" fill="#6b7280" rx="1"><title>?column=is.value</title></rect>
+  <rect x="346.3" y="32.0" width="16.2" height="66.0" fill="#6b7280" rx="1"><title>?column=isdistinct.value</title></rect>
+  <rect x="363.6" y="32.0" width="16.2" height="66.0" fill="#6b7280" rx="1"><title>?column=fts.value</title></rect>
+  <rect x="380.8" y="32.0" width="16.2" height="66.0" fill="#6b7280" rx="1"><title>?column=plfts.value</title></rect>
+  <rect x="2.0" y="99.0" width="27.3" height="39.8" fill="#6b7280" rx="1"><title>?column=phfts.value</title></rect>
+  <rect x="30.3" y="99.0" width="27.3" height="39.8" fill="#6b7280" rx="1"><title>?column=wfts.value</title></rect>
+  <rect x="58.6" y="99.0" width="27.3" height="39.8" fill="#6b7280" rx="1"><title>?column=cs.value</title></rect>
+  <rect x="86.9" y="99.0" width="27.3" height="39.8" fill="#6b7280" rx="1"><title>?column=cd.value</title></rect>
+  <rect x="115.1" y="99.0" width="27.3" height="39.8" fill="#6b7280" rx="1"><title>?column=ov.value</title></rect>
+  <rect x="143.4" y="99.0" width="27.3" height="39.8" fill="#6b7280" rx="1"><title>?column=sl.value</title></rect>
+  <rect x="171.7" y="99.0" width="27.3" height="39.8" fill="#6b7280" rx="1"><title>?column=sr.value</title></rect>
+  <rect x="200.0" y="99.0" width="27.3" height="39.8" fill="#6b7280" rx="1"><title>?column=nxr.value</title></rect>
+  <rect x="228.3" y="99.0" width="27.3" height="39.8" fill="#6b7280" rx="1"><title>?column=nxl.value</title></rect>
+  <rect x="256.6" y="99.0" width="27.3" height="39.8" fill="#6b7280" rx="1"><title>?column=adj.value</title></rect>
+  <rect x="284.9" y="99.0" width="27.3" height="39.8" fill="#6b7280" rx="1"><title>?column=not.value</title></rect>
+  <rect x="313.1" y="99.0" width="27.3" height="39.8" fill="#6b7280" rx="1"><title>?column=or.value</title></rect>
+  <rect x="341.4" y="99.0" width="27.3" height="39.8" fill="#6b7280" rx="1"><title>?column=and.value</title></rect>
+  <rect x="369.7" y="99.0" width="27.3" height="39.8" fill="#6b7280" rx="1"><title>?column=all.value</title></rect>
+  <rect x="2.0" y="139.8" width="48.5" height="22.3" fill="#6b7280" rx="1"><title>?column=any.value</title></rect>
+  <rect x="51.5" y="139.8" width="48.5" height="22.3" fill="#6b7280" rx="1"><title>Select</title></rect>
+  <rect x="101.0" y="139.8" width="48.5" height="22.3" fill="#6b7280" rx="1"><title>Order</title></rect>
+  <rect x="150.5" y="139.8" width="48.5" height="22.3" fill="#6b7280" rx="1"><title>Limit</title></rect>
+  <rect x="200.0" y="139.8" width="48.5" height="22.3" fill="#6b7280" rx="1"><title>Offset</title></rect>
+  <rect x="249.5" y="139.8" width="48.5" height="22.3" fill="#6b7280" rx="1"><title>Range</title></rect>
+  <rect x="299.0" y="139.8" width="48.5" height="22.3" fill="#6b7280" rx="1"><title>Prefer Return</title></rect>
+  <rect x="348.5" y="139.8" width="48.5" height="22.3" fill="#6b7280" rx="1"><title>Prefer Count</title></rect>
+  <rect x="2.0" y="163.1" width="78.2" height="13.6" fill="#6b7280" rx="1"><title>Prefer Resolution</title></rect>
+  <rect x="81.2" y="163.1" width="78.2" height="13.6" fill="#6b7280" rx="1"><title>Prefer Missing</title></rect>
+  <rect x="160.4" y="163.1" width="78.2" height="13.6" fill="#6b7280" rx="1"><title>Prefer Handling</title></rect>
+  <rect x="239.6" y="163.1" width="78.2" height="13.6" fill="#6b7280" rx="1"><title>On Conflict</title></rect>
+  <rect x="318.8" y="163.1" width="78.2" height="13.6" fill="#6b7280" rx="1"><title>Columns</title></rect>
+  <rect x="2.0" y="177.6" width="131.0" height="7.7" fill="#6b7280" rx="1"><title>Embedding</title></rect>
+  <rect x="134.0" y="177.6" width="131.0" height="7.7" fill="#6b7280" rx="1"><title>Spread Embedding</title></rect>
+  <rect x="266.0" y="177.6" width="131.0" height="7.7" fill="#6b7280" rx="1"><title>Inner Embedding</title></rect>
+  <rect x="2.0" y="186.4" width="98.0" height="10.6" fill="#6b7280" rx="1"><title>Left Embedding</title></rect>
+  <rect x="101.0" y="186.4" width="98.0" height="10.6" fill="#6b7280" rx="1"><title>Json Columns</title></rect>
+  <rect x="200.0" y="186.4" width="98.0" height="10.6" fill="#6b7280" rx="1"><title>Computed Columns</title></rect>
+  <rect x="299.0" y="186.4" width="98.0" height="10.6" fill="#6b7280" rx="1"><title>Aggregate</title></rect>
+</svg>
