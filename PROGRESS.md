@@ -296,19 +296,22 @@ Physically impossible for the agent (repository settings or credentials):
       `can_approve_pull_request_reviews=true`. Run 37961663758 predates it.)
 - [ ] Grant `RELEASE_PLEASE_TOKEN` the permissions release-please uses.
       Fine-grained PAT or GitHub App for `Zouhairmaj/megabase`:
-      **Contents: Read and write** (creating a GitHub Release is this
-      permission; run 38003872424 failed with `Resource not accessible
-      by personal access token` on
-      [create-a-release](https://docs.github.com/rest/releases/releases#create-a-release)
-      after pull request #144 merged), **Pull requests: Read and write**,
-      and **Workflows: Read and write** (`POST /git/trees` with this
-      repo's base tree returns 403 without it, and release-please prints
-      `Error adding to tree`). Classic PAT: `repo` and `workflow`. The
+      **Contents: Read and write** and **Pull requests: Read and write**.
+      Contents write is what
+      [Create a tree](https://docs.github.com/rest/git/trees#create-a-tree)
+      and
+      [Create a release](https://docs.github.com/rest/releases/releases#create-a-release)
+      require. The tree probe and the release commit only add
+      `.release-please-manifest.json`, `CHANGELOG.md`, and `Cargo.toml`
+      on top of `base_tree`; they do not change `.github/workflows`, so
+      this flow does not need Workflows write. A 403 on that tree call
+      is what release-please prints as `Error adding to tree`. Run
+      38003872424 failed with `Resource not accessible by personal
+      access token` on create-a-release after pull request #144 merged,
+      which is the same Contents write gap. Classic PAT: `repo`. The
       Release workflow probes the tree call and falls back to
-      `GITHUB_TOKEN` only on HTTP 403 or 404. A token that passes that
-      probe and then cannot create a release still needs Contents write.
-      Lockfile pushes keep using this secret so required checks start
-      natively.
+      `GITHUB_TOKEN` only on HTTP 403 or 404. Lockfile pushes keep using
+      this secret so required checks start natively.
 - [ ] Allow `github-actions` to publish GitHub Releases / tags on `main`
 - [ ] Enforce CODEOWNERS
 - [x] Coverage commits on `main` are not used. Shields JSON is
