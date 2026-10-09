@@ -27,7 +27,7 @@ met or unmet with a justification, and every SUGGESTED at least considered.
 | `crypto_keylength` | HS256 accepts any non-empty `JWT_SECRET`. Nothing disables keys shorter than the NIST 112-bit minimum. |
 
 Counts: MUST 35 Met, 3 Unmet, 5 N/A. SHOULD 9 Met, 0 Unmet, 1 N/A.
-SUGGESTED 9 Met, 4 Unmet, 1 N/A.
+SUGGESTED 10 Met, 3 Unmet, 1 N/A.
 
 ## Basics
 
@@ -198,12 +198,15 @@ The security policy and the CI checks are not that attestation.
 | Criterion | Level | Status | Justification | Evidence |
 |---|---|---|---|---|
 | `static_analysis` | MUST | Met | Before release, CI runs Clippy (beyond rustc warnings) plus `cargo-deny` and `cargo audit` on both owned lockfiles. | [.github/workflows/ci.yml](https://github.com/Zouhairmaj/megabase/blob/main/.github/workflows/ci.yml) |
-| `static_analysis_common_vulnerabilities` | SUGGESTED | Unmet | Clippy and cargo-audit do not scan Rust sources for vulnerability classes, and no workflow runs CodeQL analyze. | [.github/workflows/scorecard.yml](https://github.com/Zouhairmaj/megabase/blob/main/.github/workflows/scorecard.yml) |
+| `static_analysis_common_vulnerabilities` | SUGGESTED | Met | GitHub code scanning default setup runs CodeQL on Rust for pull requests; that query set looks for common vulnerabilities. | [README](https://github.com/Zouhairmaj/megabase/blob/main/README.md) |
 | `static_analysis_fixed` | MUST | Met | Clippy `-D warnings`, cargo-deny, and cargo-audit fail CI, so a release from green main has no open finding from those tools. | [.github/workflows/ci.yml](https://github.com/Zouhairmaj/megabase/blob/main/.github/workflows/ci.yml) |
 | `static_analysis_often` | SUGGESTED | Met | Those jobs run on every pull request and on every push to main. | [.github/workflows/ci.yml](https://github.com/Zouhairmaj/megabase/blob/main/.github/workflows/ci.yml) |
 
 `scorecard.yml` uploads Scorecard SARIF through `codeql-action/upload-sarif`.
-That is not a CodeQL analysis of the Rust sources.
+That upload is not the CodeQL analysis. The analysis is GitHub code scanning
+default setup (`CODE_SCANNING_IS_STEADY_STATE_DEFAULT_SETUP`), which extracted
+Rust and uploaded results on this change. There is no `codeql.yml` in the
+repository.
 
 ### Dynamic code analysis
 
