@@ -31,8 +31,10 @@ jobs:
         if: env.BENCHER_API_KEY == ''
         run: echo "BENCHER_API_TOKEN is not set; skipping continuous benchmarking."
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         if: env.BENCHER_API_KEY != ''
+        with:
+          persist-credentials: false
 
       - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
         if: env.BENCHER_API_KEY != ''
@@ -64,13 +66,18 @@ jobs:
 
       - name: Track benchmarks (pull request)
         if: env.BENCHER_API_KEY != '' && github.event_name == 'pull_request'
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+          BASE_REF: ${{ github.base_ref }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           bencher run \
             --project megabase \
             --ci-on-the-fly \
-            --branch "${{ github.head_ref }}" \
-            --start-point "${{ github.base_ref }}" \
-            --start-point-hash "${{ github.event.pull_request.base.sha }}" \
+            --branch "$HEAD_REF" \
+            --start-point "$BASE_REF" \
+            --start-point-hash "$BASE_SHA" \
             --start-point-clone-thresholds \
             --start-point-reset \
             --testbed github-actions \
@@ -79,5 +86,5 @@ jobs:
             --threshold-test t_test \
             --threshold-upper-boundary 0.99 \
             --error-on-alert \
-            --github-actions "${{ secrets.GITHUB_TOKEN }}" \
+            --github-actions "$GH_TOKEN" \
             "cargo bench --locked --bench health"

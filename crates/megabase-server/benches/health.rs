@@ -21,10 +21,12 @@ fn gateway(c: &mut Criterion) {
     group.warm_up_time(Duration::from_millis(200));
     group.measurement_time(Duration::from_secs(1));
 
+    let health_router = create_router();
     group.bench_function("GET /_megabase/health", |b| {
         b.iter(|| {
             rt.block_on(async {
-                let response = create_router()
+                let response = health_router
+                    .clone()
                     .oneshot(
                         Request::builder()
                             .uri(HEALTH_PATH)
@@ -39,10 +41,12 @@ fn gateway(c: &mut Criterion) {
         });
     });
 
+    let rest_router = create_router();
     group.bench_function("GET /rest/v1/todos", |b| {
         b.iter(|| {
             rt.block_on(async {
-                let response = create_router()
+                let response = rest_router
+                    .clone()
                     .oneshot(
                         Request::builder()
                             .uri("/rest/v1/todos")

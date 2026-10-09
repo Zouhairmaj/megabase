@@ -53,7 +53,7 @@ gateway prefixes in [ADR 0002](adr/0002-gateway-layout.md).
 
 | State | Treemap | Meaning |
 |---|---|---|
-| not done | `#303235` | 501, or not claimed in `crates/` |
+| not done | `#2A2C2F` (light: `#DCDDDE`) | 501, or not claimed in `crates/` |
 | implemented | `#005441` | `// megabase:unit <id>` in `crates/` |
 | tested | `#009366` | implemented and listed in `judge/cases/` |
 | conformant | `#00D892` | every such case passed in `coverage/judge-results.json` |

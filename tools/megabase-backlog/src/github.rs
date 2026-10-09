@@ -147,8 +147,13 @@ fn already_linked(msg: &str) -> bool {
 pub fn parse_megabase_id(body: &str) -> Option<String> {
     for line in body.lines() {
         let line = line.trim();
-        let rest = line.strip_prefix("<!-- megabase-id:")?;
-        let id = rest.strip_suffix("-->")?.trim();
+        let Some(rest) = line.strip_prefix("<!-- megabase-id:") else {
+            continue;
+        };
+        let Some(id) = rest.strip_suffix("-->") else {
+            continue;
+        };
+        let id = id.trim();
         if !id.is_empty() {
             return Some(id.to_string());
         }
@@ -807,6 +812,15 @@ mod tests {
         assert_eq!(
             parse_megabase_id(body).as_deref(),
             Some("task:rest:resources:1:1")
+        );
+    }
+
+    #[test]
+    fn megabase_id_skips_leading_text() {
+        let body = "Title line\n\n<!-- megabase-id: epic:website:site:later -->\n";
+        assert_eq!(
+            parse_megabase_id(body).as_deref(),
+            Some("epic:website:site:later")
         );
     }
 

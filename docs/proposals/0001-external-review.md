@@ -32,7 +32,7 @@ Create `docs/COMPATIBILITY.md` documenting:
 
 ### Coverage State Refinement
 
-Extend the treemap/badge system to distinguish **three states per unit**:
+Extend the treemap/badge system to distinguish **four states per unit**:
 
 | State | Color | Meaning |
 |-------|-------|---------|

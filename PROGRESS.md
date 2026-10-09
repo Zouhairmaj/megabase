@@ -108,7 +108,7 @@ waiting on a human.
     **In progress**, branch `issue-<n>-<slug>`, PR `Closes #<n>`) before
     coding. `.github/workflows/board-sync.yml` mirrors Status from those
     signals plus `blocked`. GOAL.md is unchanged (human-owned); the
-    contract is in `CONTRIBUTING.md`. `tools/megabase-backlog` is the
+    contract is in `AGENTS.md`. `tools/megabase-backlog` is the
     idempotent SoT for the board: match `<!-- megabase-id -->`, GraphQL
     Status option ids (including Blocked), sub-issues and blocked-by.
 13. **Continuous benchmarking.** Criterion benches start with a trivial

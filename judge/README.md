@@ -56,8 +56,9 @@ cargo run -p megabase-judge -- run \
 data. After a run, `git -C vendor/supabase status` must stay clean.
 
 The harness exits non-zero on a **regression**: a case that passed in the
-baseline now fails, or the passing count dropped. New failures of cases
-that never passed do not fail the job; they stay grey on the treemap.
+baseline now fails. A drop in the total passing count does not fail the
+job by itself. New failures of cases that never passed stay grey on the
+treemap.
 
 CI starts only the reference stack in Docker and runs Megabase on the
 runner (no image build). Local `just judge-up` builds the Megabase image.

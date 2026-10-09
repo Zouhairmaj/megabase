@@ -46,7 +46,7 @@ judge-down:
 # Compare both stacks. Requires judge-up, or a host Megabase on :8100 and the reference on :8000.
 judge:
     cargo run --locked -p megabase-judge -- wait
-    cargo run --locked -p megabase-judge -- run --cases judge/cases --out coverage/judge-results.json --baseline coverage/judge-results.json --summary /tmp/judge-summary.md
+    cargo run --locked -p megabase-judge -- run --cases judge/cases --out /tmp/judge-results.json --baseline coverage/judge-results.json --summary /tmp/judge-summary.md
     @cat /tmp/judge-summary.md
 
 # Upsert GitHub milestones, labels, Project fields (needs issues+project write).

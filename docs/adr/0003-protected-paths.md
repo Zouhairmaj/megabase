@@ -5,11 +5,11 @@
 
 ## Context
 
-GOAL.md forbids changing `vendor/` or `judge/` outside a reviewed branch,
-and humans own `GOAL.md`, `MANIFESTO.md` and `HUMAN_LOG.md`. The Phase 0
-bootstrap PR must *create* `vendor/`, `judge/` and `HUMAN_LOG.md`, so a
-naive "reject any touch of these paths" check would block the one PR that
-is allowed to introduce them.
+GOAL.md forbids changing `vendor/` after bootstrap, and forbids changing
+`judge/` outside a `review/*` branch. Humans own `GOAL.md`, `MANIFESTO.md`
+and `HUMAN_LOG.md`. The Phase 0 bootstrap PR must *create* `vendor/`,
+`judge/` and `HUMAN_LOG.md`, so a naive "reject any touch of these paths"
+check would block the one PR that is allowed to introduce them.
 
 ## Decision
 

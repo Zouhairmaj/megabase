@@ -46,7 +46,11 @@ impl Config {
     }
 
     pub fn bind_address(&self) -> String {
-        format!("{}:{}", self.host, self.port)
+        if self.host.contains(':') && !self.host.starts_with('[') {
+            format!("[{}]:{}", self.host, self.port)
+        } else {
+            format!("{}:{}", self.host, self.port)
+        }
     }
 }
 
@@ -65,5 +69,19 @@ mod tests {
     fn rejects_invalid_port() {
         let err = Config::from_lookup(|k| (k == "MEGABASE_PORT").then(|| "x".into()));
         assert!(err.is_err());
+    }
+
+    #[test]
+    fn bind_address_brackets_ipv6() {
+        let v6 = Config {
+            host: "::1".into(),
+            ..Config::default()
+        };
+        assert_eq!(v6.bind_address(), "[::1]:8000");
+        let already = Config {
+            host: "[::1]".into(),
+            ..Config::default()
+        };
+        assert_eq!(already.bind_address(), "[::1]:8000");
     }
 }
