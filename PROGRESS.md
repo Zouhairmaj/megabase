@@ -38,15 +38,68 @@ This file tracks overall project state, decisions, and blocked items. For task-l
 
 See `coverage/units.json` for the full unit list and `coverage/treemap.svg` for visualization.
 
-## Level Thresholds
+## Level Gates
 
-| Level | Description | Conformance Threshold |
-|-------|-------------|-----------------------|
-| 1 | REST API + email/password auth | 80% |
-| 2 | OAuth, magic links, Storage | 80% |
-| 3 | Realtime | 80% |
-| 4 | Functions, Pooler, Meta, Studio test | 80% |
-| 5 | Studio rewrite (stretch) | 80% |
+> **Note**: Concrete thresholds proposed in [Proposal 0001](docs/proposals/0001-external-review.md), awaiting human approval.
+
+| Level | Components | Conformance Threshold | Additional Gates |
+|-------|------------|----------------------|------------------|
+| 1 | REST, Auth (email/password) | ≥95% | No P0 security issues |
+| 2 | OAuth, Magic Links, Storage | ≥90% | Level 1 maintained ≥95% |
+| 3 | Realtime | ≥85% | Levels 1-2 maintained |
+| 4 | Functions, Pooler, Meta, Studio test | ≥80% | All levels maintained |
+| 5 | Studio rewrite | **DEFERRED** | Pending feasibility study |
+
+### Level 5 Deferral
+
+Level 5 (Studio rewrite) is marked as deferred because:
+- Requires investigation of whether Studio can be statically exported
+- May need a full Rust UI framework
+- Not necessary to prove the core experiment thesis
+- Will be re-evaluated after Level 4 completion
+
+## Tracking
+
+### Cost
+
+| Period | Tokens | Cost (USD) | Notes |
+|--------|--------|------------|-------|
+| Phase 0 | TBD | TBD | Initial bootstrap |
+| **Total** | **TBD** | **TBD** | |
+
+*Cost tracking begins after Phase 0 approval.*
+
+### Regressions
+
+| Date | Commit | From | To | Recovery | Root Cause |
+|------|--------|------|-----|----------|------------|
+| *None* | | | | | |
+
+### Human Interventions
+
+| Count | Latest |
+|-------|--------|
+| 0 | N/A |
+
+*See HUMAN_LOG.md for details.*
+
+---
+
+## Proposals Awaiting Human Approval
+
+### [Proposal 0001: External Review Recommendations](docs/proposals/0001-external-review.md)
+
+Source: GPT-6 Astra external review
+
+| # | Proposal | Status |
+|---|----------|--------|
+| 1 | Bounded Compatibility Contract (`docs/COMPATIBILITY.md`) | ⏳ Awaiting approval |
+| 2 | Stronger Judge Design (hidden tests, DB checks, security) | ⏳ Awaiting approval |
+| 3 | Level Gates with Concrete Thresholds | ⏳ Awaiting approval |
+
+**Action required**: Human review and approval/rejection of each proposal.
+
+---
 
 ## Decisions
 
