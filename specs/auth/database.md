@@ -769,7 +769,9 @@ challenge can exist before `auth.users` has a row (GoTrue
 
 Indexes: `webauthn_challenges_user_id_idx` on `user_id`,
 `webauthn_challenges_expires_at_idx` on `expires_at` (cleanup of expired
-rows). No table comment.
+rows). No table comment. Installer `DROP NOT NULL` on `user_id` so a
+table that already has a required `user_id` can still store signup
+challenges.
 
 ---
 

@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS auth.webauthn_challenges (
 );
 
 ALTER TABLE auth.webauthn_challenges ADD COLUMN IF NOT EXISTS user_id uuid;
+ALTER TABLE auth.webauthn_challenges ALTER COLUMN user_id DROP NOT NULL;
 ALTER TABLE auth.webauthn_challenges ADD COLUMN IF NOT EXISTS challenge_type text;
 ALTER TABLE auth.webauthn_challenges ADD COLUMN IF NOT EXISTS session_data jsonb;
 ALTER TABLE auth.webauthn_challenges ADD COLUMN IF NOT EXISTS created_at timestamptz DEFAULT now();

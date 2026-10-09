@@ -83,11 +83,7 @@ const SAML_RELAY_STATES: &str = include_str!("../sql/saml_relay_states.sql");
 const SSO_SESSIONS: &str = include_str!("../sql/sso_sessions.sql");
 const SCIM_USERS: &str = include_str!("../sql/scim_users.sql");
 const SCIM_TOKENS: &str = include_str!("../sql/scim_tokens.sql");
-
-// megabase:unit auth:sql-table:auth.webauthn_credentials
 const WEBAUTHN_CREDENTIALS: &str = include_str!("../sql/webauthn_credentials.sql");
-
-// megabase:unit auth:sql-table:auth.webauthn_challenges
 const WEBAUTHN_CHALLENGES: &str = include_str!("../sql/webauthn_challenges.sql");
 
 const OBJECTS: &[&str] = &[
@@ -183,6 +179,8 @@ pub async fn install_schema(database_url: &str) -> Result<(), SchemaError> {
     // megabase:unit auth:sql-table:auth.sso_sessions
     // megabase:unit auth:sql-table:auth.scim_users
     // megabase:unit auth:sql-table:auth.scim_tokens
+    // megabase:unit auth:sql-table:auth.webauthn_credentials
+    // megabase:unit auth:sql-table:auth.webauthn_challenges
     install_schema_within(database_url, INSTALL_DEADLINE).await
 }
 
@@ -377,6 +375,7 @@ mod tests {
             WEBAUTHN_CHALLENGES.contains("user_id uuid,"),
             "signup challenges require a nullable user_id"
         );
+        assert!(WEBAUTHN_CHALLENGES.contains("ALTER COLUMN user_id DROP NOT NULL"));
         assert!(
             !WEBAUTHN_CHALLENGES.contains("ALTER COLUMN user_id SET NOT NULL"),
             "do not force user_id NOT NULL on webauthn_challenges"
