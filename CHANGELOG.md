@@ -4,6 +4,29 @@ All notable changes to Megabase are documented in this file.
 The format is produced by [release-please](https://github.com/googleapis/release-please).
 Sections: Features, Bug Fixes, Performance, Conformance/judge, Documentation.
 
+## [0.1.1](https://github.com/Zouhairmaj/megabase/compare/v0.1.0...v0.1.1) (2026-10-09)
+
+
+### Features
+
+* **auth:** install mfa oauth one-time and refresh tables ([e708e9c](https://github.com/Zouhairmaj/megabase/commit/e708e9cfa4feb51859fef5a261eb31e6157001da))
+* jwt validation and config ([590b369](https://github.com/Zouhairmaj/megabase/commit/590b3695468341694282007d92f0a62d4eed5104))
+
+
+### Bug Fixes
+
+* **ci:** board sync status update ([#135](https://github.com/Zouhairmaj/megabase/issues/135)) ([c5e6aa8](https://github.com/Zouhairmaj/megabase/commit/c5e6aa88e0e3d0f0cefdc42ad7dd0087e978a195))
+* **site:** dark square treemaps sized for 1,024 units ([098b2d9](https://github.com/Zouhairmaj/megabase/commit/098b2d9f4ac16384a910bcd548b267543e871833))
+* **site:** remove cost mentions ([#130](https://github.com/Zouhairmaj/megabase/issues/130)) ([37f4128](https://github.com/Zouhairmaj/megabase/commit/37f412811bd052a1afbaed09b501b4f5ee684c23))
+
+
+### Conformance/judge
+
+* 0% (0/30, no regression) ([8281d6b](https://github.com/Zouhairmaj/megabase/commit/8281d6b6a63e710c37313bf97216db681c566386))
+* 0% → 0% (0/30, no regression) ([e708e9c](https://github.com/Zouhairmaj/megabase/commit/e708e9cfa4feb51859fef5a261eb31e6157001da))
+* not measured (Judge 0/30, no regression) ([098b2d9](https://github.com/Zouhairmaj/megabase/commit/098b2d9f4ac16384a910bcd548b267543e871833))
+* not measured (Judge 0/30, no regression) ([590b369](https://github.com/Zouhairmaj/megabase/commit/590b3695468341694282007d92f0a62d4eed5104))
+
 ## 0.1.0 (2026-10-09)
 
 
