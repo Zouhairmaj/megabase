@@ -344,6 +344,32 @@ fn build(
     if cname.is_file() && !same_path(&cname, &cname_out) {
         fs::copy(&cname, cname_out)?;
     }
+    write_shields(repo_root, out)?;
+    Ok(())
+}
+
+/// Shields.io endpoint JSON plus the summary the units badge reads.
+/// Only these files; never copy treemap SVGs (inlined at build time).
+fn write_shields(repo_root: &Path, out: &Path) -> io::Result<()> {
+    const FILES: &[&str] = &[
+        "badge-coverage.json",
+        "badge-conformance.json",
+        "summary.json",
+        "judge-results.json",
+    ];
+    let src_dir = repo_root.join("coverage");
+    let dest_dir = out.join("coverage");
+    let mut created = false;
+    for name in FILES {
+        let src = src_dir.join(name);
+        if src.is_file() {
+            if !created {
+                fs::create_dir_all(&dest_dir)?;
+                created = true;
+            }
+            fs::copy(&src, dest_dir.join(name))?;
+        }
+    }
     Ok(())
 }
 
@@ -903,6 +929,7 @@ mod tests {
         assert!(!html.contains("coverage/treemap-light.svg"));
         assert!(!html.contains("<picture"));
         assert!(!out.join("coverage/treemap.svg").exists());
+        assert!(!out.join("coverage/badge-coverage.json").exists());
         let _ = fs::remove_dir_all(&out);
     }
 
@@ -926,6 +953,7 @@ mod tests {
         assert!(!html.contains("coverage/treemap.svg"));
         assert!(!html.contains("coverage/treemap-light.svg"));
         assert!(!out.join("coverage/treemap.svg").exists());
+        assert!(!out.join("coverage/badge-coverage.json").exists());
         assert!(html.contains("data-component=\"rest\""));
         let _ = fs::remove_dir_all(&out);
     }
@@ -1003,6 +1031,26 @@ mod tests {
         assert!(!status.contains("coverage/treemap-light.svg"));
         assert!(!status.to_ascii_lowercase().contains("oxide"));
         assert!(!home.to_ascii_lowercase().contains("the spend"));
+        assert!(
+            home.contains(r#"class="tm-cells implemented""#),
+            "home hero/live treemaps must paint implemented units"
+        );
+        assert!(home.contains("#005441"));
+        assert!(status.contains(r#"class="tm-cells implemented""#));
+        assert!(status.contains("#005441"));
+        assert!(home.contains("status-panel-legend"));
+        assert!(home.contains("Units passing the judge"));
+        assert!(status.contains("conformant (matches real Supabase)"));
+        assert!(
+            out.join("coverage/badge-coverage.json").is_file(),
+            "live site must publish shields coverage JSON"
+        );
+        assert!(
+            out.join("coverage/badge-conformance.json").is_file(),
+            "live site must publish shields conformance JSON"
+        );
+        assert!(out.join("coverage/summary.json").is_file());
+        assert!(!out.join("coverage/treemap.svg").exists());
         let _ = fs::remove_dir_all(&out);
     }
 

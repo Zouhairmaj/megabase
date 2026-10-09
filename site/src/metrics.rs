@@ -247,12 +247,14 @@ pub fn load(repo_root: &Path) -> Metrics {
     let mut metrics = Metrics::placeholder();
     let summary_path = repo_root.join("coverage/summary.json");
     let units_path = repo_root.join("coverage/units.json");
+    let mut summary_value = None;
 
     if summary_path.is_file() {
         if let Ok(text) = fs::read_to_string(&summary_path) {
             if let Ok(value) = serde_json::from_str::<Value>(&text) {
                 apply_summary(&mut metrics, &value);
                 metrics.source = "coverage/summary.json".into();
+                summary_value = Some(value);
             }
         }
     }
@@ -266,6 +268,9 @@ pub fn load(repo_root: &Path) -> Metrics {
                         apply_summary(&mut metrics, summary);
                     }
                     merge_components(&mut metrics, summary);
+                    if summary_value.is_none() {
+                        summary_value = Some(summary.clone());
+                    }
                 }
                 if let Some(n) = value.get("total").and_then(Value::as_u64) {
                     if metrics.total.is_none() {
@@ -278,6 +283,25 @@ pub fn load(repo_root: &Path) -> Metrics {
                         metrics.source = "coverage/units.json".into();
                     }
                 }
+            }
+        }
+    }
+
+    // units.json is the denominator only; it has no per-unit state. Paint
+    // the four README states from coverage/summary.json counts so the site
+    // treemaps match the generated README treemap.
+    if let Some(summary) = summary_value.as_ref() {
+        apply_summary_states(&mut metrics, summary);
+        // apply_units counted conformant flags on units.json, which has none.
+        // Restore the headline from the summary total, not a component sum.
+        if metrics.source == "coverage/units.json" {
+            if let Some(n) = summary
+                .get("totals")
+                .and_then(|totals| totals.get("conformant"))
+                .and_then(Value::as_u64)
+                .or_else(|| summary.get("conformant").and_then(Value::as_u64))
+            {
+                metrics.passing = Some(n as usize);
             }
         }
     }
@@ -426,17 +450,7 @@ fn block_from_phase0(id: &str, stats: &Value) -> Option<ComponentBlock> {
                 .get("conformant")
                 .and_then(Value::as_u64)
                 .unwrap_or(0) as usize;
-            let impl_only = g_impl.saturating_sub(g_tested.max(g_conf));
-            let tested_only = g_tested.saturating_sub(g_conf);
-            let not_started = n.saturating_sub(g_impl.max(g_tested).max(g_conf));
-            let mut units = Vec::with_capacity(n);
-            units.extend(std::iter::repeat_n(UnitStatus::NotStarted, not_started));
-            units.extend(std::iter::repeat_n(UnitStatus::Implemented, impl_only));
-            units.extend(std::iter::repeat_n(UnitStatus::Tested, tested_only));
-            units.extend(std::iter::repeat_n(UnitStatus::Conformant, g_conf));
-            while units.len() < n {
-                units.push(UnitStatus::NotStarted);
-            }
+            let units = units_from_counts(n, g_impl, g_tested, g_conf);
             groups.push(FeatureGroup {
                 id: key.clone(),
                 label: group_label(&key),
@@ -448,17 +462,7 @@ fn block_from_phase0(id: &str, stats: &Value) -> Option<ComponentBlock> {
         id,
         component_label(id),
         groups,
-        {
-            let impl_only = implemented.saturating_sub(tested.max(conformant));
-            let tested_only = tested.saturating_sub(conformant);
-            let not_started = total.saturating_sub(implemented.max(tested).max(conformant));
-            let mut units = Vec::with_capacity(total);
-            units.extend(std::iter::repeat_n(UnitStatus::NotStarted, not_started));
-            units.extend(std::iter::repeat_n(UnitStatus::Implemented, impl_only));
-            units.extend(std::iter::repeat_n(UnitStatus::Tested, tested_only));
-            units.extend(std::iter::repeat_n(UnitStatus::Conformant, conformant));
-            units
-        },
+        units_from_counts(total, implemented, tested, conformant),
     ))
 }
 
@@ -618,6 +622,12 @@ fn status_of(item: &Value) -> UnitStatus {
     if item.get("conformant").and_then(Value::as_bool) == Some(true) {
         return UnitStatus::Conformant;
     }
+    if item.get("tested").and_then(Value::as_bool) == Some(true) {
+        return UnitStatus::Tested;
+    }
+    if item.get("implemented").and_then(Value::as_bool) == Some(true) {
+        return UnitStatus::Implemented;
+    }
     let status = item
         .get("status")
         .and_then(Value::as_str)
@@ -630,6 +640,99 @@ fn status_of(item: &Value) -> UnitStatus {
         "tested" | "test_passed" | "judge_passed" => UnitStatus::Tested,
         "implemented" => UnitStatus::Implemented,
         _ => UnitStatus::NotStarted,
+    }
+}
+
+/// Inclusive counts from `coverage/summary.json`: implemented includes
+/// tested and conformant; tested includes conformant.
+fn units_from_counts(
+    n: usize,
+    implemented: usize,
+    tested: usize,
+    conformant: usize,
+) -> Vec<UnitStatus> {
+    let impl_only = implemented.saturating_sub(tested.max(conformant));
+    let tested_only = tested.saturating_sub(conformant);
+    let not_started = n.saturating_sub(implemented.max(tested).max(conformant));
+    let mut units = Vec::with_capacity(n);
+    units.extend(std::iter::repeat_n(UnitStatus::NotStarted, not_started));
+    units.extend(std::iter::repeat_n(UnitStatus::Implemented, impl_only));
+    units.extend(std::iter::repeat_n(UnitStatus::Tested, tested_only));
+    units.extend(std::iter::repeat_n(UnitStatus::Conformant, conformant));
+    while units.len() < n {
+        units.push(UnitStatus::NotStarted);
+    }
+    units.truncate(n);
+    units
+}
+
+/// Overlay the four unit states from summary counts onto the unit list.
+///
+/// `coverage/units.json` lists every unit but does not store implemented /
+/// tested / conformant. Those counts live in `coverage/summary.json`.
+fn apply_summary_states(metrics: &mut Metrics, value: &Value) {
+    let Some(map) = value.get("components").and_then(Value::as_object) else {
+        return;
+    };
+    for block in &mut metrics.components {
+        let Some(stats) = map.get(&block.id) else {
+            continue;
+        };
+        if !block.groups.is_empty() {
+            if let Some(groups_map) = stats.get("groups").and_then(Value::as_object) {
+                for group in &mut block.groups {
+                    if let Some(gstats) = groups_map.get(&group.id) {
+                        let (implemented, tested, conformant) = counts_from(gstats);
+                        group.units =
+                            units_from_counts(group.units.len(), implemented, tested, conformant);
+                    }
+                }
+            } else {
+                paint_flat_across_groups(block, stats);
+            }
+        } else if !block.units.is_empty() {
+            let (implemented, tested, conformant) = counts_from(stats);
+            block.units = units_from_counts(block.units.len(), implemented, tested, conformant);
+        }
+        *block = ComponentBlock::from_groups(
+            block.id.clone(),
+            block.label,
+            std::mem::take(&mut block.groups),
+            std::mem::take(&mut block.units),
+        );
+    }
+    for block in &metrics.components {
+        let t = block.total();
+        if t > 0 {
+            metrics.by_component.insert(
+                block.id.clone(),
+                100.0 * (t - block.not_started) as f64 / t as f64,
+            );
+        }
+    }
+}
+
+fn counts_from(stats: &Value) -> (usize, usize, usize) {
+    (
+        stats
+            .get("implemented")
+            .and_then(Value::as_u64)
+            .unwrap_or(0) as usize,
+        stats.get("tested").and_then(Value::as_u64).unwrap_or(0) as usize,
+        stats.get("conformant").and_then(Value::as_u64).unwrap_or(0) as usize,
+    )
+}
+
+fn paint_flat_across_groups(block: &mut ComponentBlock, stats: &Value) {
+    let (implemented, tested, conformant) = counts_from(stats);
+    let painted = units_from_counts(block.total(), implemented, tested, conformant);
+    let mut i = 0;
+    for group in &mut block.groups {
+        let n = group.units.len();
+        if i + n <= painted.len() {
+            group.units = painted[i..i + n].to_vec();
+        }
+        i += n;
     }
 }
 
@@ -775,7 +878,27 @@ pub fn compact_pct(value: f64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
+    use serde_json::{json, Value};
+    use std::path::{Path, PathBuf};
+
+    fn write_coverage(dir: &Path, summary: Value, units: Value) {
+        let cov = dir.join("coverage");
+        std::fs::create_dir_all(&cov).expect("coverage dir");
+        std::fs::write(
+            cov.join("summary.json"),
+            serde_json::to_string(&summary).unwrap(),
+        )
+        .expect("summary");
+        std::fs::write(cov.join("units.json"), serde_json::to_string(&units).unwrap()).expect("units");
+    }
+
+    fn temp_dir(tag: &str) -> PathBuf {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!("megabase-site-metrics-{tag}-{stamp}"))
+    }
 
     #[test]
     fn placeholder_uses_em_dash_not_a_fake_total() {
@@ -829,5 +952,146 @@ mod tests {
         .clone();
         merge_phase0_components(&mut metrics, &map);
         assert_eq!(metrics.by_component.get("rest"), Some(&20.0));
+    }
+
+    #[test]
+    fn summary_counts_paint_units_that_have_no_status_field() {
+        let dir = temp_dir("paint");
+        write_coverage(
+            &dir,
+            json!({
+                "schema": 1,
+                "totals": { "units": 3, "implemented": 2, "tested": 0, "conformant": 0 },
+                "percent": { "coverage": 66.7, "conformance": 0.0, "done": 0.0 },
+                "components": {
+                    "auth": {
+                        "units": 3,
+                        "implemented": 2,
+                        "tested": 0,
+                        "conformant": 0,
+                        "groups": {
+                            "database": {
+                                "units": 3,
+                                "implemented": 2,
+                                "tested": 0,
+                                "conformant": 0
+                            }
+                        }
+                    }
+                }
+            }),
+            json!({
+                "schema": 1,
+                "total": 3,
+                "by_component": { "auth": 3 },
+                "units": [
+                    { "id": "auth:database:a", "component": "auth", "group": "database" },
+                    { "id": "auth:database:b", "component": "auth", "group": "database" },
+                    { "id": "auth:database:c", "component": "auth", "group": "database" }
+                ]
+            }),
+        );
+        let metrics = load(&dir);
+        let _ = std::fs::remove_dir_all(&dir);
+        let auth = metrics.component("auth").expect("auth");
+        assert_eq!(auth.total(), 3);
+        assert_eq!(auth.implemented, 2);
+        assert_eq!(auth.not_started, 1);
+        let db = auth
+            .groups
+            .iter()
+            .find(|g| g.id == "database")
+            .expect("database");
+        assert_eq!(
+            db.units
+                .iter()
+                .filter(|s| **s == UnitStatus::Implemented)
+                .count(),
+            2
+        );
+        assert!(
+            db.units.contains(&UnitStatus::Implemented),
+            "implemented units must survive a units.json that has no status field"
+        );
+        assert_eq!(metrics.passing, Some(0));
+        assert_eq!(metrics.passing_total_label(), "0 / 3");
+    }
+
+    #[test]
+    fn summary_conformant_restores_passing_headline() {
+        let dir = temp_dir("passing");
+        write_coverage(
+            &dir,
+            json!({
+                "schema": 1,
+                "totals": { "units": 2, "implemented": 1, "tested": 1, "conformant": 1 },
+                "percent": { "coverage": 50.0, "conformance": 50.0, "done": 50.0 },
+                "components": {
+                    "auth": {
+                        "units": 2,
+                        "implemented": 1,
+                        "tested": 1,
+                        "conformant": 1,
+                        "groups": {
+                            "database": {
+                                "units": 2,
+                                "implemented": 1,
+                                "tested": 1,
+                                "conformant": 1
+                            }
+                        }
+                    }
+                }
+            }),
+            json!({
+                "schema": 1,
+                "total": 2,
+                "by_component": { "auth": 2 },
+                "units": [
+                    { "id": "auth:database:a", "component": "auth", "group": "database" },
+                    { "id": "auth:database:b", "component": "auth", "group": "database" }
+                ]
+            }),
+        );
+        let metrics = load(&dir);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(
+            metrics.passing,
+            Some(1),
+            "headline must use summary totals.conformant, not the units.json overlay of 0"
+        );
+        assert_eq!(metrics.passing_total_label(), "1 / 2");
+        let auth = metrics.component("auth").expect("auth");
+        assert_eq!(auth.conformant, 1);
+        assert_eq!(auth.not_started, 1);
+        assert!(auth
+            .groups
+            .iter()
+            .flat_map(|g| g.units.iter())
+            .any(|s| *s == UnitStatus::Conformant));
+    }
+
+    #[test]
+    fn live_coverage_marks_implemented_auth_database_units() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("repo root");
+        let metrics = load(root);
+        let auth = metrics.component("auth").expect("auth in live coverage");
+        assert!(
+            auth.implemented > 0,
+            "live summary lists implemented Auth units; the site must not paint them as not started"
+        );
+        assert!(
+            auth.groups.iter().any(|g| g.id == "database"),
+            "auth database group"
+        );
+        let painted: usize = auth
+            .groups
+            .iter()
+            .flat_map(|g| g.units.iter())
+            .filter(|s| **s == UnitStatus::Implemented)
+            .count();
+        assert_eq!(painted, auth.implemented);
     }
 }

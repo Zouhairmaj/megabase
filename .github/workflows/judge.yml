@@ -38,13 +38,39 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: Build harness and binary
         run: cargo build --release --locked -p megabase -p megabase-judge --bin megabase --bin megabase-judge
+      - uses: ./.github/actions/dockerhub-login
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Pull reference images
+        run: |
+          set -euo pipefail
+          # public.ecr.aws rejects a parallel burst with "toomanyrequests:
+          # Rate exceeded". Pull one image at a time and retry.
+          mapfile -t images < <(docker compose -p megabase-judge \
+            -f vendor/supabase/docker/docker-compose.yml \
+            -f judge/compose.override.yml \
+            --env-file vendor/supabase/docker/.env.example \
+            config --images)
+          for image in "${images[@]}"; do
+            [ -n "$image" ] || continue
+            attempt=1
+            until docker pull "$image"; do
+              if [ "$attempt" -ge 8 ]; then
+                echo "failed to pull $image" >&2
+                exit 1
+              fi
+              sleep $((attempt * 5))
+              attempt=$((attempt + 1))
+            done
+          done
       - name: Reference stack
         run: |
           docker compose -p megabase-judge \
             -f vendor/supabase/docker/docker-compose.yml \
             -f judge/compose.override.yml \
             --env-file vendor/supabase/docker/.env.example \
-            up -d --wait --wait-timeout 300
+            up -d --pull never --wait --wait-timeout 300
       - name: Prepare Megabase database
         run: ./target/release/megabase-judge prepare
       - name: Megabase on :8100
@@ -112,40 +138,3 @@ jobs:
               repo: context.repo.repo,
               body,
             });
-
-  coverage-on-main:
-    name: Update coverage on main
-    needs: judge
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    concurrency:
-      group: judge-main
-      cancel-in-progress: false
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          submodules: recursive
-          token: ${{ secrets.GITHUB_TOKEN }}
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          name: judge-results
-          path: /tmp/judge
-      - run: cp /tmp/judge/judge-results.json coverage/judge-results.json
-      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
-        with:
-          toolchain: stable
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-      - run: cargo run --locked -p megabase-coverage -- update
-      - name: Commit generated status
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add coverage README.md PROGRESS.md docs/COMPATIBILITY.md docs/epics
-          if git diff --staged --quiet; then
-            echo "no coverage drift"
-            exit 0
-          fi
-          git commit -m "ci(coverage): regenerate status from judge on main"
-          git push
