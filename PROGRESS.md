@@ -203,11 +203,11 @@ waiting on a human.
     Pages badge publication is `.github/workflows/pages-badges.yml`
     (`workflow_run` only, no cache action) so a Judge artifact cannot
     poison the default-branch Actions cache.
-    `.github/workflows/pages.yml` is push and `workflow_dispatch` only
-    and checks out the event SHA. Both workflows share the `pages`
-    concurrency group. The site build copies the four coverage JSON
-    files from `gh-pages` when that snapshot is complete, and otherwise
-    keeps the checked-in files.
+    `.github/workflows/pages.yml` is push and `workflow_dispatch` only,
+    checks out the event SHA, and does not download `gh-pages` or a
+    Judge artifact (that job saves the default-branch Rust cache).
+    `pages-badges.yml` publishes shields JSON only; it does not deploy
+    the site.
 
 ## Tracking
 
