@@ -25,8 +25,7 @@ rustup toolchain install stable && rustc --version   # need >= 1.89 (MSRV); CI u
 cargo install just --locked
 git submodule update --init --recursive              # vendor/ pins; coverage and judge need them
 
-# iterate
-cargo test -p <crate>                 # one crate first; per-crate details in crates/AGENTS.md
+# iterate — Rust workflow, below
 just fmt                              # cargo fmt --all
 just run                              # serves :8000 (MEGABASE_PORT / MEGABASE_HOST)
 just fuzz jwt                         # cargo-fuzz (nightly); also gateway_http, rest_query
@@ -59,6 +58,33 @@ detects `libfuzzer_sys` in those `*.rs` files. `.github/workflows/fuzz.yml`
 runs each target for 60 seconds on PRs and 10 minutes on a schedule, and
 uploads `fuzz/artifacts/` on a crash. Needs nightly and `cargo-fuzz` 0.13.2;
 see [Contributing](docs/contributing.md#fuzzing).
+
+## Rust workflow
+
+Iterate with `cargo check -p <crate>` and
+`cargo clippy -p <crate> --all-targets --locked -- -D warnings`. Run full
+tests (`just ci`) only before pushing.
+
+Share state as `Arc<AppState>` and borrow it. Do not call `.clone()` to
+silence the borrow checker. The clone and borrow lints in
+`[workspace.lints.clippy]` are deny.
+
+Behaviour is the pinned source in `vendor/` and the unit spec in `specs/`.
+GOAL.md still decides disagreements: source beats docs, and the reference
+stack beats source.
+
+```rust
+async fn get_todo(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<i64>,
+) -> Result<Json<Todo>, Error> {
+    let todo = state.store.get(&id).await?;
+    Ok(Json(todo))
+}
+```
+
+A new external crate is rejected until its name is on the `[bans] allow`
+list in `deny.toml`. The comment there is how to propose one.
 
 **Generated files. Never hand-edit them; run the generator.**
 - `just coverage` writes `coverage/**`, the
