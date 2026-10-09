@@ -62,9 +62,11 @@ treemap.
 
 CI starts only the reference stack in Docker and runs Megabase on the
 runner (no image build) with `JWT_SECRET` and `DATABASE_URL` from
-`vendor/supabase/docker/.env.example`. `DATABASE_URL` uses the compose
-Postgres address, not host `:5432` (that port is Supavisor). Local
-`just judge-up` builds the Megabase image and points it at `db`.
+`vendor/supabase/docker/.env.example`. `DATABASE_URL` uses
+`supabase_admin` against the compose Postgres address, not host `:5432`
+(that port is Supavisor; the `postgres` role cannot `CREATE` in schema
+`auth`). Local `just judge-up` builds the Megabase image and points it
+at `db` the same way.
 
 ## Cases
 

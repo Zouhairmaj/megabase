@@ -51,10 +51,11 @@ jobs:
           JWT_SECRET=$(grep '^JWT_SECRET=' vendor/supabase/docker/.env.example | cut -d= -f2-)
           POSTGRES_PASSWORD=$(grep '^POSTGRES_PASSWORD=' vendor/supabase/docker/.env.example | cut -d= -f2-)
           POSTGRES_DB=$(grep '^POSTGRES_DB=' vendor/supabase/docker/.env.example | cut -d= -f2-)
-          # Host :5432 is Supavisor. Talk to the compose Postgres directly,
-          # same as judge/compose.override.yml's megabase service.
+          # Host :5432 is Supavisor. Talk to the compose Postgres directly.
+          # `postgres` is not a superuser here and cannot CREATE in schema
+          # auth; `supabase_admin` can run install_schema.
           DB_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' supabase-db)
-          DATABASE_URL="postgres://postgres:${POSTGRES_PASSWORD}@${DB_IP}:5432/${POSTGRES_DB}"
+          DATABASE_URL="postgres://supabase_admin:${POSTGRES_PASSWORD}@${DB_IP}:5432/${POSTGRES_DB}"
           MEGABASE_PORT=8100 MEGABASE_HOST=0.0.0.0 \
             JWT_SECRET="$JWT_SECRET" DATABASE_URL="$DATABASE_URL" \
             ./target/release/megabase > /tmp/megabase.log 2>&1 &
