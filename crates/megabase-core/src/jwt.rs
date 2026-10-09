@@ -221,8 +221,16 @@ mod tests {
     }
 
     fn sign(secret: &[u8], header: Value, payload: Value) -> String {
-        let header_b64 = URL_SAFE_NO_PAD.encode(serde_json::to_vec(&header).unwrap());
-        let payload_b64 = URL_SAFE_NO_PAD.encode(serde_json::to_vec(&payload).unwrap());
+        sign_raw(
+            secret,
+            &serde_json::to_vec(&header).unwrap(),
+            &serde_json::to_vec(&payload).unwrap(),
+        )
+    }
+
+    fn sign_raw(secret: &[u8], header: &[u8], payload: &[u8]) -> String {
+        let header_b64 = URL_SAFE_NO_PAD.encode(header);
+        let payload_b64 = URL_SAFE_NO_PAD.encode(payload);
         let signing_input = format!("{header_b64}.{payload_b64}");
         let mut mac = HmacSha256::new_from_slice(secret).unwrap();
         mac.update(signing_input.as_bytes());
@@ -448,5 +456,150 @@ mod tests {
         let debug = format!("{:?}", verifier());
         assert!(debug.contains("<redacted>"));
         assert!(!debug.contains(DEMO_SECRET));
+    }
+
+    #[test]
+    fn verify_uses_wall_clock() {
+        let token = sign(
+            DEMO_SECRET.as_bytes(),
+            hs256_header(),
+            json!({
+                "role": "authenticated",
+                "exp": i64::MAX / 2,
+            }),
+        );
+        let claims = verifier().verify(&token).unwrap();
+        assert_eq!(claims.role.as_deref(), Some("authenticated"));
+    }
+
+    #[test]
+    fn malformed_header_is_rejected() {
+        let bad_b64 = format!(
+            "!!!.{}.sig",
+            URL_SAFE_NO_PAD.encode(br#"{"role":"anon"}"#)
+        );
+        assert_eq!(
+            verifier().verify_at(&bad_b64, DURING_DEMO).unwrap_err(),
+            JwtError::MalformedHeader
+        );
+        let token = sign_raw(DEMO_SECRET.as_bytes(), b"{", br#"{"role":"anon"}"#);
+        assert_eq!(
+            verifier().verify_at(&token, DURING_DEMO).unwrap_err(),
+            JwtError::MalformedHeader
+        );
+    }
+
+    #[test]
+    fn missing_or_non_object_alg_is_rejected() {
+        let token = sign(
+            DEMO_SECRET.as_bytes(),
+            json!({"typ": "JWT"}),
+            json!({"role": "anon"}),
+        );
+        assert_eq!(
+            verifier().verify_at(&token, DURING_DEMO).unwrap_err(),
+            JwtError::BadAlgorithm(String::new())
+        );
+        let token = sign_raw(
+            DEMO_SECRET.as_bytes(),
+            b"[\"HS256\"]",
+            br#"{"role":"anon"}"#,
+        );
+        assert_eq!(
+            verifier().verify_at(&token, DURING_DEMO).unwrap_err(),
+            JwtError::BadAlgorithm(String::new())
+        );
+    }
+
+    #[test]
+    fn undecodable_signature_is_bad_crypto() {
+        let header = URL_SAFE_NO_PAD.encode(serde_json::to_vec(&hs256_header()).unwrap());
+        let payload = URL_SAFE_NO_PAD.encode(br#"{"role":"anon"}"#);
+        let token = format!("{header}.{payload}.!!!");
+        assert_eq!(
+            verifier().verify_at(&token, DURING_DEMO).unwrap_err(),
+            JwtError::BadCrypto
+        );
+    }
+
+    #[test]
+    fn malformed_payload_is_rejected() {
+        let header = serde_json::to_vec(&hs256_header()).unwrap();
+        let token = sign_raw(DEMO_SECRET.as_bytes(), &header, b"{");
+        assert_eq!(
+            verifier().verify_at(&token, DURING_DEMO).unwrap_err(),
+            JwtError::MalformedPayload
+        );
+        let token = sign_raw(DEMO_SECRET.as_bytes(), &header, b"[1]");
+        assert_eq!(
+            verifier().verify_at(&token, DURING_DEMO).unwrap_err(),
+            JwtError::MalformedPayload
+        );
+        let header_b64 = URL_SAFE_NO_PAD.encode(&header);
+        let signing_input = format!("{header_b64}.!!!");
+        let mut mac = HmacSha256::new_from_slice(DEMO_SECRET.as_bytes()).unwrap();
+        mac.update(signing_input.as_bytes());
+        let sig = URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes());
+        let token = format!("{signing_input}.{sig}");
+        assert_eq!(
+            verifier().verify_at(&token, DURING_DEMO).unwrap_err(),
+            JwtError::MalformedPayload
+        );
+    }
+
+    #[test]
+    fn missing_or_null_exp_is_allowed() {
+        let token = sign(
+            DEMO_SECRET.as_bytes(),
+            hs256_header(),
+            json!({"role": "anon"}),
+        );
+        let claims = verifier().verify_at(&token, DURING_DEMO).unwrap();
+        assert_eq!(claims.exp, None);
+        let token = sign(
+            DEMO_SECRET.as_bytes(),
+            hs256_header(),
+            json!({"role": "anon", "exp": null}),
+        );
+        let claims = verifier().verify_at(&token, DURING_DEMO).unwrap();
+        assert_eq!(claims.exp, None);
+    }
+
+    #[test]
+    fn exp_accepts_float_and_rejects_u64_overflow() {
+        let token = sign(
+            DEMO_SECRET.as_bytes(),
+            hs256_header(),
+            json!({"role": "anon", "exp": 1_791_504_000.9}),
+        );
+        let claims = verifier().verify_at(&token, DURING_DEMO).unwrap();
+        assert_eq!(claims.exp, Some(DURING_DEMO));
+
+        let token = sign(
+            DEMO_SECRET.as_bytes(),
+            hs256_header(),
+            json!({"role": "anon", "exp": u64::MAX}),
+        );
+        assert_eq!(
+            verifier().verify_at(&token, DURING_DEMO).unwrap_err(),
+            JwtError::ExpNotNumber
+        );
+
+        let token = sign(
+            DEMO_SECRET.as_bytes(),
+            hs256_header(),
+            json!({"role": "anon", "exp": 1e40}),
+        );
+        assert_eq!(
+            verifier().verify_at(&token, DURING_DEMO).unwrap_err(),
+            JwtError::ExpNotNumber
+        );
+    }
+
+    #[test]
+    fn bearer_token_rejects_short_scheme() {
+        assert_eq!(bearer_token(""), None);
+        assert_eq!(bearer_token("Bear"), None);
+        assert_eq!(bearer_token("bearer"), None);
     }
 }
