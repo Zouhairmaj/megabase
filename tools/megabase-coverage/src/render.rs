@@ -131,7 +131,7 @@ pub fn render(units: &UnitsFile, status: &Status, summary: &Summary) -> Result<O
     out.files.insert(
         cov.join("treemap.svg"),
         treemap::render(
-            treemap::Heading::Status,
+            &treemap::Heading::Status,
             &all,
             status,
             Metric::State,
@@ -142,7 +142,7 @@ pub fn render(units: &UnitsFile, status: &Status, summary: &Summary) -> Result<O
     out.files.insert(
         cov.join("treemap-light.svg"),
         treemap::render(
-            treemap::Heading::Status,
+            &treemap::Heading::Status,
             &all,
             status,
             Metric::State,
@@ -165,7 +165,7 @@ pub fn render(units: &UnitsFile, status: &Status, summary: &Summary) -> Result<O
         out.files.insert(
             cov.join(name),
             treemap::render(
-                treemap::Heading::Title(title.into()),
+                &treemap::Heading::Title(title.into()),
                 &all,
                 status,
                 metric,
@@ -179,7 +179,7 @@ pub fn render(units: &UnitsFile, status: &Status, summary: &Summary) -> Result<O
         out.files.insert(
             cov.join(format!("treemap-{id}.svg")),
             treemap::render(
-                treemap::Heading::Title((*label).into()),
+                &treemap::Heading::Title((*label).into()),
                 &members,
                 status,
                 Metric::State,

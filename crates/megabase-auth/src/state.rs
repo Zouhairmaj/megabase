@@ -27,8 +27,8 @@ impl AuthState {
         Self {
             jwt,
             database_url: lookup("DATABASE_URL").filter(|url| !url.is_empty()),
-            oauth_server_enabled: env_bool(lookup("GOTRUE_OAUTH_SERVER_ENABLED"), false),
-            custom_oauth_enabled: env_bool(lookup("GOTRUE_CUSTOM_OAUTH_ENABLED"), true),
+            oauth_server_enabled: env_bool(lookup("GOTRUE_OAUTH_SERVER_ENABLED").as_deref(), false),
+            custom_oauth_enabled: env_bool(lookup("GOTRUE_CUSTOM_OAUTH_ENABLED").as_deref(), true),
             admin_roles: lookup("GOTRUE_JWT_ADMIN_ROLES")
                 .map(|raw| {
                     raw.split(',')
@@ -52,8 +52,8 @@ impl AuthState {
     }
 }
 
-fn env_bool(raw: Option<String>, default: bool) -> bool {
-    match raw.as_deref().map(str::trim) {
+fn env_bool(raw: Option<&str>, default: bool) -> bool {
+    match raw.map(str::trim) {
         Some(value) if value.eq_ignore_ascii_case("true") || value == "1" => true,
         Some(value) if value.eq_ignore_ascii_case("false") || value == "0" => false,
         _ => default,

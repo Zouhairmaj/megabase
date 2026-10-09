@@ -92,11 +92,11 @@ impl IntoResponse for AuthError {
     }
 }
 
-pub fn json_ok(value: serde_json::Value) -> Response {
+pub fn json_ok(value: &serde_json::Value) -> Response {
     (
         StatusCode::OK,
         [(CONTENT_TYPE, HeaderValue::from_static("application/json"))],
-        serde_json::to_vec(&value).unwrap_or_else(|_| b"null".to_vec()),
+        serde_json::to_vec(value).unwrap_or_else(|_| b"null".to_vec()),
     )
         .into_response()
 }
