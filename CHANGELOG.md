@@ -4,6 +4,40 @@ All notable changes to Megabase are documented in this file.
 The format is produced by [release-please](https://github.com/googleapis/release-please).
 Sections: Features, Bug Fixes, Performance, Conformance/judge, Documentation.
 
+## [0.1.1](https://github.com/Zouhairmaj/megabase/compare/v0.1.0...v0.1.1) (2026-10-09)
+
+
+### Features
+
+* **auth:** install auth sql functions and tables ([9dbe7f6](https://github.com/Zouhairmaj/megabase/commit/9dbe7f6289a932e6391ef2877615f92b82621e81))
+* **auth:** install saml sso scim users and sessions tables ([c6aa059](https://github.com/Zouhairmaj/megabase/commit/c6aa0590b3ebf727685cafb640c80ad1aaf457e7))
+* **auth:** install webauthn challenges and credentials tables ([#148](https://github.com/Zouhairmaj/megabase/issues/148)) ([10c4857](https://github.com/Zouhairmaj/megabase/commit/10c485777fdd8b710fb03d735af20cfe4e4df126))
+* **judge:** database side-effect checks ([#149](https://github.com/Zouhairmaj/megabase/issues/149)) ([9eca1b4](https://github.com/Zouhairmaj/megabase/commit/9eca1b431b306ee1807e31c3015ff62dcd65afd4))
+
+
+### Bug Fixes
+
+* **ci:** dispatch required checks on lockfile commits ([#161](https://github.com/Zouhairmaj/megabase/issues/161)) ([0d09a48](https://github.com/Zouhairmaj/megabase/commit/0d09a4800ec5f9c06745e2c5896ac11320e98509))
+* **coverage:** traffic-light badge colors ([#165](https://github.com/Zouhairmaj/megabase/issues/165)) ([30f82d3](https://github.com/Zouhairmaj/megabase/commit/30f82d32dac9c0f512e9d89b6059100ebb8c7fa7))
+* **site:** align roadmap card progress bars ([#145](https://github.com/Zouhairmaj/megabase/issues/145)) ([bd0aa72](https://github.com/Zouhairmaj/megabase/commit/bd0aa729e20c844cb14724e22583764d2a6255ab))
+* **site:** patch rustsec-2026-0206 and 0192 ([#156](https://github.com/Zouhairmaj/megabase/issues/156)) ([0165042](https://github.com/Zouhairmaj/megabase/commit/016504259a8cf4c39d46a5e21e79c10eaad50990))
+* **site:** show implemented units in treemaps ([#154](https://github.com/Zouhairmaj/megabase/issues/154)) ([5f2e9a2](https://github.com/Zouhairmaj/megabase/commit/5f2e9a29c7ea0da80fa42e9ea4cbc9f0263e5b69))
+
+
+### Conformance/judge
+
+* 0% (unchanged) ([c6aa059](https://github.com/Zouhairmaj/megabase/commit/c6aa0590b3ebf727685cafb640c80ad1aaf457e7))
+* not measured ([30f82d3](https://github.com/Zouhairmaj/megabase/commit/30f82d32dac9c0f512e9d89b6059100ebb8c7fa7))
+* not measured (README only) ([02324aa](https://github.com/Zouhairmaj/megabase/commit/02324aaa2a41683185c7a071f2a84f071ab642fc))
+
+
+### Documentation
+
+* add per-unit template and level 1 stubs ([#146](https://github.com/Zouhairmaj/megabase/issues/146)) ([e0bdddf](https://github.com/Zouhairmaj/megabase/commit/e0bdddfd30ddf894097c77aefb85145345a74e92))
+* color-code coverage badges ([#159](https://github.com/Zouhairmaj/megabase/issues/159)) ([f8a8d0c](https://github.com/Zouhairmaj/megabase/commit/f8a8d0ce464530e35b939b5bd39ee1ed8e8a1b65))
+* drop internal note from readme status ([#167](https://github.com/Zouhairmaj/megabase/issues/167)) ([70d1f79](https://github.com/Zouhairmaj/megabase/commit/70d1f7995e4d8e8422d2a18cc5543e7136409edb))
+* readme badges ([02324aa](https://github.com/Zouhairmaj/megabase/commit/02324aaa2a41683185c7a071f2a84f071ab642fc))
+
 ## 0.1.0 (2026-10-09)
 
 
