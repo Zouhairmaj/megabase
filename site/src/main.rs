@@ -21,7 +21,7 @@ use std::path::{Path, PathBuf};
 use metrics::Metrics;
 
 pub const GITHUB: &str = "https://github.com/Zouhairmaj/megabase";
-const ORIGIN: &str = "https://zouhairmaj.github.io/megabase";
+const ORIGIN: &str = "https://megabase-site.workers.dev";
 
 #[derive(Clone, Copy)]
 enum Kind {
@@ -148,8 +148,24 @@ fn main() -> io::Result<()> {
     Ok(())
 }
 
+fn same_path(a: &Path, b: &Path) -> bool {
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let abs = |p: &Path| {
+        if p.is_absolute() {
+            p.to_path_buf()
+        } else {
+            cwd.join(p)
+        }
+    };
+    match (abs(a).canonicalize(), abs(b).canonicalize()) {
+        (Ok(x), Ok(y)) => x == y,
+        _ => abs(a) == abs(b),
+    }
+}
+
 fn build(site_root: &Path, repo_root: &Path, out: &Path, metrics: &Metrics) -> io::Result<()> {
-    if out.exists() {
+    // Wrangler serves `./site`. Never wipe the generator crate if --out points here.
+    if out.exists() && !same_path(out, site_root) {
         fs::remove_dir_all(out)?;
     }
     copy_dir(&site_root.join("static"), out)?;

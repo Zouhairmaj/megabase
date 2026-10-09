@@ -2,3 +2,20 @@
 /dist
 __pycache__/
 _render-*.html
+
+# Built HTML/CSS copied to ./site for Wrangler (`--out site`).
+/index.html
+/404.html
+/sitemap.xml
+/manifesto/
+/styles.css
+/fonts/
+/logo.svg
+/favicon.svg
+/og-card.png
+/og-card.svg
+/toc.js
+/robots.txt
+/apple-touch-icon.png
+/.nojekyll
+

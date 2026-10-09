@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://zouhairmaj.github.io/megabase/sitemap.xml
+Sitemap: https://megabase-site.workers.dev/sitemap.xml

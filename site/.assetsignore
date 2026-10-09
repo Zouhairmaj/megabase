@@ -1,0 +1,10 @@
+# Generator source — Cloudflare should only serve the built HTML/CSS/fonts.
+src/
+templates/
+target/
+dist/
+Cargo.toml
+Cargo.lock
+.gitignore
+.assetsignore
+static/

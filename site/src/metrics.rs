@@ -35,11 +35,83 @@ pub struct ComponentBlock {
     pub implemented: usize,
     pub tested: usize,
     pub conformant: usize,
+    pub units: Vec<UnitStatus>,
 }
 
 impl ComponentBlock {
+    pub fn from_counts(
+        id: impl Into<String>,
+        label: &'static str,
+        not_started: usize,
+        implemented: usize,
+        tested: usize,
+        conformant: usize,
+    ) -> Self {
+        let mut units = Vec::with_capacity(not_started + implemented + tested + conformant);
+        units.extend(std::iter::repeat_n(UnitStatus::NotStarted, not_started));
+        units.extend(std::iter::repeat_n(UnitStatus::Implemented, implemented));
+        units.extend(std::iter::repeat_n(UnitStatus::Tested, tested));
+        units.extend(std::iter::repeat_n(UnitStatus::Conformant, conformant));
+        Self {
+            id: id.into(),
+            label,
+            not_started,
+            implemented,
+            tested,
+            conformant,
+            units,
+        }
+    }
+
+    pub fn from_units(id: impl Into<String>, label: &'static str, units: Vec<UnitStatus>) -> Self {
+        let not_started = units
+            .iter()
+            .filter(|s| **s == UnitStatus::NotStarted)
+            .count();
+        let implemented = units
+            .iter()
+            .filter(|s| **s == UnitStatus::Implemented)
+            .count();
+        let tested = units.iter().filter(|s| **s == UnitStatus::Tested).count();
+        let conformant = units
+            .iter()
+            .filter(|s| **s == UnitStatus::Conformant)
+            .count();
+        Self {
+            id: id.into(),
+            label,
+            not_started,
+            implemented,
+            tested,
+            conformant,
+            units,
+        }
+    }
+
     pub fn total(&self) -> usize {
-        self.not_started + self.implemented + self.tested + self.conformant
+        if self.units.is_empty() {
+            self.not_started + self.implemented + self.tested + self.conformant
+        } else {
+            self.units.len()
+        }
+    }
+
+    pub fn unit_statuses(&self) -> Vec<UnitStatus> {
+        if !self.units.is_empty() {
+            return self.units.clone();
+        }
+        let mut units = Vec::with_capacity(self.total());
+        units.extend(std::iter::repeat_n(
+            UnitStatus::NotStarted,
+            self.not_started,
+        ));
+        units.extend(std::iter::repeat_n(
+            UnitStatus::Implemented,
+            self.implemented,
+        ));
+        units.extend(std::iter::repeat_n(UnitStatus::Tested, self.tested));
+        units.extend(std::iter::repeat_n(UnitStatus::Conformant, self.conformant));
+        units
     }
 }
 
@@ -203,14 +275,14 @@ fn blocks_from_summary(metrics: &mut Metrics, value: &Value) {
         if total == 0 {
             continue;
         }
-        blocks.push(ComponentBlock {
-            id: (*id).into(),
-            label: component_label(id),
+        blocks.push(ComponentBlock::from_counts(
+            *id,
+            component_label(id),
             not_started,
-            implemented: implemented_only,
-            tested: tested_only,
+            implemented_only,
+            tested_only,
             conformant,
-        });
+        ));
     }
     // Any extra components not in the canonical order.
     for (id, stats) in map {
@@ -221,20 +293,20 @@ fn blocks_from_summary(metrics: &mut Metrics, value: &Value) {
         if total == 0 {
             continue;
         }
-        blocks.push(ComponentBlock {
-            id: id.clone(),
-            label: component_label(id),
-            not_started: total,
-            implemented: 0,
-            tested: 0,
-            conformant: 0,
-        });
+        blocks.push(ComponentBlock::from_counts(
+            id.clone(),
+            component_label(id),
+            total,
+            0,
+            0,
+            0,
+        ));
     }
     metrics.components = blocks;
 }
 
 fn apply_units(metrics: &mut Metrics, list: &[Value]) {
-    let mut counts: BTreeMap<String, [usize; 4]> = BTreeMap::new();
+    let mut units_by: BTreeMap<String, Vec<UnitStatus>> = BTreeMap::new();
     let mut passing = 0usize;
     for item in list {
         let component = item
@@ -246,20 +318,18 @@ fn apply_units(metrics: &mut Metrics, list: &[Value]) {
         if status == UnitStatus::Conformant {
             passing += 1;
         }
-        let slot = match status {
-            UnitStatus::NotStarted => 0,
-            UnitStatus::Implemented => 1,
-            UnitStatus::Tested => 2,
-            UnitStatus::Conformant => 3,
-        };
-        counts.entry(component).or_insert([0; 4])[slot] += 1;
+        units_by.entry(component).or_default().push(status);
     }
 
     let total = list.len();
     metrics.total = Some(total);
     metrics.passing = Some(passing);
     if metrics.coverage.is_none() && total > 0 {
-        let implemented = counts.values().map(|c| c[1] + c[2] + c[3]).sum::<usize>();
+        let implemented = units_by
+            .values()
+            .flatten()
+            .filter(|s| **s != UnitStatus::NotStarted)
+            .count();
         metrics.coverage = Some(100.0 * implemented as f64 / total as f64);
     }
     if metrics.conformance.is_none() && total > 0 {
@@ -268,36 +338,27 @@ fn apply_units(metrics: &mut Metrics, list: &[Value]) {
 
     let mut blocks = Vec::new();
     for id in COMPONENT_ORDER {
-        let Some([ns, imp, tes, con]) = counts.get(*id).copied() else {
+        let Some(units) = units_by.remove(*id) else {
             continue;
         };
-        blocks.push(ComponentBlock {
-            id: (*id).into(),
-            label: component_label(id),
-            not_started: ns,
-            implemented: imp,
-            tested: tes,
-            conformant: con,
-        });
-        let t = ns + imp + tes + con;
+        let t = units.len();
+        let implemented = units
+            .iter()
+            .filter(|s| **s != UnitStatus::NotStarted)
+            .count();
         if t > 0 {
             metrics
                 .by_component
-                .insert((*id).into(), 100.0 * (imp + tes + con) as f64 / t as f64);
+                .insert((*id).into(), 100.0 * implemented as f64 / t as f64);
         }
+        blocks.push(ComponentBlock::from_units(*id, component_label(id), units));
     }
-    for (id, [ns, imp, tes, con]) in &counts {
-        if COMPONENT_ORDER.contains(&id.as_str()) {
-            continue;
-        }
-        blocks.push(ComponentBlock {
-            id: id.clone(),
-            label: component_label(id),
-            not_started: *ns,
-            implemented: *imp,
-            tested: *tes,
-            conformant: *con,
-        });
+    for (id, units) in units_by {
+        blocks.push(ComponentBlock::from_units(
+            id.clone(),
+            component_label(&id),
+            units,
+        ));
     }
     metrics.components = blocks;
 }
