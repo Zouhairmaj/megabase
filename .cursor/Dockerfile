@@ -1,6 +1,7 @@
 # Base image for Cursor Cloud Agents.
 # Do not COPY the repository: Cursor checks out the requested revision separately.
-FROM ubuntu:24.04
+# Digest verified against Docker Hub tag ubuntu:24.04 on 2026-10-09 (Scorecard Pinned-Dependencies).
+FROM ubuntu:24.04@sha256:534baea6a22c03a63003dbc8dbe78fe34bc0d7e595d9a9dc9834884ff530eb55
 
 ENV DEBIAN_FRONTEND=noninteractive \
     CARGO_HOME=/home/ubuntu/.cargo \

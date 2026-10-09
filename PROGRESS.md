@@ -126,7 +126,8 @@ waiting on a human.
     `bootstrap-sha` is Day 0 so the first release PR is Phase 0 at
     `0.1.0` (`release-as`). The v0.1.0 release PR must delete
     `release-as` before it merges.
-    Container `FROM` lines are pinned by digest.
+    Container `FROM` lines are pinned by digest (root image and
+    `.cursor/Dockerfile`).
 
 ## Tracking
 
