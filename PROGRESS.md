@@ -280,16 +280,21 @@ Physically impossible for the agent (repository settings or credentials):
 - [x] Allow GitHub Actions to create and approve pull requests
       (Settings → Actions → General → Workflow permissions;
       `can_approve_pull_request_reviews=true`. Run 37961663758 predates it.)
-- [ ] Give secret `RELEASE_PLEASE_TOKEN` Workflows: Read and write
-      (fine-grained PAT or GitHub App; classic PAT: `workflow` plus
-      `repo`), plus Contents and Pull requests Read and write. The
-      secret is set, but `POST /git/trees` on this repo's base tree
-      returns 403 without Workflows write, and release-please prints
-      `Error adding to tree`. Release probes that call and falls back
-      to `GITHUB_TOKEN` for the release PR until the secret can create
-      a tree. Lockfile pushes still need this user or app token so
-      required checks start natively. Exact steps: `HUMAN_LOG.md`
-      Pending, 2026-10-09.
+- [ ] Grant `RELEASE_PLEASE_TOKEN` the permissions release-please uses.
+      Fine-grained PAT or GitHub App for `Zouhairmaj/megabase`:
+      **Contents: Read and write** (creating a GitHub Release is this
+      permission; run 38003872424 failed with `Resource not accessible
+      by personal access token` on
+      [create-a-release](https://docs.github.com/rest/releases/releases#create-a-release)
+      after pull request #144 merged), **Pull requests: Read and write**,
+      and **Workflows: Read and write** (`POST /git/trees` with this
+      repo's base tree returns 403 without it, and release-please prints
+      `Error adding to tree`). Classic PAT: `repo` and `workflow`. The
+      Release workflow probes the tree call and falls back to
+      `GITHUB_TOKEN` only on HTTP 403 or 404. A token that passes that
+      probe and then cannot create a release still needs Contents write.
+      Lockfile pushes keep using this secret so required checks start
+      natively.
 - [ ] Allow `github-actions` to publish GitHub Releases / tags on `main`
 - [ ] Enforce CODEOWNERS
 - [x] Coverage commits on `main` are not used. Shields JSON is

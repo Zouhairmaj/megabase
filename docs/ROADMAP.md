@@ -105,18 +105,11 @@ A TOML extra-file updater bumps `[workspace.package].version`; member
 crates inherit. The Release workflow runs `cargo update -w` on
 `release-please--branches--*` and commits `Cargo.lock` if workspace
 member versions drifted, so `--locked` CI (Build, Codecov, Bencher,
-Protected paths, Judge) stays green. release-please writes that PR with
-`POST /git/trees` and `base_tree` set to `main`. A fine-grained PAT or
-GitHub App token needs Contents, Pull requests, and Workflows (each
-Read and write); a classic PAT needs `repo` and `workflow`. Without
-Workflows write, GitHub returns 403 because the base tree contains
-`.github/workflows`, and release-please prints only `Error adding to
-tree`. The workflow probes that call. When `RELEASE_PLEASE_TOKEN`
-fails it, the release PR update uses `GITHUB_TOKEN` (`contents: write`
-on that job) and the log names the missing scopes (`HUMAN_LOG.md`).
-The lockfile commit is still pushed with `RELEASE_PLEASE_TOKEN` when
-the secret is set: a user or GitHub App push starts workflows, and a
-`GITHUB_TOKEN` push does not. When the secret is unset, or that
+Protected paths, Judge) stays green. That commit is pushed with
+`RELEASE_PLEASE_TOKEN` when set (a user PAT or GitHub App whose pushes
+start workflows). `GITHUB_TOKEN` pushes do not trigger
+`push`/`pull_request` workflows. Token permissions are under
+Human-only actions in `PROGRESS.md`. When the secret is unset, or the
 lockfile commit was not pushed, the lockfile job `workflow_dispatch`es
 CI, Bencher, and Judge on the release branch
 (native check runs on that SHA). If that ref's workflow files lack
