@@ -181,8 +181,8 @@ pub fn alt_text(metrics: &Metrics) -> String {
     }
     format!(
         "Component map: {} of {} units. One whole square per unit, grouped by component and feature group.",
-        metrics.passing.map(comma).unwrap_or_else(|| "0".into()),
-        metrics.total.map(comma).unwrap_or_else(|| "0".into()),
+        metrics.passing.map(comma).unwrap_or_else(|| "—".into()),
+        metrics.total.map(comma).unwrap_or_else(|| "—".into()),
     )
 }
 
@@ -231,11 +231,12 @@ fn fallback_layout(comps: &[&ComponentBlock], preset: Preset) -> Layout {
     try_layout(comps, preset, 1, 0).unwrap_or_else(|| {
         let weights = component_weights(comps, 1, 0);
         let rects = pack_rects(&weights, 0, 0, preset.width, preset.height, preset.gap);
-        layout_from_rects(comps, &rects, preset).unwrap_or_else(|| Layout {
-            preset,
-            s: S_MIN,
-            unit_gap: unit_gap(S_MIN),
-            components: Vec::new(),
+        layout_from_rects(comps, &rects, preset).unwrap_or_else(|| {
+            let total: usize = comps.iter().map(|c| c.total()).sum();
+            panic!(
+                "treemap preset {} cannot fit {total} units at {S_MIN}px; adjust the preset",
+                preset.id
+            )
         })
     })
 }
@@ -1919,11 +1920,18 @@ mod tests {
         for c in &live {
             let name = c.label.to_ascii_uppercase();
             assert!(svg.contains(&name), "hero must label component {name}");
-            let count = format!("/{}", comma(c.total()));
-            assert!(
-                svg.contains(&count) || svg.contains(&name),
-                "hero label should include a count when it fits"
-            );
+            let full = format!("{name} {}/{}", comma(c.conformant), comma(c.total()));
+            let chunk = svg
+                .split("<g data-component=\"")
+                .find(|ch| ch.starts_with(&format!("{}\"", c.id)))
+                .expect("component block");
+            let bw = parse_i(chunk, "data-w=");
+            if LABEL_INSET + mono_w(&full, 8) + 4 <= bw {
+                assert!(
+                    svg.contains(&full),
+                    "hero label {name} should include its count"
+                );
+            }
         }
         assert!(svg.contains("/"));
         let groups = parse_groups(&svg);
@@ -1940,6 +1948,46 @@ mod tests {
         let area: f64 = rects.iter().map(|r| r[2] * r[3]).sum();
         assert!((area - 462.0 * 200.0).abs() < 1.0);
         assert!(rects[0][2] * rects[0][3] >= rects[1][2] * rects[1][3] - 1.0);
+    }
+
+    #[test]
+    fn alt_text_uses_em_dash_when_passing_is_missing() {
+        let mut metrics = Metrics::placeholder();
+        metrics.total = Some(8);
+        metrics.components = vec![ComponentBlock::from_counts("rest", "REST", 8, 0, 0, 0)];
+        let text = alt_text(&metrics);
+        assert!(
+            text.contains("— of 8"),
+            "missing passing must be an em dash, not a fabricated zero: {text}"
+        );
+        assert!(!text.contains("0 of"));
+    }
+
+    #[test]
+    #[should_panic(expected = "cannot fit")]
+    fn overflow_preset_fails_the_build() {
+        let mut metrics = Metrics::placeholder();
+        let n = 5000usize;
+        metrics.total = Some(n);
+        metrics.passing = Some(0);
+        metrics.components = [
+            "rest",
+            "auth",
+            "realtime",
+            "storage",
+            "functions",
+            "pooler",
+            "meta",
+            "studio",
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(i, id)| {
+            let share = n / 8 + usize::from(i < n % 8);
+            ComponentBlock::from_counts(id, "Block", share, 0, 0, 0)
+        })
+        .collect();
+        let _ = render(&metrics, HERO_MOBILE);
     }
 
     #[test]
