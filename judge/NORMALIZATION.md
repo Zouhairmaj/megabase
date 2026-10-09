@@ -22,6 +22,7 @@ Headers the gateway invents (`date`, `server`, `via`, `x-kong-*`,
 | Kind | Rule |
 |---|---|
 | Compact JWT (`eyJ….….…`) | `<jwt>` |
+| bcrypt hash (`$2a$10$…`) | `<bcrypt>` |
 | ISO-8601 / RFC 3339 timestamp | `<timestamp>` |
 | UUID | `<uuid>` |
 | JSON keys `expires_at`, `iat`, `exp` | replaced by `"<key>"` when the value is not null |
@@ -35,6 +36,22 @@ Headers the gateway invents (`date`, `server`, `via`, `x-kong-*`,
 Error codes, error messages, JSON field names, row order when the request
 asked for `order=`, and header names other than `content-type`. If those
 differ, the case fails.
+
+## Database
+
+Applied identically to the reference database (`postgres`) and the
+Megabase database (`megabase`) before a catalog or row snapshot is
+compared. Implemented in `judge/harness/src/db.rs`.
+
+| Kind | Compared | Normalized |
+|---|---|---|
+| Table catalog | column name and attnum order, `pg_type.typname`, `NOT NULL`, generated expression, `relrowsecurity`, `pg_get_indexdef`, `pg_get_constraintdef` (PK, UNIQUE, CHECK, FK) | SQL text: strip `--` comments, collapse whitespace, lowercase outside `'quoted'` literals. A required object missing on both sides fails; `absent = true` passes only when both databases lack the relation |
+| Function catalog | identity arguments, result type, language, `provolatile`, `prosrc` | same SQL normalization on result type and body |
+| Row snapshot | `jsonb_agg(row_to_json(t))` of `SELECT *` | HTTP JSON rules (including bcrypt), plus non-empty `auth.users` secret columns (`encrypted_password`, `*_token`), then sort the row array by serialized text. Mutating HTTP cases compare the before/after row delta as a multiset (duplicate normalized rows are counted), not the full table. Empty token strings stay empty so an autoconfirmed clear still differs from a leftover token. |
+
+Owners, ACLs, `column_default` and comments are not compared: they
+depend on which cluster roles exist and on cosmetic `COMMENT ON`.
+`storage.objects` is out of scope until Level 2.
 
 ## Captures
 

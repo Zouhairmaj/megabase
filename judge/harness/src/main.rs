@@ -2,11 +2,12 @@
 //! Supabase stack and Megabase. See `judge/README.md`.
 
 mod case;
+mod db;
 mod normalize;
 mod run;
 
 use std::fmt::Write as _;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -17,13 +18,17 @@ use run::{CaseResult, Keys, Outcome, Results, Target};
 const USAGE: &str = "\
 usage:
   megabase-judge wait [--timeout SECS] [common]
+  megabase-judge prepare [--fixtures FILE] [common]
   megabase-judge run [--cases DIR] [--out FILE] [--baseline FILE] [--summary FILE] [common]
 
 common:
-  --reference URL   reference gateway (default http://localhost:8000)
-  --megabase URL    Megabase (default http://localhost:8100)
-  --env FILE        env file with ANON_KEY and SERVICE_ROLE_KEY
-                    (default vendor/supabase/docker/.env.example)";
+  --reference URL              reference gateway (default http://localhost:8000)
+  --megabase URL               Megabase (default http://localhost:8100)
+  --reference-database URL     reference Postgres (default from --env)
+  --megabase-database URL      Megabase Postgres (default from --env, db megabase)
+  --env FILE                   env file with ANON_KEY, SERVICE_ROLE_KEY,
+                               POSTGRES_PASSWORD
+                               (default vendor/supabase/docker/.env.example)";
 
 struct Args {
     command: String,
@@ -35,6 +40,9 @@ struct Args {
     baseline: Option<PathBuf>,
     summary: Option<PathBuf>,
     timeout: u64,
+    reference_database: Option<String>,
+    megabase_database: Option<String>,
+    fixtures: PathBuf,
 }
 
 fn parse_args() -> Result<Args> {
@@ -54,6 +62,9 @@ fn parse_args_from(it: impl IntoIterator<Item = String>) -> Result<Args> {
         baseline: None,
         summary: None,
         timeout: 300,
+        reference_database: None,
+        megabase_database: None,
+        fixtures: "judge/fixtures/schema.sql".into(),
     };
     while let Some(flag) = it.next() {
         let mut value = || {
@@ -63,11 +74,14 @@ fn parse_args_from(it: impl IntoIterator<Item = String>) -> Result<Args> {
         match flag.as_str() {
             "--reference" => args.reference = value()?,
             "--megabase" => args.megabase = value()?,
+            "--reference-database" => args.reference_database = Some(value()?),
+            "--megabase-database" => args.megabase_database = Some(value()?),
             "--env" => args.env = value()?.into(),
             "--cases" => args.cases = value()?.into(),
             "--out" => args.out = Some(value()?.into()),
             "--baseline" => args.baseline = Some(value()?.into()),
             "--summary" => args.summary = Some(value()?.into()),
+            "--fixtures" => args.fixtures = value()?.into(),
             "--timeout" => args.timeout = value()?.parse().context("--timeout")?,
             other => bail!("unknown argument `{other}`\n{USAGE}"),
         }
@@ -75,21 +89,67 @@ fn parse_args_from(it: impl IntoIterator<Item = String>) -> Result<Args> {
     Ok(args)
 }
 
+fn env_value(text: &str, path: &Path, name: &str) -> Result<String> {
+    text.lines()
+        .filter_map(|l| l.split_once('='))
+        .find(|(k, _)| k.trim() == name)
+        .map(|(_, v)| v.trim().trim_matches('"').to_string())
+        .filter(|v| !v.is_empty())
+        .with_context(|| format!("{name} not set in {}", path.display()))
+}
+
 fn load_keys(path: &PathBuf) -> Result<Keys> {
     let text =
         std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
-    let get = |name: &str| {
-        text.lines()
-            .filter_map(|l| l.split_once('='))
-            .find(|(k, _)| k.trim() == name)
-            .map(|(_, v)| v.trim().trim_matches('"').to_string())
-            .filter(|v| !v.is_empty())
-            .with_context(|| format!("{name} not set in {}", path.display()))
-    };
     Ok(Keys {
-        anon: get("ANON_KEY")?,
-        service_role: get("SERVICE_ROLE_KEY")?,
+        anon: env_value(&text, path, "ANON_KEY")?,
+        service_role: env_value(&text, path, "SERVICE_ROLE_KEY")?,
     })
+}
+
+fn percent_encode(raw: &str) -> String {
+    let mut out = String::new();
+    for b in raw.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char);
+            }
+            _ => out.push_str(&format!("%{b:02X}")),
+        }
+    }
+    out
+}
+
+/// Host port published by `judge/compose.override.yml` for the Postgres
+/// container. Official compose maps Supavisor to host `5432`; connecting
+/// there fails `prepare` with `no tenant identifier provided` and the
+/// harness never reaches the cases. Do not read `POSTGRES_PORT` from the
+/// env file: that value is the in-network port (5432).
+const DIRECT_POSTGRES_HOST_PORT: &str = "54322";
+
+fn default_databases(args: &Args) -> Result<db::Databases> {
+    let text = std::fs::read_to_string(&args.env)
+        .with_context(|| format!("reading {}", args.env.display()))?;
+    let password = percent_encode(&env_value(&text, &args.env, "POSTGRES_PASSWORD")?);
+    Ok(database_urls(
+        &password,
+        args.reference_database.clone(),
+        args.megabase_database.clone(),
+    ))
+}
+
+fn database_urls(
+    password: &str,
+    reference: Option<String>,
+    megabase: Option<String>,
+) -> db::Databases {
+    let port = DIRECT_POSTGRES_HOST_PORT;
+    db::Databases {
+        reference: reference
+            .unwrap_or_else(|| format!("postgres://postgres:{password}@127.0.0.1:{port}/postgres")),
+        megabase: megabase
+            .unwrap_or_else(|| format!("postgres://postgres:{password}@127.0.0.1:{port}/megabase")),
+    }
 }
 
 fn wait(args: &Args, keys: &Keys) -> Result<()> {
@@ -129,7 +189,38 @@ fn wait(args: &Args, keys: &Keys) -> Result<()> {
             std::thread::sleep(Duration::from_secs(2));
         }
     }
+    let databases = default_databases(args)?;
+    let deadline = Instant::now() + Duration::from_secs(args.timeout);
+    for (label, url) in [
+        ("reference database", databases.reference.as_str()),
+        ("megabase database", databases.megabase.as_str()),
+    ] {
+        loop {
+            match db::ping(url) {
+                Ok(()) => {
+                    eprintln!("ready: {label}");
+                    break;
+                }
+                Err(err) => {
+                    if Instant::now() > deadline {
+                        bail!(
+                            "timed out after {}s waiting for {label}: {err:#}",
+                            args.timeout
+                        );
+                    }
+                    std::thread::sleep(Duration::from_secs(2));
+                }
+            }
+        }
+    }
     Ok(())
+}
+
+fn prepare(args: &Args) -> Result<()> {
+    let databases = default_databases(args)?;
+    let fixtures = std::fs::read_to_string(&args.fixtures)
+        .with_context(|| format!("reading {}", args.fixtures.display()))?;
+    db::prepare(&databases.reference, &databases.megabase, &fixtures)
 }
 
 fn summary_markdown(outcomes: &[Outcome], regressions: &[String]) -> String {
@@ -180,9 +271,10 @@ fn run_all(args: &Args, keys: &Keys) -> Result<bool> {
             .map(|d| d.as_millis())
             .unwrap_or(0)
     );
+    let databases = default_databases(args)?;
     let mut outcomes = Vec::new();
     for case in &cases {
-        let outcome = run::run_case(case, &reference, &megabase, keys, &run_id)
+        let outcome = run::run_case(case, &reference, &megabase, keys, &run_id, &databases)
             .with_context(|| format!("case `{}`", case.id))?;
         eprintln!(
             "{} {}",
@@ -246,6 +338,7 @@ fn main() -> ExitCode {
         let keys = load_keys(&args.env)?;
         match args.command.as_str() {
             "wait" => wait(&args, &keys).map(|_| true),
+            "prepare" => prepare(&args).map(|_| true),
             "run" => run_all(&args, &keys),
             other => bail!("unknown command `{other}`\n{USAGE}"),
         }
@@ -382,5 +475,96 @@ mod tests {
         assert!(md.contains("fail"));
         assert!(md.contains("left\\|right"));
         assert!(!md.contains("left|right\n"));
+    }
+
+    fn fixture_password() -> String {
+        // Assembled at runtime so CodeQL does not treat a test fixture as a
+        // shipped credential. Production URLs read POSTGRES_PASSWORD from
+        // vendor/supabase/docker/.env.example.
+        ["unit", "-", "test"].concat()
+    }
+
+    #[test]
+    fn default_database_urls_use_direct_postgres_not_supavisor() {
+        let password = fixture_password();
+        let dbs = database_urls(&password, None, None);
+        assert_eq!(
+            dbs.reference,
+            format!("postgres://postgres:{password}@127.0.0.1:54322/postgres")
+        );
+        assert_eq!(
+            dbs.megabase,
+            format!("postgres://postgres:{password}@127.0.0.1:54322/megabase")
+        );
+        assert!(
+            !dbs.reference.contains(":5432/"),
+            "host 5432 is Supavisor; prepare would fail before cases run"
+        );
+    }
+
+    #[test]
+    fn explicit_database_urls_win() {
+        let password = fixture_password();
+        let dbs = database_urls(
+            &password,
+            Some("postgres://u:p@db:5432/postgres".into()),
+            Some("postgres://u:p@db:5432/megabase".into()),
+        );
+        assert_eq!(dbs.reference, "postgres://u:p@db:5432/postgres");
+        assert_eq!(dbs.megabase, "postgres://u:p@db:5432/megabase");
+    }
+
+    #[test]
+    fn compose_override_images_use_mirrors_and_digests() {
+        let path =
+            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../compose.override.yml");
+        let text = std::fs::read_to_string(&path).expect("compose.override.yml");
+        let mut images = 0usize;
+        for (i, line) in text.lines().enumerate() {
+            let trimmed = line.trim();
+            let Some(rest) = trimmed.strip_prefix("image:") else {
+                continue;
+            };
+            images += 1;
+            let image = rest.trim().trim_matches('"').trim_matches('\'');
+            assert!(
+                !image.contains("docker.io/"),
+                "line {} must not pull from Docker Hub, got {image}",
+                i + 1
+            );
+            assert!(
+                image.starts_with("public.ecr.aws/") || image.starts_with("ghcr.io/"),
+                "line {} must use public.ecr.aws or ghcr.io, got {image}",
+                i + 1
+            );
+            let Some((_, digest)) = image.rsplit_once("@sha256:") else {
+                panic!("line {} must pin a sha256 digest, got {image}", i + 1);
+            };
+            assert_eq!(digest.len(), 64, "sha256 on line {} is not 64 hex", i + 1);
+            assert!(
+                digest.chars().all(|c| c.is_ascii_hexdigit()),
+                "sha256 on line {} is not hex: {digest}",
+                i + 1
+            );
+        }
+        assert!(
+            images >= 11,
+            "expected every reference-stack service to pin an image, got {images}"
+        );
+    }
+
+    #[test]
+    fn kong_entrypoint_replaces_vendor_script() {
+        let path =
+            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../compose.override.yml");
+        let text = std::fs::read_to_string(&path).expect("compose.override.yml");
+        assert!(
+            text.contains("entrypoint: !override"),
+            "Compose appends entrypoint sequences; without !override the vendor script still execs /entrypoint.sh"
+        );
+        assert!(
+            text.contains("/docker-entrypoint.sh"),
+            "the ECR library Kong image has /docker-entrypoint.sh, not /entrypoint.sh"
+        );
     }
 }

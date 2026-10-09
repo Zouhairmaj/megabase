@@ -19,6 +19,20 @@ pub const DEFAULT_HEADERS: &[&str] = &[
 /// beyond their presence and type.
 const VOLATILE_KEYS: &[&str] = &["expires_at", "iat", "exp", "refresh_token"];
 
+/// `auth.users` columns whose *contents* are secrets or per-insert hashes.
+/// Empty strings stay empty so an autoconfirmed sign-up that cleared a
+/// token still differs from one that left a random value.
+const AUTH_USER_SECRET_KEYS: &[&str] = &[
+    "encrypted_password",
+    "confirmation_token",
+    "recovery_token",
+    "email_change_token",
+    "email_change_token_new",
+    "email_change_token_current",
+    "reauthentication_token",
+    "phone_change_token",
+];
+
 fn rules() -> &'static [(Regex, &'static str)] {
     static RULES: OnceLock<Vec<(Regex, &'static str)>> = OnceLock::new();
     RULES.get_or_init(|| {
@@ -27,6 +41,7 @@ fn rules() -> &'static [(Regex, &'static str)] {
                 r"eyJ[A-Za-z0-9_-]*\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+",
                 "<jwt>",
             ),
+            (r"(?i)\$2[abxy]?\$\d{2}\$[A-Za-z0-9./]{53}", "<bcrypt>"),
             (
                 r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}(:?\d{2})?)?",
                 "<timestamp>",
@@ -63,19 +78,32 @@ pub fn json(value: &mut Value, ignore: &[String]) {
     for pointer in ignore {
         remove_pointer(value, pointer);
     }
-    walk(value);
+    walk(value, false);
 }
 
-fn walk(value: &mut Value) {
+/// Same as [`json`], plus `auth.users` secret columns and a stable row
+/// order. Used for database snapshots, not HTTP bodies.
+pub fn json_rows(value: &mut Value) {
+    walk(value, true);
+    if let Value::Array(items) = value {
+        items.sort_by_cached_key(Value::to_string);
+    }
+}
+
+fn walk(value: &mut Value, secrets: bool) {
     match value {
         Value::String(s) => *s = text(s),
-        Value::Array(items) => items.iter_mut().for_each(walk),
+        Value::Array(items) => items.iter_mut().for_each(|v| walk(v, secrets)),
         Value::Object(map) => {
             for (key, v) in map.iter_mut() {
-                if VOLATILE_KEYS.contains(&key.as_str()) && !v.is_null() {
+                let replace_volatile = VOLATILE_KEYS.contains(&key.as_str()) && !v.is_null();
+                let replace_secret = secrets
+                    && AUTH_USER_SECRET_KEYS.contains(&key.as_str())
+                    && matches!(v, Value::String(s) if !s.is_empty());
+                if replace_volatile || replace_secret {
                     *v = Value::String(format!("<{key}>"));
                 } else {
-                    walk(v);
+                    walk(v, secrets);
                 }
             }
         }
@@ -117,6 +145,10 @@ mod tests {
         assert_eq!(
             text("Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.abc-_x"),
             "Bearer <jwt>"
+        );
+        assert_eq!(
+            text("$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy"),
+            "<bcrypt>"
         );
     }
 
@@ -161,5 +193,55 @@ mod tests {
         assert_eq!(v["rows"][0]["id"], "<uuid>");
         assert_eq!(v["rows"].as_array().unwrap().len(), 1);
         assert!(v["keep"].is_null());
+    }
+
+    #[test]
+    fn database_rows_normalize_secrets_and_order() {
+        let mut a = json!([
+            {
+                "instance_id": "00000000-0000-0000-0000-000000000000",
+                "email": "b@example.com",
+                "encrypted_password": "$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy",
+                "confirmation_token": ""
+            },
+            {
+                "instance_id": "00000000-0000-0000-0000-000000000000",
+                "email": "a@example.com",
+                "encrypted_password": "$2b$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWz",
+                "confirmation_token": "abc123"
+            }
+        ]);
+        let mut b = json!([
+            {
+                "instance_id": "11111111-1111-1111-1111-111111111111",
+                "email": "a@example.com",
+                "encrypted_password": "$2a$10$otherhashotherhashotherhashotherhashotherhashe",
+                "confirmation_token": "zzzzzz"
+            },
+            {
+                "instance_id": "11111111-1111-1111-1111-111111111111",
+                "email": "b@example.com",
+                "encrypted_password": "$2y$12$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy",
+                "confirmation_token": ""
+            }
+        ]);
+        json_rows(&mut a);
+        json_rows(&mut b);
+        assert_eq!(a, b);
+        let empty_token = a
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["email"] == "b@example.com")
+            .unwrap();
+        let leftover_token = a
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["email"] == "a@example.com")
+            .unwrap();
+        assert_eq!(empty_token["confirmation_token"], "");
+        assert_eq!(leftover_token["confirmation_token"], "<confirmation_token>");
+        assert_eq!(empty_token["encrypted_password"], "<encrypted_password>");
     }
 }

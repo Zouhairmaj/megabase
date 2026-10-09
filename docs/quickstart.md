@@ -52,7 +52,9 @@ docker build -t megabase .
 docker run --rm -p 8000:8000 megabase
 ```
 
-Builder and runtime base images are pinned by digest; see [Install](install.md).
+Builder and runtime base images are pinned by digest. After the Release
+workflow publishes an image, `ghcr.io/zouhairmaj/megabase` and how to
+verify it are in [Install](install.md).
 
 ## Use with supabase-js
 
@@ -69,8 +71,9 @@ const { data, error } = await supabase.from('todos').select()
 
 ## Run the judge
 
-The judge starts the official Supabase reference stack with Docker Compose
-and compares it with Megabase. From the repository root:
+The judge starts the official Supabase reference stack with Docker Compose,
+creates a dedicated `megabase` database on that cluster, and compares HTTP
+plus database side-effects with Megabase. From the repository root:
 
 ```shell
 just judge-up

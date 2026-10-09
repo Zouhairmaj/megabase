@@ -7,10 +7,23 @@ bootstrap exception. Architecture and commands are in
 
 - **Cases** (`cases/<component>.toml`): write one `[[case]]` per behavior.
   Take `units = [...]` from `coverage/units.json` and run the steps against
-  `fixtures/schema.sql`. Every case must pass on the reference stack. Expected
-  behavior always comes from the reference, never from Megabase.
+  `fixtures/schema.sql`. A case may be HTTP-only, `[[case.db]]`-only
+  (schema objects), or both.   Use `absent = true` when the pinned
+  reference dropped the object. A required object missing on both
+  databases fails. Mutating HTTP cases compare the before/after row
+  delta of `auth.users` and `public.todos` unless `snapshot` overrides
+  that. Every case must
+  pass on the reference stack. Expected behavior always comes from the
+  reference, never from Megabase. The harness talks to Postgres itself
+  and does not import Megabase crates.
 - **Never** delete, loosen or skip a case, or add an `ignore` that hides a
   real difference.
 - A new normalization rule must apply to both stacks equally and be
   documented in `NORMALIZATION.md` in the same PR.
 - Harness tests: `cargo test -p megabase-judge`.
+- `compose.override.yml` must pin every reference-stack `image:` to
+  `public.ecr.aws/…@sha256:…` or `ghcr.io/…@sha256:…`. Do not pull
+  from Docker Hub (anonymous 429s fail CI). The Kong service uses
+  `entrypoint: !override` so Compose replaces the vendor script
+  instead of appending it. The wrapper points that script at
+  `/docker-entrypoint.sh` on the ECR library image.

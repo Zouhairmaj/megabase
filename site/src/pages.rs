@@ -90,7 +90,7 @@ pub fn home(paths: &Paths, metrics: &Metrics) -> String {
     </div>
     <a class="text-link" href="{status}">Full status →</a>
   </div>
-  <p class="lede hide-mobile">Nested squarified treemap: component, then feature group, then one whole square per unit. Regenerated at build time from coverage/units.json. Grey is not started. Green is conformant.</p>
+  <p class="lede hide-mobile">Nested squarified treemap: component, then feature group, then one whole square per unit. Regenerated at build time from coverage/summary.json and coverage/units.json. The four-state legend matches the README: not started, implemented, tested, conformant.</p>
   {treemap}
 </section>
 
@@ -169,11 +169,8 @@ fn treemap_block(metrics: &Metrics) -> String {
         r#"<div class="treemap-block">
   <div class="treemap-block-head">
     <span>{head}</span>
-    <span class="legend-inline hide-mobile">
-      <span class="swatch-row"><i class="swatch not-started"></i> not started</span>
-      <span class="swatch-row"><i class="swatch implemented"></i> implemented</span>
-      <span class="swatch-row"><i class="swatch tested"></i> tested</span>
-      <span class="swatch-row"><i class="swatch conformant"></i> conformant (matches real Supabase)</span>
+    <span class="legend-inline">
+      {legend}
     </span>
   </div>
   <div class="treemap treemap-wide">
@@ -190,6 +187,27 @@ fn treemap_block(metrics: &Metrics) -> String {
         github = GITHUB,
         desktop = desktop,
         mobile = mobile,
+        legend = four_state_legend_inline(),
+    )
+}
+
+fn four_state_legend_inline() -> &'static str {
+    concat!(
+        r#"<span class="swatch-row"><i class="swatch not-started"></i> not started</span>"#,
+        r#"<span class="swatch-row"><i class="swatch implemented"></i> implemented</span>"#,
+        r#"<span class="swatch-row"><i class="swatch tested"></i> tested</span>"#,
+        r#"<span class="swatch-row"><i class="swatch conformant"></i> conformant (matches real Supabase)</span>"#,
+    )
+}
+
+fn four_state_legend_list() -> &'static str {
+    concat!(
+        r#"<ul class="status-legend">"#,
+        r#"<li><i class="swatch not-started"></i> not started</li>"#,
+        r#"<li><i class="swatch implemented"></i> implemented</li>"#,
+        r#"<li><i class="swatch tested"></i> tested</li>"#,
+        r#"<li><i class="swatch conformant"></i> conformant (matches real Supabase)</li>"#,
+        r#"</ul>"#,
     )
 }
 
@@ -207,6 +225,7 @@ fn status_panel(metrics: &Metrics) -> String {
     <div class="hide-mobile">{desktop}</div>
     <div class="hide-desktop">{mobile}</div>
   </div>
+  <div class="legend-inline status-panel-legend">{legend}</div>
   <dl>
     <div><dt>Units passing the judge</dt><dd>{passing}</dd></div>
     <div><dt>Coverage · Conformance</dt><dd>{coverage}</dd></div>
@@ -217,6 +236,7 @@ fn status_panel(metrics: &Metrics) -> String {
         passing = esc(&metrics.passing_total_label()),
         coverage = esc(&metrics.coverage_conformance_label()),
         stage = esc(&metrics.stage),
+        legend = four_state_legend_inline(),
     )
 }
 
@@ -613,15 +633,10 @@ pub fn status(paths: &Paths, metrics: &Metrics) -> String {
     <div class="status-map-copy">
       <p class="kicker">COMPONENT MAP</p>
       <h2>Component map</h2>
-      <p>Each block is one Supabase component, split into its feature groups. Each square is one unit extracted from the pinned upstream source. Grey until the judge says green.</p>
+      <p>Each block is one Supabase component, split into its feature groups. Each square is one unit extracted from the pinned upstream source. Colour follows the same four-state legend as the README treemap.</p>
       <p class="stat-xl status-map-count">{units_headline}</p>
       <p class="status-map-sub">{units_sub}</p>
-      <ul class="status-legend">
-        <li><i class="swatch not-started"></i> not started</li>
-        <li><i class="swatch implemented"></i> implemented</li>
-        <li><i class="swatch tested"></i> tested</li>
-        <li><i class="swatch conformant"></i> conformant (matches real Supabase)</li>
-      </ul>
+      {legend}
       <p class="status-map-source">Generated at build time from coverage/units.json and coverage/summary.json. One whole square per unit, never cut.</p>
     </div>
     <div class="status-map-svg treemap">
@@ -657,6 +672,7 @@ pub fn status(paths: &Paths, metrics: &Metrics) -> String {
         units_sub = esc(&units_sub),
         desktop = desktop,
         mobile = mobile,
+        legend = four_state_legend_list(),
         levels = level_cards(metrics, true),
         roadmap = paths.page("roadmap"),
     )
@@ -997,5 +1013,26 @@ mod tests {
         assert!(!home.contains("coverage/treemap.svg"));
         assert!(!status.contains("coverage/treemap.svg"));
         assert!(!status.contains("coverage/treemap-light.svg"));
+    }
+
+    #[test]
+    fn hero_and_status_include_four_state_legend_and_judge_line() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("repo root");
+        let metrics = crate::metrics::load(root);
+        let home = home(&Paths::home(false), &metrics);
+        let status = status(&Paths::nested("status", false), &metrics);
+        assert!(home.contains("Units passing the judge"));
+        assert!(home.contains("status-panel-legend"));
+        assert!(!home.contains("status-panel-legend hide-mobile"));
+        for html in [&home, &status] {
+            assert!(html.contains("swatch implemented"));
+            assert!(html.contains("not started"));
+            assert!(html.contains("tested"));
+            assert!(html.contains("conformant (matches real Supabase)"));
+            assert!(html.contains("data-status=\"implemented\""));
+            assert!(html.contains("#005441"));
+        }
     }
 }

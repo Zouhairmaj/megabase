@@ -16,9 +16,9 @@
 [![release-please](https://img.shields.io/badge/release--please-enabled-00D892?style=flat-square)](https://github.com/Zouhairmaj/megabase/actions/workflows/release.yml)
 [![MSRV](https://img.shields.io/badge/MSRV-1.89-00D892?style=flat-square)](https://github.com/Zouhairmaj/megabase/blob/main/Cargo.toml)
 [![Discussions](https://img.shields.io/github/discussions/Zouhairmaj/megabase?style=flat-square)](https://github.com/Zouhairmaj/megabase/discussions)
-[![Coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2FZouhairmaj%2Fmegabase%2Fmain%2Fcoverage%2Fbadge-coverage.json&style=flat-square)](#status)
-[![Conformance](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2FZouhairmaj%2Fmegabase%2Fmain%2Fcoverage%2Fbadge-conformance.json&style=flat-square)](#status)
-[![Units](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2FZouhairmaj%2Fmegabase%2Fmain%2Fcoverage%2Fsummary.json&query=%24.totals.units&label=units&style=flat-square&color=00D892)](#status)
+[![Coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2FZouhairmaj%2Fmegabase%2Fgh-pages%2Fcoverage%2Fbadge-coverage.json&style=flat-square)](#status)
+[![Conformance](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2FZouhairmaj%2Fmegabase%2Fgh-pages%2Fcoverage%2Fbadge-conformance.json&style=flat-square)](#status)
+[![Units](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2FZouhairmaj%2Fmegabase%2Fgh-pages%2Fcoverage%2Fsummary.json&query=%24.totals.units&label=units&style=flat-square&color=00D892)](#status)
 
 # Supabase, rewritten in Rust. By agents. In public.
 
@@ -57,6 +57,14 @@ Site: [megabase.sh](https://megabase.sh) · mission: [MANIFESTO.md](MANIFESTO.md
 | `docker build -t megabase .` | Release image |
 
 `just` lists every recipe that works today.
+
+## Install
+
+Signed linux binaries (`x86_64` and `aarch64`, musl-static) are GitHub
+Release assets. `ghcr.io/zouhairmaj/megabase:<tag>` is published to GHCR
+after the Release workflow runs (`v0.1.0` has neither). Download,
+checksum, and Sigstore / SLSA verification are in
+[`docs/install.md`](docs/install.md). Building from source is Quick start.
 
 ## How it works
 

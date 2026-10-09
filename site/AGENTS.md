@@ -9,11 +9,18 @@ Extends the root `AGENTS.md`; it does not relax it.
   cargo clippy --manifest-path site/Cargo.toml -- -D warnings
   cargo audit --file site/Cargo.lock
   ```
-  CI does not lint it, so run fmt/clippy yourself. Scorecard/OSV scan
-  `site/Cargo.lock`; `just audit` does too. Keep `resvg` on the
-  harfrust/skrifa stack (0.48+); do not regress to rustybuzz or
-  ttf-parser (RUSTSEC-2026-0206, RUSTSEC-2026-0192).
-- Deployed to GitHub Pages by `.github/workflows/pages.yml` on push to `main`.
+  CI does not lint it, so run fmt/clippy yourself. Scorecard/OSV,
+  `just audit`, and the CI `cargo-audit` matrix all scan
+  `site/Cargo.lock`. Keep `resvg` on the harfrust/skrifa stack (0.48+);
+  do not regress to rustybuzz or ttf-parser (RUSTSEC-2026-0206,
+  RUSTSEC-2026-0192).
+- Deployed to GitHub Pages by `.github/workflows/pages.yml` on push to
+  `main` (and `workflow_dispatch`). That workflow checks out the event
+  SHA only. After a successful Judge run on `main`,
+  `.github/workflows/pages-badges.yml` (`workflow_run` only, no cache
+  action) applies the Judge artifact and publishes shields JSON to
+  `gh-pages`. The generator writes that JSON to `_site/coverage/`
+  (never treemap SVGs). Neither workflow pushes to `main`.
 - Root design gate: the PR links the approved Kite frame and its committee
   review.
 - Treemaps are generated in Rust (`src/treemap.rs`) from
