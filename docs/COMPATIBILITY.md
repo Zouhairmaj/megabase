@@ -99,7 +99,7 @@ In scope: **1024 units**. Excluded: **76** upstream items.
 | Auth | passkeys | 2 | 7 | 0 | 0 | 0 |
 | Auth | scim | 2 | 3 | 0 | 0 | 0 |
 | Auth | sso | 2 | 3 | 0 | 0 | 0 |
-| Auth | token | 1–2 | 6 | 0 | 0 | 0 |
+| Auth | token | 1–2 | 6 | 3 | 3 | 0 |
 | Auth | user | 1–2 | 6 | 0 | 0 | 0 |
 | Auth | verify | 1–2 | 10 | 0 | 0 | 0 |
 | Auth | well-known | 2 | 3 | 0 | 0 | 0 |

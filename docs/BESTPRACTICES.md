@@ -161,7 +161,7 @@ SUGGESTED 10 Met, 3 Unmet, 1 N/A.
 | `crypto_working` | MUST | Met | Verification rejects every `alg` other than HS256, including `none`; MD4, MD5, DES, and RC4 are not used. | [crates/megabase-core/src/jwt.rs](https://github.com/Zouhairmaj/megabase/blob/main/crates/megabase-core/src/jwt.rs) |
 | `crypto_weaknesses` | SHOULD | Met | The default mechanism is HMAC-SHA-256, not SHA-1 and not SSH CBC. | [docs/configuration.md](https://github.com/Zouhairmaj/megabase/blob/main/docs/configuration.md) |
 | `crypto_pfs` | SHOULD | N/A | The binary does not implement a key-agreement protocol: HTTP is plaintext and PostgreSQL uses `NoTls`. | [docs/configuration.md](https://github.com/Zouhairmaj/megabase/blob/main/docs/configuration.md) |
-| `crypto_password_storage` | MUST | N/A | Auth routes still return 501 and no code writes password hashes for external users. | [SECURITY.md](https://github.com/Zouhairmaj/megabase/blob/main/SECURITY.md) |
+| `crypto_password_storage` | MUST | Met | Signup stores passwords as bcrypt at cost 10, the GoTrue `DefaultCost`. `POST /auth/v1/token` verifies that hash. Passwords and hashes are not logged. | [docs/SECURE_DESIGN.md](https://github.com/Zouhairmaj/megabase/blob/main/docs/SECURE_DESIGN.md) |
 | `crypto_random` | MUST | N/A | Product code does not generate cryptographic keys or nonces; `JWT_SECRET` is supplied by the operator. | [docs/configuration.md](https://github.com/Zouhairmaj/megabase/blob/main/docs/configuration.md) |
 
 ### Secured delivery against man-in-the-middle (MITM) attacks

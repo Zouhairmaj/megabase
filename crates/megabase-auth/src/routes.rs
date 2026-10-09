@@ -3,7 +3,8 @@
 
 //! `/auth/v1` routes served by this crate.
 //!
-//! Health, settings, autoconfirm email signup, and logout are implemented.
+//! Health, settings, autoconfirm email signup, logout, and
+//! `POST /token` (password and refresh-token grants) are implemented.
 //! Invite, recover, resend, reauthenticate, phone signup, anonymous signup,
 //! and mailer confirmation stay HTTP 501.
 
@@ -45,6 +46,7 @@ pub(crate) fn router(state: AuthState) -> Router {
         .route("/auth/v1/settings", get(settings))
         .route("/auth/v1/reauthenticate", get(reauthenticate))
         .route("/auth/v1/signup", post(signup))
+        .route("/auth/v1/token", post(crate::token::token))
         .route("/auth/v1/invite", post(invite))
         .route("/auth/v1/logout", post(logout))
         .route("/auth/v1/recover", post(recover))
@@ -452,7 +454,7 @@ fn email_format() -> &'static Regex {
     })
 }
 
-fn request_aud(headers: &HeaderMap, config: &AuthConfig) -> String {
+pub(crate) fn request_aud(headers: &HeaderMap, config: &AuthConfig) -> String {
     headers
         .get("x-jwt-aud")
         .and_then(|value| value.to_str().ok())
@@ -501,7 +503,7 @@ fn parse_scope(scope: Option<&str>) -> Result<LogoutScope, GoTrueError> {
     }
 }
 
-fn query_param(query: Option<&str>, name: &str) -> Option<String> {
+pub(crate) fn query_param(query: Option<&str>, name: &str) -> Option<String> {
     let query = query?;
     for pair in query.split('&') {
         if pair.is_empty() {
@@ -557,7 +559,7 @@ fn jwt_failure(error: &JwtError) -> Response {
     .into_response()
 }
 
-struct JsonOk(Value);
+pub(crate) struct JsonOk(pub(crate) Value);
 
 impl IntoResponse for JsonOk {
     fn into_response(self) -> Response {
@@ -565,7 +567,7 @@ impl IntoResponse for JsonOk {
     }
 }
 
-fn insert_header(response: &mut Response, name: &'static str, value: &str) {
+pub(crate) fn insert_header(response: &mut Response, name: &'static str, value: &str) {
     let Ok(value) = axum::http::HeaderValue::from_str(value) else {
         return;
     };
@@ -574,7 +576,7 @@ fn insert_header(response: &mut Response, name: &'static str, value: &str) {
         .insert(axum::http::HeaderName::from_static(name), value);
 }
 
-async fn read_body(body: Body) -> Result<axum::body::Bytes, GoTrueError> {
+pub(crate) async fn read_body(body: Body) -> Result<axum::body::Bytes, GoTrueError> {
     match to_bytes(body, MAX_BODY_BYTES).await {
         Ok(bytes) => Ok(bytes),
         Err(error) => {
@@ -924,17 +926,20 @@ mod tests {
         assert_eq!(body["user"]["app_metadata"]["provider"], "email");
         assert_eq!(body["user"]["app_metadata"]["providers"][0], "email");
         assert_eq!(body["user"]["user_metadata"]["email_verified"], true);
+        assert_eq!(body["user"]["user_metadata"]["phone_verified"], false);
+        assert_eq!(
+            body["user"]["user_metadata"]["email"],
+            "judge-user@example.com"
+        );
+        assert_eq!(body["user"]["user_metadata"]["sub"], body["user"]["id"]);
         assert_eq!(body["user"]["user_metadata"]["name"], "Ada");
         assert!(body["user"]["email_confirmed_at"].is_string());
-        assert_eq!(
-            body["user"]["confirmed_at"],
-            body["user"]["email_confirmed_at"]
-        );
+        assert!(body["user"]["confirmed_at"].is_null());
         assert_eq!(body["user"]["identities"][0]["provider"], "email");
         assert_eq!(body["user"]["identities"][0]["id"], body["user"]["id"]);
         assert_eq!(
             body["user"]["identities"][0]["identity_data"]["email_verified"],
-            false
+            true
         );
         assert_eq!(
             body["user"]["identities"][0]["identity_data"]["phone_verified"],
