@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM auth.sessions WHERE id = $1::uuid",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e448ef6cc84f19617e56286f6f27b0cef1589cb916dcb4dbb6be81ed27323c56"
+}

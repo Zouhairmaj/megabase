@@ -1,0 +1,154 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, provider_type, identifier, name, client_id,\n                acceptable_client_ids, scopes, pkce_enabled, attribute_mapping,\n                custom_claims_allowlist, authorization_params, enabled, email_optional,\n                issuer, discovery_url, skip_nonce_check, cached_discovery,\n                authorization_url, token_url, userinfo_url, jwks_uri,\n                created_at, updated_at\n         FROM auth.custom_oauth_providers WHERE identifier = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "provider_type",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "identifier",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "client_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "acceptable_client_ids",
+        "type_info": "TextArray"
+      },
+      {
+        "ordinal": 6,
+        "name": "scopes",
+        "type_info": "TextArray"
+      },
+      {
+        "ordinal": 7,
+        "name": "pkce_enabled",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 8,
+        "name": "attribute_mapping",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 9,
+        "name": "custom_claims_allowlist",
+        "type_info": "TextArray"
+      },
+      {
+        "ordinal": 10,
+        "name": "authorization_params",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 11,
+        "name": "enabled",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 12,
+        "name": "email_optional",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 13,
+        "name": "issuer",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 14,
+        "name": "discovery_url",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 15,
+        "name": "skip_nonce_check",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 16,
+        "name": "cached_discovery",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 17,
+        "name": "authorization_url",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 18,
+        "name": "token_url",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 19,
+        "name": "userinfo_url",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 20,
+        "name": "jwks_uri",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 21,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 22,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "32f1f4e1b6a7b9d509a6cdf13d18bed0a091201f004e92e8870797d37da1144e"
+}

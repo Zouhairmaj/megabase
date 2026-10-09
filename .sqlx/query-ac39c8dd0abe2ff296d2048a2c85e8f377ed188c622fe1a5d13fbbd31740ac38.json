@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE auth.users SET\n            email_confirmed_at = $2::timestamptz,\n            confirmation_token = '',\n            last_sign_in_at = $2::timestamptz,\n            raw_user_meta_data = $3::jsonb,\n            updated_at = $2::timestamptz\n         WHERE id = $1::uuid",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Timestamptz",
+        "Jsonb"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "ac39c8dd0abe2ff296d2048a2c85e8f377ed188c622fe1a5d13fbbd31740ac38"
+}

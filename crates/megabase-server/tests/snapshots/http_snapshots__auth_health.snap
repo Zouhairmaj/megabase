@@ -1,0 +1,13 @@
+---
+source: crates/megabase-server/tests/http_snapshots.rs
+expression: "observe(\"GET\", \"/auth/v1/health\", None).await"
+---
+{
+  "body": {
+    "description": "GoTrue is a user registration and authentication API",
+    "name": "GoTrue",
+    "version": "v2.197.0"
+  },
+  "content_type": "application/json",
+  "status": 200
+}

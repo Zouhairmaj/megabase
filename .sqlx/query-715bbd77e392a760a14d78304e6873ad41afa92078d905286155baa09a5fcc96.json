@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM auth.sessions WHERE user_id = $1::uuid AND id <> $2::uuid",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "715bbd77e392a760a14d78304e6873ad41afa92078d905286155baa09a5fcc96"
+}

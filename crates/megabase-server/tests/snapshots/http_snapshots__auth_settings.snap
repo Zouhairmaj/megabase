@@ -1,0 +1,45 @@
+---
+source: crates/megabase-server/tests/http_snapshots.rs
+expression: "observe(\"GET\", \"/auth/v1/settings\", None).await"
+---
+{
+  "body": {
+    "disable_signup": false,
+    "external": {
+      "anonymous_users": false,
+      "apple": false,
+      "azure": false,
+      "bitbucket": false,
+      "discord": false,
+      "email": true,
+      "facebook": false,
+      "figma": false,
+      "fly": false,
+      "github": false,
+      "gitlab": false,
+      "google": false,
+      "kakao": false,
+      "keycloak": false,
+      "linkedin": false,
+      "linkedin_oidc": false,
+      "notion": false,
+      "phone": true,
+      "slack": false,
+      "slack_oidc": false,
+      "snapchat": false,
+      "spotify": false,
+      "twitch": false,
+      "twitter": false,
+      "workos": false,
+      "zoom": false
+    },
+    "mailer_autoconfirm": true,
+    "passkeys_enabled": false,
+    "phone_autoconfirm": true,
+    "saml_enabled": false,
+    "saml_private_key_next_configured": false,
+    "sms_provider": ""
+  },
+  "content_type": "application/json",
+  "status": 200
+}

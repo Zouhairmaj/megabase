@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT banned_until FROM auth.users\n                         WHERE instance_id = $1::uuid AND id = $2::uuid",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "banned_until",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "164f74b4e4c180e3ef4f717b964c90b0bfe5a1ad39254883f35ecb17715a8016"
+}

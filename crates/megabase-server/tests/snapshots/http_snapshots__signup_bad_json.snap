@@ -1,0 +1,13 @@
+---
+source: crates/megabase-server/tests/http_snapshots.rs
+expression: bad_json
+---
+{
+  "body": {
+    "code": 400,
+    "error_code": "bad_json",
+    "msg": "Could not parse request body as JSON: expected ident at line 1 column 2"
+  },
+  "content_type": "application/json",
+  "status": 400
+}

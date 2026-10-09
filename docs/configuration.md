@@ -1,9 +1,9 @@
 ---
 title: Configuration
-description: MEGABASE_HOST, MEGABASE_PORT, DATABASE_URL, JWT_SECRET — what each variable does.
+description: Listen address, HTTP limits, DATABASE_URL, JWT_SECRET, and the GoTrue flags Auth honors.
 section: get-started
 order: 3
-card: Listen address, JWT_SECRET, and the GoTrue env flags Auth admin and signup honor.
+card: Listen address, HTTP limits, JWT_SECRET, and the GoTrue env flags Auth honors.
 ---
 
 # Configuration
@@ -16,7 +16,9 @@ other names. There is no `.env.example` in this tree; the judge uses
 | --- | --- |
 | MEGABASE_HOST | Bind address. Default `0.0.0.0`. |
 | MEGABASE_PORT | HTTP port. Default `8000`. |
-| DATABASE_URL | PostgreSQL connection string. PostgreSQL stays external; Megabase does not bundle it. When set, startup installs the Auth SQL objects listed in [`specs/auth/database.md`](../specs/auth/database.md). The statements are idempotent. Connect plus SQL must finish within 30 seconds or the process exits. If install fails, the process exits. Served admin routes that read or write Auth tables use this URL per request and abort the connect after 30 seconds with 500. Signup and logout use one connection opened at startup. Omit it to skip schema install (the HTTP server still starts; admin, signup, and logout calls that need the database then return 500). The judge sets this to the dedicated `megabase` database (`just judge-up` / CI), never to the official stack's `postgres` database. |
+| DATABASE_URL | PostgreSQL connection string. PostgreSQL stays external; Megabase does not bundle it. When set, startup installs the Auth SQL objects listed in [`specs/auth/database.md`](../specs/auth/database.md) (idempotent DDL, 30-second deadline) and opens one sqlx pool (10 connections, 30-second acquire). Signup, logout, and served admin routes share that pool. SIGINT and SIGTERM stop the listener, then the pool closes. Omit it to skip schema install (the HTTP server still starts; admin, signup, and logout calls that need the database then return 500). The judge sets this to the dedicated `megabase` database (`just judge-up` / CI), never to the official stack's `postgres` database. |
+| MEGABASE_HTTP_TIMEOUT_MS | Whole-request deadline in milliseconds. Default `150000`, the functions `read_timeout` in `vendor/supabase/docker/volumes/api/kong.yml`. `0` and non-integers abort startup. A request that exceeds it returns 504. |
+| MEGABASE_REQUEST_BODY_LIMIT_BYTES | Maximum request body in bytes. Default `52428800`, `FILE_SIZE_LIMIT` in `vendor/supabase/docker/docker-compose.yml`. A non-integer aborts startup. A larger body returns 413. |
 | JWT_SECRET | HS256 secret for verifying and signing JWTs (same name as the self-hosted demo stack). Raw UTF-8 bytes, not base64, and not a default. Omit it and the process still starts so `/_megabase/health` and `GET /auth/v1/health` work; verification and signing then fail with `Server lacks JWT secret`. Email signup then returns 500 `Server lacks JWT secret` and does not insert a user. A present value shorter than 32 bytes, including empty, aborts startup before listen: `JWT_SECRET is N bytes; HMAC-SHA-256 keys shorter than 32 bytes are disabled`. Length is bytes, not an entropy check. Required for `/auth/v1/admin` (a missing Bearer token is still 401). |
 | GOTRUE_JWT_ADMIN_ROLES | Comma-separated JWT `role` values that may call `/auth/v1/admin`. When unset, `service_role,supabase_admin`, same as GoTrue. An empty value falls back to that pair. Signup settings do not use this allow-list. |
 | GOTRUE_OAUTH_SERVER_ENABLED | GoTrue flag. Default `false`. When false, admin OAuth client routes return 404 `feature_disabled`. |
@@ -75,6 +77,29 @@ and also abort. `sslmode=disable`, and the default `prefer` when this client
 cannot offer TLS, still send credentials in the clear. Use a Unix socket or
 loopback. A remote `DATABASE_URL` needs a separate encrypted transport until
 Megabase speaks TLS to PostgreSQL.
+
+## HTTP limits
+
+Every response passes through the gateway layers in `megabase-server`: a
+request-id (`x-request-id`, echoed when the caller sends one), sensitive
+`Authorization`, `apikey`, and `Cookie` so those values stay out of traces, a
+150-second timeout (504) and a 50 MiB body limit (413) unless the variables
+above override them, and a panic catch that returns JSON
+`{"code":"internal_error","message":"internal error"}` without the panic text.
+
+## Checked SQL
+
+Auth reads and writes use `sqlx::query!` and `sqlx::query_as!`. The workspace
+compiles them from the committed `.sqlx` cache (`SQLX_OFFLINE=true` in
+`.cargo/config.toml`), so CI does not need a database. Regenerating the cache
+needs Postgres with the Auth schema installed and a matching `DATABASE_URL`:
+
+```shell
+SQLX_OFFLINE=false DATABASE_URL=postgres://… cargo sqlx prepare --workspace -- --all-targets
+```
+
+`cargo sqlx prepare --check` in CI needs a workflow edit. That file is a
+protected path, so it belongs on a `review/*` branch.
 
 ## Listen address
 

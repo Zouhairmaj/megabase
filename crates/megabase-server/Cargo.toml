@@ -25,6 +25,8 @@ serde_json = { workspace = true }
 
 [dev-dependencies]
 criterion = { workspace = true }
+insta = { version = "1.43", features = ["json"] }
+tokio = { workspace = true }
 
 [[bench]]
 name = "health"

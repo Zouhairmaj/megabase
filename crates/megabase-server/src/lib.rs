@@ -15,10 +15,13 @@ use axum::{
     routing::get,
     Json, Router,
 };
+mod layers;
+
 use megabase_core::Config;
 use tower::ServiceExt;
-use tower_http::trace::TraceLayer;
 use tracing::info;
+
+use layers::apply_http_layers;
 
 /// Megabase's own liveness probe. The `/_megabase` prefix is not used by any
 /// Supabase service, so it cannot shadow an upstream route.
@@ -98,7 +101,19 @@ pub fn create_router() -> Router {
 }
 
 /// Gateway whose `/auth/v1/` and OAuth discovery prefixes share `auth`.
+///
+/// Uses [`Config::default`] HTTP limits. [`create_router_from`] applies the
+/// process config, including timeout and body limit.
 pub fn create_router_with(auth: &megabase_auth::AuthState) -> Router {
+    create_router_from(auth, &Config::default())
+}
+
+/// Gateway plus the production tower-http stack from `config`.
+pub fn create_router_from(auth: &megabase_auth::AuthState, config: &Config) -> Router {
+    apply_http_layers(assemble(auth), config)
+}
+
+fn assemble(auth: &megabase_auth::AuthState) -> Router {
     let gateway = Gateway {
         routes: Arc::new(
             GATEWAY_ROUTES
@@ -112,7 +127,6 @@ pub fn create_router_with(auth: &megabase_auth::AuthState) -> Router {
         .route(HEALTH_PATH, get(health))
         .fallback(dispatch)
         .with_state(gateway)
-        .layer(TraceLayer::new_for_http())
 }
 
 async fn dispatch(State(gateway): State<Gateway>, request: Request) -> Response {
@@ -158,7 +172,38 @@ pub async fn run(config: Config) -> std::io::Result<()> {
     let addr = config.bind_address();
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     info!("megabase listening on {}", listener.local_addr()?);
-    axum::serve(listener, create_router_with(&auth)).await
+    axum::serve(listener, create_router_from(&auth, &config))
+        .with_graceful_shutdown(shutdown_signal())
+        .await?;
+    auth.backend.close().await;
+    info!("megabase stopped");
+    Ok(())
+}
+
+async fn shutdown_signal() {
+    let ctrl_c = async {
+        if let Err(error) = tokio::signal::ctrl_c().await {
+            tracing::error!(%error, "failed to listen for ctrl-c");
+        }
+    };
+    #[cfg(unix)]
+    let terminate = async {
+        match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+            Ok(mut signal) => {
+                signal.recv().await;
+            }
+            Err(error) => {
+                tracing::error!(%error, "failed to listen for SIGTERM");
+            }
+        }
+    };
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+    tokio::select! {
+        () = ctrl_c => {}
+        () = terminate => {}
+    }
+    info!("shutdown signal received");
 }
 
 #[cfg(test)]

@@ -15,8 +15,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use serde_json::{json, Map, Value};
-use tokio::sync::{Mutex, MutexGuard};
-use tokio_postgres::GenericClient;
+use tokio::sync::Mutex;
 use uuid::Uuid;
 
 use crate::config::BCRYPT_COST;
@@ -35,7 +34,7 @@ pub enum StoreError {
     #[error("database operation timed out")]
     TimedOut,
     #[error(transparent)]
-    Postgres(#[from] tokio_postgres::Error),
+    Postgres(#[from] sqlx::Error),
 }
 
 /// Same bound the admin routes use for a connect. A stalled query fails
@@ -138,11 +137,10 @@ enum BackendKind {
     Postgres(Pg),
 }
 
-/// One Auth connection, replaced when PostgreSQL closes it.
+/// Auth connection pool. Closed on process shutdown.
 #[derive(Clone)]
 struct Pg {
-    url: String,
-    client: Arc<Mutex<tokio_postgres::Client>>,
+    pool: sqlx::PgPool,
 }
 
 struct MemoryDb {
@@ -172,11 +170,25 @@ impl Backend {
         })
     }
 
+    /// Release the Auth database pool after the HTTP listener has stopped.
+    pub async fn close(&self) {
+        if let BackendKind::Postgres(pg) = &self.inner {
+            pg.close().await;
+        }
+    }
+
+    pub fn pg_pool(&self) -> Option<sqlx::PgPool> {
+        match &self.inner {
+            BackendKind::Postgres(pg) => Some(pg.pool.clone()),
+            _ => None,
+        }
+    }
+
     pub async fn signup_email(&self, cmd: SignupCommand) -> Result<SignupResult, StoreError> {
         match &self.inner {
             BackendKind::None => Err(StoreError::Unavailable),
             BackendKind::Memory(db) => memory_signup(db, cmd).await,
-            BackendKind::Postgres(pg) => timed(pg, postgres_signup(pg, cmd)).await,
+            BackendKind::Postgres(pg) => timed(postgres_signup(pg, cmd)).await,
         }
     }
 
@@ -190,18 +202,18 @@ impl Backend {
                 }))
             }
             BackendKind::Postgres(pg) => {
-                timed(pg, async {
+                timed(async {
                     let instance = Uuid::nil();
-                    let client = pg.lock().await?;
-                    let row = client
-                        .query_opt(
-                            "SELECT banned_until FROM auth.users
+                    let row = sqlx::query!(
+                        "SELECT banned_until FROM auth.users
                          WHERE instance_id = $1::uuid AND id = $2::uuid",
-                            &[&instance, &user_id],
-                        )
-                        .await?;
+                        instance,
+                        user_id,
+                    )
+                    .fetch_optional(&pg.pool)
+                    .await?;
                     Ok(row.map(|row| Subject {
-                        banned_until: row.get(0),
+                        banned_until: row.banned_until.map(from_ts),
                     }))
                 })
                 .await
@@ -214,14 +226,13 @@ impl Backend {
             BackendKind::None => Err(StoreError::Unavailable),
             BackendKind::Memory(db) => Ok(db.lock().await.sessions.contains_key(&session_id)),
             BackendKind::Postgres(pg) => {
-                timed(pg, async {
-                    let client = pg.lock().await?;
-                    let row = client
-                        .query_opt(
-                            "SELECT 1 FROM auth.sessions WHERE id = $1::uuid",
-                            &[&session_id],
-                        )
-                        .await?;
+                timed(async {
+                    let row = sqlx::query!(
+                        "SELECT 1 AS present FROM auth.sessions WHERE id = $1::uuid",
+                        session_id,
+                    )
+                    .fetch_optional(&pg.pool)
+                    .await?;
                     Ok(row.is_some())
                 })
                 .await
@@ -246,13 +257,12 @@ impl Backend {
                 Ok(())
             }
             BackendKind::Postgres(pg) => {
-                timed(pg, async {
-                    let mut client = pg.lock().await?;
-                    let tx = client.transaction().await?;
-                    if let Some(user) = find_user_by_id(&tx, user_id).await? {
-                        insert_audit(&tx, &user, "logout", "account", None).await?;
+                timed(async {
+                    let mut tx = pg.pool.begin().await?;
+                    if let Some(user) = find_user_by_id(&mut tx, user_id).await? {
+                        insert_audit(&mut tx, &user, "logout", "account", None).await?;
                     }
-                    exec_logout(&tx, user_id, session_id, scope).await?;
+                    exec_logout(&mut tx, user_id, session_id, scope).await?;
                     tx.commit().await?;
                     Ok(())
                 })
@@ -487,60 +497,52 @@ fn apply_logout(
 
 impl Pg {
     async fn connect(url: &str) -> Result<Self, SchemaError> {
-        let client = connect_deadline(url).await?;
-        Ok(Self {
-            url: url.to_string(),
-            client: Arc::new(Mutex::new(client)),
-        })
+        // Reject `sslmode=require` before sqlx opens a socket. Schema install
+        // uses the same check.
+        crate::schema::reject_tls(url)?;
+        let connect = sqlx::postgres::PgPoolOptions::new()
+            .max_connections(10)
+            .acquire_timeout(QUERY_DEADLINE)
+            .connect(url);
+        let pool = match tokio::time::timeout(QUERY_DEADLINE, connect).await {
+            Ok(Ok(pool)) => pool,
+            Ok(Err(error)) => return Err(SchemaError::Sqlx(error)),
+            Err(_) => {
+                return Err(SchemaError::TimedOut {
+                    timeout: QUERY_DEADLINE,
+                })
+            }
+        };
+        Ok(Self { pool })
     }
 
-    async fn lock(&self) -> Result<MutexGuard<'_, tokio_postgres::Client>, StoreError> {
-        let mut guard = self.client.lock().await;
-        if guard.is_closed() {
-            tracing::warn!("auth postgres connection closed; reconnecting");
-            *guard = connect_deadline(&self.url)
-                .await
-                .map_err(StoreError::Connect)?;
-        }
-        Ok(guard)
-    }
-
-    async fn reconnect(&self) -> Result<(), StoreError> {
-        let client = connect_deadline(&self.url)
-            .await
-            .map_err(StoreError::Connect)?;
-        *self.client.lock().await = client;
-        Ok(())
+    async fn close(&self) {
+        self.pool.close().await;
     }
 }
 
-async fn connect_deadline(url: &str) -> Result<tokio_postgres::Client, SchemaError> {
-    match tokio::time::timeout(QUERY_DEADLINE, crate::schema::connect(url)).await {
-        Ok(result) => result,
-        Err(_) => Err(SchemaError::TimedOut {
-            timeout: QUERY_DEADLINE,
-        }),
-    }
-}
-
-async fn timed<T>(
-    pg: &Pg,
-    fut: impl Future<Output = Result<T, StoreError>>,
-) -> Result<T, StoreError> {
+async fn timed<T>(fut: impl Future<Output = Result<T, StoreError>>) -> Result<T, StoreError> {
     match tokio::time::timeout(QUERY_DEADLINE, fut).await {
         Ok(result) => result,
         Err(_) => {
             tracing::error!("auth database operation timed out");
-            let _ = pg.reconnect().await;
             Err(StoreError::TimedOut)
         }
     }
 }
 
+fn ts(time: SystemTime) -> chrono::DateTime<chrono::Utc> {
+    chrono::DateTime::<chrono::Utc>::from(time)
+}
+
+fn from_ts(time: chrono::DateTime<chrono::Utc>) -> SystemTime {
+    SystemTime::from(time)
+}
+
 async fn postgres_signup(pg: &Pg, cmd: SignupCommand) -> Result<SignupResult, StoreError> {
     let preexisting = {
-        let client = pg.lock().await?;
-        find_email(&*client, &cmd.email, &cmd.aud)
+        let mut conn = pg.pool.acquire().await?;
+        find_email(&mut conn, &cmd.email, &cmd.aud)
             .await?
             .map(|user| user.email_confirmed_at.is_some())
     };
@@ -549,12 +551,11 @@ async fn postgres_signup(pg: &Pg, cmd: SignupCommand) -> Result<SignupResult, St
     } else {
         Some(hash_password(cmd.password.clone()).await?)
     };
-    let mut guard = pg.lock().await?;
-    let tx = guard.transaction().await?;
-    if let Some(user) = find_email(&tx, &cmd.email, &cmd.aud).await? {
+    let mut tx = pg.pool.begin().await?;
+    if let Some(user) = find_email(&mut tx, &cmd.email, &cmd.aud).await? {
         if user.email_confirmed_at.is_some() {
             insert_audit(
-                &tx,
+                &mut tx,
                 &user,
                 "user_repeated_signup",
                 "user",
@@ -564,21 +565,20 @@ async fn postgres_signup(pg: &Pg, cmd: SignupCommand) -> Result<SignupResult, St
             tx.commit().await?;
             return Ok(SignupResult::AlreadyExists);
         }
-        let issued = confirm_existing_tx(&tx, user, &cmd).await?;
+        let issued = confirm_existing_tx(&mut tx, user, &cmd).await?;
         tx.commit().await?;
         return Ok(SignupResult::Created(Box::new(issued)));
     }
     let Some(hash) = hash else {
         return Err(StoreError::Unavailable);
     };
-    match insert_new_tx(&tx, &cmd, hash).await {
+    match insert_new_tx(&mut tx, &cmd, hash).await {
         Ok(issued) => {
             tx.commit().await?;
             Ok(SignupResult::Created(Box::new(issued)))
         }
         Err(WriteError::Conflict) => {
             drop(tx);
-            drop(guard);
             audit_conflict(pg, &cmd).await
         }
         Err(WriteError::Db(error)) => Err(error),
@@ -586,11 +586,10 @@ async fn postgres_signup(pg: &Pg, cmd: SignupCommand) -> Result<SignupResult, St
 }
 
 async fn audit_conflict(pg: &Pg, cmd: &SignupCommand) -> Result<SignupResult, StoreError> {
-    let mut client = pg.lock().await?;
-    let tx = client.transaction().await?;
-    if let Some(user) = find_email(&tx, &cmd.email, &cmd.aud).await? {
+    let mut tx = pg.pool.begin().await?;
+    if let Some(user) = find_email(&mut tx, &cmd.email, &cmd.aud).await? {
         insert_audit(
-            &tx,
+            &mut tx,
             &user,
             "user_repeated_signup",
             "user",
@@ -603,7 +602,7 @@ async fn audit_conflict(pg: &Pg, cmd: &SignupCommand) -> Result<SignupResult, St
 }
 
 async fn confirm_existing_tx(
-    tx: &tokio_postgres::Transaction<'_>,
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     mut user: UserRecord,
     cmd: &SignupCommand,
 ) -> Result<IssuedSession, StoreError> {
@@ -623,7 +622,8 @@ async fn confirm_existing_tx(
             .map_err(write_to_store)?;
         user.identities.push(identity);
     }
-    tx.execute(
+    let now_ts = ts(now);
+    sqlx::query!(
         "UPDATE auth.users SET
             email_confirmed_at = $2::timestamptz,
             confirmation_token = '',
@@ -631,8 +631,11 @@ async fn confirm_existing_tx(
             raw_user_meta_data = $3::jsonb,
             updated_at = $2::timestamptz
          WHERE id = $1::uuid",
-        &[&user.id, &now, &user.user_metadata],
+        user.id,
+        now_ts,
+        user.user_metadata,
     )
+    .execute(&mut **tx)
     .await?;
     let issued = grant_session(&mut user, now);
     insert_session_rows(tx, &issued)
@@ -658,7 +661,7 @@ async fn confirm_existing_tx(
 }
 
 async fn insert_new_tx(
-    tx: &tokio_postgres::Transaction<'_>,
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     cmd: &SignupCommand,
     password_hash: String,
 ) -> Result<IssuedSession, WriteError> {
@@ -696,124 +699,133 @@ async fn insert_new_tx(
 }
 
 async fn insert_user(
-    tx: &tokio_postgres::Transaction<'_>,
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     user: &UserRecord,
 ) -> Result<(), WriteError> {
-    let confirmed = user.email_confirmed_at.unwrap_or(user.created_at);
-    let signed_in = user.last_sign_in_at.unwrap_or(user.created_at);
+    let confirmed = ts(user.email_confirmed_at.unwrap_or(user.created_at));
+    let signed_in = ts(user.last_sign_in_at.unwrap_or(user.created_at));
+    let created = ts(user.created_at);
     let instance = Uuid::nil();
-    let result = tx
-        .execute(
-            "INSERT INTO auth.users (
-                instance_id, id, aud, role, email, encrypted_password,
-                email_confirmed_at, confirmation_token, recovery_token,
-                email_change_token_new, email_change, email_change_token_current,
-                email_change_confirm_status,
-                phone, phone_change, phone_change_token, reauthentication_token,
-                last_sign_in_at, raw_app_meta_data, raw_user_meta_data,
-                is_sso_user, is_anonymous, created_at, updated_at
-            ) VALUES (
-                $1::uuid, $2::uuid, $3, $4, $5, $6,
-                $7::timestamptz, '', '',
-                '', '', '',
-                0,
-                NULL, '', '', '',
-                $8::timestamptz, $9::jsonb, $10::jsonb,
-                false, false, $11::timestamptz, $11::timestamptz
-            )",
-            &[
-                &instance,
-                &user.id,
-                &user.aud,
-                &user.role,
-                &user.email,
-                &user.password_hash,
-                &confirmed,
-                &signed_in,
-                &user.app_metadata,
-                &user.user_metadata,
-                &user.created_at,
-            ],
-        )
-        .await;
+    let result = sqlx::query!(
+        "INSERT INTO auth.users (
+            instance_id, id, aud, role, email, encrypted_password,
+            email_confirmed_at, confirmation_token, recovery_token,
+            email_change_token_new, email_change, email_change_token_current,
+            email_change_confirm_status,
+            phone, phone_change, phone_change_token, reauthentication_token,
+            last_sign_in_at, raw_app_meta_data, raw_user_meta_data,
+            is_sso_user, is_anonymous, created_at, updated_at
+        ) VALUES (
+            $1::uuid, $2::uuid, $3, $4, $5, $6,
+            $7::timestamptz, '', '',
+            '', '', '',
+            0,
+            NULL, '', '', '',
+            $8::timestamptz, $9::jsonb, $10::jsonb,
+            false, false, $11::timestamptz, $11::timestamptz
+        )",
+        instance,
+        user.id,
+        user.aud,
+        user.role,
+        user.email,
+        user.password_hash,
+        confirmed,
+        signed_in,
+        user.app_metadata,
+        user.user_metadata,
+        created,
+    )
+    .execute(&mut **tx)
+    .await
+    .map(|done| done.rows_affected());
     map_write(result)
 }
 
 async fn insert_identity(
-    tx: &tokio_postgres::Transaction<'_>,
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     identity: &IdentityRecord,
 ) -> Result<(), WriteError> {
-    let result = tx
-        .execute(
-            "INSERT INTO auth.identities (
-                id, provider_id, user_id, identity_data, provider,
-                last_sign_in_at, created_at, updated_at
-            ) VALUES (
-                $1::uuid, $2, $3::uuid, $4::jsonb, $5,
-                $6::timestamptz, $6::timestamptz, $6::timestamptz
-            )",
-            &[
-                &identity.id,
-                &identity.provider_id,
-                &identity.user_id,
-                &identity.identity_data,
-                &identity.provider,
-                &identity.created_at,
-            ],
-        )
-        .await;
+    let created = ts(identity.created_at);
+    let result = sqlx::query!(
+        "INSERT INTO auth.identities (
+            id, provider_id, user_id, identity_data, provider,
+            last_sign_in_at, created_at, updated_at
+        ) VALUES (
+            $1::uuid, $2, $3::uuid, $4::jsonb, $5,
+            $6::timestamptz, $6::timestamptz, $6::timestamptz
+        )",
+        identity.id,
+        identity.provider_id,
+        identity.user_id,
+        identity.identity_data,
+        identity.provider,
+        created,
+    )
+    .execute(&mut **tx)
+    .await
+    .map(|done| done.rows_affected());
     map_write(result)
 }
 
 async fn insert_session_rows(
-    tx: &tokio_postgres::Transaction<'_>,
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     issued: &IssuedSession,
 ) -> Result<(), WriteError> {
     let instance = Uuid::nil();
     // `auth.refresh_tokens.user_id` is varchar, not uuid.
     let user_id = issued.user.id.to_string();
     let amr_id = Uuid::new_v4();
+    let amr_at = ts(issued.amr_at);
     map_write(
-        tx.execute(
+        sqlx::query!(
             "INSERT INTO auth.sessions (id, user_id, created_at, updated_at, aal)
              VALUES ($1::uuid, $2::uuid, $3::timestamptz, $3::timestamptz, 'aal1')",
-            &[&issued.session_id, &issued.user.id, &issued.amr_at],
+            issued.session_id,
+            issued.user.id,
+            amr_at,
         )
-        .await,
+        .execute(&mut **tx)
+        .await
+        .map(|done| done.rows_affected()),
     )?;
     map_write(
-        tx.execute(
+        sqlx::query!(
             "INSERT INTO auth.refresh_tokens (
                 instance_id, token, user_id, revoked, created_at, updated_at, session_id
              ) VALUES (
                 $1::uuid, $2, $3, false, $4::timestamptz, $4::timestamptz, $5::uuid
              )",
-            &[
-                &instance,
-                &issued.refresh_token,
-                &user_id,
-                &issued.amr_at,
-                &issued.session_id,
-            ],
+            instance,
+            issued.refresh_token,
+            user_id,
+            amr_at,
+            issued.session_id,
         )
-        .await,
+        .execute(&mut **tx)
+        .await
+        .map(|done| done.rows_affected()),
     )?;
     map_write(
-        tx.execute(
+        sqlx::query!(
             "INSERT INTO auth.mfa_amr_claims (
                 id, session_id, created_at, updated_at, authentication_method
              ) VALUES (
                 $1::uuid, $2::uuid, $3::timestamptz, $3::timestamptz, 'password'
              )",
-            &[&amr_id, &issued.session_id, &issued.amr_at],
+            amr_id,
+            issued.session_id,
+            amr_at,
         )
-        .await,
+        .execute(&mut **tx)
+        .await
+        .map(|done| done.rows_affected()),
     )?;
     Ok(())
 }
 
 async fn insert_audit(
-    tx: &tokio_postgres::Transaction<'_>,
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     user: &UserRecord,
     action: &str,
     log_type: &str,
@@ -821,162 +833,165 @@ async fn insert_audit(
 ) -> Result<(), StoreError> {
     let instance = Uuid::nil();
     let id = Uuid::new_v4();
-    let now = SystemTime::now();
+    let now = ts(SystemTime::now());
     let payload = audit_payload(user, action, log_type, traits);
-    tx.execute(
+    sqlx::query!(
         "INSERT INTO auth.audit_log_entries (instance_id, id, payload, created_at, ip_address)
          VALUES ($1::uuid, $2::uuid, $3::json, $4::timestamptz, '')",
-        &[&instance, &id, &payload, &now],
+        instance,
+        id,
+        payload,
+        now,
     )
+    .execute(&mut **tx)
     .await?;
     Ok(())
 }
 
 async fn exec_logout(
-    tx: &tokio_postgres::Transaction<'_>,
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     user_id: Uuid,
     session_id: Option<Uuid>,
     scope: LogoutScope,
 ) -> Result<(), StoreError> {
     match (session_id, scope) {
         (None, _) | (_, LogoutScope::Global) => {
-            tx.execute(
+            sqlx::query!(
                 "DELETE FROM auth.sessions WHERE user_id = $1::uuid",
-                &[&user_id],
+                user_id,
             )
+            .execute(&mut **tx)
             .await?;
         }
         (Some(session_id), LogoutScope::Local) => {
-            tx.execute(
-                "DELETE FROM auth.sessions WHERE id = $1::uuid",
-                &[&session_id],
-            )
-            .await?;
+            sqlx::query!("DELETE FROM auth.sessions WHERE id = $1::uuid", session_id,)
+                .execute(&mut **tx)
+                .await?;
         }
         (Some(session_id), LogoutScope::Others) => {
-            tx.execute(
+            sqlx::query!(
                 "DELETE FROM auth.sessions WHERE user_id = $1::uuid AND id <> $2::uuid",
-                &[&user_id, &session_id],
+                user_id,
+                session_id,
             )
+            .execute(&mut **tx)
             .await?;
         }
     }
     Ok(())
 }
 
-async fn find_email<C: GenericClient + Sync>(
-    client: &C,
+async fn find_email(
+    conn: &mut sqlx::PgConnection,
     email: &str,
     aud: &str,
 ) -> Result<Option<UserRecord>, StoreError> {
     let instance = Uuid::nil();
-    let by_identity = client
-        .query_opt(
-            "SELECT u.id::text
-             FROM auth.identities i
-             JOIN auth.users u ON u.id = i.user_id
-             WHERE i.email = $1
-               AND u.aud = $2
-               AND u.instance_id = $3::uuid
-               AND u.is_sso_user = false
-             LIMIT 1",
-            &[&email, &aud, &instance],
-        )
-        .await?;
+    let by_identity = sqlx::query!(
+        "SELECT u.id::text AS id
+         FROM auth.identities i
+         JOIN auth.users u ON u.id = i.user_id
+         WHERE i.email = $1
+           AND u.aud = $2
+           AND u.instance_id = $3::uuid
+           AND u.is_sso_user = false
+         LIMIT 1",
+        email,
+        aud,
+        instance,
+    )
+    .fetch_optional(&mut *conn)
+    .await?;
     if let Some(row) = by_identity {
-        let id = parse_uuid(&row.get::<_, String>(0))?;
-        return find_user_by_id(client, id).await;
+        let id = parse_uuid(row.id.as_deref().unwrap_or(""))?;
+        return find_user_by_id(conn, id).await;
     }
-    let by_user = client
-        .query_opt(
-            "SELECT id::text FROM auth.users
-             WHERE instance_id = $1::uuid
-               AND lower(email) = $2
-               AND aud = $3
-               AND is_sso_user = false
-             LIMIT 1",
-            &[&instance, &email, &aud],
-        )
-        .await?;
+    let by_user = sqlx::query!(
+        "SELECT id::text AS id FROM auth.users
+         WHERE instance_id = $1::uuid
+           AND lower(email) = $2
+           AND aud = $3
+           AND is_sso_user = false
+         LIMIT 1",
+        instance,
+        email,
+        aud,
+    )
+    .fetch_optional(&mut *conn)
+    .await?;
     match by_user {
-        Some(row) => find_user_by_id(client, parse_uuid(&row.get::<_, String>(0))?).await,
+        Some(row) => find_user_by_id(conn, parse_uuid(row.id.as_deref().unwrap_or(""))?).await,
         None => Ok(None),
     }
 }
 
-async fn find_user_by_id<C: GenericClient + Sync>(
-    client: &C,
+async fn find_user_by_id(
+    conn: &mut sqlx::PgConnection,
     id: Uuid,
 ) -> Result<Option<UserRecord>, StoreError> {
-    let row = client
-        .query_opt(
-            "SELECT id::text, aud, COALESCE(role, ''), COALESCE(email, ''),
-                    COALESCE(phone, ''), email_confirmed_at, last_sign_in_at,
-                    created_at, updated_at,
-                    COALESCE(raw_app_meta_data::text, 'null'),
-                    COALESCE(raw_user_meta_data::text, 'null'),
-                    is_anonymous, banned_until, is_sso_user,
-                    COALESCE(encrypted_password, '')
-             FROM auth.users
-             WHERE instance_id = $1::uuid AND id = $2::uuid",
-            &[&Uuid::nil(), &id],
-        )
-        .await?;
+    let instance = Uuid::nil();
+    let row = sqlx::query!(
+        "SELECT id, aud, role, email, phone,
+                email_confirmed_at, last_sign_in_at, created_at, updated_at,
+                raw_app_meta_data, raw_user_meta_data,
+                is_anonymous, banned_until, is_sso_user, encrypted_password
+         FROM auth.users
+         WHERE instance_id = $1 AND id = $2",
+        instance,
+        id,
+    )
+    .fetch_optional(&mut *conn)
+    .await?;
     let Some(row) = row else {
         return Ok(None);
     };
-    let id = parse_uuid(&row.get::<_, String>(0))?;
-    let identities = load_identities(client, id).await?;
-    let created_at: Option<SystemTime> = row.get(7);
-    let updated_at: Option<SystemTime> = row.get(8);
+    let identities = load_identities(conn, row.id).await?;
     let now = SystemTime::now();
     Ok(Some(UserRecord {
-        id,
-        aud: row.get(1),
-        role: row.get(2),
-        email: row.get(3),
-        phone: row.get(4),
-        email_confirmed_at: row.get(5),
-        last_sign_in_at: row.get(6),
-        app_metadata: parse_json_text(&row.get::<_, String>(9)),
-        user_metadata: parse_json_text(&row.get::<_, String>(10)),
+        id: row.id,
+        aud: row.aud.unwrap_or_default(),
+        role: row.role.unwrap_or_default(),
+        email: row.email.unwrap_or_default(),
+        phone: row.phone.unwrap_or_default(),
+        email_confirmed_at: row.email_confirmed_at.map(from_ts),
+        last_sign_in_at: row.last_sign_in_at.map(from_ts),
+        app_metadata: row.raw_app_meta_data.unwrap_or(Value::Null),
+        user_metadata: row.raw_user_meta_data.unwrap_or(Value::Null),
         identities,
-        created_at: created_at.unwrap_or(now),
-        updated_at: updated_at.unwrap_or(now),
-        is_anonymous: row.get(11),
-        banned_until: row.get(12),
-        is_sso_user: row.get(13),
-        password_hash: row.get(14),
+        created_at: row.created_at.map(from_ts).unwrap_or(now),
+        updated_at: row.updated_at.map(from_ts).unwrap_or(now),
+        is_anonymous: row.is_anonymous,
+        banned_until: row.banned_until.map(from_ts),
+        is_sso_user: row.is_sso_user,
+        password_hash: row.encrypted_password.unwrap_or_default(),
     }))
 }
 
-async fn load_identities<C: GenericClient + Sync>(
-    client: &C,
+async fn load_identities(
+    conn: &mut sqlx::PgConnection,
     user_id: Uuid,
 ) -> Result<Vec<IdentityRecord>, StoreError> {
-    let rows = client
-        .query(
-            "SELECT id::text, provider_id, user_id::text, identity_data::text, provider,
-                    COALESCE(email, ''), last_sign_in_at, created_at, updated_at
-             FROM auth.identities WHERE user_id = $1::uuid",
-            &[&user_id],
-        )
-        .await?;
+    let rows = sqlx::query!(
+        "SELECT id, provider_id, user_id, identity_data, provider, email,
+                last_sign_in_at, created_at, updated_at
+         FROM auth.identities WHERE user_id = $1",
+        user_id,
+    )
+    .fetch_all(&mut *conn)
+    .await?;
     let mut identities = Vec::with_capacity(rows.len());
     for row in rows {
-        let created_at: Option<SystemTime> = row.get(7);
-        let updated_at: Option<SystemTime> = row.get(8);
         let now = SystemTime::now();
         identities.push(IdentityRecord {
-            id: parse_uuid(&row.get::<_, String>(0))?,
-            provider_id: row.get(1),
-            user_id: parse_uuid(&row.get::<_, String>(2))?,
-            identity_data: parse_json_text(&row.get::<_, String>(3)),
-            provider: row.get(4),
-            email: row.get(5),
-            last_sign_in_at: row.get(6),
-            created_at: created_at.unwrap_or(now),
-            updated_at: updated_at.unwrap_or(now),
+            id: row.id,
+            provider_id: row.provider_id,
+            user_id: row.user_id,
+            identity_data: row.identity_data,
+            provider: row.provider,
+            email: row.email.unwrap_or_default(),
+            last_sign_in_at: row.last_sign_in_at.map(from_ts),
+            created_at: row.created_at.map(from_ts).unwrap_or(now),
+            updated_at: row.updated_at.map(from_ts).unwrap_or(now),
         });
     }
     Ok(identities)
@@ -989,7 +1004,7 @@ fn write_to_store(error: WriteError) -> StoreError {
     }
 }
 
-fn map_write(result: Result<u64, tokio_postgres::Error>) -> Result<(), WriteError> {
+fn map_write(result: Result<u64, sqlx::Error>) -> Result<(), WriteError> {
     match result {
         Ok(_) => Ok(()),
         Err(error) if unique_violation(&error) => Err(WriteError::Conflict),
@@ -997,16 +1012,15 @@ fn map_write(result: Result<u64, tokio_postgres::Error>) -> Result<(), WriteErro
     }
 }
 
-fn unique_violation(error: &tokio_postgres::Error) -> bool {
-    error.code().is_some_and(|code| code.code() == "23505")
+fn unique_violation(error: &sqlx::Error) -> bool {
+    error
+        .as_database_error()
+        .and_then(|db| db.code())
+        .is_some_and(|code| code == "23505")
 }
 
 fn parse_uuid(value: &str) -> Result<Uuid, StoreError> {
     Uuid::parse_str(value).map_err(|_| StoreError::Unavailable)
-}
-
-fn parse_json_text(value: &str) -> Value {
-    serde_json::from_str(value).unwrap_or(Value::Null)
 }
 
 fn app_metadata() -> Value {

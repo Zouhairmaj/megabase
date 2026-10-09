@@ -1,0 +1,65 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, friendly_name, factor_type::text AS factor_type, status::text AS status,\n                created_at, updated_at, phone, last_challenged_at\n         FROM auth.mfa_factors WHERE user_id = $1 AND id = $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "friendly_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "factor_type",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "status",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 5,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 6,
+        "name": "phone",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "last_challenged_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      null,
+      null,
+      false,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "e6f362f6519a933b26b4b67299ed5fefa49769afbf3c63c028a68d3c6df597dd"
+}

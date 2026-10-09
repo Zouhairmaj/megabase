@@ -35,6 +35,22 @@ Failures return HTTP 501 with `{"code":"MEGABASE_NOT_IMPLEMENTED",...}`. Never a
 - Credit upstream in a header comment; keep NOTICE current.
 - Conventional Commits for the site and docs; component unit commits follow GOAL.md.
 
+## Checked queries
+
+Auth DML is `sqlx::query!` / `sqlx::query_as!`. `.cargo/config.toml` sets
+`SQLX_OFFLINE=true`, and `.sqlx/` is the committed query metadata. After
+changing a query string, install `sqlx-cli` 0.8.6 (the `sqlx` pin in the
+workspace `Cargo.toml`) and refresh the cache against a database that already
+has the Auth schema:
+
+```shell
+cargo install sqlx-cli --version 0.8.6 --locked --no-default-features --features native-tls,postgres
+SQLX_OFFLINE=false DATABASE_URL=postgres://… cargo sqlx prepare --workspace -- --all-targets
+```
+
+Commit the `.sqlx` files the command writes. A CI `cargo sqlx prepare --check`
+step would live in `.github/` and needs its own `review/*` pull request.
+
 ## Fuzzing
 
 OpenSSF Scorecard's Fuzzing check treats a Rust repo as fuzzed when a `*.rs`
