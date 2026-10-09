@@ -45,9 +45,9 @@ jobs:
         with:
           toolchain: stable
 
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        with:
-          key: pages
+      # No actions/cache here. This job checks out workflow_run.head_sha and
+      # downloads the Judge artifact. A cache saved from that checkout can be
+      # restored by a later default-branch run (CodeQL actions/cache-poisoning).
 
       - name: Download judge results
         if: github.event_name == 'workflow_run'
