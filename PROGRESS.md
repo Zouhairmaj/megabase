@@ -138,6 +138,11 @@ waiting on a human.
     SHA-256 and verified before exec (no `curl|sh`). That pin is the
     two bootstrap binaries only; the `stable` toolchain they install and
     later `cargo binstall` tool fetches remain unpinned.
+16. **README coverage/conformance badge colors.** Owner-specified
+    traffic-light steps for the shields.io endpoint JSON only:
+    `#e05d44` below 50%, `#fe7d37` from 50% to under 90%, `#00D892` at
+    90% and above (`flat-square`). Treemap chips and generated SVG
+    badges stay on the brand greens in `docs/brand/README.md`.
 
 ## Tracking
 
