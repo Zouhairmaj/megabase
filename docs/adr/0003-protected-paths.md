@@ -21,7 +21,8 @@ agreement). CI runs it on every pull request.
 
 - Edits to `GOAL.md` (except the lead-approved Design and Documentation
   sections on the Phase 0 bootstrap branch) or `MANIFESTO.md`.
-- Edits to `HUMAN_LOG.md` except the bootstrap case below.
+- Edits to `HUMAN_LOG.md` except the bootstrap case and the `review/*`
+  pending/completed exception below.
 - Edits to `vendor/`, `vendor.toml` or `.gitmodules` after bootstrap.
 - Source files in languages other than Rust (`.py`, `.js`, `.ts`, `.go`,
   `.ex`, `.hs`, `.rb`, `.lua`, `.sh`, …) outside `vendor/`. SQL, TOML,
@@ -56,6 +57,33 @@ Then the PR may add the protected tree, provided:
 The exception cannot apply to a later PR: after this lands, the base has
 `vendor.toml` and condition 1 is false. It cannot apply to a different
 branch name even before this lands. It is not a label anyone can add.
+
+### Release-please exception
+
+Branches named `release-please--branches--*` may change only the version
+bump set:
+
+- `CHANGELOG.md`
+- `.release-please-manifest.json`
+- `Cargo.toml` (workspace package version)
+- `Cargo.lock` (workspace member versions, kept in sync by
+  `cargo update -w` on the release branch)
+- `release-please-config.json` only when the sole change is deleting
+  `release-as` (required before the v0.1.0 PR merges). Any other edit
+  to that file is rejected.
+
+Any other path on those branches is rejected, including reviewed paths
+and product code. This is narrower than a `review/*` exception: the bot
+cannot land CI or judge changes through a release PR.
+
+`review/*` may append or remove items under `## Pending` in `HUMAN_LOG.md`
+(a grow whose added suffix starts a new `- ` item, or a shrink that ends
+at a complete Pending item whose removed suffix starts with `- **Date**`)
+and may grow the Completed section (replace the empty-log placeholder,
+or append after existing completed entries). A shrink does not have to
+add a Completed entry. Format text and earlier completed entries stay
+unchanged. Mid-item Pending truncations and continuation-line growth
+are rejected.
 
 ## Consequences
 

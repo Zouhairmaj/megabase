@@ -34,8 +34,8 @@ PRs are squash-merged, and the PR title becomes the changelog entry.
 `conformance` titles land in the **Conformance/judge** section. Versioning,
 cadence and who may merge a release PR are in
 [`docs/ROADMAP.md`](docs/ROADMAP.md#versioning-and-releases) (do not restate
-them here). If a release PR's lockfile is stale, run `cargo generate-lockfile`
-on that PR.
+them here). The Release workflow keeps `Cargo.lock` in sync; if a release
+PR's lockfile is still stale, run `cargo update -w` on that branch.
 
 ## Questions
 

@@ -21,4 +21,9 @@ Each entry should include:
 
 ---
 
-*No completed human interventions recorded yet.*
+## Completed
+
+- **Date**: 2026-10-09
+- **Action**: Enabled “Allow GitHub Actions to create and approve pull requests” (Settings → Actions → General → Workflow permissions). Confirmed via API: `can_approve_pull_request_reviews=true`.
+- **Reason**: Release run 37961663758 failed with “GitHub Actions is not permitted to create or approve pull requests” before this setting was on. The pending item recorded that failure; the setting is now enabled. Lockfile-head checks still need `RELEASE_PLEASE_TOKEN` (`GITHUB_TOKEN` pushes do not trigger workflows).
+- **Files affected**: GitHub Actions settings (not in git)
