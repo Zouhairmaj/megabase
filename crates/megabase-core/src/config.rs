@@ -7,7 +7,8 @@ pub struct Config {
     pub host: String,
     /// `MEGABASE_PORT`, default `8000` (the port the Supabase gateway uses).
     pub port: u16,
-    /// `DATABASE_URL`. Not used yet; read so deployments can set it today.
+    /// `DATABASE_URL`. When set, Megabase installs implemented Auth SQL
+    /// objects at startup. PostgreSQL stays external.
     pub database_url: Option<String>,
     /// `JWT_SECRET`. Raw HS256 secret; no default. Optional so the process can
     /// start for health checks; [`Self::jwt_hs256`] fails if it is missing.

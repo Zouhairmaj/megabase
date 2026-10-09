@@ -10,3 +10,7 @@ rust-version.workspace = true
 [dependencies]
 megabase-core = { workspace = true }
 axum = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tokio-postgres = { workspace = true }
+tracing = { workspace = true }

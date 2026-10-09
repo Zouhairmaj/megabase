@@ -9,9 +9,9 @@ card: Start the binary, call /_megabase/health, then hit a 501 on an unimplement
 # Quickstart
 
 > [!NOTE]
-> Phase 0: nothing is conformant yet. Every unimplemented route answers HTTP
-> 501 `MEGABASE_NOT_IMPLEMENTED`. Use these docs to run the gateway locally,
-> not to run production.
+> Unimplemented HTTP endpoints answer 501 `MEGABASE_NOT_IMPLEMENTED`. Auth
+> SQL objects listed in [Configuration](configuration.md) are installed when
+> `DATABASE_URL` is set. This is not production software.
 
 ## Build from source
 

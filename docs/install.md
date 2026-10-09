@@ -63,6 +63,7 @@ docker build -t megabase .
 docker run --rm -p 8000:8000 megabase
 ```
 
+Pass `-e DATABASE_URL=...` if the process should install Auth SQL objects.
 The image includes `megabase-healthcheck`, which probes
 `/_megabase/health`.
 

@@ -2,12 +2,12 @@
   "schema": 1,
   "totals": {
     "units": 1024,
-    "implemented": 0,
+    "implemented": 10,
     "tested": 0,
     "conformant": 0
   },
   "percent": {
-    "coverage": 0.0,
+    "coverage": 1.0,
     "conformance": 0.0,
     "done": 0.0
   },
@@ -18,7 +18,7 @@
   "components": {
     "auth": {
       "units": 152,
-      "implemented": 0,
+      "implemented": 10,
       "tested": 0,
       "conformant": 0,
       "groups": {
@@ -30,7 +30,7 @@
         },
         "database": {
           "units": 32,
-          "implemented": 0,
+          "implemented": 10,
           "tested": 0,
           "conformant": 0
         },
@@ -555,5 +555,16 @@
       }
     }
   },
-  "units": {}
+  "units": {
+    "auth:sql-table:auth.saml_providers": "implemented",
+    "auth:sql-table:auth.saml_relay_states": "implemented",
+    "auth:sql-table:auth.schema_migrations": "implemented",
+    "auth:sql-table:auth.scim_tokens": "implemented",
+    "auth:sql-table:auth.scim_users": "implemented",
+    "auth:sql-table:auth.sessions": "implemented",
+    "auth:sql-table:auth.sso_domains": "implemented",
+    "auth:sql-table:auth.sso_providers": "implemented",
+    "auth:sql-table:auth.sso_sessions": "implemented",
+    "auth:sql-table:auth.users": "implemented"
+  }
 }
