@@ -106,12 +106,19 @@ crates inherit. The Release workflow runs `cargo update -w` on
 `release-please--branches--*` and commits `Cargo.lock` if workspace
 member versions drifted, so `--locked` CI (Build, Codecov, Bencher,
 Protected paths, Judge) stays green. That commit is pushed with
-`RELEASE_PLEASE_TOKEN` when set, so required checks start on the new
-head; `GITHUB_TOKEN` pushes do not trigger workflows. The lockfile job
-polls until Build, Codecov, Bencher, Protected paths, and Judge have
-started on that SHA, not merely until any check run exists. The window
-is 60 attempts of 6s by default (about six minutes) and is configurable
-via `LOCKFILE_CHECK_ATTEMPTS` and `LOCKFILE_CHECK_SLEEP_SECONDS`. PR titles use `chore: release ${version}` (no `main` scope);
+`RELEASE_PLEASE_TOKEN` when set (preferred: a PAT or GitHub App whose
+pushes start workflows). `GITHUB_TOKEN` pushes do not trigger
+`push`/`pull_request` workflows; when the secret is unset, the lockfile
+job `workflow_dispatch`es CI, Bencher, and Judge on the release branch
+(native check runs on that SHA). If that ref's workflow files lack
+`workflow_dispatch`, it dispatches **Lockfile required checks** on the
+default branch, which checks out the lockfile SHA and reports Build,
+Codecov, Bencher, Protected paths, and Judge via the Checks API.
+`GITHUB_TOKEN` is allowed to create `workflow_dispatch` runs. The
+lockfile job then polls until those five names have started on that
+SHA, not merely until any check run exists. The window is 60 attempts
+of 6s by default (about six minutes) and is configurable via
+`LOCKFILE_CHECK_ATTEMPTS` and `LOCKFILE_CHECK_SLEEP_SECONDS`. PR titles use `chore: release ${version}` (no `main` scope);
 `semantic-pr.yml` also allows scope `main` as a fallback.
 `bootstrap-sha` is the Phase 0 merge (`7aa41e8`, exclusive): commits
 before it (`Day 0`, `[phase0]`, `[brand]`) are not conventional and

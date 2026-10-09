@@ -69,6 +69,7 @@ impl Counts {
     }
 }
 
+#[derive(Debug)]
 pub struct Status {
     pub states: BTreeMap<String, State>,
     pub cases_total: usize,
@@ -254,5 +255,170 @@ pub fn summarize(units: &UnitsFile, status: &Status) -> Summary {
         },
         components,
         units: status.states.clone(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::{Collector, Pin, Source, UnitSpec};
+    use crate::scan::TempTree;
+
+    fn src() -> Source {
+        Source {
+            repo: "postgrest".into(),
+            file: "a.hs".into(),
+            line: 1,
+        }
+    }
+
+    fn units_file() -> UnitsFile {
+        let mut c = Collector::default();
+        c.route("rest", "resources", "GET", "/rest/v1/todos", 1, src());
+        c.route("rest", "resources", "POST", "/rest/v1/todos", 1, src());
+        c.item(UnitSpec {
+            component: "auth",
+            group: "token",
+            kind: "grant-type",
+            name: "password".into(),
+            level: 1,
+            source: src(),
+        });
+        c.finish(vec![Pin {
+            name: "postgrest".into(),
+            path: "vendor/postgrest".into(),
+            repo: "https://example".into(),
+            tag: "v1".into(),
+            commit: "abc".into(),
+            license: "MIT".into(),
+            image: Some("img".into()),
+        }])
+    }
+
+    #[test]
+    fn pct_rounds_tenth_and_zero_whole() {
+        assert_eq!(pct(0, 0), 0.0);
+        assert_eq!(pct(1, 3), 33.3);
+        assert_eq!(pct(1, 2), 50.0);
+    }
+
+    #[test]
+    fn counts_add_tracks_state_ranks() {
+        let mut c = Counts::default();
+        c.add(State::Missing);
+        c.add(State::Implemented);
+        c.add(State::Tested);
+        c.add(State::Conformant);
+        assert_eq!(c.units, 4);
+        assert_eq!(c.implemented, 3);
+        assert_eq!(c.tested, 2);
+        assert_eq!(c.conformant, 1);
+    }
+
+    #[test]
+    fn compute_implemented_tested_conformant_and_errors() {
+        let units = units_file();
+        let get_id = "rest:route:GET /rest/v1/todos";
+        let post_id = "rest:route:POST /rest/v1/todos";
+        let grant_id = "auth:grant-type:password";
+
+        let tree = TempTree::new();
+        tree.write(
+            "crates/demo/src/lib.rs",
+            &format!("// megabase:unit {get_id}\n// megabase:unit {post_id}\n// megabase:unit {grant_id}\n"),
+        );
+        tree.write(
+            "judge/cases/rest.toml",
+            r#"
+[[case]]
+id = "rest.select"
+units = ["rest:route:GET /rest/v1/todos"]
+[[case]]
+id = "rest.insert"
+units = ["rest:route:POST /rest/v1/todos"]
+"#,
+        );
+        tree.write(
+            "coverage/judge-results.json",
+            r#"{"schema":1,"cases":[{"id":"rest.select","pass":true},{"id":"rest.insert","pass":false},{"id":"stale","pass":true}]}"#,
+        );
+
+        let status = compute(&tree.root, &units).unwrap();
+        assert_eq!(status.state(get_id), State::Conformant);
+        assert_eq!(status.state(post_id), State::Tested);
+        assert_eq!(status.state(grant_id), State::Implemented);
+        assert_eq!(status.state("missing"), State::Missing);
+        assert_eq!(status.cases_total, 2);
+        assert_eq!(status.cases_passing, 1);
+
+        let summary = summarize(&units, &status);
+        assert_eq!(summary.totals.units, 3);
+        assert_eq!(summary.totals.implemented, 3);
+        assert_eq!(summary.totals.tested, 2);
+        assert_eq!(summary.totals.conformant, 1);
+        assert_eq!(summary.percent.coverage, 100.0);
+        assert_eq!(summary.percent.conformance, 50.0);
+        assert!(summary.percent.done > 0.0);
+
+        tree.write(
+            "crates/demo/src/bad.rs",
+            "// megabase:unit rest:route:GET /nope\n",
+        );
+        let err = compute(&tree.root, &units).unwrap_err().to_string();
+        assert!(err.contains("unknown unit"), "{err}");
+    }
+
+    #[test]
+    fn compute_rejects_duplicate_cases_and_unknown_unit_refs() {
+        let units = units_file();
+        let tree = TempTree::new();
+        tree.write("crates/demo/src/lib.rs", "fn x() {}\n");
+        tree.write(
+            "judge/cases/a.toml",
+            r#"
+[[case]]
+id = "dup"
+units = ["rest:route:GET /rest/v1/todos"]
+"#,
+        );
+        tree.write(
+            "judge/cases/b.toml",
+            r#"
+[[case]]
+id = "dup"
+units = ["rest:route:GET /rest/v1/todos"]
+"#,
+        );
+        let err = compute(&tree.root, &units).unwrap_err().to_string();
+        assert!(err.contains("duplicate judge case"), "{err}");
+
+        let tree = TempTree::new();
+        tree.write("crates/demo/src/lib.rs", "fn x() {}\n");
+        tree.write(
+            "judge/cases/a.toml",
+            r#"
+[[case]]
+id = "x"
+units = ["rest:nope"]
+"#,
+        );
+        let err = compute(&tree.root, &units).unwrap_err().to_string();
+        assert!(err.contains("unknown unit"), "{err}");
+    }
+
+    #[test]
+    fn compute_without_cases_or_results_is_implemented_only() {
+        let units = units_file();
+        let tree = TempTree::new();
+        tree.write(
+            "crates/demo/src/lib.rs",
+            "// megabase:unit rest:route:GET /rest/v1/todos\n",
+        );
+        let status = compute(&tree.root, &units).unwrap();
+        assert_eq!(
+            status.state("rest:route:GET /rest/v1/todos"),
+            State::Implemented
+        );
+        assert_eq!(status.cases_total, 0);
     }
 }

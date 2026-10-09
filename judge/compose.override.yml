@@ -15,7 +15,10 @@
 #   3. loads the judge fixtures into the reference database,
 #   4. turns on email autoconfirm, because the self-hosted stack ships no
 #      mail server and sign-up cases need a session back,
-#   5. optionally adds Megabase on host port 8100 (`--profile with-megabase`),
+#   5. optionally adds Megabase on host port 8100 (`--profile with-megabase`)
+#      pointed at a dedicated `megabase` database (created by
+#      `megabase-judge prepare`), so HTTP and row snapshots are independent
+#      of the official stack's `postgres` database,
 #   6. keeps the pooler alive on GitHub Actions (RLIMIT_NOFILE + a longer
 #      healthcheck; Elixir migrate+eval+server is slower than compose --wait
 #      would otherwise allow).
@@ -66,6 +69,10 @@ services:
     volumes:
       - judge-snippets:/app/snippets
   db:
+    # Official compose publishes 5432 on the pooler. The harness needs a
+    # direct Postgres port for CREATE DATABASE and catalog snapshots.
+    ports:
+      - "54322:5432"
     volumes:
       - judge-db-data:/var/lib/postgresql/data
       - ../../../judge/fixtures/schema.sql:/docker-entrypoint-initdb.d/migrations/99-zz-judge-fixtures.sql:ro
@@ -78,7 +85,7 @@ services:
     environment:
       MEGABASE_PORT: "8000"
       JWT_SECRET: ${JWT_SECRET}
-      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD}@db:${POSTGRES_PORT}/${POSTGRES_DB}
+      DATABASE_URL: postgres://supabase_admin:${POSTGRES_PASSWORD}@db:${POSTGRES_PORT}/megabase
     ports:
       - "8100:8000"
     healthcheck:

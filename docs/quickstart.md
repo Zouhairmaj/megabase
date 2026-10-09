@@ -69,8 +69,9 @@ const { data, error } = await supabase.from('todos').select()
 
 ## Run the judge
 
-The judge starts the official Supabase reference stack with Docker Compose
-and compares it with Megabase. From the repository root:
+The judge starts the official Supabase reference stack with Docker Compose,
+creates a dedicated `megabase` database on that cluster, and compares HTTP
+plus database side-effects with Megabase. From the repository root:
 
 ```shell
 just judge-up

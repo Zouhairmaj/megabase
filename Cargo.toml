@@ -57,6 +57,7 @@ base64 = "0.22"
 hmac = "0.12"
 sha2 = "0.10"
 tokio-postgres = "0.7"
+postgres = { version = "0.19", features = ["with-serde_json-1"] }
 
 megabase-core = { path = "crates/megabase-core" }
 megabase-server = { path = "crates/megabase-server" }

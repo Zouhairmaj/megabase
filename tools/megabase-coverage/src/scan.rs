@@ -233,6 +233,52 @@ pub fn string_consts(text: &str) -> Vec<(String, String)> {
         .collect()
 }
 
+/// Scratch tree for extractor/status tests. Removed on drop.
+#[cfg(test)]
+pub(crate) struct TempTree {
+    pub root: PathBuf,
+}
+
+#[cfg(test)]
+impl TempTree {
+    pub fn new() -> Self {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        let root =
+            std::env::temp_dir().join(format!("megabase-cov-{}-{unique}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        Self { root }
+    }
+
+    pub fn write(&self, rel: &str, contents: &str) {
+        let path = self.root.join(rel);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        std::fs::write(path, contents).unwrap();
+    }
+
+    pub fn mkdir(&self, rel: &str) {
+        std::fs::create_dir_all(self.root.join(rel)).unwrap();
+    }
+
+    pub fn repo(&self, name: &str) -> Repo {
+        Repo {
+            name: name.into(),
+            root: self.root.clone(),
+        }
+    }
+}
+
+#[cfg(test)]
+impl Drop for TempTree {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.root);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -282,5 +328,64 @@ mod tests {
         assert!(cleaned.code.contains("\"{x}\""));
         assert!(!cleaned.skeleton.contains("{x}"));
         assert!(cleaned.skeleton.ends_with('{'));
+    }
+
+    #[test]
+    fn clean_blanks_block_comments_and_unclosed_blocks() {
+        let src = "a /* hide { */ b {- also -} c /*no close";
+        let ts = clean(src, TS);
+        assert!(!ts.code.contains("hide"));
+        assert!(ts.code.contains('b'));
+        assert!(!ts.code.contains("no close"));
+        let hs = clean("x {- hide -} y", HASKELL);
+        assert!(!hs.code.contains("hide"));
+        assert!(hs.code.contains('y'));
+    }
+
+    #[test]
+    fn clean_respects_escaped_quotes_and_backticks() {
+        let src = "s = \"a\\\"b\"; t = `line\n{keep}`";
+        let cleaned = clean(src, TS);
+        let quote = src.find('"').unwrap();
+        let inner = &cleaned.skeleton[quote + 1..quote + 5];
+        assert_eq!(inner, "    ", "{inner:?}");
+        assert!(!cleaned.skeleton.contains("a\\\"b"));
+        assert!(cleaned.code.contains("a\\\"b"));
+        assert!(!cleaned.skeleton.contains("{keep}"));
+        assert!(cleaned.code.contains("{keep}"));
+        assert!(cleaned.skeleton.contains('\n'));
+    }
+
+    #[test]
+    fn line_at_counts_newlines_and_clamps() {
+        assert_eq!(line_at("a\nb\nc", 0), 1);
+        assert_eq!(line_at("a\nb\nc", 2), 2);
+        assert_eq!(line_at("a\nb\nc", 999), 3);
+    }
+
+    #[test]
+    fn string_consts_reads_typed_and_plain() {
+        let src = r#"
+const PATH = '/bucket'
+NAME : string = "x"
+skip := 1
+"#;
+        let found = string_consts(src);
+        assert!(found.iter().any(|(k, v)| k == "PATH" && v == "/bucket"));
+        assert!(found.iter().any(|(k, v)| k == "NAME" && v == "x"));
+    }
+
+    #[test]
+    fn normalize_path_star_and_repo_files() {
+        assert_eq!(normalize_path("*"), "/{*}");
+        let tree = TempTree::new();
+        tree.write("src/a.ts", "a");
+        tree.write("src/nested/b.ts", "b");
+        tree.write("src/skip.txt", "no");
+        let repo = tree.repo("demo");
+        let files = repo.files("src", |f| f.ends_with(".ts")).unwrap();
+        assert_eq!(files, ["src/a.ts", "src/nested/b.ts"]);
+        assert_eq!(repo.read("src/a.ts").unwrap(), "a");
+        assert_eq!(repo.source("src/a.ts", "one\ntwo", 4).line, 2);
     }
 }

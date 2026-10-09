@@ -129,3 +129,455 @@ units = ["auth:route:GET /auth/v1/admin/users"]
 [[case.step]]
 method = "GET"
 path = "/auth/v1/admin/users"
+
+# Auth SQL objects (issues #10, #11, #12). No HTTP: the judge compares the
+# catalog on the reference database with the dedicated megabase database.
+
+[[case]]
+id = "auth.sql.function.email"
+description = "auth.email() matches the reference signature and body"
+units = ["auth:sql-function:auth.email()"]
+[[case.db]]
+function = "auth.email()"
+
+[[case]]
+id = "auth.sql.function.jwt"
+description = "auth.jwt() matches the reference signature and body"
+units = ["auth:sql-function:auth.jwt()"]
+[[case.db]]
+function = "auth.jwt()"
+
+[[case]]
+id = "auth.sql.function.role"
+description = "auth.role() matches the reference signature and body"
+units = ["auth:sql-function:auth.role()"]
+[[case.db]]
+function = "auth.role()"
+
+[[case]]
+id = "auth.sql.function.uid"
+description = "auth.uid() matches the reference signature and body"
+units = ["auth:sql-function:auth.uid()"]
+[[case.db]]
+function = "auth.uid()"
+
+[[case]]
+id = "auth.sql.table.audit_log_entries"
+description = "auth.audit_log_entries columns, RLS and indexes match"
+units = ["auth:sql-table:auth.audit_log_entries"]
+[[case.db]]
+table = "auth.audit_log_entries"
+
+[[case]]
+id = "auth.sql.table.custom_oauth_providers"
+description = "auth.custom_oauth_providers columns, RLS and indexes match"
+units = ["auth:sql-table:auth.custom_oauth_providers"]
+[[case.db]]
+table = "auth.custom_oauth_providers"
+
+[[case]]
+id = "auth.sql.table.flow_state"
+description = "auth.flow_state columns, RLS and indexes match"
+units = ["auth:sql-table:auth.flow_state"]
+[[case.db]]
+table = "auth.flow_state"
+
+[[case]]
+id = "auth.sql.table.identities"
+description = "auth.identities columns, RLS and indexes match"
+units = ["auth:sql-table:auth.identities"]
+[[case.db]]
+table = "auth.identities"
+
+[[case]]
+id = "auth.sql.table.instances"
+description = "auth.instances columns, RLS and indexes match"
+units = ["auth:sql-table:auth.instances"]
+[[case.db]]
+table = "auth.instances"
+
+[[case]]
+id = "auth.sql.table.mfa_amr_claims"
+description = "auth.mfa_amr_claims columns, RLS and indexes match"
+units = ["auth:sql-table:auth.mfa_amr_claims"]
+[[case.db]]
+table = "auth.mfa_amr_claims"
+
+[[case]]
+id = "auth.sql.table.mfa_challenges"
+description = "auth.mfa_challenges columns, RLS and indexes match"
+units = ["auth:sql-table:auth.mfa_challenges"]
+[[case.db]]
+table = "auth.mfa_challenges"
+
+[[case]]
+id = "auth.sql.table.mfa_factors"
+description = "auth.mfa_factors columns, RLS and indexes match"
+units = ["auth:sql-table:auth.mfa_factors"]
+[[case.db]]
+table = "auth.mfa_factors"
+
+[[case]]
+id = "auth.sql.table.mfa_recovery_code_sets"
+description = "auth.mfa_recovery_code_sets columns, RLS and indexes match"
+units = ["auth:sql-table:auth.mfa_recovery_code_sets"]
+[[case.db]]
+table = "auth.mfa_recovery_code_sets"
+
+[[case]]
+id = "auth.sql.table.mfa_recovery_codes"
+description = "auth.mfa_recovery_codes columns, RLS and indexes match"
+units = ["auth:sql-table:auth.mfa_recovery_codes"]
+[[case.db]]
+table = "auth.mfa_recovery_codes"
+
+[[case]]
+id = "auth.sql.table.oauth_authorizations"
+description = "auth.oauth_authorizations columns, RLS and indexes match"
+units = ["auth:sql-table:auth.oauth_authorizations"]
+[[case.db]]
+table = "auth.oauth_authorizations"
+
+[[case]]
+id = "auth.sql.table.oauth_client_states"
+description = "auth.oauth_client_states columns, RLS and indexes match"
+units = ["auth:sql-table:auth.oauth_client_states"]
+[[case.db]]
+table = "auth.oauth_client_states"
+
+[[case]]
+id = "auth.sql.table.oauth_clients"
+description = "auth.oauth_clients columns, RLS and indexes match"
+units = ["auth:sql-table:auth.oauth_clients"]
+[[case.db]]
+table = "auth.oauth_clients"
+
+[[case]]
+id = "auth.sql.table.oauth_consents"
+description = "auth.oauth_consents columns, RLS and indexes match"
+units = ["auth:sql-table:auth.oauth_consents"]
+[[case.db]]
+table = "auth.oauth_consents"
+
+[[case]]
+id = "auth.sql.table.one_time_tokens"
+description = "auth.one_time_tokens columns, RLS and indexes match"
+units = ["auth:sql-table:auth.one_time_tokens"]
+[[case.db]]
+table = "auth.one_time_tokens"
+
+[[case]]
+id = "auth.sql.table.refresh_tokens"
+description = "auth.refresh_tokens columns, RLS and indexes match"
+units = ["auth:sql-table:auth.refresh_tokens"]
+[[case.db]]
+table = "auth.refresh_tokens"
+
+[[case]]
+id = "auth.sql.table.saml_providers"
+description = "auth.saml_providers columns, RLS and indexes match"
+units = ["auth:sql-table:auth.saml_providers"]
+[[case.db]]
+table = "auth.saml_providers"
+
+[[case]]
+id = "auth.sql.table.saml_relay_states"
+description = "auth.saml_relay_states columns, RLS and indexes match"
+units = ["auth:sql-table:auth.saml_relay_states"]
+[[case.db]]
+table = "auth.saml_relay_states"
+
+[[case]]
+id = "auth.sql.table.schema_migrations"
+description = "auth.schema_migrations columns, RLS and indexes match"
+units = ["auth:sql-table:auth.schema_migrations"]
+[[case.db]]
+table = "auth.schema_migrations"
+
+[[case]]
+id = "auth.sql.table.scim_tokens"
+description = "auth.scim_tokens columns, RLS and indexes match"
+units = ["auth:sql-table:auth.scim_tokens"]
+[[case.db]]
+table = "auth.scim_tokens"
+
+[[case]]
+id = "auth.sql.table.scim_users"
+description = "auth.scim_users columns, RLS and indexes match"
+units = ["auth:sql-table:auth.scim_users"]
+[[case.db]]
+table = "auth.scim_users"
+
+[[case]]
+id = "auth.sql.table.sessions"
+description = "auth.sessions columns, RLS and indexes match"
+units = ["auth:sql-table:auth.sessions"]
+[[case.db]]
+table = "auth.sessions"
+
+[[case]]
+id = "auth.sql.table.sso_domains"
+description = "auth.sso_domains columns, RLS and indexes match"
+units = ["auth:sql-table:auth.sso_domains"]
+[[case.db]]
+table = "auth.sso_domains"
+
+[[case]]
+id = "auth.sql.table.sso_providers"
+description = "auth.sso_providers columns, RLS and indexes match"
+units = ["auth:sql-table:auth.sso_providers"]
+[[case.db]]
+table = "auth.sso_providers"
+
+[[case]]
+id = "auth.sql.table.sso_sessions"
+description = "auth.sso_sessions is absent after the pin (dropped; data lives on auth.sessions)"
+units = ["auth:sql-table:auth.sso_sessions"]
+[[case.db]]
+table = "auth.sso_sessions"
+absent = true
+
+[[case]]
+id = "auth.sql.table.users"
+description = "auth.users columns, RLS and indexes match"
+units = ["auth:sql-table:auth.users"]
+[[case.db]]
+table = "auth.users"
+
+# Issue #6 first admin batch. Anon / validation steps stay before a database
+# read. Service-role list and not-found steps hit Auth tables so a unit
+# cannot become conformant on credential checks alone (judge/AGENTS.md).
+
+[[case]]
+id = "auth.admin.audit.anon"
+description = "Admin audit log with the anon key is forbidden"
+units = ["auth:route:GET /auth/v1/admin/audit"]
+[[case.step]]
+method = "GET"
+path = "/auth/v1/admin/audit"
+
+[[case]]
+id = "auth.admin.audit.bad-page"
+description = "Admin audit log rejects a non-integer page"
+units = ["auth:route:GET /auth/v1/admin/audit"]
+[[case.step]]
+method = "GET"
+path = "/auth/v1/admin/audit?page=nope"
+key = "service_role"
+
+[[case]]
+id = "auth.admin.audit.bad-query"
+description = "Admin audit log rejects an unknown query scope"
+units = ["auth:route:GET /auth/v1/admin/audit"]
+[[case.step]]
+method = "GET"
+path = "/auth/v1/admin/audit?query=bogus:x"
+key = "service_role"
+
+[[case]]
+id = "auth.admin.audit.list"
+description = "Admin audit log lists entries for the service role"
+units = ["auth:route:GET /auth/v1/admin/audit"]
+[[case.step]]
+method = "GET"
+path = "/auth/v1/admin/audit"
+key = "service_role"
+compare_headers = ["x-total-count", "link"]
+
+[[case]]
+id = "auth.admin.custom-providers.anon"
+description = "Admin custom-provider list with the anon key is forbidden"
+units = ["auth:route:GET /auth/v1/admin/custom-providers"]
+[[case.step]]
+method = "GET"
+path = "/auth/v1/admin/custom-providers"
+
+[[case]]
+id = "auth.admin.custom-providers.get.anon"
+description = "Admin custom-provider get with the anon key is forbidden"
+units = ["auth:route:GET /auth/v1/admin/custom-providers/{identifier}"]
+[[case.step]]
+method = "GET"
+path = "/auth/v1/admin/custom-providers/custom:missing"
+
+[[case]]
+id = "auth.admin.custom-providers.list"
+description = "Admin custom-provider list is empty for the service role"
+units = ["auth:route:GET /auth/v1/admin/custom-providers"]
+[[case.step]]
+method = "GET"
+path = "/auth/v1/admin/custom-providers"
+key = "service_role"
+
+[[case]]
+id = "auth.admin.custom-providers.get.prefix"
+description = "Admin custom-provider get requires the custom: prefix"
+units = ["auth:route:GET /auth/v1/admin/custom-providers/{identifier}"]
+[[case.step]]
+method = "GET"
+path = "/auth/v1/admin/custom-providers/example"
+key = "service_role"
+
+[[case]]
+id = "auth.admin.custom-providers.get.missing"
+description = "Admin custom-provider get returns not found"
+units = ["auth:route:GET /auth/v1/admin/custom-providers/{identifier}"]
+[[case.step]]
+method = "GET"
+path = "/auth/v1/admin/custom-providers/custom:missing"
+key = "service_role"
+
+[[case]]
+id = "auth.admin.custom-providers.delete.anon"
+description = "Admin custom-provider delete with the anon key is forbidden"
+units = ["auth:route:DELETE /auth/v1/admin/custom-providers/{identifier}"]
+[[case.step]]
+method = "DELETE"
+path = "/auth/v1/admin/custom-providers/custom:missing"
+
+[[case]]
+id = "auth.admin.custom-providers.delete.missing"
+description = "Admin custom-provider delete returns not found"
+units = ["auth:route:DELETE /auth/v1/admin/custom-providers/{identifier}"]
+[[case.step]]
+method = "DELETE"
+path = "/auth/v1/admin/custom-providers/custom:missing"
+key = "service_role"
+
+[[case]]
+id = "auth.admin.oauth.clients.anon"
+description = "Admin OAuth client list with the anon key is forbidden"
+units = ["auth:route:GET /auth/v1/admin/oauth/clients"]
+[[case.step]]
+method = "GET"
+path = "/auth/v1/admin/oauth/clients"
+
+[[case]]
+id = "auth.admin.oauth.clients.disabled"
+description = "Admin OAuth client list is feature-disabled on the self-hosted default"
+units = ["auth:route:GET /auth/v1/admin/oauth/clients"]
+[[case.step]]
+method = "GET"
+path = "/auth/v1/admin/oauth/clients"
+key = "service_role"
+
+[[case]]
+id = "auth.admin.oauth.clients.delete.anon"
+description = "Admin OAuth client delete with the anon key is forbidden"
+units = ["auth:route:DELETE /auth/v1/admin/oauth/clients/{client_id}"]
+[[case.step]]
+method = "DELETE"
+path = "/auth/v1/admin/oauth/clients/00000000-0000-0000-0000-000000000001"
+
+[[case]]
+id = "auth.admin.oauth.clients.delete.disabled"
+description = "Admin OAuth client delete is feature-disabled on the self-hosted default"
+units = ["auth:route:DELETE /auth/v1/admin/oauth/clients/{client_id}"]
+[[case.step]]
+method = "DELETE"
+path = "/auth/v1/admin/oauth/clients/00000000-0000-0000-0000-000000000001"
+key = "service_role"
+
+[[case]]
+id = "auth.admin.sso.providers.delete.anon"
+description = "Admin SSO provider delete with the anon key is forbidden"
+units = ["auth:route:DELETE /auth/v1/admin/sso/providers/{idp_id}"]
+[[case.step]]
+method = "DELETE"
+path = "/auth/v1/admin/sso/providers/00000000-0000-0000-0000-000000000001"
+
+[[case]]
+id = "auth.admin.sso.providers.delete.bad-id"
+description = "Admin SSO provider delete returns not found for a non-UUID id"
+units = ["auth:route:DELETE /auth/v1/admin/sso/providers/{idp_id}"]
+[[case.step]]
+method = "DELETE"
+path = "/auth/v1/admin/sso/providers/not-a-uuid"
+key = "service_role"
+
+[[case]]
+id = "auth.admin.sso.providers.delete.missing"
+description = "Admin SSO provider delete returns not found for a missing UUID"
+units = ["auth:route:DELETE /auth/v1/admin/sso/providers/{idp_id}"]
+[[case.step]]
+method = "DELETE"
+path = "/auth/v1/admin/sso/providers/00000000-0000-0000-0000-000000000001"
+key = "service_role"
+
+[[case]]
+id = "auth.admin.users.delete.anon"
+description = "Admin user delete with the anon key is forbidden"
+units = ["auth:route:DELETE /auth/v1/admin/users/{user_id}"]
+[[case.step]]
+method = "DELETE"
+path = "/auth/v1/admin/users/00000000-0000-0000-0000-000000000001"
+
+[[case]]
+id = "auth.admin.users.delete.bad-id"
+description = "Admin user delete requires a UUID user_id"
+units = ["auth:route:DELETE /auth/v1/admin/users/{user_id}"]
+[[case.step]]
+method = "DELETE"
+path = "/auth/v1/admin/users/not-a-uuid"
+key = "service_role"
+
+[[case]]
+id = "auth.admin.users.delete.missing"
+description = "Admin user delete returns not found for a missing UUID"
+units = ["auth:route:DELETE /auth/v1/admin/users/{user_id}"]
+[[case.step]]
+method = "DELETE"
+path = "/auth/v1/admin/users/00000000-0000-0000-0000-000000000001"
+key = "service_role"
+
+[[case]]
+id = "auth.admin.users.factors.delete.anon"
+description = "Admin factor delete with the anon key is forbidden"
+units = ["auth:route:DELETE /auth/v1/admin/users/{user_id}/factors/{factor_id}"]
+[[case.step]]
+method = "DELETE"
+path = "/auth/v1/admin/users/00000000-0000-0000-0000-000000000001/factors/00000000-0000-0000-0000-000000000002"
+
+[[case]]
+id = "auth.admin.users.factors.delete.bad-user"
+description = "Admin factor delete requires a UUID user_id"
+units = ["auth:route:DELETE /auth/v1/admin/users/{user_id}/factors/{factor_id}"]
+[[case.step]]
+method = "DELETE"
+path = "/auth/v1/admin/users/not-a-uuid/factors/00000000-0000-0000-0000-000000000002"
+key = "service_role"
+
+[[case]]
+id = "auth.admin.users.factors.delete.missing-user"
+description = "Admin factor delete returns not found when the user is missing"
+units = ["auth:route:DELETE /auth/v1/admin/users/{user_id}/factors/{factor_id}"]
+[[case.step]]
+method = "DELETE"
+path = "/auth/v1/admin/users/00000000-0000-0000-0000-000000000001/factors/00000000-0000-0000-0000-000000000002"
+key = "service_role"
+
+[[case]]
+id = "auth.admin.users.passkeys.delete.anon"
+description = "Admin passkey delete with the anon key is forbidden"
+units = ["auth:route:DELETE /auth/v1/admin/users/{user_id}/passkeys/{passkey_id}"]
+[[case.step]]
+method = "DELETE"
+path = "/auth/v1/admin/users/00000000-0000-0000-0000-000000000001/passkeys/00000000-0000-0000-0000-000000000002"
+
+[[case]]
+id = "auth.admin.users.passkeys.delete.bad-user"
+description = "Admin passkey delete requires a UUID user_id"
+units = ["auth:route:DELETE /auth/v1/admin/users/{user_id}/passkeys/{passkey_id}"]
+[[case.step]]
+method = "DELETE"
+path = "/auth/v1/admin/users/not-a-uuid/passkeys/00000000-0000-0000-0000-000000000002"
+key = "service_role"
+
+[[case]]
+id = "auth.admin.users.passkeys.delete.missing-user"
+description = "Admin passkey delete returns not found when the user is missing"
+units = ["auth:route:DELETE /auth/v1/admin/users/{user_id}/passkeys/{passkey_id}"]
+[[case.step]]
+method = "DELETE"
+path = "/auth/v1/admin/users/00000000-0000-0000-0000-000000000001/passkeys/00000000-0000-0000-0000-000000000002"
+key = "service_role"

@@ -360,6 +360,38 @@ mod tests {
         }
     }
 
+    fn render_home_card(load_fonts: bool) -> resvg::tiny_skia::Pixmap {
+        let site_root = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let mut opt = resvg::usvg::Options::default();
+        if load_fonts {
+            let db = opt.fontdb_mut();
+            for weight in ["Regular", "Bold"] {
+                let path = site_root.join(format!("og-fonts/JetBrainsMono-{weight}.ttf"));
+                db.load_font_data(fs::read(&path).expect("bundled OG font"));
+            }
+        }
+        let tree = resvg::usvg::Tree::from_str(&svg(&CARDS[0]), &opt).expect("svg parses");
+        let mut pixmap = resvg::tiny_skia::Pixmap::new(W as u32, H as u32).expect("pixmap");
+        resvg::render(
+            &tree,
+            resvg::tiny_skia::Transform::default(),
+            &mut pixmap.as_mut(),
+        );
+        pixmap
+    }
+
+    #[test]
+    fn renders_home_card_with_bundled_fonts() {
+        let with_fonts = render_home_card(true);
+        let without_fonts = render_home_card(false);
+        assert_ne!(
+            with_fonts.data(),
+            without_fonts.data(),
+            "harfrust/skrifa must paint glyphs the unfonted render lacks"
+        );
+        assert!(with_fonts.encode_png().is_ok());
+    }
+
     #[test]
     fn cards_omit_cost_copy() {
         for card in CARDS {

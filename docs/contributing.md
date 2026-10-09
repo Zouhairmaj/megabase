@@ -20,7 +20,8 @@ One Cargo workspace, one final binary: `megabase`. One crate per Supabase-author
 2. Take one Ready issue.
 3. Spec the unit from `vendor/` if the spec file is missing.
 4. Implement in Rust.
-5. Run the judge (`just judge` or the equivalent once `judge/` exists).
+5. Run the judge (`just judge`). Mutating cases also compare database
+   side-effects; judge harness changes stay on `review/*`.
 6. Keep the commit only if total conformance does not fall.
 7. Record: PR, coverage, PROGRESS.md for decisions that outlive one issue.
 
@@ -37,6 +38,14 @@ Failures return HTTP 501 with `{"code":"MEGABASE_NOT_IMPLEMENTED",...}`. Never a
 ## Design
 
 Mockups live in the [Kite identity file](https://kite.new/p/megabase-identity). The public site is generated from `site/` in Rust. No JavaScript framework.
+
+## Supply chain
+
+Megabase owns two Rust lockfiles: the workspace `Cargo.lock` and `site/Cargo.lock` (the static generator is a standalone crate). `just audit` scans both. OpenSSF Scorecard's OSV check walks every `Cargo.lock` in the tree, including `site/`. CI currently audits only `Cargo.lock`; a follow-up should make the `cargo-audit` job run `cargo audit --file` once per owned lockfile because a workspace-only `cargo audit` misses `site/`.
+
+Lockfiles under `vendor/` belong to the pinned upstream spec. Agents never edit them ([ADR 0003](adr/0003-protected-paths.md)). Report issues in those trees upstream; do not add an OSV ignore unless a Scorecard finding is only in `vendor/` and cannot be fixed without bumping a pin.
+
+`site/` used `resvg` 0.45, which pulled in unmaintained `rustybuzz` (RUSTSEC-2026-0206) and `ttf-parser` (RUSTSEC-2026-0192). `resvg` 0.48 shapes text with `harfrust` and `skrifa` instead. Workspace `cargo audit` did not see those crates because `site/` is excluded from the workspace.
 
 ## What a human does
 
