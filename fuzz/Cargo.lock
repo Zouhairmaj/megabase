@@ -558,10 +558,13 @@ dependencies = [
 name = "megabase-fuzz"
 version = "0.0.0"
 dependencies = [
+ "base64",
+ "hmac 0.12.1",
  "libfuzzer-sys",
  "megabase-core",
  "megabase-rest",
  "megabase-server",
+ "sha2 0.10.9",
 ]
 
 [[package]]

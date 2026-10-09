@@ -8,7 +8,10 @@ edition = "2021"
 cargo-fuzz = true
 
 [dependencies]
+base64 = "0.22"
+hmac = "0.12"
 libfuzzer-sys = "0.4"
+sha2 = "0.10"
 
 [dependencies.megabase-core]
 path = "../crates/megabase-core"
