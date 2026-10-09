@@ -216,11 +216,17 @@ jobs:
       - name: Check each feature of crates that declare one
         run: |
           set -euo pipefail
-          mapfile -t crates < <(cargo metadata --locked --format-version 1 --no-deps \
-            | python3 -c 'import json,sys
-          for p in json.load(sys.stdin)["packages"]:
+          meta="$(mktemp)"
+          names="$(mktemp)"
+          trap 'rm -f "$meta" "$names"' EXIT
+          # Direct command so a metadata failure fails the job. A process
+          # substitution would hide that status and look like "no features".
+          cargo metadata --locked --format-version 1 --no-deps >"$meta"
+          python3 -c 'import json,sys
+          for p in json.load(open(sys.argv[1]))["packages"]:
               if p.get("features"):
-                  print(p["name"])')
+                  print(p["name"])' "$meta" >"$names"
+          mapfile -t crates < "$names"
           if [ "${#crates[@]}" -eq 0 ]; then
             echo "No workspace crate declares features; nothing to check."
             exit 0
