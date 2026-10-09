@@ -711,6 +711,12 @@ mod tests {
         assert!(!home.contains("1024") || metrics::load(&PathBuf::from(".")).has_data());
         assert!(home.contains("Not affiliated with or endorsed by Supabase, Inc."));
         assert!(!home.to_ascii_lowercase().contains("oxide"));
+        assert!(home.contains("EXPERIMENT STATUS"));
+        assert!(home.contains("updated on every commit"));
+        assert!(home.contains("panel-treemap"));
+        assert!(home.contains("visually-hidden"));
+        assert!(home.contains("Coverage · Conformance"));
+        assert!(home.contains("Units passing the judge"));
         let _ = fs::remove_dir_all(&out);
     }
 

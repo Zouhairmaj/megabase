@@ -10,7 +10,7 @@ use crate::GITHUB;
 
 pub fn home(paths: &Paths, metrics: &Metrics) -> String {
     let treemap = treemap::svg_size(metrics, 1248.0, 280.0);
-    let status_panel = status_panel(paths, metrics);
+    let status_panel = status_panel(metrics);
     let components = component_cards(paths, metrics);
     let faq = home_faq(paths, metrics);
     format!(
@@ -29,7 +29,7 @@ pub fn home(paths: &Paths, metrics: &Metrics) -> String {
     </div>
     <p class="hero-disclaimer">Independent experiment. Not affiliated with or endorsed by Supabase, Inc.</p>
   </div>
-  <div class="hide-mobile">{status_panel}</div>
+  {status_panel}
 </section>
 
 <section class="band home-what">
@@ -83,7 +83,6 @@ pub fn home(paths: &Paths, metrics: &Metrics) -> String {
 </section>
 
 <section class="band home-live" id="status">
-  {mobile_stats}
   <p class="kicker hide-mobile">03 · LIVE STATUS</p>
   <h2 class="section-title hide-mobile">Each cell is one unit.<br />Grey until the judge says green.</h2>
   <p class="lede hide-mobile">Nested squarified treemap: component, then feature group, then one whole square per unit. Regenerated at build time from coverage/units.json. Grey is not started. Green is conformant.</p>
@@ -136,7 +135,6 @@ pub fn home(paths: &Paths, metrics: &Metrics) -> String {
         components_href = paths.page("components"),
         faq_href = paths.page("faq"),
         levels = level_cards(metrics, false),
-        mobile_stats = home_mobile_stats(metrics),
     )
 }
 
@@ -151,49 +149,30 @@ fn coverage_map(paths: &Paths, generated: &str, coverage_svg: bool) -> String {
     )
 }
 
-fn home_mobile_stats(metrics: &Metrics) -> String {
-    format!(
-        r#"<div class="home-mobile-stats hide-desktop">
-  <div class="status-head"><span>STATUS</span><span class="live-dot">● Live</span></div>
-  <div class="mobile-stat"><span>Units passing</span><strong>{passing}</strong></div>
-  <div class="mobile-stat"><span>Coverage</span><strong>{coverage}</strong></div>
-  <div class="mobile-stat"><span>Conformance</span><strong>{conformance}</strong></div>
-  <div class="mobile-stat"><span>Stage</span><strong class="accent">{stage}</strong></div>
-</div>"#,
-        passing = esc(&metrics.passing_total_label()),
-        coverage = esc(&metrics.coverage_label()),
-        conformance = esc(&metrics.conformance_label()),
-        stage = esc(&metrics.stage_short),
-    )
-}
-
-fn status_panel(paths: &Paths, metrics: &Metrics) -> String {
+fn status_panel(metrics: &Metrics) -> String {
+    let desktop = treemap::panel(metrics, 442.0, 220.0);
+    let mobile = treemap::panel(metrics, 308.0, 290.0);
     format!(
         r#"<aside class="status-panel" aria-labelledby="status-title">
   <div class="status-head">
     <span id="status-title">EXPERIMENT STATUS</span>
-    <span class="live-dot">● regenerated on every commit</span>
+    <span class="status-updated">updated on every commit</span>
   </div>
-  <hr class="rule" />
+  <div class="status-treemap">
+    <p class="visually-hidden">{alt}</p>
+    <div class="hide-mobile">{desktop}</div>
+    <div class="hide-desktop">{mobile}</div>
+  </div>
   <dl>
     <div><dt>Units passing the judge</dt><dd>{passing}</dd></div>
-    <div><dt>Coverage (implemented)</dt><dd>{coverage}</dd></div>
-    <div><dt>Conformance (matches Supabase)</dt><dd>{conformance}</dd></div>
+    <div><dt>Coverage · Conformance</dt><dd>{coverage}</dd></div>
     <div><dt>Current stage</dt><dd class="accent">{stage}</dd></div>
-    <div><dt>Next milestone</dt><dd>{next}</dd></div>
-    <div><dt>Human interventions</dt><dd>{humans}</dd></div>
-    <div><dt>Spend</dt><dd>{spend}</dd></div>
   </dl>
-  <a class="text-link" href="{status}">Full status →</a>
 </aside>"#,
+        alt = esc(&treemap::panel_alt(metrics)),
         passing = esc(&metrics.passing_total_label()),
-        coverage = esc(&metrics.coverage_label()),
-        conformance = esc(&metrics.conformance_label()),
+        coverage = esc(&metrics.coverage_conformance_label()),
         stage = esc(&metrics.stage),
-        next = esc(&metrics.next_milestone),
-        humans = esc(&metrics.human_interventions_label()),
-        spend = esc(&metrics.spend_label),
-        status = paths.page("status"),
     )
 }
 
