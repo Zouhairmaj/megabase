@@ -39,8 +39,9 @@ Do **not** report:
 - issues that exist only in `vendor/` (report those upstream)
 - theoretical issues in components that still return 501
 
-Release binaries and `ghcr.io/zouhairmaj/megabase` are signed. How to
-verify a download is in [`docs/install.md`](docs/install.md).
+After a GitHub Release publishes signed assets, verify binaries and
+`ghcr.io/zouhairmaj/megabase` as in [`docs/install.md`](docs/install.md).
+`v0.1.0` shipped without those assets.
 
 ## Disclosure
 

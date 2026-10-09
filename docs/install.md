@@ -3,7 +3,7 @@ title: Install
 description: Download a signed GitHub Release binary, pull the GHCR image, or build from source.
 section: get-started
 order: 1
-card: Signed linux binaries and ghcr.io/zouhairmaj/megabase on each GitHub Release, or build from source.
+card: Signed linux binaries and ghcr.io/zouhairmaj/megabase from a GitHub Release, or build from source.
 ---
 
 # Install
@@ -12,26 +12,39 @@ Megabase is one Rust binary next to PostgreSQL. Unimplemented routes return
 HTTP 501 `{"code":"MEGABASE_NOT_IMPLEMENTED",...}`. Nothing here is
 production software.
 
-Each GitHub Release attaches musl-static linux `x86_64` and `aarch64`
+The Release workflow attaches musl-static linux `x86_64` and `aarch64`
 binaries, `SHA256SUMS`, Sigstore signatures, and SLSA provenance, and
-publishes `ghcr.io/zouhairmaj/megabase` tagged with that version. Commands
-for download and verification live only on this page.
+publishes `ghcr.io/zouhairmaj/megabase` tagged with that version. `v0.1.0`
+shipped without those assets; use a later tag, or a backfilled `v0.1.0`,
+that lists `megabase-*-unknown-linux-musl` on
+[Releases](https://github.com/Zouhairmaj/megabase/releases). Commands for
+download and verification live only on this page.
 
 ## Release binary
 
-Pick the asset that matches your CPU (`uname -m`: `x86_64` or `aarch64`).
-Replace `v0.1.0` with the tag you want from
-[Releases](https://github.com/Zouhairmaj/megabase/releases).
+Install [cosign](https://docs.sigstore.dev/cosign/system_config/installation/).
+Set `TAG` to a release that includes the musl assets, then authenticate
+`SHA256SUMS` before trusting the checksum or running the binary.
 
 ```shell
-TAG=v0.1.0
-ARCH=x86_64-unknown-linux-musl
+TAG=vX.Y.Z
+case "$(uname -m)" in
+  x86_64) ARCH=x86_64-unknown-linux-musl ;;
+  aarch64|arm64) ARCH=aarch64-unknown-linux-musl ;;
+  *) echo "Unsupported architecture: $(uname -m)" >&2; exit 1 ;;
+esac
 BASE=https://github.com/Zouhairmaj/megabase/releases/download/${TAG}
 ASSET=megabase-${TAG}-${ARCH}
 curl -fsSL -O "${BASE}/${ASSET}"
 curl -fsSL -O "${BASE}/SHA256SUMS"
 curl -fsSL -O "${BASE}/SHA256SUMS.sig"
 curl -fsSL -O "${BASE}/SHA256SUMS.pem"
+cosign verify-blob \
+  --certificate SHA256SUMS.pem \
+  --signature SHA256SUMS.sig \
+  --certificate-identity-regexp '^https://github.com/Zouhairmaj/megabase/\.github/workflows/release\.yml@refs/' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  SHA256SUMS
 sha256sum -c SHA256SUMS --ignore-missing
 chmod +x "${ASSET}"
 ./"${ASSET}"
@@ -44,19 +57,9 @@ See [Configuration](configuration.md).
 
 Release blobs are signed keylessly with Sigstore (`cosign sign-blob` in
 `.github/workflows/release.yml`). The signing identity is this
-repository's Release workflow; the OIDC issuer is GitHub Actions.
-
-Install [cosign](https://docs.sigstore.dev/cosign/system_config/installation/),
-then:
-
-```shell
-cosign verify-blob \
-  --certificate SHA256SUMS.pem \
-  --signature SHA256SUMS.sig \
-  --certificate-identity-regexp '^https://github.com/Zouhairmaj/megabase/\.github/workflows/release\.yml@refs/' \
-  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  SHA256SUMS
-```
+repository's Release workflow; the OIDC issuer is GitHub Actions. The
+install sequence above already authenticates `SHA256SUMS` before the
+checksum check.
 
 To verify a binary instead of the checksum file, use that asset's `.pem`
 and `.sig` (same identity flags). SLSA provenance is
@@ -68,17 +71,18 @@ gh attestation verify "${ASSET}" --repo Zouhairmaj/megabase
 
 ## Container image
 
-The published image is `ghcr.io/zouhairmaj/megabase:<tag>` (also tagged
-without the leading `v`). It is signed with `cosign sign` in the same
-Release job.
+After the Release workflow publishes an image, it is
+`ghcr.io/zouhairmaj/megabase:<tag>` (also tagged without the leading `v`)
+and signed with `cosign sign` in the same job. `v0.1.0` has no image until
+that job is dispatched for the tag.
 
 ```shell
-docker pull ghcr.io/zouhairmaj/megabase:v0.1.0
+docker pull ghcr.io/zouhairmaj/megabase:vX.Y.Z
 cosign verify \
   --certificate-identity-regexp '^https://github.com/Zouhairmaj/megabase/\.github/workflows/release\.yml@refs/' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  ghcr.io/zouhairmaj/megabase:v0.1.0
-docker run --rm -p 8000:8000 ghcr.io/zouhairmaj/megabase:v0.1.0
+  ghcr.io/zouhairmaj/megabase:vX.Y.Z
+docker run --rm -p 8000:8000 ghcr.io/zouhairmaj/megabase:vX.Y.Z
 ```
 
 Pass `-e DATABASE_URL=...` if the process should install Auth SQL objects.

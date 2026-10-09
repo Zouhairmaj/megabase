@@ -52,9 +52,9 @@ docker build -t megabase .
 docker run --rm -p 8000:8000 megabase
 ```
 
-Builder and runtime base images are pinned by digest. Signed images on
-`ghcr.io/zouhairmaj/megabase` and how to verify them are in
-[Install](install.md).
+Builder and runtime base images are pinned by digest. After the Release
+workflow publishes an image, `ghcr.io/zouhairmaj/megabase` and how to
+verify it are in [Install](install.md).
 
 ## Use with supabase-js
 
