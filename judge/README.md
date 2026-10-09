@@ -83,8 +83,12 @@ crates):
 
 | Side | Default URL |
 |---|---|
-| Reference | `postgres://postgres:…@127.0.0.1:5432/postgres` |
-| Megabase | `postgres://postgres:…@127.0.0.1:5432/megabase` |
+| Reference | `postgres://postgres:…@127.0.0.1:54322/postgres` |
+| Megabase | `postgres://postgres:…@127.0.0.1:54322/megabase` |
+
+Host `5432` is Supavisor. The overlay publishes Postgres itself on
+`54322` so `prepare` can `CREATE DATABASE` and so snapshots do not go
+through the pooler.
 
 `prepare` creates the `megabase` database on the official cluster and
 loads `judge/fixtures/schema.sql` into it. Megabase then installs its

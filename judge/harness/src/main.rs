@@ -117,7 +117,9 @@ fn default_databases(args: &Args) -> Result<db::Databases> {
     let text = std::fs::read_to_string(&args.env)
         .with_context(|| format!("reading {}", args.env.display()))?;
     let password = percent_encode(&env_value(&text, &args.env, "POSTGRES_PASSWORD")?);
-    let port = env_value(&text, &args.env, "POSTGRES_PORT").unwrap_or_else(|_| "5432".into());
+    // Host 5432 is Supavisor. Direct Postgres is published on 54322 by
+    // judge/compose.override.yml.
+    let port = "54322";
     let reference = args
         .reference_database
         .clone()

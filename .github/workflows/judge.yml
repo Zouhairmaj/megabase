@@ -50,9 +50,8 @@ jobs:
       - name: Megabase on :8100
         run: |
           POSTGRES_PASSWORD=$(awk -F= '/^POSTGRES_PASSWORD=/{print substr($0,index($0,"=")+1)}' vendor/supabase/docker/.env.example)
-          POSTGRES_PORT=$(awk -F= '/^POSTGRES_PORT=/{print substr($0,index($0,"=")+1)}' vendor/supabase/docker/.env.example)
           JWT_SECRET=$(awk -F= '/^JWT_SECRET=/{print substr($0,index($0,"=")+1)}' vendor/supabase/docker/.env.example)
-          DATABASE_URL="postgres://postgres:${POSTGRES_PASSWORD}@127.0.0.1:${POSTGRES_PORT}/megabase" \
+          DATABASE_URL="postgres://postgres:${POSTGRES_PASSWORD}@127.0.0.1:54322/megabase" \
           JWT_SECRET="${JWT_SECRET}" \
           MEGABASE_PORT=8100 MEGABASE_HOST=0.0.0.0 \
             ./target/release/megabase > /tmp/megabase.log 2>&1 &

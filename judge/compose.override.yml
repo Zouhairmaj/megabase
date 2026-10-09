@@ -69,6 +69,10 @@ services:
     volumes:
       - judge-snippets:/app/snippets
   db:
+    # Official compose publishes 5432 on the pooler. The harness needs a
+    # direct Postgres port for CREATE DATABASE and catalog snapshots.
+    ports:
+      - "54322:5432"
     volumes:
       - judge-db-data:/var/lib/postgresql/data
       - ../../../judge/fixtures/schema.sql:/docker-entrypoint-initdb.d/migrations/99-zz-judge-fixtures.sql:ro
