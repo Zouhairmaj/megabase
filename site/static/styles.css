@@ -729,16 +729,6 @@ a:hover {
   border: 1px solid var(--border);
 }
 
-.metric-grid-5 {
-  grid-template-columns: repeat(5, 1fr);
-}
-
-.spend-note {
-  margin: 0;
-  font-size: 12px;
-  letter-spacing: 0;
-}
-
 .home-mobile-stats {
   display: flex;
   flex-direction: column;
@@ -1652,10 +1642,6 @@ body:has(#licensing-and-credits:target) .toc-list a[href="#licensing-and-credits
     gap: 40px;
   }
 
-  .metric-grid-5 {
-    grid-template-columns: repeat(3, 1fr);
-  }
-
   .step-row,
   .level-row,
   .component-grid,
@@ -1977,7 +1963,6 @@ body:has(#licensing-and-credits:target) .toc-list a[href="#licensing-and-credits
   .level-row,
   .component-grid,
   .metric-grid,
-  .metric-grid-5,
   .day0-strip,
   .split-band,
   .faq-teaser,

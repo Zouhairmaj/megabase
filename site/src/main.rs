@@ -45,7 +45,6 @@ enum Kind {
     HumanLog,
     Faq,
     Docs,
-    Cost,
     NotFound,
 }
 
@@ -191,18 +190,6 @@ const PAGES: &[Page] = &[
         kind: Kind::Docs,
         noindex: false,
         extra_preload: ExtraPreload::Inter,
-    },
-    Page {
-        id: "cost",
-        dir: "cost",
-        title: "Cost — Megabase",
-        description: "Tokens and money spent on the Megabase experiment, published continuously once tracking starts.",
-        og_type: "website",
-        og_image: "og/cost.png",
-        og_alt: "Megabase cost: tokens and money, published continuously.",
-        kind: Kind::Cost,
-        noindex: false,
-        extra_preload: ExtraPreload::Home,
     },
     Page {
         id: "404",
@@ -469,7 +456,6 @@ fn content(
         Kind::HumanLog => pages::human_log(paths, data.metrics, &data.human.html),
         Kind::Faq => pages::faq(paths, data.metrics),
         Kind::Docs => docs::index(paths, data.docs, data.metrics, data.sha, data.date),
-        Kind::Cost => pages::cost(paths, data.metrics),
         Kind::NotFound => pages::not_found(paths),
     })
 }
@@ -892,7 +878,6 @@ mod tests {
             "docs/index.html",
             "docs/quickstart/index.html",
             "docs/install/index.html",
-            "cost/index.html",
             "404.html",
             "sitemap.xml",
         ] {
@@ -990,6 +975,76 @@ mod tests {
         assert!(html.contains("content=\"Called it &quot;compatible&quot; today.\""));
         assert!(!html.contains("content=\"Called it \"compatible\""));
         let _ = fs::remove_dir_all(&out);
+    }
+
+    #[test]
+    fn generated_pages_omit_cost_copy() {
+        let out = generate_tmp();
+        assert!(!out.join("cost").exists());
+        assert!(!out.join("cost/index.html").exists());
+        let sitemap = fs::read_to_string(out.join("sitemap.xml")).unwrap();
+        assert!(!sitemap.to_ascii_lowercase().contains("cost"));
+        let mut hits = Vec::new();
+        collect_cost_hits(&out, &out, &mut hits);
+        let _ = fs::remove_dir_all(&out);
+        assert!(
+            hits.is_empty(),
+            "cost copy still on the site:\n{}",
+            hits.join("\n")
+        );
+    }
+
+    fn collect_cost_hits(root: &Path, dir: &Path, hits: &mut Vec<String>) {
+        for entry in fs::read_dir(dir).unwrap() {
+            let entry = entry.unwrap();
+            let path = entry.path();
+            if path.is_dir() {
+                collect_cost_hits(root, &path, hits);
+                continue;
+            }
+            let name = path.file_name().unwrap().to_string_lossy();
+            if !(name.ends_with(".html") || name == "sitemap.xml") {
+                continue;
+            }
+            let text = fs::read_to_string(&path).unwrap();
+            let lower = text.to_ascii_lowercase();
+            for needle in [
+                "cost",
+                "spend",
+                "budget",
+                "money",
+                "dollar",
+                "price",
+                "token usage",
+                "token spend",
+            ] {
+                if let Some(idx) = find_term(&lower, needle) {
+                    let rel = path.strip_prefix(root).unwrap_or(&path);
+                    let end = (idx + 80).min(text.len());
+                    hits.push(format!(
+                        "{}: {needle:?} …{}…",
+                        rel.display(),
+                        &text[idx..end]
+                    ));
+                }
+            }
+        }
+    }
+
+    fn find_term(haystack: &str, needle: &str) -> Option<usize> {
+        let mut start = 0;
+        while let Some(rel) = haystack[start..].find(needle) {
+            let abs = start + rel;
+            let before = haystack[..abs].chars().next_back();
+            let after = haystack[abs + needle.len()..].chars().next();
+            let word_before = before.is_none_or(|c| !c.is_ascii_alphanumeric());
+            let word_after = after.is_none_or(|c| !c.is_ascii_alphanumeric());
+            if word_before && word_after {
+                return Some(abs);
+            }
+            start = abs + needle.len();
+        }
+        None
     }
 
     #[test]

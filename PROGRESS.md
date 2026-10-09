@@ -117,6 +117,15 @@ waiting on a human.
     the content source of truth. New doc pages reuse the Kite article
     template (no new mockup). Same-PR updates; truthful; reviewers block
     stale or missing docs. Agent-decided, approved by the lead.
+15. **release-please + Docker pins.** Workspace versions use
+    `version.workspace = true`, so release-please's `rust` strategy
+    errors (`value at path package.version is not tagged`). Config uses
+    `release-type: simple` and bumps `[workspace.package].version` only.
+    `bootstrap-sha` is Day 0 so the first release PR is Phase 0 at
+    `0.1.0` (`release-as`). The v0.1.0 release PR must delete
+    `release-as` before it merges.
+    Container `FROM` lines are pinned by digest (root image and
+    `.cursor/Dockerfile`).
 
 ## Tracking
 
@@ -129,6 +138,10 @@ waiting on a human.
 ### Regressions
 
 None.
+
+### Follow-ups
+
+- [ ] When release-please opens the v0.1.0 PR: delete `"release-as": "0.1.0"` from `release-please-config.json` **in that PR before it merges**. The merge retriggers Release on `main`; leaving the key would propose another `0.1.0`. Tracked from PR #132.
 
 ### Blocked items
 
@@ -180,6 +193,13 @@ Physically impossible for the agent (repository settings or credentials):
 - [ ] Set repo secret `PROJECT_TOKEN` (classic PAT, `project` scope) so
       board-sync can write the Status field
 - [ ] Confirm the Kite file is readable by agents who implement UI
+- [x] Install the [Claude GitHub App](https://github.com/apps/claude) on this
+      repository (2026-10-09)
+- [x] Set repo secret `CLAUDE_CODE_OAUTH_TOKEN` (2026-10-09)
+- [ ] Enable GitHub private vulnerability reporting (Settings → Code
+      security) so the path in `SECURITY.md` works
+- [ ] Optionally register an [OpenSSF Best Practices](https://www.bestpractices.dev/)
+      badge (Scorecard CII-Best-Practices; long-horizon)
 
 Log each of these in `HUMAN_LOG.md` when it is done. The delegation of
 decisions itself is a human intervention to log.

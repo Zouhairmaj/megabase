@@ -1,61 +1,80 @@
 ---
 title: Install
-description: Build the megabase binary with Rust 1.89+ and point it at PostgreSQL 15+.
+description: Clone the workspace, build the megabase binary, or build the pinned container image.
 section: get-started
 order: 1
-card: Build from source with Rust 1.89+ and PostgreSQL 15+. A Docker image is in the repository.
+card: Build from source with Rust 1.89+ or from the root Dockerfile. PostgreSQL is external.
 ---
 
 # Install
 
-Megabase is one Rust binary next to PostgreSQL. Clone the repository, build
-`megabase`, and set `DATABASE_URL` if you want it to install Auth SQL objects
-at startup.
-
-> [!NOTE]
-> Nothing in this repository is production software. Unimplemented HTTP
-> endpoints answer 501 with `{"code":"MEGABASE_NOT_IMPLEMENTED",...}`.
+Megabase is one Rust binary next to PostgreSQL. Unimplemented routes return
+HTTP 501 `{"code":"MEGABASE_NOT_IMPLEMENTED",...}`. Nothing here is
+production software.
 
 ## Clone
 
 ```shell
-git clone --recurse-submodules https://github.com/Zouhairmaj/megabase
+git clone --recurse-submodules https://github.com/Zouhairmaj/megabase.git
 cd megabase
 ```
 
-`vendor/` is git submodules. Coverage extraction and the judge need them;
-building the binary does not.
+Vendor pins live in `vendor/` (`vendor.toml`). Coverage and the judge need the submodules.
 
-## Build the binary
+## Build from source
 
-Rust **1.89** or newer (the MSRV). From the repository root:
+MSRV is **1.89**. From the repository root:
 
 ```shell
 cargo build --release --locked -p megabase
 ./target/release/megabase
 ```
 
-Default listen address is `0.0.0.0:8000` (`MEGABASE_HOST` / `MEGABASE_PORT`).
-Liveness is `GET /_megabase/health`.
+The binary listens on `0.0.0.0:8000` (`MEGABASE_HOST` / `MEGABASE_PORT`).
+See [Configuration](configuration.md). `just` lists every recipe that
+works today.
 
-The website generator is separate: `cargo run --manifest-path site/Cargo.toml -- --repo-root . --out _site`.
+When `DATABASE_URL` is set, startup creates the Auth schema objects Megabase
+currently implements. The install is idempotent. Without `DATABASE_URL` the
+process still serves HTTP.
 
-## PostgreSQL
+The public site generator is separate:
 
-PostgreSQL 15 or newer stays external. When `DATABASE_URL` is set, startup
-creates the Auth schema objects Megabase currently implements (see
-[Configuration](configuration.md)). The install is idempotent. Without
-`DATABASE_URL` the process still serves HTTP.
+```shell
+cargo run --manifest-path site/Cargo.toml -- --repo-root . --out _site
+```
+
+## Container image
+
+The root `Dockerfile` builds the release image. Both `FROM` lines are
+pinned by digest so Scorecard Pinned-Dependencies does not flag a
+floating tag (alerts #6 and #7 on `main`):
+
+| Stage | Image |
+| --- | --- |
+| Builder | `rust:1.89-slim-bookworm@sha256:d7fc7de78bb8c1469933aeecbf801314d30d7d6e9f0578bba4cfa285bfa37fe6` |
+| Runtime | `debian:bookworm-slim@sha256:7c7b2c966bc9ee8cedfeef67e0e279108992c77681fa595db4a9d65c06ccc587` |
+
+The Cloud Agent image in `.cursor/Dockerfile` is pinned the same way:
+`ubuntu:24.04@sha256:534baea6a22c03a63003dbc8dbe78fe34bc0d7e595d9a9dc9834884ff530eb55`
+(index digest for that tag, verified 2026-10-09).
+
+Renovate's `docker` datasource has `pinDigests: true`, so a tag bump and
+its digest move in the same PR. Do not un-pin these images to a bare tag.
 
 ```shell
 docker build -t megabase .
-docker run --rm -p 8000:8000 -e DATABASE_URL=postgres://postgres@host:5432/postgres megabase
+docker run --rm -p 8000:8000 megabase
 ```
+
+Pass `-e DATABASE_URL=...` if the process should install Auth SQL objects.
+The image includes `megabase-healthcheck`, which probes
+`/_megabase/health`.
 
 ## Requirements
 
 | Tool | Why |
 | --- | --- |
-| Rust 1.89+ | Workspace MSRV |
-| PostgreSQL 15+ | External database the binary sits next to |
-| Docker Compose | Judge only (`just judge-up`) |
+| Rust 1.89+ | Workspace MSRV; CI also checks 1.89 |
+| PostgreSQL 15+ | External database (not required just to start the 501 gateway) |
+| Docker | Release image; Compose for the judge |

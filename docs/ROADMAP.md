@@ -98,7 +98,20 @@ release-please cuts that exact version. Between gates, `feat` / `fix` /
 
 release-please (`release-please-config.json`):
 `bump-minor-pre-major` is **false**, `bump-patch-for-minor-pre-major` is
-**true**. The rust strategy still updates `workspace.package.version`.
+**true**. Use `release-type: simple` (not `rust`): the rust strategy
+walks workspace members and fails on `version.workspace = true`
+([googleapis/release-please#2478](https://github.com/googleapis/release-please/issues/2478)).
+A TOML extra-file updater bumps `[workspace.package].version`; member
+crates inherit. `bootstrap-sha` is Day 0 (`25ebab3`, exclusive) so the
+first release PR covers Phase 0. `release-as` is `0.1.0` for that
+bootstrap only. The v0.1.0 **release PR itself** must delete
+`"release-as"` from `release-please-config.json` before it merges
+(PROGRESS.md). The Release workflow runs again on that merge; leaving
+the key would propose another `0.1.0`. Do not delete it before that PR
+exists: without it, Phase 0 would cut `0.0.1` and the `rust` strategy
+on `main` today fails with `package.version is not tagged`.
+release-please ignores `bootstrap-sha` after the first release PR
+merges. Do not add a `version.txt`.
 
 Cadence:
 

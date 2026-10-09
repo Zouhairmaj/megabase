@@ -106,7 +106,7 @@ pub const CARDS: &[Card] = &[
         eyebrow: "FAQ",
         line1: "Questions",
         line2: "people ask.",
-        summary: "Affiliation, Day 0, the judge, units, coverage versus conformance, cost.",
+        summary: "Affiliation, Day 0, the judge, units, coverage versus conformance.",
     },
     Card {
         key: "docs",
@@ -114,13 +114,6 @@ pub const CARDS: &[Card] = &[
         line1: "Getting started.",
         line2: "Nothing works yet.",
         summary: "Build from source. Every endpoint answers 501 MEGABASE_NOT_IMPLEMENTED.",
-    },
-    Card {
-        key: "cost",
-        eyebrow: "COST",
-        line1: "Tokens and money.",
-        line2: "In public.",
-        summary: "Tracking starts after Phase 0 review. Until then this card invents no figure.",
     },
 ];
 
@@ -364,6 +357,21 @@ mod tests {
             let svg = svg(card);
             assert!(resvg::usvg::Tree::from_str(&svg, &resvg::usvg::Options::default()).is_ok());
             assert!(svg.contains("endorsed by Supabase, Inc."));
+        }
+    }
+
+    #[test]
+    fn cards_omit_cost_copy() {
+        for card in CARDS {
+            assert_ne!(card.key, "cost");
+            let blob = format!(
+                "{} {} {} {} {}",
+                card.key, card.eyebrow, card.line1, card.line2, card.summary
+            )
+            .to_ascii_lowercase();
+            for needle in ["cost", "spend", "budget", "dollar", "price"] {
+                assert!(!blob.contains(needle), "{} contains {needle}", card.key);
+            }
         }
     }
 }

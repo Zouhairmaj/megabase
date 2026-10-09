@@ -167,7 +167,6 @@ pub struct Metrics {
     pub stage: String,
     pub stage_short: String,
     pub human_interventions: usize,
-    pub spend_label: String,
     pub next_milestone: String,
 }
 
@@ -185,7 +184,6 @@ impl Metrics {
             stage: FALLBACK_STAGE.into(),
             stage_short: FALLBACK_STAGE_SHORT.into(),
             human_interventions: 0,
-            spend_label: "—".into(),
             next_milestone: "Level 1 · REST + Auth".into(),
         }
     }

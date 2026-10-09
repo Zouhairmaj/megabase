@@ -3,7 +3,7 @@ title: Quickstart
 description: Build the binary, start it and confirm it answers. No hosted account needed.
 section: get-started
 order: 2
-card: Start the binary, call /_megabase/health, and get 200. Other routes are 501 until they pass the judge.
+card: Start the binary, call /_megabase/health, then hit a 501 on an unimplemented route.
 ---
 
 # Quickstart
@@ -15,53 +15,48 @@ card: Start the binary, call /_megabase/health, and get 200. Other routes are 50
 
 ## Build from source
 
-Rust 1.89 or newer. PostgreSQL 15 or newer if you set `DATABASE_URL`. The
-judge also needs Docker Compose.
+You need Rust **1.89** or newer. PostgreSQL 15+ is the intended external
+database; the 501 gateway starts without it. The judge also needs Docker.
 
 ```shell
-git clone --recurse-submodules https://github.com/Zouhairmaj/megabase
+git clone --recurse-submodules https://github.com/Zouhairmaj/megabase.git
 cd megabase
-cargo build --release --locked -p megabase
+cargo run --locked -p megabase
 ```
 
-## Configuration
-
-| Variable | Description |
-| --- | --- |
-| DATABASE_URL | PostgreSQL connection string. Installs implemented Auth SQL objects at startup when set |
-| JWT_SECRET | Secret for signing JWTs. Read at startup; Auth HTTP is not implemented yet |
-| MEGABASE_PORT | HTTP port, default 8000 |
+Or `cargo build --release --locked -p megabase` and run
+`./target/release/megabase`. Environment variables are in
+[Configuration](configuration.md).
 
 ## Check it runs
 
-```shell
-export DATABASE_URL=postgres://postgres@localhost:5432/postgres
-export JWT_SECRET=your-secret
-./target/release/megabase
-# keep running; leave this terminal open
-```
+Keep the binary running, then in another terminal:
 
 ```shell
-curl -i http://localhost:8000/_megabase/health
-# HTTP 200 {"name":"megabase","status":"ok",...}
-
-curl -i http://localhost:8000/auth/v1/health
-# HTTP 501 {"code":"MEGABASE_NOT_IMPLEMENTED",...}
+curl -s localhost:8000/_megabase/health
+# {"name":"megabase","version":"0.0.0","status":"ok"}
+curl -sS -w '\nHTTP %{http_code}\n' localhost:8000/rest/v1/todos
+# {"code":"MEGABASE_NOT_IMPLEMENTED",...}
+# HTTP 501
 ```
 
-A 501 on `/auth/v1` means the gateway is up and that HTTP unit is not
-ported yet. A 200 on `/_megabase/health` means the process is alive.
+A 501 on `/rest/v1/todos` means the gateway is up and that unit is not
+implemented yet.
+
+## Container image
 
 ```shell
 docker build -t megabase .
 docker run --rm -p 8000:8000 megabase
 ```
 
+Builder and runtime base images are pinned by digest; see [Install](install.md).
+
 ## Use with supabase-js
 
-Point supabase-js at your local base URL. `ANON_KEY` is a JWT signed with
-your `JWT_SECRET`. Every Auth/REST request returns 501 today; Level 1
-targets REST and Auth email/password first (see Roadmap).
+Point supabase-js at your local base URL. Every request to an unimplemented
+unit returns 501 today; Level 1 targets REST and Auth email/password first
+(see [Roadmap](ROADMAP.md)).
 
 ```javascript
 import { createClient } from '@supabase/supabase-js'
@@ -72,11 +67,13 @@ const { data, error } = await supabase.from('todos').select()
 
 ## Run the judge
 
-Keep Megabase reachable on `:8100` (compose profile) or `:8000` (host),
-and the reference stack on `:8000`. From the repository root:
+The judge starts the official Supabase reference stack with Docker Compose
+and compares it with Megabase. From the repository root:
 
 ```shell
 just judge-up
 just judge
 just judge-down
 ```
+
+Recipes and ports are in `judge/README.md`.
