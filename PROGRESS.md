@@ -65,7 +65,8 @@ Do not start a level until the previous threshold holds.
 
 One file per decision in [`docs/decisions/`](docs/decisions/). Add
 `NNNN-slug.md` with the next free number. Do not append to a list in this
-file.
+file. Aligning GOAL.md §10 and §11 with that rule is a human follow-up
+under Human-only actions.
 
 ## Tracking
 
@@ -168,6 +169,10 @@ Physically impossible for the agent (repository settings or credentials):
       `v0.1.0`) so that release gains signed assets (it shipped without
       binaries). Scorecard Signed-Releases looks at the last five
       GitHub Releases.
+- [ ] Update GOAL.md §10 and §11 so the decisions record is
+      `docs/decisions/`, matching this file and
+      [decision 0020](docs/decisions/0020-one-file-per-decision.md).
+      GOAL.md is human-owned. Agents do not edit it to close that gap.
 
 Log each of these in `HUMAN_LOG.md` when it is done. The delegation of
 decisions itself is a human intervention to log.

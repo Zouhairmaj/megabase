@@ -10,4 +10,6 @@ tracking. Agents add `NNNN-slug.md`. They do not append to a shared list.
 
 GOAL.md §10 and §11 still say `PROGRESS.md` holds decisions. That file is
 human-only and was left unchanged. `PROGRESS.md` records the divergence so
-the two instructions are visible in one place.
+the two instructions are visible in one place. A human still needs to
+update §10 and §11; that follow-up is listed under Human-only actions in
+`PROGRESS.md`.

@@ -9,4 +9,8 @@ decision.
 blocked items, and judge disputes. A decision that outlives a single issue
 is a new file in this directory.
 
+GOAL.md §10 and §11 still name `PROGRESS.md` as the decisions record. GOAL.md
+is human-owned, so that wording waits for a human edit
+([0020](0020-one-file-per-decision.md)). Until then, decisions go here.
+
 The files are the index. There is no second list to update.
