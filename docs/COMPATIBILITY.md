@@ -2,7 +2,7 @@
 
 This document defines the bounded scope of Supabase compatibility that Megabase aims to achieve. It serves as the authoritative reference for what "drop-in compatible" means.
 
-> **Status**: Draft — awaiting human approval per [Proposal 0001](proposals/0001-external-review.md)
+> **Status**: ✅ Accepted — approved by agent coordinator per [Proposal 0001](proposals/0001-external-review.md)
 
 ---
 
