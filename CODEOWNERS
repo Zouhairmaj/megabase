@@ -1,28 +1,14 @@
-# Megabase CODEOWNERS
-# 
-# This file defines code ownership for the repository.
-# Human maintainers own critical files that agents cannot modify without approval.
-#
-# See: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+# Human maintainers own the mission, the frozen specification and the
+# intervention log. Agents cannot change these without a logged human
+# review. The reviewer agent additionally owns judge/ (GOAL.md rule 2).
 
-# Human-owned files (per GOAL.md)
-# These require human approval for any changes
-
-/MANIFESTO.md           @AgenP/megabase-humans
-/GOAL.md                @AgenP/megabase-humans
-/HUMAN_LOG.md           @AgenP/megabase-humans
-
-# Vendor directory - pinned upstream sources
-# Humans own submodule version decisions
-/vendor/                @AgenP/megabase-humans
-
-# Judge directory - external correctness arbiter
-# Changes require reviewer agent approval, then human merge
-/judge/                 @AgenP/megabase-humans @AgenP/megabase-reviewer
-
-# Security-sensitive files
-/.github/workflows/     @AgenP/megabase-humans
-/CODEOWNERS             @AgenP/megabase-humans
-
-# Everything else can be modified by agents
-# (but still requires PR review per branch protection rules)
+/MANIFESTO.md           @Zouhairmaj
+/GOAL.md                @Zouhairmaj
+/HUMAN_LOG.md           @Zouhairmaj
+/vendor/                @Zouhairmaj
+/vendor.toml            @Zouhairmaj
+/.gitmodules            @Zouhairmaj
+/judge/                 @Zouhairmaj
+/.github/               @Zouhairmaj
+/tools/megabase-guard/  @Zouhairmaj
+/CODEOWNERS             @Zouhairmaj
