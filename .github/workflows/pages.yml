@@ -39,41 +39,13 @@ jobs:
         with:
           toolchain: stable
 
-      # Trusted event SHA only (push or workflow_dispatch). The Judge
-      # artifact is applied in pages-badges.yml, which does not save a cache.
-      # save-if on this action writes the cache only for a push to main.
+      # Trusted event SHA only. Do not download gh-pages or a
+      # workflow_run artifact here: this job saves the default-branch
+      # Rust cache. Live badges are published by pages-badges.yml.
       - name: Cache site workspace
         uses: ./.github/actions/rust-cache
         with:
           workspace: site
-
-      - name: Restore published Judge coverage when present
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          # One snapshot: the four files the site copies into
-          # _site/coverage/, or none of them. A missing gh-pages file
-          # keeps the checked-in set. This job does not check that
-          # branch out.
-          files=(badge-coverage.json badge-conformance.json summary.json judge-results.json)
-          dest="$(mktemp -d)"
-          ok=1
-          for name in "${files[@]}"; do
-            url="repos/${GITHUB_REPOSITORY}/contents/coverage/${name}?ref=gh-pages"
-            if ! gh api "$url" -H "Accept: application/vnd.github.raw" > "${dest}/${name}"; then
-              ok=0
-              break
-            fi
-          done
-          if [ "$ok" -eq 1 ]; then
-            python3 -c 'import json; d=json.load(open("'"${dest}"'/summary.json")); assert d.get("schema")==1 and "totals" in d'
-            for name in "${files[@]}"; do
-              cp "${dest}/${name}" "coverage/${name}"
-            done
-          else
-            echo "Published coverage snapshot incomplete; using the checked-in files."
-          fi
 
       - name: Generate site
         run: cargo run --manifest-path site/Cargo.toml --release -- --repo-root . --out _site
