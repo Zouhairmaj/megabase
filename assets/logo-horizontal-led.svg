@@ -1,14 +1,14 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 337.6 96" width="337.6" height="96" role="img" aria-labelledby="t">
   <title id="t">Megabase</title>
-  <g fill="#303235">
-    <rect x="0" y="0" width="30" height="30"/>
-    <rect x="33" y="0" width="30" height="30"/>
-    <rect x="66" y="0" width="30" height="30"/>
-    <rect x="0" y="33" width="30" height="30"/>
-    <rect x="66" y="33" width="30" height="30"/>
-    <rect x="0" y="66" width="30" height="30"/>
-    <rect x="33" y="66" width="30" height="30"/>
-    <rect x="66" y="66" width="30" height="30"/>
+  <g fill="#002923" stroke="#005441" stroke-width="1.5">
+    <rect x="0.75" y="0.75" width="28.5" height="28.5"/>
+    <rect x="33.75" y="0.75" width="28.5" height="28.5"/>
+    <rect x="66.75" y="0.75" width="28.5" height="28.5"/>
+    <rect x="0.75" y="33.75" width="28.5" height="28.5"/>
+    <rect x="66.75" y="33.75" width="28.5" height="28.5"/>
+    <rect x="0.75" y="66.75" width="28.5" height="28.5"/>
+    <rect x="33.75" y="66.75" width="28.5" height="28.5"/>
+    <rect x="66.75" y="66.75" width="28.5" height="28.5"/>
   </g>
   <rect x="33" y="33" width="30" height="30" fill="#00D892"/>
   <g transform="translate(126 34.5) scale(0.036986)" fill="#F7F7F7">

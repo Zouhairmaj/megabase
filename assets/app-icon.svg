@@ -1,8 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-labelledby="t">
   <title id="t">Megabase</title>
-  <rect x="2" y="2" width="508" height="508" rx="112" fill="#FBF8F1" stroke="#E2DDD2" stroke-width="4"/>
+  <rect x="2" y="2" width="508" height="508" rx="112" fill="#F7F7F7" stroke="#BABABB" stroke-width="4"/>
   <g transform="translate(106 106) scale(3.1667)">
-    <g fill="#1F1F1F">
+    <g fill="#181A1D">
       <rect x="0" y="0" width="30" height="30"/>
       <rect x="33" y="0" width="30" height="30"/>
       <rect x="66" y="0" width="30" height="30"/>
@@ -12,6 +12,6 @@
       <rect x="33" y="66" width="30" height="30"/>
       <rect x="66" y="66" width="30" height="30"/>
     </g>
-    <rect x="33" y="33" width="30" height="30" fill="#1FCB5B"/>
+    <rect x="33" y="33" width="30" height="30" fill="#009366"/>
   </g>
 </svg>

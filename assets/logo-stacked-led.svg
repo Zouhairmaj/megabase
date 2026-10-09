@@ -1,17 +1,19 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 337.6 96" width="337.6" height="96" role="img" aria-labelledby="t">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 142.5" width="192" height="142.5" role="img" aria-labelledby="t">
   <title id="t">Megabase</title>
-  <g fill="#303235">
-    <rect x="0" y="0" width="30" height="30"/>
-    <rect x="33" y="0" width="30" height="30"/>
-    <rect x="66" y="0" width="30" height="30"/>
-    <rect x="0" y="33" width="30" height="30"/>
-    <rect x="66" y="33" width="30" height="30"/>
-    <rect x="0" y="66" width="30" height="30"/>
-    <rect x="33" y="66" width="30" height="30"/>
-    <rect x="66" y="66" width="30" height="30"/>
+  <g transform="translate(48 0)">
+    <g fill="#002923" stroke="#005441" stroke-width="1.5">
+      <rect x="0.75" y="0.75" width="28.5" height="28.5"/>
+      <rect x="33.75" y="0.75" width="28.5" height="28.5"/>
+      <rect x="66.75" y="0.75" width="28.5" height="28.5"/>
+      <rect x="0.75" y="33.75" width="28.5" height="28.5"/>
+      <rect x="66.75" y="33.75" width="28.5" height="28.5"/>
+      <rect x="0.75" y="66.75" width="28.5" height="28.5"/>
+      <rect x="33.75" y="66.75" width="28.5" height="28.5"/>
+      <rect x="66.75" y="66.75" width="28.5" height="28.5"/>
+    </g>
+    <rect x="33" y="33" width="30" height="30" fill="#00D892"/>
   </g>
-  <rect x="33" y="33" width="30" height="30" fill="#00D892"/>
-  <g transform="translate(126 34.5) scale(0.036986)" fill="#F7F7F7">
+  <g transform="translate(0 118) scale(0.033555)" fill="#F7F7F7">
     <path d="M0 730V0H163L245 314L328 0H492V730H375V423Q375 360 378 292Q382 225 387 162Q392 98 398 46L295 413H192L93 55Q102 124 110 220Q117 315 117 423V730Z"/>
     <path d="M784 730V0H1222V110H907V300H1187V406H907V620H1222V730Z"/>
     <path d="M1750 740Q1679 740 1627 714Q1575 687 1546 638Q1518 590 1518 524V206Q1518 140 1546 92Q1575 43 1627 16Q1679 -10 1750 -10Q1820 -10 1872 16Q1924 43 1953 92Q1982 140 1982 206H1856Q1856 155 1828 128Q1801 100 1750 100Q1699 100 1671 127Q1643 154 1643 205V524Q1643 575 1671 603Q1699 631 1750 631Q1801 631 1828 603Q1856 575 1856 524V443H1732V335H1982V524Q1982 590 1953 638Q1924 687 1872 714Q1820 740 1750 740Z"/>

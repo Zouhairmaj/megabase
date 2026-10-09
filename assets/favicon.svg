@@ -1,7 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
   <style>
-    .t { fill: #1F1F1F; }
-    @media (prefers-color-scheme: dark) { .t { fill: #F5F2EA; } }
+    .t { fill: #181A1D; } .c { fill: #009366; }
+    @media (prefers-color-scheme: dark) { .t { fill: #303235; } .c { fill: #00D892; } }
   </style>
   <g class="t">
     <rect x="1" y="1" width="9.4" height="9.4"/>
@@ -13,5 +13,5 @@
     <rect x="11.3" y="21.6" width="9.4" height="9.4"/>
     <rect x="21.6" y="21.6" width="9.4" height="9.4"/>
   </g>
-  <rect x="11.3" y="11.3" width="9.4" height="9.4" fill="#1FCB5B"/>
+  <rect class="c" x="11.3" y="11.3" width="9.4" height="9.4"/>
 </svg>
