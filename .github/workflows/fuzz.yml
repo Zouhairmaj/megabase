@@ -76,7 +76,11 @@ jobs:
 
       - name: Fuzz ${{ matrix.target }}
         run: |
-          cargo +nightly fuzz run "${{ matrix.target }}" -- \
+          # taiki-e/install-action ships a musl cargo-fuzz, which otherwise
+          # selects x86_64-unknown-linux-musl. ASan cannot link a static musl
+          # libc (rust-fuzz/cargo-fuzz#397 / #398).
+          host="$(rustc +nightly -vV | awk '/^host:/{print $2}')"
+          cargo +nightly fuzz run "${{ matrix.target }}" --target "$host" -- \
             -max_total_time="${{ steps.duration.outputs.seconds }}"
 
       - name: Upload crash artifacts

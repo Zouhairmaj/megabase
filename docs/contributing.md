@@ -56,6 +56,8 @@ cargo install cargo-fuzz --locked --version 0.13.2
 just fuzz jwt            # or gateway_http / rest_query; default 60s
 just fuzz jwt 600
 cargo +nightly fuzz list
+# just fuzz pins --target to the host triple so a musl-built cargo-fuzz
+# does not pick x86_64-unknown-linux-musl (ASan cannot link static musl).
 ```
 
 `.github/workflows/fuzz.yml` runs each target for 60 seconds on pull
