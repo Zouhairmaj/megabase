@@ -1,8 +1,9 @@
 # Auth: database (issues 10–13)
 
-Issues #10 through #13 port Auth SQL objects. HTTP `/auth/v1` is
-unchanged (501). These objects are the compatibility surface that RLS
-policies and clients call inside PostgreSQL.
+Issues #10 through #13 port Auth SQL objects. Autoconfirm email signup
+and logout write `auth.users` and sessions; other `/auth/v1` routes stay
+501 ([`endpoints.md`](endpoints.md)). These objects are the compatibility
+surface that RLS policies and clients call inside PostgreSQL.
 
 Namespace is always `auth` (GoTrue `{{ index .Options "Namespace" }}`).
 Pin: `vendor/auth` `v2.197.0` (`4eee58f296d9698a1c2c0ae14d7a0b379c7622d3`),

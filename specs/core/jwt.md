@@ -1,8 +1,9 @@
 # Core: HS256 JWT validation and config
 
 Shared `megabase-core` types so Auth and REST enforce the same JWT and role
-claims as GoTrue and PostgREST. This is library code, not an HTTP unit;
-handlers keep returning 501 until Auth/REST port those routes.
+claims as GoTrue and PostgREST. This is library code, not an HTTP unit.
+Auth signup signs with `Hs256::sign` and logout verifies with `Hs256::verify`.
+REST handlers still return 501.
 
 ## Upstream
 
@@ -57,8 +58,8 @@ On success, `JwtClaims`:
 ## Errors
 
 `JwtError` kinds use PostgREST’s JWT messages so REST can map them to
-`PGRST301` / `PGRST303` later. Auth maps the same kinds to GoTrue
-`bad_jwt` when those routes are ported.
+`PGRST301` / `PGRST303` later. Auth logout maps the same kinds to GoTrue
+`bad_jwt` (`invalid JWT: unable to parse or verify signature, …`).
 
 | Kind | When | PostgREST message |
 |---|---|---|
@@ -96,4 +97,5 @@ key. Empty string is the same as unset.
 ## Out of scope
 
 Asymmetric keys (RS256, ES256, EdDSA), JWKS rotation, `aud` matching,
-`nbf` / `iat` checks, signing new access tokens (Auth token grant).
+`nbf` / `iat` checks. `Hs256::sign` covers the signup access token.
+`POST /token` is still out of scope.

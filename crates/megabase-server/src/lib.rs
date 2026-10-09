@@ -46,9 +46,9 @@ struct Gateway {
     fallback: Router,
 }
 
-fn component_router(component: &str) -> Router {
+fn component_router(component: &str, auth: &megabase_auth::AuthState) -> Router {
     match component {
-        megabase_auth::COMPONENT => megabase_auth::router(),
+        megabase_auth::COMPONENT => megabase_auth::router_with_state(auth.clone()),
         megabase_rest::COMPONENT => megabase_rest::router(),
         megabase_realtime::COMPONENT => megabase_realtime::router(),
         megabase_storage::COMPONENT => megabase_storage::router(),
@@ -58,12 +58,21 @@ fn component_router(component: &str) -> Router {
     }
 }
 
+/// Gateway with reference Auth defaults, no signing key, and no database.
+///
+/// Benches and the 501 route tests use this. `run` passes a configured
+/// [`megabase_auth::AuthState`] so signup and logout share one backend.
 pub fn create_router() -> Router {
+    create_router_with(megabase_auth::AuthState::reference())
+}
+
+/// Gateway whose `/auth/v1/` and OAuth discovery prefixes share `auth`.
+pub fn create_router_with(auth: megabase_auth::AuthState) -> Router {
     let gateway = Gateway {
         routes: Arc::new(
             GATEWAY_ROUTES
                 .iter()
-                .map(|(prefix, component)| (*prefix, component_router(component)))
+                .map(|(prefix, component)| (*prefix, component_router(component, &auth)))
                 .collect(),
         ),
         fallback: megabase_studio::router(),
@@ -99,9 +108,13 @@ async fn health() -> Json<serde_json::Value> {
 }
 
 pub async fn run(config: Config) -> std::io::Result<()> {
-    if let Some(url) = &config.database_url {
+    let mut auth = megabase_auth::AuthState::try_from_env().map_err(std::io::Error::other)?;
+    if let Some(url) = auth.database_url.clone() {
         info!("installing auth schema");
-        megabase_auth::install_schema(url)
+        megabase_auth::install_schema(&url)
+            .await
+            .map_err(std::io::Error::other)?;
+        auth.backend = megabase_auth::Backend::connect(&url)
             .await
             .map_err(std::io::Error::other)?;
     } else {
@@ -110,5 +123,5 @@ pub async fn run(config: Config) -> std::io::Result<()> {
     let addr = config.bind_address();
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     info!("megabase listening on {}", listener.local_addr()?);
-    axum::serve(listener, create_router()).await
+    axum::serve(listener, create_router_with(auth)).await
 }
