@@ -1463,6 +1463,14 @@ a:hover {
   margin: 0;
 }
 
+.footer-measure {
+  margin: 12px 0 0;
+  max-width: 72ch;
+  color: var(--muted-aa);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .footer-mobile {
   display: none;
 }

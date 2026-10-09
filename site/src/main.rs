@@ -871,6 +871,8 @@ mod tests {
         assert!(home.contains("Coverage · Conformance"));
         assert!(home.contains("Units passing the judge"));
         assert!(home.contains("https://analytics.ahrefs.com/analytics.js"));
+        assert!(home.contains("footer-measure"));
+        assert!(home.contains("IP-derived city/country"));
         let _ = fs::remove_dir_all(&out);
     }
 

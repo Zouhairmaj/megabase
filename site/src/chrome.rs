@@ -251,6 +251,7 @@ pub fn footer(paths: &Paths, logo: &str) -> String {
     }
 
     let home = paths.home_href();
+    let measure = r#"<p class="footer-measure">This site sends page URLs, referrers, user-agent, language, and IP-derived city/country to Ahrefs. Ahrefs discards raw IPs and does not use cookies or persistent IDs by default.</p>"#;
     format!(
         r#"<footer class="site-footer">
   <div class="footer-desktop">
@@ -265,6 +266,7 @@ pub fn footer(paths: &Paths, logo: &str) -> String {
       <p>Independent experiment. Not affiliated with or endorsed by Supabase, Inc.</p>
       <p>Apache-2.0 · Upstream licenses in NOTICE</p>
     </div>
+    {measure}
   </div>
   <div class="footer-mobile">
     <a class="brand brand-footer" href="{home}">{logo}<span class="wordmark">MEGABASE</span></a>
@@ -276,6 +278,7 @@ pub fn footer(paths: &Paths, logo: &str) -> String {
       <p>Independent experiment. Not affiliated with or endorsed by Supabase, Inc.</p>
       <p>Apache-2.0 · Upstream licenses in NOTICE</p>
     </div>
+    {measure}
   </div>
 </footer>"#
     )
