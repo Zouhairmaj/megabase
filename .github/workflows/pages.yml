@@ -45,20 +45,32 @@ jobs:
         with:
           key: pages
 
-      - name: Restore published Judge summary when present
+      - name: Restore published Judge coverage when present
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          # Keep the checked-in file until gh-pages has a summary. The
-          # download is one JSON blob; this job does not check that
+          # One snapshot: the four files the site copies into
+          # _site/coverage/, or none of them. A missing gh-pages file
+          # keeps the checked-in set. This job does not check that
           # branch out.
-          url="repos/${GITHUB_REPOSITORY}/contents/coverage/summary.json?ref=gh-pages"
-          if gh api "$url" -H "Accept: application/vnd.github.raw" > /tmp/judge-summary.json; then
-            python3 -c 'import json; d=json.load(open("/tmp/judge-summary.json")); assert d.get("schema")==1 and "totals" in d'
-            cp /tmp/judge-summary.json coverage/summary.json
+          files=(badge-coverage.json badge-conformance.json summary.json judge-results.json)
+          dest="$(mktemp -d)"
+          ok=1
+          for name in "${files[@]}"; do
+            url="repos/${GITHUB_REPOSITORY}/contents/coverage/${name}?ref=gh-pages"
+            if ! gh api "$url" -H "Accept: application/vnd.github.raw" > "${dest}/${name}"; then
+              ok=0
+              break
+            fi
+          done
+          if [ "$ok" -eq 1 ]; then
+            python3 -c 'import json; d=json.load(open("'"${dest}"'/summary.json")); assert d.get("schema")==1 and "totals" in d'
+            for name in "${files[@]}"; do
+              cp "${dest}/${name}" "coverage/${name}"
+            done
           else
-            echo "No published coverage/summary.json; using the checked-in file."
+            echo "Published coverage snapshot incomplete; using the checked-in files."
           fi
 
       - name: Generate site
