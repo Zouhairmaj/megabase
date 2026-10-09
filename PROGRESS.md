@@ -74,6 +74,12 @@ waiting on a human.
    bootstrap; `judge/`, CI and the guard only on `review/*`. The Phase 0
    bootstrap exception applies solely to branch
    `cursor/phase-0-bootstrap-121c` while `main` still has no `vendor.toml`.
+   `release-please--branches--*` may change only `CHANGELOG.md`,
+   `.release-please-manifest.json`, `Cargo.toml`, `Cargo.lock`, and
+   delete `release-as` from `release-please-config.json`. `review/*`
+   may append or complete `HUMAN_LOG.md` Pending items (grows must
+   start a new `- ` item; shrinks must end at a `- **Date**` item)
+   and grow the Completed section.
 6. **README status is generated.** `megabase-coverage update` on `main`;
    `check` is a required CI job. Agents keep it current. Status is one
    full-width nested treemap (`coverage/treemap.svg`, light:
@@ -121,9 +127,11 @@ waiting on a human.
     `version.workspace = true`, so release-please's `rust` strategy
     errors (`value at path package.version is not tagged`). Config uses
     `release-type: simple` and bumps `[workspace.package].version` only.
-    `bootstrap-sha` is Day 0 so the first release PR is Phase 0 at
-    `0.1.0` (`release-as`). The v0.1.0 release PR must delete
-    `release-as` before it merges.
+    `bootstrap-sha` is the Phase 0 merge (`7aa41e8`, exclusive) so
+    changelog collection skips non-conventional `Day 0` / `[phase0]` /
+    `[brand]` commits. The first release is still Phase 0 at `0.1.0`
+    (`release-as`). The v0.1.0 release PR must delete `release-as`
+    before it merges.
     Container `FROM` lines are pinned by digest (root image and
     `.cursor/Dockerfile`).
 
@@ -183,8 +191,13 @@ Physically impossible for the agent (repository settings or credentials):
 - [ ] Branch protection on `main`: PRs only, required checks
       `Build`, `MSRV 1.89`, `Coverage check`, `Protected paths`,
       `Judge`, `Conventional Commits title`, one approving review
-- [ ] Allow `github-actions` to open release-please PRs and publish
-      GitHub Releases / tags on `main`
+- [x] Allow GitHub Actions to create and approve pull requests
+      (Settings → Actions → General → Workflow permissions;
+      `can_approve_pull_request_reviews=true`. Run 37961663758 predates it.)
+- [ ] Set secret `RELEASE_PLEASE_TOKEN` (PAT or GitHub App) so lockfile
+      pushes on the release branch start required checks (`GITHUB_TOKEN`
+      pushes do not trigger workflows)
+- [ ] Allow `github-actions` to publish GitHub Releases / tags on `main`
 - [ ] Enforce CODEOWNERS
 - [ ] Allow `github-actions` to push coverage commits to `main`
 - [ ] Dedicated bot / GitHub App for agents
