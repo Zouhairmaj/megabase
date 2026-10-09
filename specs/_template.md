@@ -42,7 +42,8 @@ Empty input, duplicates, encodings, ordering, concurrency, auth/RLS role.
 ## Out of scope
 
 What this unit deliberately leaves to other units or levels. Anything not
-served returns 501 via `megabase_core::MegabaseNotImplemented`.
+served returns HTTP 501 via `megabase_core::MegabaseNotImplemented`, with the
+body `{"code":"MEGABASE_NOT_IMPLEMENTED","component":"<component>","message":"<unit> is not implemented by Megabase yet","unit":"<unit>"}`.
 
 ## Judge cases
 
