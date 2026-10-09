@@ -68,7 +68,6 @@ One file per decision in [`docs/decisions/`](docs/decisions/). Add
 file. Aligning GOAL.md §10 and §11 with that rule is a human follow-up
 under Human-only actions.
 
-
 ## Tracking
 
 ### Cost

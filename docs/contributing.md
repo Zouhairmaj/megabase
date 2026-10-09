@@ -78,6 +78,8 @@ Megabase owns two Rust lockfiles: the workspace `Cargo.lock` and `site/Cargo.loc
 
 Lockfiles under `vendor/` belong to the pinned upstream spec. Agents never edit them ([ADR 0003](adr/0003-protected-paths.md)). Report issues in those trees upstream; do not add an OSV ignore unless a Scorecard finding is only in `vendor/` and cannot be fixed without bumping a pin.
 
+`cargo vet --locked` checks the workspace graph against imported audits from Mozilla, Google, and the Bytecode Alliance (`supply-chain/`). Crates those imports do not cover are exemptions. `cargo-machete` fails CI on an unused dependency in `crates/`, `tools/`, `judge/`, `site/`, and `fuzz/` (`cargo-udeps` needs nightly). `cargo-hack check --locked --each-feature` runs only for workspace crates that declare features; today none do, so that job does not rebuild the workspace.
+
 `site/` used `resvg` 0.45, which pulled in unmaintained `rustybuzz` (RUSTSEC-2026-0206) and `ttf-parser` (RUSTSEC-2026-0192). `resvg` 0.48 shapes text with `harfrust` and `skrifa` instead. Workspace `cargo audit` did not see those crates because `site/` is excluded from the workspace.
 
 ## What a human does

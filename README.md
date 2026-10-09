@@ -99,6 +99,8 @@ See [`docs/brand/README.md`](docs/brand/README.md).
 | CodeQL, secret scanning, Dependabot alerts | GitHub Advanced Security | [Security](https://github.com/Zouhairmaj/megabase/security) |
 | Renovate | Dependency updates | [renovatebot.com](https://docs.renovatebot.com) |
 | cargo-deny / cargo-audit | Rust advisories, licenses, bans | [cargo-deny](https://github.com/EmbarkStudios/cargo-deny) · [cargo-audit](https://github.com/rustsec/rustsec/tree/main/cargo-audit) |
+| cargo-vet | Imported crate audits; exemptions for the rest | [cargo-vet](https://mozilla.github.io/cargo-vet/) |
+| cargo-machete / cargo-hack | Unused dependencies; per-feature check | [cargo-machete](https://github.com/bnjbvr/cargo-machete) · [cargo-hack](https://github.com/taiki-e/cargo-hack) |
 | OpenSSF Scorecard | Supply-chain score | [scorecard.dev](https://scorecard.dev/viewer/?uri=github.com/Zouhairmaj/megabase) |
 | Codecov | Line coverage | [codecov.io/gh/Zouhairmaj/megabase](https://codecov.io/gh/Zouhairmaj/megabase) |
 | Bencher | Continuous benchmarks | [bencher.dev/perf/megabase](https://bencher.dev/perf/megabase) |

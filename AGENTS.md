@@ -49,7 +49,8 @@ git push -u origin HEAD
 ```
 
 PR checks: **Build, MSRV 1.89, Coverage check, Protected paths, Container
-image, Judge, Conventional Commits title, Fuzz**. GitHub does not enforce them yet.
+image, Judge, Conventional Commits title, Fuzz, cargo-vet, cargo-machete,
+cargo-hack**. GitHub does not enforce them yet.
 Treat every one as required anyway.
 
 `fuzz/` is a standalone cargo-fuzz workspace (excluded from the root
@@ -69,7 +70,10 @@ tests (`just ci`) only before pushing.
 
 Share state as `Arc<AppState>` and borrow it. Do not call `.clone()` to
 silence the borrow checker. The clone and borrow lints in
-`[workspace.lints.clippy]` are deny.
+`[workspace.lints.clippy]` are deny. Every workspace crate sets
+`lints.workspace = true`. `[workspace.lints.rust]` forbids `unsafe_code`.
+`site/` repeats that lint (it is not a workspace member). `fuzz/` does
+not: `libfuzzer_sys::fuzz_target!` expands to `unsafe`.
 
 Behaviour is the pinned source in `vendor/` and the unit spec in `specs/`.
 GOAL.md still decides disagreements: source beats docs, and the reference
@@ -95,6 +99,18 @@ list in `deny.toml`. The comment there is how to propose one.
 - `coverage/judge-results.json` is written by `just judge` but owned by CI
   on `main`. Feature PRs never change it.
 - `cargo run --locked -p megabase-backlog -- plan` writes `docs/backlog/PLAN.md`.
+
+## Rust API style
+
+Two references, not a second style guide:
+
+- [Pragmatic Rust Guidelines](https://microsoft.github.io/rust-guidelines/guidelines/index.html) (Microsoft)
+- [Rust API Guidelines](https://rust-lang.github.io/api-guidelines/)
+
+- **Newtypes.** A domain value is its own type with a private field. A newtype that is not total is built with a fallible constructor (`M-STRONG-TYPES`, `M-STRONG-TYPES-GUARD`, `C-NEWTYPE`).
+- **Errors.** Library crates expose a dedicated error type (`thiserror`) that implements `std::error::Error`, and convert with `From`. Binaries may use `anyhow`. Do not use `String` as the error (`M-ERRORS-CANONICAL-STRUCTS`, `C-GOOD-ERR`).
+- **Panics.** A panic stops the process. Bad input and I/O return `Result`. Panic only when an internal invariant is already broken (`M-PANIC-IS-STOP`, `M-PANIC-ON-BUG`). Parsers and JWT verification stay panic-free on arbitrary bytes (the `fuzz/` targets).
+- **Docs.** Public items start with one summary sentence. Add `# Errors` and `# Panics` when they apply (`M-CANONICAL-DOCS`, `C-FAILURE`).
 
 ## Who may change what
 

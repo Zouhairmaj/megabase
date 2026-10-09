@@ -190,9 +190,9 @@ SUGGESTED 10 Met, 3 Unmet, 1 N/A.
 
 | Criterion | Level | Status | Justification | Evidence |
 |---|---|---|---|---|
-| `static_analysis` | MUST | Met | Before release, CI runs Clippy (beyond rustc warnings) plus `cargo-deny` and `cargo audit` on both owned lockfiles. | [.github/workflows/ci.yml](https://github.com/Zouhairmaj/megabase/blob/main/.github/workflows/ci.yml) |
+| `static_analysis` | MUST | Met | Before release, CI runs Clippy (beyond rustc warnings), forbids `unsafe_code`, and runs `cargo-deny` and `cargo audit` on both owned lockfiles. | [.github/workflows/ci.yml](https://github.com/Zouhairmaj/megabase/blob/main/.github/workflows/ci.yml) |
 | `static_analysis_common_vulnerabilities` | SUGGESTED | Met | GitHub code scanning default setup runs CodeQL on Rust for pull requests; that query set looks for common vulnerabilities. | [README](https://github.com/Zouhairmaj/megabase/blob/main/README.md) |
-| `static_analysis_fixed` | MUST | Met | Clippy `-D warnings`, cargo-deny, and cargo-audit fail CI, so a release from green main has no open finding from those tools. | [.github/workflows/ci.yml](https://github.com/Zouhairmaj/megabase/blob/main/.github/workflows/ci.yml) |
+| `static_analysis_fixed` | MUST | Met | Clippy `-D warnings`, `unsafe_code = "forbid"`, cargo-deny, and cargo-audit fail CI, so a release from green main has no open finding from those tools. | [.github/workflows/ci.yml](https://github.com/Zouhairmaj/megabase/blob/main/.github/workflows/ci.yml) |
 | `static_analysis_often` | SUGGESTED | Met | Those jobs run on every pull request and on every push to main. | [.github/workflows/ci.yml](https://github.com/Zouhairmaj/megabase/blob/main/.github/workflows/ci.yml) |
 
 `scorecard.yml` uploads Scorecard SARIF through `codeql-action/upload-sarif`.
@@ -206,6 +206,6 @@ repository.
 | Criterion | Level | Status | Justification | Evidence |
 |---|---|---|---|---|
 | `dynamic_analysis` | SUGGESTED | Unmet | There is no fuzzer or web scanner, and branch coverage is not the 80% alternative the criterion allows. | [issue 153](https://github.com/Zouhairmaj/megabase/issues/153) |
-| `dynamic_analysis_unsafe` | SUGGESTED | N/A | The software produced is Rust, and `crates/` contains no `unsafe` blocks. | [crates/](https://github.com/Zouhairmaj/megabase/tree/main/crates) |
+| `dynamic_analysis_unsafe` | SUGGESTED | N/A | The software produced is Rust. Workspace crates forbid `unsafe_code`, so there is no unsafe block for a fuzzer to exercise. | [Cargo.toml](https://github.com/Zouhairmaj/megabase/blob/main/Cargo.toml) |
 | `dynamic_analysis_enable_assertions` | SUGGESTED | Unmet | `crates/` has no `debug_assert!` or other production assertions for a test or fuzz build to turn on. | [crates/](https://github.com/Zouhairmaj/megabase/tree/main/crates) |
 | `dynamic_analysis_fixed` | MUST | N/A | No dynamic-analysis tool is run, so there is no confirmed finding from one. | [issue 153](https://github.com/Zouhairmaj/megabase/issues/153) |

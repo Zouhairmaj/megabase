@@ -58,6 +58,10 @@ hmac = "0.12"
 sha2 = "0.10"
 tokio-postgres = "0.7"
 postgres = { version = "0.19", features = ["with-serde_json-1"] }
+bcrypt = "0.19.3"
+chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }
+uuid = { version = "1.27.0", features = ["v4"] }
+criterion = { version = "0.5", default-features = false, features = ["cargo_bench_support"] }
 
 megabase-core = { path = "crates/megabase-core" }
 megabase-server = { path = "crates/megabase-server" }
@@ -69,6 +73,12 @@ megabase-functions = { path = "crates/megabase-functions" }
 megabase-pooler = { path = "crates/megabase-pooler" }
 megabase-meta = { path = "crates/megabase-meta" }
 megabase-studio = { path = "crates/megabase-studio" }
+
+# Product crates do not use `unsafe`. site/ repeats this lint locally
+# because it is excluded from the workspace. fuzz/ does not: the libfuzzer
+# harness expands to `unsafe`.
+[workspace.lints.rust]
+unsafe_code = "forbid"
 
 # Clone and borrow lints. CI runs clippy with `-D warnings`, which also
 # denies every other warning. These are deny so a per-crate `cargo clippy`
