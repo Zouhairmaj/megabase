@@ -5,6 +5,8 @@ judge against the real, pinned Supabase stack. **[`GOAL.md`](GOAL.md) is the
 mission, levels, roles and iteration loop; this file only says how to carry
 them out in this repository.** It never relaxes GOAL.md or `MANIFESTO.md`.
 
+Cursor Cloud Agent environment: [`.cursor/environment.json`](.cursor/environment.json) (install, start, and base image). Do not duplicate those commands here.
+
 **At the start of every session**, read `GOAL.md` (and `MANIFESTO.md` once),
 `PROGRESS.md`, `coverage/summary.json` and the
 [board](https://github.com/users/Zouhairmaj/projects/1). Before you edit a

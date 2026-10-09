@@ -1,0 +1,23 @@
+{
+  // Cursor Cloud Agent environment (https://cursor.com/docs/cloud-agent/setup).
+  // Headless Chromium is omitted: site/ is a Rust static generator (resvg) with no
+  // Lighthouse tests. Studio browser sessions belong in judge/ later.
+  // cargo-nextest is omitted: CI and the justfile use `cargo test --workspace --locked`.
+  "name": "Megabase",
+  "user": "ubuntu",
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
+  "install": "set -euo pipefail\nexport CARGO_HOME=\"${CARGO_HOME:-$HOME/.cargo}\"\nexport RUSTUP_HOME=\"${RUSTUP_HOME:-$HOME/.rustup}\"\nexport PATH=\"$CARGO_HOME/bin:$PATH\"\nexport CARGO_TERM_COLOR=\"${CARGO_TERM_COLOR:-always}\"\nexport RUST_BACKTRACE=\"${RUST_BACKTRACE:-1}\"\n\nif ! command -v rustup >/dev/null 2>&1; then\n  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain none\n  # shellcheck disable=SC1091\n  . \"$CARGO_HOME/env\"\nfi\n\nif [ -f rust-toolchain.toml ] || [ -f rust-toolchain ]; then\n  rustup show\nelse\n  rustup toolchain install stable --profile minimal --component rustfmt --component clippy --component llvm-tools\n  rustup default stable\nfi\nrustup component add rustfmt clippy llvm-tools\n\nif ! command -v cargo-binstall >/dev/null 2>&1; then\n  curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash\nfi\n\nbinstall_if_missing() {\n  if ! command -v \"$1\" >/dev/null 2>&1; then\n    cargo binstall -y \"$2\"\n  fi\n}\nbinstall_if_missing just just\nbinstall_if_missing cargo-deny cargo-deny\nbinstall_if_missing cargo-audit cargo-audit\nbinstall_if_missing cargo-llvm-cov cargo-llvm-cov\n# cargo-nextest is not used by CI or the justfile (`cargo test --workspace --locked`).\n\nif [ -f .gitmodules ]; then\n  git submodule update --init --recursive\nfi\n\nlink_bin() {\n  src=\"$CARGO_HOME/bin/$1\"\n  if [ -x \"$src\" ]; then\n    sudo ln -sfn \"$src\" \"/usr/local/bin/$1\"\n  fi\n}\nfor b in rustup rustc cargo rustfmt cargo-clippy cargo-fmt clippy-driver just cargo-deny cargo-audit cargo-llvm-cov cargo-binstall; do\n  link_bin \"$b\"\ndone\n\nif [ -f Cargo.lock ]; then\n  cargo fetch --locked\n  cargo build --locked\nelif [ -f site/Cargo.toml ]; then\n  cargo fetch --locked --manifest-path site/Cargo.toml\n  cargo build --locked --manifest-path site/Cargo.toml\nfi\n",
+  "start": "set -euo pipefail\nif ! command -v docker >/dev/null 2>&1; then\n  echo \"Docker is not available in this Cloud Agent VM. The judge reference stack (just judge-up, vendor/supabase/docker) needs a Docker daemon. Builds from .cursor/Dockerfile install Docker Engine with fuse-overlayfs; on the default image, install Docker or skip judge-up.\"\n  exit 0\nfi\n\ndocker_ready() {\n  docker info >/dev/null 2>&1 || sudo docker info >/dev/null 2>&1\n}\n\nif docker_ready; then\n  exit 0\nfi\n\nif command -v service >/dev/null 2>&1; then\n  sudo service docker start || true\nfi\nn=0\nuntil docker_ready; do\n  n=$((n + 1))\n  if [ \"$n\" -eq 5 ] && ! pgrep -x dockerd >/dev/null 2>&1; then\n    mkdir -p /tmp/cursor/start-user\n    sudo dockerd >/tmp/cursor/start-user/dockerd.log 2>&1 &\n  fi\n  if [ \"$n\" -ge 30 ]; then\n    echo \"Docker daemon did not become ready\" >&2\n    exit 1\n  fi\n  sleep 1\ndone\n",
+  "ports": [
+    {
+      "name": "judge-reference",
+      "port": 8000
+    },
+    {
+      "name": "megabase",
+      "port": 8100
+    }
+  ]
+}

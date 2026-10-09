@@ -1,0 +1,7 @@
+# Matches CI's Build / Coverage / Codecov jobs (dtolnay/rust-toolchain, toolchain:
+# stable, components rustfmt + clippy, plus llvm-tools-preview for cargo-llvm-cov).
+# MSRV 1.89 is a separate CI job and is not the agent default.
+[toolchain]
+channel = "stable"
+profile = "minimal"
+components = ["rustfmt", "clippy", "llvm-tools"]
