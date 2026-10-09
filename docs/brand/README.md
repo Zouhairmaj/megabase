@@ -101,34 +101,42 @@ Open Graph); light mode swaps via `prefers-color-scheme`.
 
 ## Status treemap
 
-`coverage/treemap.svg` is the README Status graphic and the same file the
-website Status page embeds. Totals always come from `coverage/units.json`
-(never a hardcoded denominator). Layout, from the Kite page "Repo / README":
+`coverage/treemap.svg` (dark) and `coverage/treemap-light.svg` are the
+README Status graphic. GitHub and the website pick the dark file as the
+default; light mode swaps via `prefers-color-scheme`. Totals always come
+from `coverage/units.json` (never a hardcoded denominator). Layout, from
+the Kite page "Repo / README":
 
-1. Badges: coverage, conformance, units `n / total`, in palette greens and
-   `#303235`.
-2. Header bar: `Supabase components: X% conformant (n/total)`.
-3. Squarified blocks, one per component, sized by that component's unit
-   count. Header bar `#181A1D`, name `#F7F7F7`, numbers `#BABABB`, JetBrains
-   Mono (SVG paths). Wide blocks: `REST 0.0% (0/57)`. Narrow blocks drop
-   the percentage: `POOLER 0/13`. Labels shrink, then truncate, so they
-   never clip.
-4. Inside each block, **exactly one whole 26×26 square per unit**, 4px
-   gap, same size in every block, laid out in rows, the grid centered.
-   Squares are never clipped and never tiled as a pattern.
-5. Legend: not started, implemented, tested, conformant (matches real
+1. Badges: coverage, conformance, units `n / total`.
+2. Title: `Supabase components: X% conformant (n/total)`.
+3. Nested squarified treemap filling the remaining area, **area
+   proportional to unit count**:
+   - Component cards (`rx=3`) with 10px gutters between them. Uppercase
+     JetBrains Mono name (Bold 15px, tracking 0.5px), count `n/total`
+     right-aligned (`n` bold, `/total` regular), then a 2px progress track.
+   - Feature groups squarified inside each card, also with 10px gutters.
+     Group labels (10.5px, tracking 0.4px) truncate, or drop, when they
+     do not fit.
+   - Unit cells packed to fill each group (~2px gaps; the last row may
+     have fewer, wider cells). Implemented cells get a thin `#009366`
+     inset outline.
+4. Legend: not started, implemented, tested, conformant (matches real
    Supabase).
 
-| State | Color |
-|---|---|
-| conformant | `#00D892` |
-| tested | `#009366` |
-| implemented | `#005441` |
-| not started | `#303235` |
-| background | `#0B0E12` |
+| State | Dark | Light |
+|---|---|---|
+| background | `#0B0E12` | `#FFFFFF` |
+| card | `#14171B` | `#F7F7F7` |
+| not started | `#2A2C2F` | `#DCDDDE` |
+| implemented | `#005441` | `#005441` |
+| tested | `#009366` | `#009366` |
+| conformant | `#00D892` | `#00D892` |
+| name | `#F7F7F7` | `#0B0E12` |
+| count `/total` | `#BABABB` | `#303235` |
 
-Badges use a `#181A1D` label with a green value: `#00D892` from 90%,
-`#009366` from 50%, `#005441` otherwise; the units chip stays `#303235`.
+Badges use a card-colored label with a green value: `#00D892` from 90%,
+`#009366` from 50%, `#005441` otherwise; empty chips use the not-started
+fill.
 
 ## Rules
 

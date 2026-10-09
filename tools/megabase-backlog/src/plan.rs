@@ -458,7 +458,7 @@ fn website() -> Vec<Item> {
             "2. LLM committee review (several external models).\n",
             "3. Apply corrections in Kite.\n",
             "4. Implement in this repository so assets match Kite.\n\n",
-            "## Scope\n\n**In:** marketing/docs site, social images, diagrams. Status uses the generated `coverage/treemap.svg` (same treemap as the README). **Out:** Studio rewrite, product API.\n\n",
+            "## Scope\n\n**In:** marketing/docs site, social images, diagrams. Status uses the generated `coverage/treemap.svg` / `coverage/treemap-light.svg` (same treemap as the README). **Out:** Studio rewrite, product API.\n\n",
             "Child issues below must be done **in order**. Do not implement before the committee signs off.\n\n",
             "**Effort:** XL. **Labels:** `type:feature`. No level milestone.\n"
         )
@@ -476,7 +476,7 @@ fn website() -> Vec<Item> {
         ("task:website:design:later", "Website: design in Kite", "Add website frames to https://kite.new/p/megabase-identity (home, status, docs). Palette and logo from the identity file. Stop when a reviewer can click through the Kite file."),
         ("task:website:committee:later", "Website: LLM committee review", "Send the Kite frames to several external LLMs. Collect written review. Blocked by design."),
         ("task:website:revisions:later", "Website: apply committee revisions in Kite", "Update the Kite file. Do not start implementation. Blocked by committee review."),
-        ("task:website:implement:later", "Website: implement matching Kite", "Implement only what is in Kite after revisions. Repo assets must match. The Status page embeds `coverage/treemap.svg`. Blocked by revisions."),
+        ("task:website:implement:later", "Website: implement matching Kite", "Implement only what is in Kite after revisions. Repo assets must match. The Status page embeds `coverage/treemap.svg` / `coverage/treemap-light.svg`. Blocked by revisions."),
     ];
     for (i, (key, title, scope)) in steps.iter().enumerate() {
         items.push(Item {

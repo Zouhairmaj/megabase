@@ -51,7 +51,8 @@ The public website follows the design-first rule: design in
 [Kite](https://kite.new/p/megabase-identity), LLM committee review,
 revisions, then implementation. It is a `type:feature` epic with no
 level milestone. The Status page embeds the generated
-`coverage/treemap.svg` (same file, same style as the README).
+`coverage/treemap.svg` / `coverage/treemap-light.svg` (same files, same
+style as the README).
 
 ## Regenerating the board
 

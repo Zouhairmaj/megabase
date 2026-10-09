@@ -642,6 +642,14 @@ pub const REGULAR: Font = Font {
     glyph: regular,
 };
 
+/// `tracking_em` such that extra advance between glyphs equals `px` pixels.
+pub fn tracking_for_px(font: Font, size: f32, px: f32) -> f32 {
+    if size <= 0.0 || font.em <= 0.0 {
+        return 0.0;
+    }
+    px * font.cap / (font.em * size)
+}
+
 pub fn measure(font: Font, text: &str, size: f32, tracking_em: f32) -> f32 {
     let s = size / font.cap;
     let extra = tracking_em * font.em * s;

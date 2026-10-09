@@ -1,6 +1,6 @@
-//! Squarified treemaps: one whole square per unit, grouped into a labeled
-//! block per component. Squares are a fixed size in every block and are
-//! never clipped.
+//! Nested squarified treemaps (Kite "Repo / README" Status): component cards
+//! sized by unit count, feature groups inside each card, unit cells filling
+//! each group. Totals always come from `coverage/units.json`.
 
 use std::fmt::Write;
 
@@ -8,18 +8,30 @@ use crate::glyphs::{self, BOLD, REGULAR};
 use crate::model::{component_label, Unit, COMPONENTS};
 use crate::status::{pct, State, Status};
 
-/// Side of each unit square (Kite Status treemap).
-pub const CELL: f64 = 26.0;
-/// Gap between adjacent squares.
-pub const GAP: f64 = 4.0;
-const STRIDE: f64 = CELL + GAP;
-const HEADER_H: f64 = 28.0;
-const INNER_PAD: f64 = 12.0;
-const BLOCK_GAP: f64 = 8.0;
-const MARGIN: f64 = 16.0;
+/// Gap between adjacent component cards and between feature groups (Kite).
+pub const GUTTER: f64 = 10.0;
+/// Gap between packed unit cells inside a group.
+pub const CELL_GAP: f64 = 2.0;
+
+const CARD_RX: f64 = 3.0;
+const CARD_PAD: f64 = 8.0;
+const NAME_INSET: f64 = 11.0;
+const NAME_SIZE: f32 = 15.0;
+const NAME_TRACKING_PX: f32 = 0.5;
+const COUNT_SIZE: f32 = 12.0;
+const TRACK_Y: f64 = 30.0;
+const TRACK_H: f64 = 2.0;
+const HEADER_H: f64 = 32.0;
+const GROUP_LABEL_H: f64 = 21.0;
+const GROUP_LABEL_SIZE: f32 = 10.5;
+const GROUP_LABEL_TRACKING_PX: f32 = 0.4;
+const MARGIN: f64 = 20.0;
 const BADGE_H: f64 = 20.0;
-const TITLE_H: f64 = 36.0;
+const TITLE_H: f64 = 28.0;
 const LEGEND_H: f64 = 32.0;
+const BODY_H_MIN: f64 = 620.0;
+const PX_PER_UNIT: f64 = 1100.0;
+const IMPLEMENTED_OUTLINE: &str = "#009366";
 
 #[derive(Debug, Clone, Copy)]
 pub struct Rect {
@@ -30,20 +42,19 @@ pub struct Rect {
 }
 
 impl Rect {
-    fn inset(self, top: f64, side: f64) -> Rect {
-        Rect {
-            x: self.x + side,
-            y: self.y + top,
-            w: (self.w - 2.0 * side).max(0.0),
-            h: (self.h - top - side).max(0.0),
-        }
+    fn right(self) -> f64 {
+        self.x + self.w
+    }
+
+    fn bottom(self) -> f64 {
+        self.y + self.h
     }
 
     fn contains(self, inner: Rect) -> bool {
         inner.x + 1e-6 >= self.x
             && inner.y + 1e-6 >= self.y
-            && inner.x + inner.w <= self.x + self.w + 1e-6
-            && inner.y + inner.h <= self.y + self.h + 1e-6
+            && inner.right() <= self.right() + 1e-6
+            && inner.bottom() <= self.bottom() + 1e-6
     }
 }
 
@@ -111,6 +122,122 @@ pub fn squarify(values: &[f64], rect: Rect) -> Vec<Rect> {
     out
 }
 
+/// Shrink shared edges so neighbouring rects are separated by `gutter` px.
+/// Outer edges of the parent bounds stay flush (no outer margin).
+pub fn apply_gutters(rects: &mut [Rect], gutter: f64) {
+    let n = rects.len();
+    if n < 2 || gutter <= 0.0 {
+        return;
+    }
+    let half = gutter / 2.0;
+    let orig = rects.to_vec();
+    const EPS: f64 = 0.75;
+    for i in 0..n {
+        let r = orig[i];
+        let mut left = false;
+        let mut right = false;
+        let mut top = false;
+        let mut bottom = false;
+        for (j, s) in orig.iter().enumerate() {
+            if i == j {
+                continue;
+            }
+            let y_overlap = r.y < s.bottom() - EPS && s.y < r.bottom() - EPS;
+            let x_overlap = r.x < s.right() - EPS && s.x < r.right() - EPS;
+            if y_overlap && (s.right() - r.x).abs() < EPS {
+                left = true;
+            }
+            if y_overlap && (r.right() - s.x).abs() < EPS {
+                right = true;
+            }
+            if x_overlap && (s.bottom() - r.y).abs() < EPS {
+                top = true;
+            }
+            if x_overlap && (r.bottom() - s.y).abs() < EPS {
+                bottom = true;
+            }
+        }
+        let d = &mut rects[i];
+        if left {
+            d.x += half;
+            d.w -= half;
+        }
+        if right {
+            d.w -= half;
+        }
+        if top {
+            d.y += half;
+            d.h -= half;
+        }
+        if bottom {
+            d.h -= half;
+        }
+        d.w = d.w.max(0.0);
+        d.h = d.h.max(0.0);
+    }
+}
+
+/// Column count that makes packed cells as square as possible.
+pub fn best_cols(n: usize, w: f64, h: f64, gap: f64) -> usize {
+    if n <= 1 {
+        return n.max(1);
+    }
+    let mut best = 1usize;
+    let mut best_ratio = f64::MAX;
+    for cols in 1..=n {
+        let rows = n.div_ceil(cols);
+        let cw = (w - gap * (cols - 1) as f64) / cols as f64;
+        let ch = (h - gap * (rows - 1) as f64) / rows as f64;
+        if cw < 0.5 || ch < 0.5 {
+            continue;
+        }
+        let ratio = cw.max(ch) / cw.min(ch);
+        if ratio < best_ratio - 1e-9 || ((ratio - best_ratio).abs() < 1e-9 && cols > best) {
+            best_ratio = ratio;
+            best = cols;
+        }
+    }
+    best
+}
+
+fn split_axis(len: f64, n: usize, gap: f64) -> Vec<f64> {
+    if n == 0 {
+        return Vec::new();
+    }
+    let inner = (len - gap * (n.saturating_sub(1) as f64)).max(0.0);
+    vec![inner / n as f64; n]
+}
+
+/// Pack `n` cells so they fill `inner`. Last row may have fewer, wider cells.
+pub fn unit_cells(n: usize, inner: Rect) -> Vec<Rect> {
+    if n == 0 || inner.w < 0.5 || inner.h < 0.5 {
+        return Vec::new();
+    }
+    let cols = best_cols(n, inner.w, inner.h, CELL_GAP);
+    let rows = n.div_ceil(cols);
+    let row_h = split_axis(inner.h, rows, CELL_GAP);
+    let mut out = Vec::with_capacity(n);
+    let mut i = 0;
+    let mut y = inner.y;
+    for (r, h) in row_h.iter().enumerate() {
+        let remaining = n - i;
+        let cols_this = if r + 1 == rows {
+            remaining
+        } else {
+            cols.min(remaining)
+        };
+        let col_w = split_axis(inner.w, cols_this, CELL_GAP);
+        let mut x = inner.x;
+        for w in col_w {
+            out.push(Rect { x, y, w, h: *h });
+            x += w + CELL_GAP;
+            i += 1;
+        }
+        y += *h + CELL_GAP;
+    }
+    out
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Metric {
     /// Four colors: not started, implemented, tested, conformant.
@@ -129,25 +256,74 @@ pub enum Heading {
     Title(String),
 }
 
-// Megabase palette only (docs/brand/README.md).
-const BG: &str = "#0B0E12";
-const PANEL: &str = "#181A1D";
-const TEXT: &str = "#F7F7F7";
-const MUTED: &str = "#BABABB";
-const NOT_STARTED: &str = "#303235";
-const IMPLEMENTED: &str = "#005441";
-const TESTED: &str = "#009366";
-const GREEN: &str = "#00D892";
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Theme {
+    Dark,
+    Light,
+}
 
-fn color(metric: Metric, state: State) -> &'static str {
+struct Palette {
+    bg: &'static str,
+    card: &'static str,
+    name: &'static str,
+    count: &'static str,
+    slash: &'static str,
+    group_name: &'static str,
+    group_count: &'static str,
+    not_started: &'static str,
+    implemented: &'static str,
+    tested: &'static str,
+    conformant: &'static str,
+    muted: &'static str,
+    title: &'static str,
+}
+
+impl Theme {
+    fn palette(self) -> Palette {
+        match self {
+            Theme::Dark => Palette {
+                bg: "#0B0E12",
+                card: "#14171B",
+                name: "#F7F7F7",
+                count: "#F7F7F7",
+                slash: "#BABABB",
+                group_name: "#ABACAE",
+                group_count: "#76777A",
+                not_started: "#2A2C2F",
+                implemented: "#005441",
+                tested: "#009366",
+                conformant: "#00D892",
+                muted: "#BABABB",
+                title: "#F7F7F7",
+            },
+            Theme::Light => Palette {
+                bg: "#FFFFFF",
+                card: "#F7F7F7",
+                name: "#0B0E12",
+                count: "#0B0E12",
+                slash: "#303235",
+                group_name: "#303235",
+                group_count: "#76777A",
+                not_started: "#DCDDDE",
+                implemented: "#005441",
+                tested: "#009366",
+                conformant: "#00D892",
+                muted: "#303235",
+                title: "#0B0E12",
+            },
+        }
+    }
+}
+
+fn color(pal: &Palette, metric: Metric, state: State) -> &'static str {
     match (metric, state) {
-        (Metric::State, State::Missing) => NOT_STARTED,
-        (Metric::State, State::Implemented) => IMPLEMENTED,
-        (Metric::State, State::Tested) => TESTED,
-        (Metric::State, State::Conformant) => GREEN,
-        (Metric::Coverage, s) if s >= State::Implemented => GREEN,
-        (Metric::Conformance, State::Conformant) => GREEN,
-        _ => NOT_STARTED,
+        (Metric::State, State::Missing) => pal.not_started,
+        (Metric::State, State::Implemented) => pal.implemented,
+        (Metric::State, State::Tested) => pal.tested,
+        (Metric::State, State::Conformant) => pal.conformant,
+        (Metric::Coverage, s) if s >= State::Implemented => pal.conformant,
+        (Metric::Conformance, State::Conformant) => pal.conformant,
+        _ => pal.not_started,
     }
 }
 
@@ -165,130 +341,78 @@ fn esc(s: &str) -> String {
         .replace('"', "&quot;")
 }
 
-fn cols_for(inner_w: f64, n: usize) -> usize {
-    if n == 0 || inner_w < CELL {
-        return 1;
-    }
-    let max = ((inner_w + GAP) / STRIDE).floor() as usize;
-    max.max(1).min(n)
+fn display_group_name(group: &str) -> String {
+    group.replace(['-', '_'], " ").to_ascii_uppercase()
 }
 
-fn grid_size(n: usize, cols: usize) -> (f64, f64) {
-    if n == 0 {
-        return (0.0, 0.0);
-    }
-    let cols = cols.max(1);
-    let rows = n.div_ceil(cols);
-    let w = cols as f64 * CELL + (cols - 1) as f64 * GAP;
-    let h = rows as f64 * CELL + (rows - 1) as f64 * GAP;
-    (w, h)
-}
-
-/// One 26×26 square per unit, row-major, the whole grid centered in `inner`.
-/// Returns an empty vec when `inner` cannot hold whole squares (never clips).
-pub fn unit_cells(n: usize, inner: Rect) -> Vec<Rect> {
-    if n == 0 || inner.w < CELL || inner.h < CELL {
-        return Vec::new();
-    }
-    let cols = cols_for(inner.w, n);
-    let (gw, gh) = grid_size(n, cols);
-    if gw > inner.w + 1e-6 || gh > inner.h + 1e-6 {
-        return Vec::new();
-    }
-    let ox = inner.x + (inner.w - gw) / 2.0;
-    let oy = inner.y + (inner.h - gh) / 2.0;
-    let mut out = Vec::with_capacity(n);
-    for i in 0..n {
-        let c = i % cols;
-        let r = i / cols;
-        out.push(Rect {
-            x: ox + c as f64 * STRIDE,
-            y: oy + r as f64 * STRIDE,
-            w: CELL,
-            h: CELL,
-        });
-    }
-    out
-}
-
-fn block_frame(rect: Rect) -> Rect {
-    rect.inset(BLOCK_GAP / 2.0, BLOCK_GAP / 2.0)
-}
-
-fn block_inner(frame: Rect) -> Rect {
-    Rect {
-        x: frame.x + INNER_PAD,
-        y: frame.y + HEADER_H + INNER_PAD,
-        w: (frame.w - 2.0 * INNER_PAD).max(0.0),
-        h: (frame.h - HEADER_H - 2.0 * INNER_PAD).max(0.0),
-    }
-}
-
-/// Squarify weights: unit counts, with a floor so the smallest block is still
-/// wide enough for whole 26px squares and a `NAME 0/N` label.
-fn layout_weights(counts: &[usize], canvas: f64) -> Vec<f64> {
-    let total: f64 = counts.iter().map(|&n| n as f64).sum::<f64>().max(1.0);
-    let min_w = CELL * 2.0 + GAP + INNER_PAD * 2.0 + BLOCK_GAP + 24.0;
-    let min_h = HEADER_H + CELL * 2.0 + GAP + INNER_PAD * 2.0 + BLOCK_GAP;
-    let min_share = (min_w * min_h) / canvas.max(1.0) * total;
-    counts.iter().map(|&n| (n as f64).max(min_share)).collect()
-}
-
-fn block_fits(n: usize, rect: Rect) -> bool {
-    let frame = block_frame(rect);
-    if frame.w < CELL + 2.0 * INNER_PAD || frame.h < HEADER_H + CELL + 2.0 * INNER_PAD {
-        return false;
-    }
-    let inner = block_inner(frame);
-    unit_cells(n, inner).len() == n
-}
-
-/// Name + stats for a component header. Wide blocks get
-/// `NAME 0.0% (0/N)`; narrow blocks get `NAME 0/N`.
-pub fn component_header(
+/// Name (truncated) and optional `n/total`. Drops the label when nothing fits.
+pub fn fit_group_label(
     name: &str,
     done: usize,
     n: usize,
-    percent: f64,
     max_w: f32,
-) -> (String, String, f32) {
-    let size = 12.0_f32;
-    let min = 8.0_f32;
-    let wide_stats = format!(" {percent:.1}% ({done}/{n})");
-    let narrow_stats = format!(" {done}/{n}");
-    let fits = |nm: &str, stats: &str, sz: f32| {
-        glyphs::measure(BOLD, nm, sz, 0.0) + glyphs::measure(REGULAR, stats, sz, 0.0) <= max_w
-    };
-    if fits(name, &wide_stats, size) {
-        return (name.to_string(), wide_stats, size);
+) -> Option<(String, Option<String>)> {
+    let size = GROUP_LABEL_SIZE;
+    let track = glyphs::tracking_for_px(REGULAR, size, GROUP_LABEL_TRACKING_PX);
+    if max_w < 8.0 {
+        return None;
     }
-    if fits(name, &narrow_stats, size) {
-        return (name.to_string(), narrow_stats, size);
-    }
-    let mut sz = 11.0;
-    while sz >= min {
-        if fits(name, &narrow_stats, sz) {
-            return (name.to_string(), narrow_stats, sz);
+    let count = format!("{done}/{n}");
+    let count_w = glyphs::measure(REGULAR, &count, size, 0.0);
+    let gap = 6.0;
+    let name_budget = max_w - count_w - gap;
+    if name_budget >= 10.0 {
+        let nm = glyphs::truncate(REGULAR, name, size, track, name_budget);
+        if !nm.is_empty() {
+            return Some((nm, Some(count)));
         }
-        sz -= 0.5;
     }
-    let stats_w = glyphs::measure(REGULAR, &narrow_stats, min, 0.0);
-    let budget = (max_w - stats_w).max(0.0);
-    let nm = glyphs::truncate(BOLD, name, min, 0.0, budget);
-    (nm, narrow_stats, min)
+    let nm = glyphs::truncate(REGULAR, name, size, track, max_w);
+    if nm.is_empty() {
+        None
+    } else {
+        Some((nm, None))
+    }
 }
 
-fn draw_badge(svg: &mut String, x: f32, y: f32, label: &str, value: &str, value_bg: &str) -> f32 {
+fn card_inner(frame: Rect) -> Rect {
+    Rect {
+        x: frame.x + CARD_PAD,
+        y: frame.y + HEADER_H,
+        w: (frame.w - 2.0 * CARD_PAD).max(0.0),
+        h: (frame.h - HEADER_H - CARD_PAD).max(0.0),
+    }
+}
+
+fn body_height(total: usize, body_w: f64) -> f64 {
+    let h = (total.max(1) as f64 * PX_PER_UNIT) / body_w.max(1.0);
+    h.clamp(BODY_H_MIN, 1800.0)
+}
+
+fn draw_badge(
+    svg: &mut String,
+    pal: &Palette,
+    x: f32,
+    y: f32,
+    label: &str,
+    value: &str,
+    value_bg: &str,
+) -> f32 {
     let size = 11.0;
     let pad = 8.0;
     let h = BADGE_H as f32;
     let lw = (glyphs::measure(REGULAR, label, size, 0.0) + pad * 2.0).ceil();
     let vw = (glyphs::measure(REGULAR, value, size, 0.0) + pad * 2.0).ceil();
     let w = lw + vw;
-    let value_fg = if value_bg == GREEN { BG } else { TEXT };
+    let value_fg = if value_bg == pal.conformant {
+        pal.bg
+    } else {
+        pal.name
+    };
     let _ = write!(
         svg,
-        r##"<rect x="{x:.1}" y="{y:.1}" width="{w:.1}" height="{h:.1}" rx="3" fill="{PANEL}"/>"##
+        r##"<rect x="{x:.1}" y="{y:.1}" width="{w:.1}" height="{h:.1}" rx="3" fill="{card}"/>"##,
+        card = pal.card
     );
     let _ = write!(
         svg,
@@ -301,19 +425,260 @@ fn draw_badge(svg: &mut String, x: f32, y: f32, label: &str, value: &str, value_
         x + lw
     );
     let ty = y + (h - size) / 2.0;
-    glyphs::write_text(svg, REGULAR, label, x + pad, ty, size, MUTED, 0.0);
+    glyphs::write_text(svg, REGULAR, label, x + pad, ty, size, pal.muted, 0.0);
     glyphs::write_text(svg, REGULAR, value, x + lw + pad, ty, size, value_fg, 0.0);
     w
 }
 
-fn metric_badge_color(percent: f64) -> &'static str {
+fn metric_badge_color(pal: &Palette, percent: f64) -> &'static str {
     if percent >= 90.0 {
-        GREEN
+        pal.conformant
     } else if percent >= 50.0 {
-        TESTED
+        pal.tested
+    } else if percent > 0.0 {
+        pal.implemented
     } else {
-        IMPLEMENTED
+        pal.not_started
     }
+}
+
+fn draw_cell(
+    svg: &mut String,
+    pal: &Palette,
+    metric: Metric,
+    unit: &Unit,
+    state: State,
+    cell: Rect,
+) {
+    let fill = color(pal, metric, state);
+    let _ = write!(
+        svg,
+        r#"<rect data-unit="{}" x="{:.1}" y="{:.1}" width="{:.1}" height="{:.1}" fill="{fill}"><title>{} ({state:?})</title></rect>"#,
+        esc(&unit.id),
+        cell.x,
+        cell.y,
+        cell.w,
+        cell.h,
+        esc(&unit.id),
+    );
+    if metric == Metric::State && state == State::Implemented && cell.w > 2.0 && cell.h > 2.0 {
+        let _ = write!(
+            svg,
+            r#"<rect x="{:.1}" y="{:.1}" width="{:.1}" height="{:.1}" fill="none" stroke="{IMPLEMENTED_OUTLINE}" stroke-width="1"/>"#,
+            cell.x + 0.5,
+            cell.y + 0.5,
+            (cell.w - 1.0).max(0.0),
+            (cell.h - 1.0).max(0.0),
+        );
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn draw_card(
+    svg: &mut String,
+    pal: &Palette,
+    clip_id: &str,
+    frame: Rect,
+    name: &str,
+    members: &[&Unit],
+    status: &Status,
+    metric: Metric,
+) {
+    let done = members
+        .iter()
+        .filter(|u| counted(metric, status.state(&u.id)))
+        .count();
+    let n = members.len();
+    let implemented = members
+        .iter()
+        .filter(|u| status.state(&u.id) >= State::Implemented)
+        .count();
+    let tested = members
+        .iter()
+        .filter(|u| status.state(&u.id) >= State::Tested)
+        .count();
+    let conformant = members
+        .iter()
+        .filter(|u| status.state(&u.id) == State::Conformant)
+        .count();
+
+    let _ = write!(svg, r#"<g><title>{} {done}/{n}</title>"#, esc(name));
+    let _ = write!(
+        svg,
+        r#"<clipPath id="{clip_id}"><rect x="{:.1}" y="{:.1}" width="{:.1}" height="{:.1}" rx="{CARD_RX}"/></clipPath>"#,
+        frame.x, frame.y, frame.w, frame.h
+    );
+    let _ = write!(
+        svg,
+        r#"<g clip-path="url(#{clip_id})"><rect x="{:.1}" y="{:.1}" width="{:.1}" height="{:.1}" rx="{CARD_RX}" fill="{}"/>"#,
+        frame.x, frame.y, frame.w, frame.h, pal.card
+    );
+
+    let pad = NAME_INSET as f32;
+    let done_s = format!("{done}");
+    let slash_s = format!("/{n}");
+    let slash_w = glyphs::measure(REGULAR, &slash_s, COUNT_SIZE, 0.0);
+    let done_w = glyphs::measure(BOLD, &done_s, COUNT_SIZE, 0.0);
+    let right = frame.x as f32 + frame.w as f32 - pad;
+    let name_x = frame.x as f32 + pad;
+    let name_max = (right - slash_w - done_w - 8.0 - name_x).max(0.0);
+    let mut name_size = NAME_SIZE;
+    let mut track = glyphs::tracking_for_px(BOLD, name_size, NAME_TRACKING_PX);
+    let mut label = name.to_string();
+    while name_size > 10.0
+        && glyphs::measure(BOLD, name, name_size, track) > name_max
+        && name_max > 0.0
+    {
+        name_size -= 0.5;
+        track = glyphs::tracking_for_px(BOLD, name_size, NAME_TRACKING_PX);
+    }
+    if name_max > 0.0 {
+        label = glyphs::truncate(BOLD, name, name_size, track, name_max);
+    } else {
+        label.clear();
+    }
+    let name_y = frame.y as f32 + 8.0;
+    if !label.is_empty() {
+        glyphs::write_text(
+            svg, BOLD, &label, name_x, name_y, name_size, pal.name, track,
+        );
+    }
+    let count_y = frame.y as f32 + 8.5;
+    glyphs::write_text(
+        svg,
+        BOLD,
+        &done_s,
+        right - slash_w - done_w,
+        count_y,
+        COUNT_SIZE,
+        pal.count,
+        0.0,
+    );
+    glyphs::write_text(
+        svg,
+        REGULAR,
+        &slash_s,
+        right - slash_w,
+        count_y,
+        COUNT_SIZE,
+        pal.slash,
+        0.0,
+    );
+
+    let track_x = frame.x + CARD_PAD;
+    let track_y = frame.y + TRACK_Y;
+    let track_w = (frame.w - 2.0 * CARD_PAD).max(0.0);
+    let _ = write!(
+        svg,
+        r#"<rect x="{track_x:.1}" y="{track_y:.1}" width="{track_w:.1}" height="{TRACK_H:.1}" fill="{}"/>"#,
+        pal.not_started
+    );
+    if n > 0 && track_w > 0.0 {
+        let draw = |svg: &mut String, count: usize, fill: &str| {
+            if count == 0 {
+                return;
+            }
+            let w = track_w * count as f64 / n as f64;
+            let _ = write!(
+                svg,
+                r#"<rect x="{track_x:.1}" y="{track_y:.1}" width="{w:.1}" height="{TRACK_H:.1}" fill="{fill}"/>"#
+            );
+        };
+        match metric {
+            Metric::State => {
+                draw(svg, implemented, pal.implemented);
+                draw(svg, tested, pal.tested);
+                draw(svg, conformant, pal.conformant);
+            }
+            Metric::Coverage => draw(svg, implemented, pal.conformant),
+            Metric::Conformance => draw(svg, conformant, pal.conformant),
+        }
+    }
+
+    let inner = card_inner(frame);
+    if inner.w < 1.0 || inner.h < 1.0 || members.is_empty() {
+        svg.push_str("</g></g>");
+        return;
+    }
+
+    let mut groups: Vec<(String, Vec<&Unit>)> = Vec::new();
+    for unit in members {
+        if let Some((_, list)) = groups.iter_mut().find(|(g, _)| g == &unit.group) {
+            list.push(*unit);
+        } else {
+            groups.push((unit.group.clone(), vec![*unit]));
+        }
+    }
+    let weights: Vec<f64> = groups.iter().map(|(_, m)| m.len() as f64).collect();
+    let mut group_rects = squarify(&weights, inner);
+    apply_gutters(&mut group_rects, GUTTER);
+
+    for ((gname, gunits), grec) in groups.iter().zip(&group_rects) {
+        if grec.w < 1.0 || grec.h < 1.0 {
+            continue;
+        }
+        let gdone = gunits
+            .iter()
+            .filter(|u| counted(metric, status.state(&u.id)))
+            .count();
+        let _ = write!(
+            svg,
+            r#"<g data-group="{}"><title>{} {gdone}/{}</title>"#,
+            esc(&display_group_name(gname)),
+            esc(&display_group_name(gname)),
+            gunits.len()
+        );
+        let label_w = grec.w as f32 - 2.0;
+        let shown = if grec.h >= GROUP_LABEL_H + 8.0 {
+            fit_group_label(&display_group_name(gname), gdone, gunits.len(), label_w)
+        } else {
+            None
+        };
+        let cells_rect = if shown.is_some() {
+            Rect {
+                x: grec.x,
+                y: grec.y + GROUP_LABEL_H,
+                w: grec.w,
+                h: (grec.h - GROUP_LABEL_H).max(0.0),
+            }
+        } else {
+            *grec
+        };
+        if let Some((nm, count)) = shown {
+            let ly = grec.y as f32 + 6.0;
+            let track = glyphs::tracking_for_px(REGULAR, GROUP_LABEL_SIZE, GROUP_LABEL_TRACKING_PX);
+            glyphs::write_text(
+                svg,
+                REGULAR,
+                &nm,
+                grec.x as f32 + 1.0,
+                ly,
+                GROUP_LABEL_SIZE,
+                pal.group_name,
+                track,
+            );
+            if let Some(count) = count {
+                let cw = glyphs::measure(REGULAR, &count, GROUP_LABEL_SIZE, 0.0);
+                glyphs::write_text(
+                    svg,
+                    REGULAR,
+                    &count,
+                    grec.x as f32 + grec.w as f32 - cw - 1.0,
+                    ly,
+                    GROUP_LABEL_SIZE,
+                    pal.group_count,
+                    0.0,
+                );
+            }
+        }
+        let cells = unit_cells(gunits.len(), cells_rect);
+        for (unit, cell) in gunits.iter().zip(&cells) {
+            debug_assert!(cells_rect.contains(*cell));
+            draw_cell(svg, pal, metric, unit, status.state(&unit.id), *cell);
+        }
+        svg.push_str("</g>");
+    }
+    svg.push_str("</g></g>");
 }
 
 pub fn render(
@@ -322,7 +687,9 @@ pub fn render(
     status: &Status,
     metric: Metric,
     width: f64,
+    theme: Theme,
 ) -> String {
+    let pal = theme.palette();
     let mut components: Vec<(&str, Vec<&Unit>)> = Vec::new();
     for (id, _) in COMPONENTS {
         let mut members: Vec<&Unit> = units
@@ -358,38 +725,19 @@ pub fn render(
         Heading::Status => MARGIN + BADGE_H + 12.0 + TITLE_H + 8.0,
         Heading::Title(_) => MARGIN + TITLE_H + 8.0,
     };
-    let counts: Vec<usize> = components.iter().map(|(_, m)| m.len()).collect();
+    let counts: Vec<f64> = components.iter().map(|(_, m)| m.len() as f64).collect();
     let body_x = MARGIN;
-    let body_w = (width - 2.0 * MARGIN).max(CELL * 4.0);
+    let body_w = (width - 2.0 * MARGIN).max(80.0);
     let body_y = chrome_h;
-    let area_guess: f64 = counts
-        .iter()
-        .map(|&n| {
-            let n = n.max(1);
-            let cols = (n as f64).sqrt().ceil().max(1.0) as usize;
-            let (gw, gh) = grid_size(n, cols);
-            (gw + 2.0 * INNER_PAD + BLOCK_GAP) * (gh + HEADER_H + 2.0 * INNER_PAD + BLOCK_GAP)
-        })
-        .sum();
-    let mut body_h = (area_guess / body_w * 1.2).max(360.0);
-    let rects = loop {
-        let body = Rect {
-            x: body_x,
-            y: body_y,
-            w: body_w,
-            h: body_h,
-        };
-        let sizes = layout_weights(&counts, body_w * body_h);
-        let rects = squarify(&sizes, body);
-        let ok = components
-            .iter()
-            .zip(&rects)
-            .all(|((_, members), r)| block_fits(members.len(), *r));
-        if ok || body_h > 8000.0 {
-            break rects;
-        }
-        body_h += 32.0;
+    let body_h = body_height(total, body_w);
+    let body = Rect {
+        x: body_x,
+        y: body_y,
+        w: body_w,
+        h: body_h,
     };
+    let mut rects = squarify(&counts, body);
+    apply_gutters(&mut rects, GUTTER);
     let height = body_y + body_h + LEGEND_H + MARGIN;
 
     let aria = match &heading {
@@ -406,34 +754,41 @@ pub fn render(
         esc(&aria)
     );
     let _ = write!(svg, r#"<title>{}</title>"#, esc(&aria));
-    let _ = write!(svg, r#"<rect width="100%" height="100%" fill="{BG}"/>"#);
+    let _ = write!(
+        svg,
+        r#"<rect width="100%" height="100%" fill="{}"/>"#,
+        pal.bg
+    );
 
     let mut cursor_x = MARGIN as f32;
     let badge_y = MARGIN as f32;
     if matches!(heading, Heading::Status) {
         cursor_x += draw_badge(
             &mut svg,
+            &pal,
             cursor_x,
             badge_y,
             "coverage",
             &format!("{coverage_pct:.1}%"),
-            metric_badge_color(coverage_pct),
+            metric_badge_color(&pal, coverage_pct),
         ) + 8.0;
         cursor_x += draw_badge(
             &mut svg,
+            &pal,
             cursor_x,
             badge_y,
             "conformance",
             &format!("{conformant_pct:.1}%"),
-            metric_badge_color(conformant_pct),
+            metric_badge_color(&pal, conformant_pct),
         ) + 8.0;
         draw_badge(
             &mut svg,
+            &pal,
             cursor_x,
             badge_y,
             "units",
             &format!("{implemented} / {total}"),
-            NOT_STARTED,
+            pal.not_started,
         );
     }
 
@@ -441,17 +796,6 @@ pub fn render(
         Heading::Status => MARGIN + BADGE_H + 12.0,
         Heading::Title(_) => MARGIN,
     };
-    let title_bar = Rect {
-        x: MARGIN,
-        y: title_y,
-        w: body_w,
-        h: TITLE_H,
-    };
-    let _ = write!(
-        svg,
-        r#"<rect x="{:.1}" y="{:.1}" width="{:.1}" height="{:.1}" fill="{PANEL}"/>"#,
-        title_bar.x, title_bar.y, title_bar.w, title_bar.h
-    );
     let title_size = 14.0_f32;
     let title_text = match &heading {
         Heading::Status => {
@@ -459,75 +803,51 @@ pub fn render(
         }
         Heading::Title(t) => format!("{t}: {metric_pct:.1}% ({metric_done}/{total})"),
     };
-    let title_max = title_bar.w as f32 - 24.0;
+    let title_max = body_w as f32;
     let title_draw = glyphs::truncate(REGULAR, &title_text, title_size, 0.0, title_max);
     glyphs::write_text(
         &mut svg,
         REGULAR,
         &title_draw,
-        title_bar.x as f32 + 12.0,
-        title_bar.y as f32 + (TITLE_H as f32 - title_size) / 2.0,
+        body_x as f32,
+        title_y as f32 + (TITLE_H as f32 - title_size) / 2.0,
         title_size,
-        TEXT,
+        pal.title,
         0.0,
     );
 
-    for ((component, members), rect) in components.iter().zip(&rects) {
-        let frame = block_frame(*rect);
-        let inner = block_inner(frame);
-        let name = component_label(component).to_ascii_uppercase();
-        let done = members
-            .iter()
-            .filter(|u| counted(metric, status.state(&u.id)))
-            .count();
-        let percent = pct(done, members.len());
-        let header_max = (frame.w as f32 - 16.0).max(8.0);
-        let (nm, stats, sz) = component_header(&name, done, members.len(), percent, header_max);
-        let _ = write!(
-            svg,
-            r#"<g><title>{} {}</title>"#,
-            esc(nm.trim()),
-            esc(stats.trim())
-        );
-        let _ = write!(
-            svg,
-            r#"<rect x="{:.1}" y="{:.1}" width="{:.1}" height="{:.1}" fill="{PANEL}"/>"#,
-            frame.x, frame.y, frame.w, HEADER_H
-        );
-        let tx = frame.x as f32 + 8.0;
-        let ty = frame.y as f32 + (HEADER_H as f32 - sz) / 2.0;
-        glyphs::write_text(&mut svg, BOLD, &nm, tx, ty, sz, TEXT, 0.0);
-        let nx = tx + glyphs::measure(BOLD, &nm, sz, 0.0);
-        glyphs::write_text(&mut svg, REGULAR, &stats, nx, ty, sz, MUTED, 0.0);
-
-        let cells = unit_cells(members.len(), inner);
-        debug_assert_eq!(cells.len(), members.len());
-        for (unit, cell) in members.iter().zip(&cells) {
-            debug_assert!(inner.contains(*cell));
-            let fill = color(metric, status.state(&unit.id));
-            let _ = write!(
-                svg,
-                r#"<rect x="{:.1}" y="{:.1}" width="{:.0}" height="{:.0}" fill="{fill}"><title>{} ({:?})</title></rect>"#,
-                cell.x,
-                cell.y,
-                cell.w,
-                cell.h,
-                esc(&unit.id),
-                status.state(&unit.id)
-            );
+    for (i, ((component, members), rect)) in components.iter().zip(&rects).enumerate() {
+        if rect.w < 1.0 || rect.h < 1.0 {
+            continue;
         }
-        svg.push_str("</g>");
+        let name = component_label(component).to_ascii_uppercase();
+        draw_card(
+            &mut svg,
+            &pal,
+            &format!("mb-c{i}"),
+            *rect,
+            &name,
+            members,
+            status,
+            metric,
+        );
     }
 
     let legend: &[(&str, &str)] = match metric {
         Metric::State => &[
-            (NOT_STARTED, "not started"),
-            (IMPLEMENTED, "implemented"),
-            (TESTED, "tested"),
-            (GREEN, "conformant (matches real Supabase)"),
+            (pal.not_started, "not started"),
+            (pal.implemented, "implemented"),
+            (pal.tested, "tested"),
+            (pal.conformant, "conformant (matches real Supabase)"),
         ],
-        Metric::Coverage => &[(GREEN, "implemented"), (NOT_STARTED, "not implemented")],
-        Metric::Conformance => &[(GREEN, "conformant"), (NOT_STARTED, "not conformant")],
+        Metric::Coverage => &[
+            (pal.conformant, "implemented"),
+            (pal.not_started, "not implemented"),
+        ],
+        Metric::Conformance => &[
+            (pal.conformant, "conformant"),
+            (pal.not_started, "not conformant"),
+        ],
     };
     let mut x = MARGIN as f32;
     let y = (height - MARGIN - 14.0) as f32;
@@ -545,7 +865,7 @@ pub fn render(
             x + 14.0,
             y - 1.0,
             legend_size,
-            MUTED,
+            pal.muted,
             0.0,
         );
         svg.push_str("</g>");
@@ -607,7 +927,32 @@ mod tests {
     }
 
     #[test]
-    fn unit_cells_are_whole_fixed_squares_centered() {
+    fn gutters_are_ten_px_on_shared_edges() {
+        let rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 200.0,
+            h: 100.0,
+        };
+        let mut rects = squarify(&[1.0, 1.0], rect);
+        apply_gutters(&mut rects, GUTTER);
+        let dx = (rects[0].x - rects[1].right())
+            .abs()
+            .min((rects[1].x - rects[0].right()).abs());
+        let dy = (rects[0].y - rects[1].bottom())
+            .abs()
+            .min((rects[1].y - rects[0].bottom()).abs());
+        let gap = dx.min(dy);
+        assert!(
+            (gap - GUTTER).abs() < 0.05,
+            "gap={gap} dx={dx} dy={dy} a={:?} b={:?}",
+            rects[0],
+            rects[1]
+        );
+    }
+
+    #[test]
+    fn unit_cells_fill_the_group() {
         let inner = Rect {
             x: 10.0,
             y: 20.0,
@@ -618,61 +963,92 @@ mod tests {
         let cells = unit_cells(n, inner);
         assert_eq!(cells.len(), n);
         for c in &cells {
-            assert!((c.w - CELL).abs() < 1e-9);
-            assert!((c.h - CELL).abs() < 1e-9);
-            assert!(inner.contains(*c), "square clipped: {c:?} in {inner:?}");
+            assert!(inner.contains(*c), "cell clipped: {c:?} in {inner:?}");
+            assert!(c.w > 8.0 && c.h > 8.0);
         }
         let min_x = cells.iter().map(|c| c.x).fold(f64::MAX, f64::min);
-        let max_x = cells.iter().map(|c| c.x + c.w).fold(f64::MIN, f64::max);
+        let max_x = cells.iter().map(|c| c.right()).fold(f64::MIN, f64::max);
         let min_y = cells.iter().map(|c| c.y).fold(f64::MAX, f64::min);
-        let max_y = cells.iter().map(|c| c.y + c.h).fold(f64::MIN, f64::max);
-        assert!(((min_x - inner.x) - (inner.x + inner.w - max_x)).abs() < 0.6);
-        assert!(((min_y - inner.y) - (inner.y + inner.h - max_y)).abs() < 0.6);
-        assert!((cells[1].x - cells[0].x - STRIDE).abs() < 1e-9);
+        let max_y = cells.iter().map(|c| c.bottom()).fold(f64::MIN, f64::max);
+        assert!((min_x - inner.x).abs() < 0.05);
+        assert!((max_x - inner.right()).abs() < 0.05);
+        assert!((min_y - inner.y).abs() < 0.05);
+        assert!((max_y - inner.bottom()).abs() < 0.05);
     }
 
     #[test]
-    fn unit_cells_refuse_to_clip() {
-        let tiny = Rect {
+    fn last_row_may_use_wider_cells() {
+        let inner = Rect {
             x: 0.0,
             y: 0.0,
-            w: 40.0,
-            h: 20.0,
+            w: 238.8,
+            h: 144.8,
         };
-        assert!(unit_cells(8, tiny).is_empty());
+        let cells = unit_cells(22, inner);
+        assert_eq!(cells.len(), 22);
+        let last_y = cells.iter().map(|c| c.y).fold(f64::MIN, f64::max);
+        let last: Vec<_> = cells
+            .iter()
+            .filter(|c| (c.y - last_y).abs() < 1e-6)
+            .collect();
+        let first: Vec<_> = cells.iter().filter(|c| c.y.abs() < 1e-6).collect();
+        assert!(
+            last.len() < first.len(),
+            "last={} first={}",
+            last.len(),
+            first.len()
+        );
+        assert!(last[0].w > first[0].w);
     }
 
     #[test]
-    fn narrow_header_drops_percentage() {
-        let (name, stats, _) = component_header("STORAGE", 0, 34, 0.0, 90.0);
-        assert_eq!(name, "STORAGE");
-        assert_eq!(stats.trim(), "0/34");
-        assert!(!stats.contains('%'));
-        let (name, stats, _) = component_header("REST", 0, 57, 0.0, 400.0);
-        assert_eq!(name, "REST");
-        assert!(stats.contains('%'), "{stats}");
-        assert!(stats.contains("(0/57)"));
+    fn group_label_truncates_then_drops_count() {
+        let (name, count) = fit_group_label("ENDPOINTS", 0, 28, 400.0).unwrap();
+        assert_eq!(name, "ENDPOINTS");
+        assert_eq!(count.as_deref(), Some("0/28"));
+        let (name, count) = fit_group_label("ADMIN", 0, 12, 50.0).unwrap();
+        assert!(name.starts_with('A') || name == "ADMIN", "{name}");
+        if glyphs::measure(
+            REGULAR,
+            "ADMIN",
+            GROUP_LABEL_SIZE,
+            glyphs::tracking_for_px(REGULAR, GROUP_LABEL_SIZE, GROUP_LABEL_TRACKING_PX),
+        ) + glyphs::measure(REGULAR, "0/12", GROUP_LABEL_SIZE, 0.0)
+            + 6.0
+            > 50.0
+        {
+            assert!(count.is_none() || name.contains('…'), "{name} {count:?}");
+        }
+        assert!(fit_group_label("ENDPOINTS", 0, 28, 4.0).is_none());
     }
 
     #[test]
     fn status_svg_uses_live_totals_and_brand_colors() {
         let rest: Vec<Unit> = (0..5)
-            .map(|i| unit(&format!("rest:x:{i}"), "rest", "g"))
+            .map(|i| unit(&format!("rest:x:{i}"), "rest", "filtering"))
             .collect();
         let pooler: Vec<Unit> = (0..2)
-            .map(|i| unit(&format!("pooler:x:{i}"), "pooler", "g"))
+            .map(|i| unit(&format!("pooler:x:{i}"), "pooler", "modes"))
             .collect();
         let all: Vec<&Unit> = rest.iter().chain(pooler.iter()).collect();
-        let svg = render(Heading::Status, &all, &empty_status(), Metric::State, 800.0);
+        let svg = render(
+            Heading::Status,
+            &all,
+            &empty_status(),
+            Metric::State,
+            800.0,
+            Theme::Dark,
+        );
         assert!(svg.contains("Supabase components: 0.0% conformant (0/7)"));
         assert!(svg.contains("aria-label=\"Supabase components: 0.0% conformant (0/7)\""));
         assert!(!svg.contains("1,024"));
         assert!(!svg.contains("1024"));
         assert!(!svg.contains("334"));
-        let squares = svg.matches("width=\"26\" height=\"26\"").count();
-        assert_eq!(squares, 7);
+        assert_eq!(svg.matches("data-unit=\"").count(), 7);
+        assert!(!svg.contains("width=\"26\" height=\"26\""));
         for c in [
-            "#0B0E12", "#181A1D", "#303235", "#005441", "#009366", "#00D892", "#F7F7F7", "#BABABB",
+            "#0B0E12", "#14171B", "#2A2C2F", "#005441", "#009366", "#00D892", "#F7F7F7", "#BABABB",
+            "#ABACAE",
         ] {
             assert!(svg.contains(c), "missing {c}");
         }
@@ -681,17 +1057,66 @@ mod tests {
         assert!(!svg.contains("#24B47E"));
         assert!(svg.contains("not started"));
         assert!(svg.contains("conformant (matches real Supabase)"));
+        assert!(svg.contains("rx=\"3\""));
+        assert!(svg.contains("FILTERING") || svg.contains("filtering"));
     }
 
     #[test]
-    fn pooler_label_does_not_use_wide_form_when_narrow() {
-        let (name, stats, _) = component_header("POOLER", 0, 13, 0.0, 110.0);
-        assert_eq!(name, "POOLER");
-        assert_eq!(stats.trim(), "0/13");
+    fn light_theme_uses_kite_light_palette() {
+        let rest: Vec<Unit> = (0..3)
+            .map(|i| unit(&format!("rest:x:{i}"), "rest", "rpc"))
+            .collect();
+        let all: Vec<&Unit> = rest.iter().collect();
+        let svg = render(
+            Heading::Status,
+            &all,
+            &empty_status(),
+            Metric::State,
+            800.0,
+            Theme::Light,
+        );
+        for c in ["#FFFFFF", "#F7F7F7", "#DCDDDE", "#0B0E12", "#303235"] {
+            assert!(svg.contains(c), "missing {c}");
+        }
+        assert_eq!(svg.matches("data-unit=\"").count(), 3);
     }
 
     #[test]
-    fn production_component_sizes_draw_one_square_each() {
+    fn implemented_cells_get_inset_outline() {
+        let rest: Vec<Unit> = (0..4)
+            .map(|i| unit(&format!("rest:x:{i}"), "rest", "g"))
+            .collect();
+        let mut states = BTreeMap::new();
+        states.insert("rest:x:0".into(), State::Implemented);
+        states.insert("rest:x:1".into(), State::Tested);
+        states.insert("rest:x:2".into(), State::Conformant);
+        let status = Status {
+            states,
+            cases_total: 0,
+            cases_passing: 0,
+        };
+        let all: Vec<&Unit> = rest.iter().collect();
+        let svg = render(
+            Heading::Status,
+            &all,
+            &status,
+            Metric::State,
+            800.0,
+            Theme::Dark,
+        );
+        assert!(svg.contains(&format!("stroke=\"{IMPLEMENTED_OUTLINE}\"")));
+        assert_eq!(
+            svg.matches(&format!("stroke=\"{IMPLEMENTED_OUTLINE}\""))
+                .count(),
+            1
+        );
+        assert!(svg.contains("fill=\"#005441\""));
+        assert!(svg.contains("fill=\"#009366\""));
+        assert!(svg.contains("fill=\"#00D892\""));
+    }
+
+    #[test]
+    fn production_component_sizes_draw_one_cell_each() {
         let spec = [
             ("rest", 93),
             ("auth", 152),
@@ -715,9 +1140,11 @@ mod tests {
             &empty_status(),
             Metric::State,
             1280.0,
+            Theme::Dark,
         );
         let n: usize = spec.iter().map(|(_, n)| n).sum();
-        assert_eq!(svg.matches("width=\"26\" height=\"26\"").count(), n);
+        assert_eq!(svg.matches("data-unit=\"").count(), n);
         assert!(svg.contains(&format!("conformant (0/{n})")));
+        assert!(svg.contains("rx=\"3\""));
     }
 }

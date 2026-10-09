@@ -77,8 +77,9 @@ waiting on a human.
    `cursor/phase-0-bootstrap-121c` while `main` still has no `vendor.toml`.
 6. **README status is generated.** `megabase-coverage update` on `main`;
    `check` is a required CI job. Agents keep it current. Status is one
-   full-width treemap (`coverage/treemap.svg`); the website embeds the
-   same file. Totals come from `coverage/units.json`.
+   full-width nested treemap (`coverage/treemap.svg`, light:
+   `coverage/treemap-light.svg`); the website embeds the same files.
+   Totals come from `coverage/units.json`.
 7. **Design-first, Kite is source of truth.** Every graphic and UI element
    (logos, badges, treemaps, diagrams, website, Studio-related UI, social
    images) exists first in

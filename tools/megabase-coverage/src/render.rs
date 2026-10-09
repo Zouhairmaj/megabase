@@ -110,6 +110,18 @@ pub fn render(units: &UnitsFile, status: &Status, summary: &Summary) -> Result<O
             status,
             Metric::State,
             1280.0,
+            treemap::Theme::Dark,
+        ),
+    );
+    out.files.insert(
+        cov.join("treemap-light.svg"),
+        treemap::render(
+            treemap::Heading::Status,
+            &all,
+            status,
+            Metric::State,
+            1280.0,
+            treemap::Theme::Light,
         ),
     );
     for (name, title, metric) in [
@@ -132,6 +144,7 @@ pub fn render(units: &UnitsFile, status: &Status, summary: &Summary) -> Result<O
                 status,
                 metric,
                 1280.0,
+                treemap::Theme::Dark,
             ),
         );
     }
@@ -145,6 +158,7 @@ pub fn render(units: &UnitsFile, status: &Status, summary: &Summary) -> Result<O
                 status,
                 Metric::State,
                 900.0,
+                treemap::Theme::Dark,
             ),
         );
         let c = &summary.components[*id].counts;
@@ -223,7 +237,7 @@ fn readme_status(units: &UnitsFile, summary: &Summary) -> String {
     let _ = writeln!(s, "{GENERATED_NOTE}\n");
     let _ = writeln!(
         s,
-        "<img src=\"coverage/treemap.svg\" alt=\"Supabase components: {:.1}% conformant ({}/{})\" width=\"100%\">\n",
+        "<picture>\n  <source media=\"(prefers-color-scheme: light)\" srcset=\"coverage/treemap-light.svg\">\n  <img src=\"coverage/treemap.svg\" alt=\"Supabase components: {:.1}% conformant ({}/{})\" width=\"100%\">\n</picture>\n",
         summary.percent.done,
         summary.totals.conformant,
         summary.totals.units
@@ -239,7 +253,7 @@ with a recorded reason (blocked or unexposed by the gateway, hosted-platform pag
 [`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md). A unit is *implemented* when Megabase code claims it, *tested* when a \
 judge case covers it, and *conformant* when every such case matches the reference stack. Coverage = implemented ÷ units; \
 conformance = identical judge cases ÷ judge cases; component percentages count conformant units. The website Status page \
-embeds this same `coverage/treemap.svg`.</sup>\n",
+embeds the same generated treemap (`coverage/treemap.svg`, light: `coverage/treemap-light.svg`).</sup>\n",
         units.total,
         units.excluded.len()
     );

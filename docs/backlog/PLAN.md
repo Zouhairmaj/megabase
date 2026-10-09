@@ -5133,7 +5133,7 @@ On a `review/*` branch. Blocks calling Level 1 'done' (no P0 security issues).
 
 <!-- megabase-id: epic:website:site:later -->
 
-Public website for the experiment. **Not a compatibility level.** Status embeds `coverage/treemap.svg` (same file as the README). Follows the design-first rule:
+Public website for the experiment. **Not a compatibility level.** Status embeds `coverage/treemap.svg` / `coverage/treemap-light.svg` (same files as the README). Follows the design-first rule:
 
 1. Design in [Kite: Megabase identity](https://kite.new/p/megabase-identity).
 2. LLM committee review (several external models).
@@ -5190,7 +5190,7 @@ Parent: **Website**. Step 3 of 4. Design-first: CONTRIBUTING.md.
 
 <!-- megabase-id: task:website:implement:later -->
 
-Implement only what is in Kite after revisions. Repo assets must match. The Status page embeds `coverage/treemap.svg`. Blocked by revisions.
+Implement only what is in Kite after revisions. Repo assets must match. The Status page embeds `coverage/treemap.svg` / `coverage/treemap-light.svg`. Blocked by revisions.
 
 Parent: **Website**. Step 4 of 4. Design-first: CONTRIBUTING.md.
 
