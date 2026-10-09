@@ -17,22 +17,25 @@ human) writing code, docs or design.
 
 ## Design-first (graphics and UI)
 
-Decided by the agent coordinator. Recorded here, in `docs/brand/README.md`
-and in `PROGRESS.md` under Decisions.
+**All UI goes through Kite first.** Decided by the agent coordinator.
+Recorded here, in `docs/brand/README.md` and in `PROGRESS.md` under
+Decisions.
 
 1. **Kite is the source of truth** for every graphic and UI element: logos,
    badges, treemap styles, diagrams, the project website, Studio-related UI
-   and social images. Assets in this repository must match
-   [the Megabase identity file](https://kite.new/p/megabase-identity). When
-   they differ, the Kite file wins and the repository is updated.
-2. **Design before implementation.** For any UI work, including the future
-   project website: design it in Kite, have it reviewed by several external
-   LLMs (the committee), apply the corrections, and only then implement it
-   in this repository.
+   and social images. Agents design in
+   [the Megabase identity file](https://kite.new/p/megabase-identity)
+   (public mockups). When the repo and that file differ, the Kite file
+   wins and the repository is updated.
+2. **LLM committee, then implement.** Every UI change is reviewed by
+   several external LLMs (the committee) in Kite. Apply the corrections
+   there, and only then implement in this repository. Do not draw UI
+   directly in code.
 
 The Website epic on the backlog is the first work that follows this
-workflow end to end. Its Status page embeds `coverage/treemap.svg`, the
-same generated graphic as the README.
+workflow end to end. Its Status page embeds the generated Status treemap
+(`coverage/treemap.svg` / `coverage/treemap-light.svg`), the same files as
+the README.
 
 ## Loop
 
