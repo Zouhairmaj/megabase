@@ -195,8 +195,11 @@ Physically impossible for the agent (repository settings or credentials):
       (Settings → Actions → General → Workflow permissions;
       `can_approve_pull_request_reviews=true`. Run 37961663758 predates it.)
 - [ ] Set secret `RELEASE_PLEASE_TOKEN` (PAT or GitHub App) so lockfile
-      pushes on the release branch start required checks (`GITHUB_TOKEN`
-      pushes do not trigger workflows)
+      pushes on the release branch start required checks natively
+      (`GITHUB_TOKEN` pushes do not trigger `push`/`pull_request`
+      workflows). Preferred even though Release now
+      `workflow_dispatch`es those checks when the secret is unset.
+      Exact steps: `HUMAN_LOG.md` Pending, 2026-10-09.
 - [ ] Allow `github-actions` to publish GitHub Releases / tags on `main`
 - [ ] Enforce CODEOWNERS
 - [ ] Allow `github-actions` to push coverage commits to `main`
