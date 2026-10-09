@@ -56,12 +56,43 @@ RUN apt-get update \
 USER ubuntu
 WORKDIR /home/ubuntu
 # rust-toolchain.toml (repo root) selects the exact channel after checkout.
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
-        | sh -s -- -y --default-toolchain stable --profile minimal \
-            --component rustfmt --component clippy --component llvm-tools \
-    && curl -L --proto '=https' --tlsv1.2 -sSf \
-        https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash \
-    && cargo binstall -y just cargo-deny cargo-audit cargo-llvm-cov
+# rustup-init 1.29.1 (rust-lang/rustup d95a37b6ab92cc1e455d1576039333c97ca3e2c5).
+# cargo-binstall v1.25.2 (cargo-bins/cargo-binstall c06f6a0003f7c6165a00c89d1697731c9e8a5c72).
+# Download, sha256-verify, then exec — no curl|sh (Scorecard downloadThenRun).
+# rustup-init hashes match rust-lang/docker-rust stable/bookworm; cargo-binstall
+# hashes match the GitHub release asset digests. Re-verified 2026-10-09.
+RUN set -eux; \
+    arch="$(dpkg --print-architecture)"; \
+    case "$arch" in \
+        amd64) \
+            rustArch='x86_64-unknown-linux-gnu'; \
+            rustupSha256='dda7234360b7f578ca8b0ddcb80145646fa61a67c1720a5abc7051b35c9fcb71'; \
+            binstallTriple='x86_64-unknown-linux-musl'; \
+            binstallSha256='2b8687cb3297d335efdac1ee839fab47ac4c2b8f5f90b9e290aa7ba52f607803'; \
+            ;; \
+        arm64) \
+            rustArch='aarch64-unknown-linux-gnu'; \
+            rustupSha256='15f6e4ce9f583b929c996c91562bad6d4454f3281de858b02cdfdef615fac433'; \
+            binstallTriple='aarch64-unknown-linux-musl'; \
+            binstallSha256='f4d921de650ee4e04cb8ade2c1476987d21d55c23786d810a2913817c6134b94'; \
+            ;; \
+        *) echo >&2 "unsupported architecture: $arch"; exit 1 ;; \
+    esac; \
+    curl --proto '=https' --tlsv1.2 --retry 3 --retry-delay 5 -fsSL \
+        "https://static.rust-lang.org/rustup/archive/1.29.1/${rustArch}/rustup-init" \
+        -o rustup-init; \
+    echo "${rustupSha256} *rustup-init" | sha256sum -c -; \
+    chmod +x rustup-init; \
+    ./rustup-init -y --default-toolchain stable --profile minimal \
+        --component rustfmt --component clippy --component llvm-tools; \
+    rm rustup-init; \
+    curl --proto '=https' --tlsv1.2 --retry 3 --retry-delay 5 -fsSL \
+        "https://github.com/cargo-bins/cargo-binstall/releases/download/v1.25.2/cargo-binstall-${binstallTriple}.tgz" \
+        -o cargo-binstall.tgz; \
+    echo "${binstallSha256} *cargo-binstall.tgz" | sha256sum -c -; \
+    tar -xzf cargo-binstall.tgz -C /home/ubuntu/.cargo/bin cargo-binstall; \
+    rm cargo-binstall.tgz; \
+    cargo binstall -y just cargo-deny cargo-audit cargo-llvm-cov
 
 USER root
 RUN for b in rustup rustc cargo rustfmt cargo-clippy cargo-fmt clippy-driver \
