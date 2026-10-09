@@ -9,7 +9,8 @@ pub struct Config {
     pub port: u16,
     /// `DATABASE_URL`. Not used yet; read so deployments can set it today.
     pub database_url: Option<String>,
-    /// `JWT_SECRET`. Not used yet.
+    /// `JWT_SECRET`. Raw HS256 secret; no default. Optional so the process can
+    /// start for health checks; [`Self::jwt_hs256`] fails if it is missing.
     pub jwt_secret: Option<String>,
 }
 
@@ -52,6 +53,15 @@ impl Config {
             format!("{}:{}", self.host, self.port)
         }
     }
+
+    /// HS256 verifier from `JWT_SECRET`. Missing or empty is an error; Megabase
+    /// never invents a default secret.
+    pub fn jwt_hs256(&self) -> crate::Result<crate::jwt::Hs256> {
+        match self.jwt_secret.as_deref() {
+            Some(secret) if !secret.is_empty() => Ok(crate::jwt::Hs256::new(secret.as_bytes())?),
+            _ => Err(crate::jwt::JwtError::SecretMissing.into()),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -83,5 +93,30 @@ mod tests {
             ..Config::default()
         };
         assert_eq!(already.bind_address(), "[::1]:8000");
+    }
+
+    #[test]
+    fn jwt_secret_from_env() {
+        let secret = "your-super-secret-jwt-token-with-at-least-32-characters-long";
+        let config = Config::from_lookup(|k| (k == "JWT_SECRET").then(|| secret.into())).unwrap();
+        assert_eq!(config.jwt_secret.as_deref(), Some(secret));
+        assert!(config.jwt_hs256().is_ok());
+    }
+
+    #[test]
+    fn jwt_hs256_fails_without_secret() {
+        let err = Config::default().jwt_hs256().unwrap_err();
+        assert!(matches!(
+            err,
+            Error::Jwt(crate::jwt::JwtError::SecretMissing)
+        ));
+        let empty = Config {
+            jwt_secret: Some(String::new()),
+            ..Config::default()
+        };
+        assert!(matches!(
+            empty.jwt_hs256().unwrap_err(),
+            Error::Jwt(crate::jwt::JwtError::SecretMissing)
+        ));
     }
 }
