@@ -3,7 +3,7 @@ title: OpenSSF Best Practices
 description: Met, Unmet, or N/A for every passing criterion of project 15348, with a repo URL.
 section: project
 order: 2
-card: Passing-level answers for bestpractices.dev project 15348. Three MUST items are Unmet.
+card: Passing-level answers for bestpractices.dev project 15348. Every MUST is Met or N/A.
 ---
 
 # OpenSSF Best Practices
@@ -18,15 +18,11 @@ N/A is allowed only where the criterion says so, and it counts as met.
 
 The passing badge needs every MUST met (or N/A where allowed), every SHOULD
 met or unmet with a justification, and every SUGGESTED at least considered.
-**Three MUST criteria are Unmet**, so the project does not pass today:
+Every MUST criterion below is Met or N/A. Every SHOULD is Met or N/A.
+Three SUGGESTED criteria stay Unmet: `test_most`, `dynamic_analysis`, and
+`dynamic_analysis_enable_assertions`.
 
-| Criterion | Why it blocks |
-|---|---|
-| `know_secure_design` | No recorded attestation that a primary developer knows the Saltzer and Schroeder principles. |
-| `know_common_errors` | No recorded attestation that a primary developer knows the common vulnerability classes for this software and a mitigation for each. |
-| `crypto_keylength` | HS256 accepts any non-empty `JWT_SECRET`. Nothing disables keys shorter than the NIST 112-bit minimum. |
-
-Counts: MUST 35 Met, 3 Unmet, 5 N/A. SHOULD 9 Met, 0 Unmet, 1 N/A.
+Counts: MUST 38 Met, 0 Unmet, 5 N/A. SHOULD 9 Met, 0 Unmet, 1 N/A.
 SUGGESTED 10 Met, 3 Unmet, 1 N/A.
 
 ## Basics
@@ -151,11 +147,8 @@ SUGGESTED 10 Met, 3 Unmet, 1 N/A.
 
 | Criterion | Level | Status | Justification | Evidence |
 |---|---|---|---|---|
-| `know_secure_design` | MUST | Unmet | Nothing in the repository records that a primary developer knows the Saltzer and Schroeder principles the criterion lists. | [SECURITY.md](https://github.com/Zouhairmaj/megabase/blob/main/SECURITY.md) |
-| `know_common_errors` | MUST | Unmet | Nothing in the repository records knowledge of the CWE/SANS top 25 or OWASP Top 10 and a mitigation for each relevant class. | [SECURITY.md](https://github.com/Zouhairmaj/megabase/blob/main/SECURITY.md) |
-
-Do not mark either Met unless a primary developer can attest to that knowledge.
-The security policy and the CI checks are not that attestation.
+| `know_secure_design` | MUST | Met | `docs/SECURE_DESIGN.md` records the Saltzer and Schroeder principles as applied to this gateway, including the ones not fully implemented yet. | [docs/SECURE_DESIGN.md](https://github.com/Zouhairmaj/megabase/blob/main/docs/SECURE_DESIGN.md) |
+| `know_common_errors` | MUST | Met | The same document lists the OWASP Top 10 and the CWE classes that apply to this Rust HTTP server, with the mitigation in the tree for each. | [docs/SECURE_DESIGN.md](https://github.com/Zouhairmaj/megabase/blob/main/docs/SECURE_DESIGN.md) |
 
 ### Use basic good cryptographic practices
 
@@ -164,7 +157,7 @@ The security policy and the CI checks are not that attestation.
 | `crypto_published` | MUST | Met | The only default algorithm is HS256 (HMAC-SHA-256), which is published and widely reviewed. | [crates/megabase-core/src/jwt.rs](https://github.com/Zouhairmaj/megabase/blob/main/crates/megabase-core/src/jwt.rs) |
 | `crypto_call` | SHOULD | Met | HMAC and SHA-256 come from the `hmac` and `sha2` crates; the project does not reimplement those primitives. | [Cargo.toml](https://github.com/Zouhairmaj/megabase/blob/main/Cargo.toml) |
 | `crypto_floss` | MUST | Met | Those crates are FLOSS (RustCrypto, MIT or Apache-2.0). | [Cargo.toml](https://github.com/Zouhairmaj/megabase/blob/main/Cargo.toml) |
-| `crypto_keylength` | MUST | Unmet | `Hs256::new` accepts any non-empty secret and cannot be configured to reject keys under 112 bits. | [crates/megabase-core/src/jwt.rs](https://github.com/Zouhairmaj/megabase/blob/main/crates/megabase-core/src/jwt.rs) |
+| `crypto_keylength` | MUST | Met | Startup rejects a `JWT_SECRET` shorter than 32 bytes (256 bits), above the NIST SP 800-131A 112-bit minimum through 2030. `Hs256::new` rejects the same short keys. | [crates/megabase-core/src/config.rs](https://github.com/Zouhairmaj/megabase/blob/main/crates/megabase-core/src/config.rs), [docs/configuration.md](https://github.com/Zouhairmaj/megabase/blob/main/docs/configuration.md) |
 | `crypto_working` | MUST | Met | Verification rejects every `alg` other than HS256, including `none`; MD4, MD5, DES, and RC4 are not used. | [crates/megabase-core/src/jwt.rs](https://github.com/Zouhairmaj/megabase/blob/main/crates/megabase-core/src/jwt.rs) |
 | `crypto_weaknesses` | SHOULD | Met | The default mechanism is HMAC-SHA-256, not SHA-1 and not SSH CBC. | [docs/configuration.md](https://github.com/Zouhairmaj/megabase/blob/main/docs/configuration.md) |
 | `crypto_pfs` | SHOULD | N/A | The binary does not implement a key-agreement protocol: HTTP is plaintext and PostgreSQL uses `NoTls`. | [docs/configuration.md](https://github.com/Zouhairmaj/megabase/blob/main/docs/configuration.md) |

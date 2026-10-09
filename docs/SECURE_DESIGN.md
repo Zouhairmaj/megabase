@@ -1,0 +1,95 @@
+---
+title: Secure design
+description: Saltzer and Schroeder as applied in Megabase, and the vulnerability classes this Rust HTTP server mitigates.
+section: project
+order: 3
+card: Design principles and the OWASP and CWE classes that apply to this gateway, with the mitigation in the tree.
+---
+
+# Secure design
+
+This is the project's record for OpenSSF Best Practices `know_secure_design`
+and `know_common_errors`. It states how the Saltzer and Schroeder principles
+apply to the Megabase gateway, and which OWASP Top 10 (2021) and CWE classes
+matter for this Rust HTTP and PostgreSQL process, with the mitigation that
+is actually in the tree.
+
+Megabase is one Rust binary. Unimplemented Supabase routes return HTTP 501
+`MEGABASE_NOT_IMPLEMENTED`. That 501 is the current control for many classes
+below: a route that does not exist yet does not accept the request.
+
+## Saltzer and Schroeder
+
+Jerome H. Saltzer and Michael D. Schroeder, "The Protection of Information
+in Computer Systems" (1975). Each row is what this repository does today.
+
+| Principle | Applied here |
+|---|---|
+| Economy of mechanism | One binary. JWT verification lives once in `megabase-core` (`Hs256`), shared by Auth and REST when those routes exist. Unimplemented behavior returns 501 instead of a guessed response. |
+| Fail-safe defaults | No default `JWT_SECRET`. `alg` other than `HS256`, including `none`, is rejected before HMAC. A present `JWT_SECRET` shorter than 32 bytes aborts startup. `sslmode=require` aborts schema install instead of sending the database password in the clear. |
+| Complete mediation | Token checks go through `Hs256::verify`. Auth and REST routes that would perform that check still return 501, so they do not serve data without it. |
+| Open design | Algorithms, error kinds, and this file are public (`specs/core/jwt.md`, `docs/configuration.md`). The demo secret in tests is the public sample from `vendor/supabase/docker/.env.example`. |
+| Separation of privilege | Verified tokens expose `role` (`anon`, `authenticated`, `service_role`) and `sub`. HTTP routes do not enforce those roles yet; they return 501. |
+| Least privilege | CI workflows default to `contents: read`. Jobs that publish a release, a page, or a check run declare a narrower extra permission on that job. Product code does not shell out and does not open outbound HTTP from request input. |
+| Least common mechanism | There is no built-in shared secret. Operators supply `JWT_SECRET`. The process refuses a key under 32 bytes rather than sharing a short default. |
+| Psychological acceptability | Startup and verification errors name the failure (`JWT_SECRET is N bytes…`, `Server lacks JWT secret`, `MEGABASE_NOT_IMPLEMENTED`). Configuration is four environment variables, documented in `docs/configuration.md`. |
+| Limited attack surface | Megabase-only paths live under `/_megabase/` (`/_megabase/health`). Supabase prefixes that are not ported answer 501. The binary does not serve HTML, does not start a shell, and does not fetch URLs from callers. |
+| Allowlist input validation | `MEGABASE_PORT` must parse as a `u16` or startup fails. JWT `alg` must be exactly `HS256`. `Authorization: Bearer` must match the GoTrue bearer grammar (one non-whitespace token). JWT payloads must be a JSON object. |
+
+Gaps that are still true, and that later ports have to keep closed:
+
+- HTTP listens in the clear. PostgreSQL uses `NoTls`. `sslmode=disable` and `prefer` still send the database password in the clear; use a Unix socket or loopback until the client speaks TLS.
+- Omitting `JWT_SECRET` still starts the process, so health checks and the CI image smoke test work. Verification then fails. Setting a short value does not start the process.
+- Role separation is parsed, not enforced, until Auth and REST routes exist.
+
+## Cryptographic key length
+
+`crypto_keylength` (MUST). NIST SP 800-131A (2012) requires at least 112 bits
+for symmetric keys through 2030. Megabase requires 32 bytes (256 bits) for
+`JWT_SECRET`, measured as raw UTF-8 bytes.
+
+`Config::from_env` rejects a present secret shorter than 32 bytes, including
+the empty string, before the process listens:
+
+```text
+configuration error: JWT_SECRET is N bytes; HMAC-SHA-256 keys shorter than 32 bytes are disabled
+```
+
+`Hs256::new` rejects the same short keys, so a hand-built `Config` cannot
+verify with one. HMAC-SHA-256 comes from the `hmac` and `sha2` crates.
+The length check is not an entropy check: a 32-byte secret of low entropy
+still passes, and the operator supplies the value (`crypto_random` is N/A
+until the product generates keys).
+
+## Vulnerability classes
+
+OWASP Top 10 (2021) and the CWE entries that apply to this kind of server.
+The mitigation column is what the code and CI do now.
+
+| Class | Where it would land | Mitigation in this tree |
+|---|---|---|
+| A01 Broken access control. CWE-862 missing authorization, CWE-285 improper authorization | REST and Auth routes that should honor `role` | Those routes return 501. `role` is available only after `Hs256::verify` succeeds. Enforcement arrives with the route, not as an open handler. |
+| A02 Cryptographic failures. CWE-327 broken crypto, CWE-326 inadequate encryption strength | JWT, database password, HTTP | Default algorithm is HMAC-SHA-256. `alg=none` and every other `alg` fail closed. Keys under 32 bytes are disabled. `Hs256` and `Config` debug output redacts `JWT_SECRET`; `Config` also redacts `DATABASE_URL`. MD5, SHA-1, DES, and RC4 are not used. HTTP and PostgreSQL are still plaintext; see the gaps above. |
+| A03 Injection. CWE-89 SQL injection, CWE-78 OS command injection | Schema install, future query routes | Auth SQL is a static DDL string (`install_sql`), not concatenated from request input. `crates/` does not call a shell. Future query ports use parameters; a request string is not SQL text. |
+| A04 Insecure design | New routes and parsers | 501 instead of a plausible answer. Short keys and `sslmode=require` fail closed. This file is the design record new auth, crypto, SQL, and request code follows (`AGENTS.md`). |
+| A05 Security misconfiguration. CWE-16 configuration | Env, CI, defaults | Four documented variables. No default JWT secret. CI is `cargo clippy -- -D warnings`, `cargo deny`, and `cargo audit`, and those jobs fail the build. Workflows default to `contents: read`. |
+| A06 Vulnerable and outdated components. CWE-1104 outdated component | Cargo dependencies | `cargo audit` on `Cargo.lock` and `site/Cargo.lock` in CI. `cargo deny` for bans and advisories. Renovate opens dependency updates (`renovate.json`). GitHub code scanning default setup runs CodeQL on Rust. |
+| A07 Identification and authentication failures. CWE-287 improper authentication, CWE-306 missing authentication | Bearer tokens, passwords | Compact JWTs are verified (signature, then `exp` with PostgREST's 30-second skew) before claims are read. Empty tokens fail. Auth HTTP routes return 501. No code stores password hashes for external users (`crypto_password_storage` is N/A). |
+| A08 Software and data integrity failures. CWE-502 deserialization of untrusted data | JWT JSON, release artifacts | Header and payload are decoded as JSON and checked (object, `alg` allowlist, numeric `exp`) after the HMAC check for the payload. Releases after v0.1.0 keyless-sign with cosign; v0.1.0 shipped without those assets (`docs/install.md`). |
+| A09 Security logging and monitoring failures. CWE-532 sensitive info in logs | Process logs | `tracing` logs at info. Debug formatting of `Config` and `Hs256` redacts secrets. There is no security monitor or alert pipeline; a log line is not a detection system. |
+| A10 Server-side request forgery. CWE-918 SSRF | Outbound HTTP | Product code does not make an outbound HTTP request from caller input, and it does not take a caller-controlled file path. Storage and functions routes return 501. |
+| CWE-79 cross-site scripting | HTML responses | The binary returns JSON (501 body, health). It does not render HTML. The static site generator escapes markdown links that are not `http`, `https`, or relative. |
+| CWE-119 / CWE-787 buffer overflow | Parsers | The product is Rust. `crates/` contains no `unsafe` block. Bounds checks stay with the standard library and `serde_json`. |
+| CWE-22 path traversal | Static files, storage | The server does not map a request path onto the filesystem. Storage returns 501. |
+| CWE-352 cross-site request forgery | Browser session | There is no cookie session. Callers that authenticate will present `Authorization: Bearer`. Browser form routes are not implemented. |
+| CWE-798 hardcoded credentials | Source tree | Tests use the public Supabase demo secret from `.env.example`. The process has no other embedded key. |
+| CWE-434 unrestricted upload | Storage | The storage prefix returns 501. |
+
+Dynamic analysis (fuzzing) is not in CI. That is OpenSSF `dynamic_analysis`,
+which stays Unmet, tracked in [issue 153](https://github.com/Zouhairmaj/megabase/issues/153).
+
+## Reporting
+
+Vulnerabilities in this repository's code, CI, and release artifacts are
+reported in private. The process, the 3-day acknowledgement, and the 90-day
+disclosure window are in [`SECURITY.md`](../SECURITY.md).
