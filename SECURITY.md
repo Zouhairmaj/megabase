@@ -43,6 +43,12 @@ After a GitHub Release publishes signed assets, verify binaries and
 `ghcr.io/zouhairmaj/megabase` as in [`docs/install.md`](docs/install.md).
 `v0.1.0` shipped without those assets.
 
+## Secure design
+
+How the Saltzer and Schroeder principles apply to this gateway, and which
+OWASP Top 10 and CWE classes the Rust HTTP server mitigates, is recorded in
+[`docs/SECURE_DESIGN.md`](docs/SECURE_DESIGN.md).
+
 ## Disclosure
 
 After a fix lands we credit the reporter in the GitHub Security Advisory
