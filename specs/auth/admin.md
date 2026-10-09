@@ -225,6 +225,8 @@ matching `user_id`.
 POST/PUT/GET for users, generate_link, SSO list/get/update, OAuth client
 get/update/register, custom-provider create/update, factor update, passkey
 list, and every non-admin Auth route remain `MEGABASE_NOT_IMPLEMENTED`.
+Unimplemented methods on a registered admin path (for example
+`POST /auth/v1/admin/custom-providers`) also return that 501, not Axum 405.
 
 ## Judge cases
 

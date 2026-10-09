@@ -344,15 +344,15 @@ fn row_timestamptz(row: &tokio_postgres::Row, idx: usize) -> Value {
 }
 
 fn system_time_rfc3339(time: std::time::SystemTime) -> String {
-    let secs = time
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0);
-    format_unix(secs)
+    // Go `time.Time` JSON uses RFC3339Nano (fractional seconds, trailing zeros
+    // stripped). Dropping sub-second precision via `as_secs()` would diverge.
+    match time.duration_since(std::time::UNIX_EPOCH) {
+        Ok(duration) => format_unix(duration.as_secs() as i64, duration.subsec_nanos()),
+        Err(_) => format_unix(0, 0),
+    }
 }
 
-fn format_unix(secs: i64) -> String {
-    // GoTime RFC3339 UTC. Judge normalizes timestamps; keep a valid ISO-8601.
+fn format_unix(secs: i64, nanos: u32) -> String {
     let secs = secs.max(0);
     let days = secs / 86400;
     let rem = secs % 86400;
@@ -360,7 +360,14 @@ fn format_unix(secs: i64) -> String {
     let min = (rem % 3600) / 60;
     let sec = rem % 60;
     let (year, month, day) = civil_from_days(days);
-    format!("{year:04}-{month:02}-{day:02}T{hour:02}:{min:02}:{sec:02}Z")
+    if nanos == 0 {
+        return format!("{year:04}-{month:02}-{day:02}T{hour:02}:{min:02}:{sec:02}Z");
+    }
+    let mut frac = format!("{nanos:09}");
+    while frac.ends_with('0') {
+        frac.pop();
+    }
+    format!("{year:04}-{month:02}-{day:02}T{hour:02}:{min:02}:{sec:02}.{frac}Z")
 }
 
 fn civil_from_days(z: i64) -> (i64, i64, i64) {
@@ -1249,6 +1256,26 @@ mod tests {
         assert_eq!(
             split_csv("https://a.example,https://b.example".into()),
             ["https://a.example", "https://b.example"]
+        );
+    }
+
+    #[test]
+    fn rfc3339_preserves_fractional_seconds() {
+        use std::time::{Duration, UNIX_EPOCH};
+        // 2024-01-01T00:00:00Z
+        let epoch = UNIX_EPOCH + Duration::from_secs(1_704_067_200);
+        assert_eq!(system_time_rfc3339(epoch), "2024-01-01T00:00:00Z");
+        assert_eq!(
+            system_time_rfc3339(epoch + Duration::new(0, 123_456_000)),
+            "2024-01-01T00:00:00.123456Z"
+        );
+        assert_eq!(
+            system_time_rfc3339(epoch + Duration::new(0, 123_000_000)),
+            "2024-01-01T00:00:00.123Z"
+        );
+        assert_eq!(
+            system_time_rfc3339(epoch + Duration::new(0, 1_000)),
+            "2024-01-01T00:00:00.000001Z"
         );
     }
 }

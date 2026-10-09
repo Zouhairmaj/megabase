@@ -189,6 +189,43 @@ async fn unimplemented_auth_paths_stay_501() {
 }
 
 #[tokio::test]
+async fn unimplemented_methods_on_registered_admin_paths_are_501() {
+    for (method, path, unit) in [
+        (
+            "POST",
+            "/auth/v1/admin/custom-providers",
+            "POST /auth/v1/admin/custom-providers",
+        ),
+        (
+            "PUT",
+            "/auth/v1/admin/custom-providers/custom:example",
+            "PUT /auth/v1/admin/custom-providers/custom:example",
+        ),
+        (
+            "GET",
+            "/auth/v1/admin/users/11111111-1111-1111-1111-111111111111",
+            "GET /auth/v1/admin/users/11111111-1111-1111-1111-111111111111",
+        ),
+        (
+            "PUT",
+            "/auth/v1/admin/sso/providers/11111111-1111-1111-1111-111111111111",
+            "PUT /auth/v1/admin/sso/providers/11111111-1111-1111-1111-111111111111",
+        ),
+        (
+            "POST",
+            "/auth/v1/admin/oauth/clients",
+            "POST /auth/v1/admin/oauth/clients",
+        ),
+    ] {
+        let (status, body, _) = send(state(), method, path, Some(&demo_service())).await;
+        assert_eq!(status, StatusCode::NOT_IMPLEMENTED, "{method} {path}");
+        assert_eq!(body["code"], "MEGABASE_NOT_IMPLEMENTED", "{body}");
+        assert_eq!(body["component"], "auth", "{body}");
+        assert_eq!(body["unit"], unit, "{body}");
+    }
+}
+
+#[tokio::test]
 async fn default_router_reads_empty_env() {
     let (status, body, _) = send(
         AuthState::from_lookup(|_| None),

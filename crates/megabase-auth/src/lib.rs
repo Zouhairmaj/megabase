@@ -24,9 +24,13 @@ pub fn router() -> Router {
 }
 
 pub fn router_with_state(state: AuthState) -> Router {
-    admin::router(state).fallback(
-        move |method: Method, OriginalUri(uri): OriginalUri| async move {
-            MegabaseNotImplemented::new(COMPONENT, format!("{method} {}", uri.path()))
-        },
-    )
+    admin::router(state)
+        // Path match without a method handler is Axum 405; send those to the
+        // same 501 as unknown paths (GOAL.md §3 rule 5).
+        .method_not_allowed_fallback(not_implemented)
+        .fallback(not_implemented)
+}
+
+async fn not_implemented(method: Method, OriginalUri(uri): OriginalUri) -> MegabaseNotImplemented {
+    MegabaseNotImplemented::new(COMPONENT, format!("{method} {}", uri.path()))
 }
