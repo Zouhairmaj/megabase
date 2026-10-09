@@ -83,9 +83,10 @@ waiting on a human.
 6. **README status is generated.** PRs run `megabase-coverage update`;
    `check` is a required CI job. Agents keep it current. CI does not
    commit generated files to `main` (branch protection requires a PR).
-   After Judge on `main`, Pages publishes shields JSON to the `gh-pages`
-   branch. `coverage/judge-results.json` in git is the regression
-   baseline; feature PRs restore it from `origin/main`. Status is one
+   After Judge on `main`, `.github/workflows/pages-badges.yml` publishes
+   shields JSON to the `gh-pages` branch. `coverage/judge-results.json`
+   in git is the regression baseline; feature PRs restore it from
+   `origin/main`. Status is one
    full-width nested treemap (`coverage/treemap.svg`, light:
    `coverage/treemap-light.svg`); the website embeds the same files.
    Totals come from `coverage/units.json`.
@@ -191,11 +192,19 @@ waiting on a human.
     `docker.io/library/rust` and hits the same anonymous 429). When
     `DOCKERHUB_TOKEN` is set, Judge, the container image job, cargo-deny,
     and the lockfile compose job log in to Docker Hub first
-    (`docker/login-action` v4.6.0) and skip login when the secret is
+    (`docker/login-action` v4.6.0, via
+    `.github/actions/dockerhub-login`) and skip login when the secret is
     empty. A timeout talking to `auth.docker.io` is retried, then
     ignored, so the digest-pinned mirrors still pull. The ECR library
-    Kong image has no `/entrypoint.sh`; the
-    compose override points the vendor script at `/docker-entrypoint.sh`.
+    Kong image has no `/entrypoint.sh`. The compose override uses
+    `entrypoint: !override` (Compose would otherwise append the vendor
+    entrypoint, which execs the missing path and leaves `supabase-kong`
+    unhealthy) and rewrites that one path to `/docker-entrypoint.sh`.
+    Pages badge publication is `.github/workflows/pages-badges.yml`
+    (`workflow_run` only, no cache action) so a Judge artifact cannot
+    poison the default-branch Actions cache.
+    `.github/workflows/pages.yml` is push and `workflow_dispatch` only
+    and checks out the event SHA.
 
 ## Tracking
 

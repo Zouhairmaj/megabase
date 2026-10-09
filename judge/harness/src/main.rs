@@ -552,4 +552,19 @@ mod tests {
             "expected every reference-stack service to pin an image, got {images}"
         );
     }
+
+    #[test]
+    fn kong_entrypoint_replaces_vendor_script() {
+        let path =
+            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../compose.override.yml");
+        let text = std::fs::read_to_string(&path).expect("compose.override.yml");
+        assert!(
+            text.contains("entrypoint: !override"),
+            "Compose appends entrypoint sequences; without !override the vendor script still execs /entrypoint.sh"
+        );
+        assert!(
+            text.contains("/docker-entrypoint.sh"),
+            "the ECR library Kong image has /docker-entrypoint.sh, not /entrypoint.sh"
+        );
+    }
 }
