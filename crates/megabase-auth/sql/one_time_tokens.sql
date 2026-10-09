@@ -28,22 +28,6 @@ DO $$ BEGIN
         expires_at timestamptz,
         CHECK (char_length(token_hash) > 0)
     );
-
-    BEGIN
-        CREATE INDEX IF NOT EXISTS one_time_tokens_token_hash_hash_idx
-            ON auth.one_time_tokens USING hash (token_hash);
-        CREATE INDEX IF NOT EXISTS one_time_tokens_relates_to_hash_idx
-            ON auth.one_time_tokens USING hash (relates_to);
-    EXCEPTION
-        WHEN OTHERS THEN
-            CREATE INDEX IF NOT EXISTS one_time_tokens_token_hash_hash_idx
-                ON auth.one_time_tokens USING btree (token_hash);
-            CREATE INDEX IF NOT EXISTS one_time_tokens_relates_to_hash_idx
-                ON auth.one_time_tokens USING btree (relates_to);
-    END;
-
-    CREATE UNIQUE INDEX IF NOT EXISTS one_time_tokens_user_id_token_type_key
-        ON auth.one_time_tokens (user_id, token_type);
 END $$;
 
 ALTER TABLE auth.one_time_tokens ADD COLUMN IF NOT EXISTS user_id uuid;
@@ -72,6 +56,25 @@ BEGIN
             ADD CONSTRAINT one_time_tokens_user_id_fkey
             FOREIGN KEY (user_id) REFERENCES auth.users ON DELETE CASCADE;
     END IF;
+END $$;
+
+DO $$
+BEGIN
+    BEGIN
+        CREATE INDEX IF NOT EXISTS one_time_tokens_token_hash_hash_idx
+            ON auth.one_time_tokens USING hash (token_hash);
+        CREATE INDEX IF NOT EXISTS one_time_tokens_relates_to_hash_idx
+            ON auth.one_time_tokens USING hash (relates_to);
+    EXCEPTION
+        WHEN undefined_object OR feature_not_supported THEN
+            CREATE INDEX IF NOT EXISTS one_time_tokens_token_hash_hash_idx
+                ON auth.one_time_tokens USING btree (token_hash);
+            CREATE INDEX IF NOT EXISTS one_time_tokens_relates_to_hash_idx
+                ON auth.one_time_tokens USING btree (relates_to);
+    END;
+
+    CREATE UNIQUE INDEX IF NOT EXISTS one_time_tokens_user_id_token_type_key
+        ON auth.one_time_tokens (user_id, token_type);
 END $$;
 
 ALTER TABLE auth.one_time_tokens ENABLE ROW LEVEL SECURITY;

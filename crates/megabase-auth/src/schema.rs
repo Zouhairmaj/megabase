@@ -4,8 +4,12 @@
 //! is unchanged; this module is the database compatibility surface.
 
 use std::str::FromStr;
+use std::time::Duration;
 use tokio_postgres::config::SslMode;
 use tokio_postgres::{Config, NoTls};
+
+/// Whole-install bound (connect + SQL). Startup fails instead of hanging.
+const INSTALL_DEADLINE: Duration = Duration::from_secs(30);
 
 const SCHEMA: &str = include_str!("../sql/00_schema.sql");
 
@@ -113,6 +117,8 @@ pub enum SchemaError {
         "DATABASE_URL requests TLS (sslmode={mode}); Megabase does not use TLS for PostgreSQL yet"
     )]
     TlsRequired { mode: String },
+    #[error("installing auth schema timed out after {timeout:?}")]
+    TimedOut { timeout: Duration },
     #[error("installing auth schema: {0}")]
     Postgres(#[from] tokio_postgres::Error),
 }
@@ -133,9 +139,21 @@ fn require_cleartext_postgres(database_url: &str) -> Result<(), SchemaError> {
 /// already applied. Aborts startup on error so a half-installed schema is
 /// not served as if it were complete. Connects without TLS; `sslmode=require`
 /// fails instead of sending credentials in the clear. `verify-*` is not a
-/// valid `tokio-postgres` sslmode and fails at parse.
+/// valid `tokio-postgres` sslmode and fails at parse. The connect and SQL
+/// run under a 30s deadline so a stalled PostgreSQL cannot hang startup.
 pub async fn install_schema(database_url: &str) -> Result<(), SchemaError> {
+    install_schema_within(database_url, INSTALL_DEADLINE).await
+}
+
+async fn install_schema_within(database_url: &str, deadline: Duration) -> Result<(), SchemaError> {
     require_cleartext_postgres(database_url)?;
+    match tokio::time::timeout(deadline, install_schema_inner(database_url)).await {
+        Ok(result) => result,
+        Err(_) => Err(SchemaError::TimedOut { timeout: deadline }),
+    }
+}
+
+async fn install_schema_inner(database_url: &str) -> Result<(), SchemaError> {
     let (client, connection) = tokio_postgres::connect(database_url, NoTls).await?;
     tokio::spawn(async move {
         if let Err(error) = connection.await {
@@ -239,6 +257,28 @@ mod tests {
         assert!(ONE_TIME_TOKENS.contains("timestamp WITHOUT TIME ZONE"));
         assert!(ONE_TIME_TOKENS.contains("expires_at"));
         assert!(ONE_TIME_TOKENS.contains("USING hash (token_hash)"));
+        assert!(ONE_TIME_TOKENS.contains("WHEN undefined_object OR feature_not_supported"));
+        assert!(
+            !ONE_TIME_TOKENS.contains("WHEN OTHERS"),
+            "hash fallback must not swallow lock/permission errors"
+        );
+        let add_user_id = ONE_TIME_TOKENS
+            .find("ADD COLUMN IF NOT EXISTS user_id")
+            .expect("user_id repair");
+        let unique_idx = ONE_TIME_TOKENS
+            .find("one_time_tokens_user_id_token_type_key")
+            .expect("unique index");
+        let hash_idx = ONE_TIME_TOKENS
+            .find("USING hash (token_hash)")
+            .expect("hash index");
+        assert!(
+            add_user_id < unique_idx,
+            "unique index must follow column repairs"
+        );
+        assert!(
+            add_user_id < hash_idx,
+            "hash indexes must follow column repairs"
+        );
         assert!(REFRESH_TOKENS.contains("user_id varchar(255)"));
         assert!(REFRESH_TOKENS.contains("DROP CONSTRAINT IF EXISTS refresh_tokens_parent_fkey"));
         assert!(REFRESH_TOKENS.contains("DROP INDEX IF EXISTS auth.refresh_tokens_token_idx"));
@@ -310,5 +350,27 @@ mod tests {
             SchemaError::TlsRequired { mode } => assert_eq!(mode, "require"),
             other => panic!("{other:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn install_schema_times_out_when_postgres_does_not_answer() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        let deadline = Duration::from_millis(200);
+        let started = std::time::Instant::now();
+        let err = install_schema_within(&format!("postgres://megabase@{addr}/db"), deadline)
+            .await
+            .expect_err("must time out");
+        match err {
+            SchemaError::TimedOut { timeout } => assert_eq!(timeout, deadline),
+            other => panic!("{other:?}"),
+        }
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "deadline must cancel a stalled handshake"
+        );
+        drop(listener);
     }
 }

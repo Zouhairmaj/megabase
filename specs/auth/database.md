@@ -476,9 +476,13 @@ Install runs at process start when `DATABASE_URL` is set. Failure aborts
 startup (GOAL.md fail loudly). Missing `DATABASE_URL` skips install; HTTP
 still serves. Objects are created in one transaction. After `ADD COLUMN IF
 NOT EXISTS`, required columns get `SET NOT NULL` so an older table is not
-left nullable. `sslmode` is parsed by `tokio-postgres` (the same parser as
-the connection). `sslmode=require` aborts as TLS-required; `verify-*` is
-an invalid value for this client and also aborts. The connection is always
-cleartext (`NoTls`); `sslmode=disable` is not a safe remote option. Use a
-Unix socket or loopback, or a separate encrypted transport, until TLS
-exists.
+left nullable. Indexes that need those columns are created after the
+repairs. Hash indexes on `one_time_tokens` fall back to btree only for
+`undefined_object` / `feature_not_supported`; other errors abort. Connect
+plus SQL are bounded by 30 seconds; a stall returns a startup error
+instead of hanging. `sslmode` is parsed by `tokio-postgres` (the same
+parser as the connection). `sslmode=require` aborts as TLS-required;
+`verify-*` is an invalid value for this client and also aborts. The
+connection is always cleartext (`NoTls`); `sslmode=disable` is not a safe
+remote option. Use a Unix socket or loopback, or a separate encrypted
+transport, until TLS exists.
