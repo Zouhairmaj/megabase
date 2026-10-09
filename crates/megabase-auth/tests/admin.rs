@@ -5,14 +5,41 @@ use axum::{
     body::{to_bytes, Body},
     http::{Request, StatusCode},
 };
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use base64::Engine;
+use hmac::{Hmac, Mac};
 use megabase_auth::{router_with_state, AuthState};
 use serde_json::Value;
+use sha2::Sha256;
 use tower::ServiceExt;
 
 /// `JWT_SECRET` from `vendor/supabase/docker/.env.example`.
+/// Vendor `ANON_KEY` / `SERVICE_ROLE_KEY` expire 2027-01-10; tests sign fresh tokens.
 const DEMO_SECRET: &str = "your-super-secret-jwt-token-with-at-least-32-characters-long";
-const DEMO_ANON: &str = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyAgCiAgICAicm9sZSI6ICJhbm9uIiwKICAgICJpc3MiOiAic3VwYWJhc2UtZGVtbyIsCiAgICAiaWF0IjogMTY0MTc2OTIwMCwKICAgICJleHAiOiAxNzk5NTM1NjAwCn0.dc_X5iR_VP_qT0zsiyj_I_OZ2T9FtRU2BBNWN8Bu4GE";
-const DEMO_SERVICE: &str = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyAgCiAgICAicm9sZSI6ICJzZXJ2aWNlX3JvbGUiLAogICAgImlzcyI6ICJzdXBhYmFzZS1kZW1vIiwKICAgICJpYXQiOiAxNjQxNzY5MjAwLAogICAgImV4cCI6IDE3OTk1MzU2MDAKfQ.DaYlNEoUrrEn2Ig7tqibS-PHK5vgusbcbo7X36XVt4Q";
+
+fn sign_role(role: &str) -> String {
+    let header = URL_SAFE_NO_PAD.encode(br#"{"alg":"HS256","typ":"JWT"}"#);
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let exp = now.saturating_add(60 * 60 * 24 * 365 * 10);
+    let payload = format!(r#"{{"role":"{role}","iss":"supabase-demo","iat":{now},"exp":{exp}}}"#);
+    let payload_b64 = URL_SAFE_NO_PAD.encode(payload.as_bytes());
+    let signing_input = format!("{header}.{payload_b64}");
+    let mut mac = Hmac::<Sha256>::new_from_slice(DEMO_SECRET.as_bytes()).expect("secret");
+    mac.update(signing_input.as_bytes());
+    let sig = URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes());
+    format!("{signing_input}.{sig}")
+}
+
+fn demo_anon() -> String {
+    sign_role("anon")
+}
+
+fn demo_service() -> String {
+    sign_role("service_role")
+}
 
 fn state() -> AuthState {
     AuthState::from_lookup(|key| (key == "JWT_SECRET").then(|| DEMO_SECRET.into()))
@@ -103,7 +130,7 @@ async fn admin_anon_is_403_not_admin() {
         "/auth/v1/admin/custom-providers",
         "/auth/v1/admin/oauth/clients",
     ] {
-        let (status, body, _) = send(state(), "GET", path, Some(DEMO_ANON)).await;
+        let (status, body, _) = send(state(), "GET", path, Some(&demo_anon())).await;
         assert_eq!(status, StatusCode::FORBIDDEN, "{path}");
         assert_gotrue_error(&body, 403, "not_admin", "User not allowed");
     }
@@ -118,7 +145,7 @@ async fn oauth_clients_service_role_is_feature_disabled() {
             "/auth/v1/admin/oauth/clients/11111111-1111-1111-1111-111111111111",
         ),
     ] {
-        let (status, body, _) = send(state(), method, path, Some(DEMO_SERVICE)).await;
+        let (status, body, _) = send(state(), method, path, Some(&demo_service())).await;
         assert_eq!(status, StatusCode::NOT_FOUND, "{method} {path}");
         assert_gotrue_error(&body, 404, "feature_disabled", "OAuth server is disabled");
     }
@@ -135,7 +162,7 @@ async fn custom_oauth_can_be_disabled() {
         state,
         "GET",
         "/auth/v1/admin/custom-providers",
-        Some(DEMO_SERVICE),
+        Some(&demo_service()),
     )
     .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
@@ -149,7 +176,13 @@ async fn custom_oauth_can_be_disabled() {
 
 #[tokio::test]
 async fn unimplemented_auth_paths_stay_501() {
-    let (status, body, _) = send(state(), "POST", "/auth/v1/admin/users", Some(DEMO_SERVICE)).await;
+    let (status, body, _) = send(
+        state(),
+        "POST",
+        "/auth/v1/admin/users",
+        Some(&demo_service()),
+    )
+    .await;
     assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
     assert_eq!(body["code"], "MEGABASE_NOT_IMPLEMENTED");
     assert_eq!(body["unit"], "POST /auth/v1/admin/users");
@@ -179,7 +212,7 @@ async fn audit_rejects_non_integer_page_before_db() {
         state(),
         "GET",
         "/auth/v1/admin/audit?page=nope",
-        Some(DEMO_SERVICE),
+        Some(&demo_service()),
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
@@ -197,7 +230,7 @@ async fn audit_rejects_unknown_query_scope() {
         state(),
         "GET",
         "/auth/v1/admin/audit?query=bogus:x",
-        Some(DEMO_SERVICE),
+        Some(&demo_service()),
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
@@ -215,7 +248,7 @@ async fn custom_provider_identifier_must_use_prefix() {
         state(),
         "GET",
         "/auth/v1/admin/custom-providers/example",
-        Some(DEMO_SERVICE),
+        Some(&demo_service()),
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
@@ -233,7 +266,7 @@ async fn delete_user_rejects_non_uuid_before_db() {
         state(),
         "DELETE",
         "/auth/v1/admin/users/not-a-uuid",
-        Some(DEMO_SERVICE),
+        Some(&demo_service()),
     )
     .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
@@ -251,7 +284,7 @@ async fn delete_oauth_client_rejects_non_uuid_when_enabled() {
         state,
         "DELETE",
         "/auth/v1/admin/oauth/clients/not-a-uuid",
-        Some(DEMO_SERVICE),
+        Some(&demo_service()),
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
@@ -264,7 +297,7 @@ async fn delete_sso_rejects_non_uuid_before_db() {
         state(),
         "DELETE",
         "/auth/v1/admin/sso/providers/not-a-uuid",
-        Some(DEMO_SERVICE),
+        Some(&demo_service()),
     )
     .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
@@ -274,4 +307,40 @@ async fn delete_sso_rejects_non_uuid_before_db() {
         "sso_provider_not_found",
         "SSO Identity Provider not found",
     );
+}
+
+#[tokio::test]
+async fn custom_provider_type_must_be_oauth2_or_oidc() {
+    let (status, body, _) = send(
+        state(),
+        "GET",
+        "/auth/v1/admin/custom-providers?type=saml",
+        Some(&demo_service()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_gotrue_error(
+        &body,
+        400,
+        "validation_failed",
+        "type must be either 'oauth2' or 'oidc'",
+    );
+}
+
+#[tokio::test]
+async fn oauth_clients_enabled_without_database_is_500() {
+    let state = AuthState::from_lookup(|key| match key {
+        "JWT_SECRET" => Some(DEMO_SECRET.into()),
+        "GOTRUE_OAUTH_SERVER_ENABLED" => Some("true".into()),
+        _ => None,
+    });
+    let (status, body, _) = send(
+        state,
+        "GET",
+        "/auth/v1/admin/oauth/clients",
+        Some(&demo_service()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+    assert_gotrue_error(&body, 500, "unexpected_failure", "Database error");
 }

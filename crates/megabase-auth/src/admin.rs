@@ -18,6 +18,7 @@
 //! First batch of `/auth/v1/admin` routes (issue #6).
 
 use std::collections::HashMap;
+use std::time::Duration;
 
 use axum::{
     body::Bytes,
@@ -27,16 +28,28 @@ use axum::{
     routing::{delete, get},
     Router,
 };
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use base64::Engine;
 use megabase_core::jwt::bearer_token;
 use serde::Deserialize;
 use serde_json::{json, Value};
-use tokio_postgres::{types::Json as PgJson, NoTls};
+use sha2::{Digest, Sha256};
+use tokio_postgres::{types::Json as PgJson, GenericClient, NoTls};
 
 use crate::http::{json_ok, no_content, AuthError};
 use crate::state::AuthState;
 
 const NIL_INSTANCE: &str = "00000000-0000-0000-0000-000000000000";
 const AUTH_PREFIX: &str = "/auth/v1";
+const CONNECT_DEADLINE: Duration = Duration::from_secs(30);
+const CUSTOM_PROVIDER_COLUMNS: &str =
+    "SELECT id::text, provider_type, identifier, name, client_id, \
+                    acceptable_client_ids, scopes, pkce_enabled, attribute_mapping, \
+                    custom_claims_allowlist, authorization_params, enabled, email_optional, \
+                    issuer, discovery_url, skip_nonce_check, cached_discovery, \
+                    authorization_url, token_url, userinfo_url, jwks_uri, \
+                    created_at, updated_at \
+             FROM auth.custom_oauth_providers";
 
 pub fn router(state: AuthState) -> Router {
     Router::new()
@@ -132,9 +145,11 @@ async fn connect(state: &AuthState) -> Result<tokio_postgres::Client, AuthError>
         .database_url
         .as_deref()
         .ok_or_else(|| AuthError::internal("Database error"))?;
-    let (client, connection) = tokio_postgres::connect(url, NoTls)
-        .await
-        .map_err(|_| AuthError::internal("Database error"))?;
+    let (client, connection) =
+        tokio::time::timeout(CONNECT_DEADLINE, tokio_postgres::connect(url, NoTls))
+            .await
+            .map_err(|_| AuthError::internal("Database error"))?
+            .map_err(|_| AuthError::internal("Database error"))?;
     tokio::spawn(async move {
         let _ = connection.await;
     });
@@ -206,7 +221,7 @@ async fn get_audit(
         client
             .query_one(
                 &format!(
-                    "SELECT COUNT(*) FROM auth.audit_log_entries WHERE instance_id = $1::uuid{filter_sql}"
+                    "SELECT COUNT(*) FROM auth.audit_log_entries WHERE instance_id = $1::text::uuid{filter_sql}"
                 ),
                 &[&NIL_INSTANCE, like],
             )
@@ -216,7 +231,7 @@ async fn get_audit(
     } else {
         client
             .query_one(
-                "SELECT COUNT(*) FROM auth.audit_log_entries WHERE instance_id = $1::uuid",
+                "SELECT COUNT(*) FROM auth.audit_log_entries WHERE instance_id = $1::text::uuid",
                 &[&NIL_INSTANCE],
             )
             .await
@@ -231,7 +246,7 @@ async fn get_audit(
             .query(
                 &format!(
                     "SELECT id::text, payload, created_at, ip_address FROM auth.audit_log_entries \
-                     WHERE instance_id = $1::uuid{filter_sql} ORDER BY created_at DESC LIMIT $3 OFFSET $4"
+                     WHERE instance_id = $1::text::uuid{filter_sql} ORDER BY created_at DESC LIMIT $3 OFFSET $4"
                 ),
                 &[&NIL_INSTANCE, like, &limit, &offset],
             )
@@ -240,7 +255,7 @@ async fn get_audit(
         client
             .query(
                 "SELECT id::text, payload, created_at, ip_address FROM auth.audit_log_entries \
-                 WHERE instance_id = $1::uuid ORDER BY created_at DESC LIMIT $2 OFFSET $3",
+                 WHERE instance_id = $1::text::uuid ORDER BY created_at DESC LIMIT $2 OFFSET $3",
                 &[&NIL_INSTANCE, &limit, &offset],
             )
             .await
@@ -377,38 +392,39 @@ async fn list_custom_providers(
 ) -> Result<Response, AuthError> {
     require_admin(&state, &headers)?;
     require_custom_oauth(&state)?;
+    match query.provider_type.as_deref() {
+        None | Some("") | Some("oauth2") | Some("oidc") => {}
+        Some(_) => {
+            return Err(AuthError::validation(
+                400,
+                "type must be either 'oauth2' or 'oidc'",
+            ))
+        }
+    }
     let client = connect(&state).await?;
-    let rows =
-        match query.provider_type.as_deref() {
-            None | Some("") => client
+    let rows = match query.provider_type.as_deref() {
+        Some(kind @ ("oauth2" | "oidc")) => {
+            client
                 .query(
-                    "SELECT identifier FROM auth.custom_oauth_providers ORDER BY created_at DESC",
+                    &format!(
+                    "{CUSTOM_PROVIDER_COLUMNS} WHERE provider_type = $1 ORDER BY created_at DESC"
+                ),
+                    &[&kind],
+                )
+                .await
+        }
+        _ => {
+            client
+                .query(
+                    &format!("{CUSTOM_PROVIDER_COLUMNS} ORDER BY created_at DESC"),
                     &[],
                 )
-                .await,
-            Some("oauth2") | Some("oidc") => {
-                client
-                    .query(
-                        "SELECT identifier FROM auth.custom_oauth_providers \
-                     WHERE provider_type = $1 ORDER BY provider_type DESC",
-                        &[&query.provider_type.as_deref().unwrap()],
-                    )
-                    .await
-            }
-            Some(_) => {
-                return Err(AuthError::validation(
-                    400,
-                    "type must be either 'oauth2' or 'oidc'",
-                ))
-            }
+                .await
         }
-        .map_err(|_| AuthError::internal("Error retrieving custom OAuth providers"))?;
-
-    let mut providers = Vec::with_capacity(rows.len());
-    for row in rows {
-        let identifier: String = row.try_get(0).unwrap_or_default();
-        providers.push(load_custom_provider(&client, &identifier).await?);
     }
+    .map_err(|_| AuthError::internal("Error retrieving custom OAuth providers"))?;
+
+    let providers: Vec<Value> = rows.iter().map(custom_provider_json).collect();
     Ok(json_ok(json!({ "providers": providers })))
 }
 
@@ -471,13 +487,7 @@ async fn load_custom_provider(
 ) -> Result<Value, AuthError> {
     let row = client
         .query_opt(
-            "SELECT id::text, provider_type, identifier, name, client_id, \
-                    acceptable_client_ids, scopes, pkce_enabled, attribute_mapping, \
-                    custom_claims_allowlist, authorization_params, enabled, email_optional, \
-                    issuer, discovery_url, skip_nonce_check, cached_discovery, \
-                    authorization_url, token_url, userinfo_url, jwks_uri, \
-                    created_at, updated_at \
-             FROM auth.custom_oauth_providers WHERE identifier = $1",
+            &format!("{CUSTOM_PROVIDER_COLUMNS} WHERE identifier = $1"),
             &[&identifier],
         )
         .await
@@ -605,7 +615,10 @@ async fn list_oauth_clients(
     let client = connect(&state).await?;
     let rows = client
         .query(
-            "SELECT id::text FROM auth.oauth_clients WHERE deleted_at IS NULL ORDER BY created_at DESC",
+            "SELECT id::text, client_type::text, redirect_uris, token_endpoint_auth_method, \
+                    grant_types, client_name, client_uri, logo_uri, registration_type::text, \
+                    created_at, updated_at \
+             FROM auth.oauth_clients WHERE deleted_at IS NULL ORDER BY created_at DESC",
             &[],
         )
         .await
@@ -613,11 +626,77 @@ async fn list_oauth_clients(
     if rows.is_empty() {
         return Ok(json_ok(json!({})));
     }
-    let clients: Vec<Value> = rows
-        .iter()
-        .map(|row| json!({ "client_id": row.try_get::<_, String>(0).unwrap_or_default() }))
-        .collect();
+    let clients: Vec<Value> = rows.iter().map(oauth_client_json).collect();
     Ok(json_ok(json!({ "clients": clients })))
+}
+
+fn oauth_client_json(row: &tokio_postgres::Row) -> Value {
+    let mut object = serde_json::Map::new();
+    object.insert(
+        "client_id".into(),
+        json!(row.try_get::<_, String>(0).unwrap_or_default()),
+    );
+    object.insert(
+        "client_type".into(),
+        json!(row.try_get::<_, String>(1).unwrap_or_default()),
+    );
+    insert_nonempty_list(
+        &mut object,
+        "redirect_uris",
+        split_csv(row.try_get::<_, String>(2).unwrap_or_default()),
+    );
+    insert_opt_str(
+        &mut object,
+        "token_endpoint_auth_method",
+        row.try_get::<_, String>(3).ok(),
+    );
+    insert_nonempty_list(
+        &mut object,
+        "grant_types",
+        split_csv(row.try_get::<_, String>(4).unwrap_or_default()),
+    );
+    object.insert("response_types".into(), json!(["code"]));
+    insert_opt_str(
+        &mut object,
+        "client_name",
+        row.try_get::<_, Option<String>>(5).ok().flatten(),
+    );
+    insert_opt_str(
+        &mut object,
+        "client_uri",
+        row.try_get::<_, Option<String>>(6).ok().flatten(),
+    );
+    insert_opt_str(
+        &mut object,
+        "logo_uri",
+        row.try_get::<_, Option<String>>(7).ok().flatten(),
+    );
+    insert_opt_str(
+        &mut object,
+        "registration_type",
+        row.try_get::<_, String>(8).ok(),
+    );
+    object.insert("created_at".into(), row_timestamptz(row, 9));
+    object.insert("updated_at".into(), row_timestamptz(row, 10));
+    Value::Object(object)
+}
+
+fn split_csv(raw: String) -> Vec<String> {
+    if raw.is_empty() {
+        Vec::new()
+    } else {
+        raw.split(',').map(str::to_string).collect()
+    }
+}
+
+fn insert_nonempty_list(
+    object: &mut serde_json::Map<String, Value>,
+    key: &str,
+    values: Vec<String>,
+) {
+    if !values.is_empty() {
+        object.insert(key.into(), json!(values));
+    }
 }
 
 // megabase:unit auth:route:DELETE /auth/v1/admin/oauth/clients/{client_id}
@@ -638,7 +717,7 @@ async fn delete_oauth_client(
     let deleted = client
         .execute(
             "UPDATE auth.oauth_clients SET deleted_at = NOW() \
-             WHERE id = $1::uuid AND deleted_at IS NULL",
+             WHERE id = $1::text::uuid AND deleted_at IS NULL",
             &[&client_id],
         )
         .await
@@ -679,7 +758,7 @@ async fn delete_sso_provider(
         client
             .query_opt(
                 "SELECT id::text, resource_id, disabled, created_at, updated_at \
-                 FROM auth.sso_providers WHERE id = $1::uuid",
+                 FROM auth.sso_providers WHERE id = $1::text::uuid",
                 &[&idp_id],
             )
             .await
@@ -700,7 +779,7 @@ async fn delete_sso_provider(
     let saml = client
         .query_opt(
             "SELECT entity_id, metadata_xml, metadata_url, name_id_format, attribute_mapping \
-             FROM auth.saml_providers WHERE sso_provider_id = $1::uuid",
+             FROM auth.saml_providers WHERE sso_provider_id = $1::text::uuid",
             &[&id],
         )
         .await
@@ -708,14 +787,17 @@ async fn delete_sso_provider(
         .flatten();
     let domains = client
         .query(
-            "SELECT domain FROM auth.sso_domains WHERE sso_provider_id = $1::uuid",
+            "SELECT domain FROM auth.sso_domains WHERE sso_provider_id = $1::text::uuid",
             &[&id],
         )
         .await
         .unwrap_or_default();
 
     client
-        .execute("DELETE FROM auth.sso_providers WHERE id = $1::uuid", &[&id])
+        .execute(
+            "DELETE FROM auth.sso_providers WHERE id = $1::text::uuid",
+            &[&id],
+        )
         .await
         .map_err(|_| AuthError::internal("Database error deleting SSO Identity Provider"))?;
 
@@ -770,7 +852,7 @@ async fn delete_user(
             "user_id must be an UUID",
         ));
     }
-    let client = connect(&state).await?;
+    let mut client = connect(&state).await?;
     let user = load_user(&client, &user_id).await?;
     let soft = if body.is_empty() {
         false
@@ -780,69 +862,129 @@ async fn delete_user(
             .should_soft_delete
             .unwrap_or(false)
     };
-    write_user_deleted_audit(&client, &user).await?;
+    let tx = client
+        .transaction()
+        .await
+        .map_err(|_| AuthError::internal("Database error deleting user"))?;
+    write_user_deleted_audit(&tx, &user).await?;
     if soft {
-        if user.deleted_at.is_some() {
-            return Ok(json_ok(json!({})));
+        if user.deleted_at.is_none() {
+            soft_delete_user(&tx, &user).await?;
         }
-        client
-            .execute(
-                "UPDATE auth.users SET \
-                    email = $2, phone = $3, encrypted_password = NULL, \
+    } else {
+        tx.execute(
+            "DELETE FROM auth.users WHERE id = $1::text::uuid",
+            &[&user_id],
+        )
+        .await
+        .map_err(|_| AuthError::internal("Database error deleting user"))?;
+    }
+    tx.commit()
+        .await
+        .map_err(|_| AuthError::internal("Database error deleting user"))?;
+    Ok(json_ok(json!({})))
+}
+
+async fn soft_delete_user<C>(client: &C, user: &LoadedUser) -> Result<(), AuthError>
+where
+    C: GenericClient + Sync,
+{
+    let email = obfuscate_email(&user.id, user.email.as_deref().unwrap_or(""));
+    let phone = obfuscate_phone(&user.id, user.phone.as_deref().unwrap_or(""));
+    let email_change = obfuscate_email(&user.id, user.email_change.as_deref().unwrap_or(""));
+    let phone_change = obfuscate_phone(&user.id, user.phone_change.as_deref().unwrap_or(""));
+    client
+        .execute(
+            "UPDATE auth.users SET \
+                    email = $2, phone = $3, email_change = $4, phone_change = $5, \
+                    encrypted_password = NULL, \
                     confirmation_token = '', recovery_token = '', \
                     email_change_token_current = '', email_change_token_new = '', \
                     phone_change_token = '', deleted_at = NOW(), \
                     raw_user_meta_data = '{}'::jsonb, raw_app_meta_data = '{}'::jsonb \
-                 WHERE id = $1::uuid",
-                &[
-                    &user_id,
-                    &obfuscate(&user.email, &user_id),
-                    &obfuscate(&user.phone, &user_id),
-                ],
-            )
-            .await
-            .map_err(|_| AuthError::internal("Error soft deleting user"))?;
-        let _ = client
-            .execute(
-                "DELETE FROM auth.mfa_factors WHERE user_id = $1::uuid",
-                &[&user_id],
-            )
-            .await;
-        let _ = client
-            .execute(
-                "DELETE FROM auth.sessions WHERE user_id = $1::uuid",
-                &[&user_id],
-            )
-            .await;
-        let _ = client
-            .execute(
-                "DELETE FROM auth.webauthn_credentials WHERE user_id = $1::uuid",
-                &[&user_id],
-            )
-            .await;
-    } else {
+                 WHERE id = $1::text::uuid",
+            &[&user.id, &email, &phone, &email_change, &phone_change],
+        )
+        .await
+        .map_err(|_| AuthError::internal("Error soft deleting user"))?;
+    client
+        .execute(
+            "DELETE FROM auth.one_time_tokens WHERE user_id = $1::text::uuid",
+            &[&user.id],
+        )
+        .await
+        .map_err(|_| AuthError::internal("Error soft deleting user"))?;
+    soft_delete_user_identities(client, &user.id).await?;
+    client
+        .execute(
+            "DELETE FROM auth.mfa_factors WHERE user_id = $1::text::uuid",
+            &[&user.id],
+        )
+        .await
+        .map_err(|_| AuthError::internal("Error deleting user's factors"))?;
+    client
+        .execute(
+            "DELETE FROM auth.webauthn_credentials WHERE user_id = $1::text::uuid",
+            &[&user.id],
+        )
+        .await
+        .map_err(|_| AuthError::internal("Error deleting user's WebAuthn credentials"))?;
+    client
+        .execute(
+            "DELETE FROM auth.sessions WHERE user_id = $1::text::uuid",
+            &[&user.id],
+        )
+        .await
+        .map_err(|_| AuthError::internal("Error deleting user's sessions"))?;
+    Ok(())
+}
+
+async fn soft_delete_user_identities<C>(client: &C, user_id: &str) -> Result<(), AuthError>
+where
+    C: GenericClient + Sync,
+{
+    let rows = client
+        .query(
+            "SELECT id::text, provider, provider_id FROM auth.identities \
+             WHERE user_id = $1::text::uuid",
+            &[&user_id],
+        )
+        .await
+        .map_err(|_| AuthError::internal("Error soft deleting user identities"))?;
+    for row in rows {
+        let id: String = row.try_get(0).unwrap_or_default();
+        let provider: String = row.try_get(1).unwrap_or_default();
+        let provider_id: String = row.try_get(2).unwrap_or_default();
+        let obfuscated = obfuscate_value(user_id, &format!("{provider}:{provider_id}"));
         client
-            .execute("DELETE FROM auth.users WHERE id = $1::uuid", &[&user_id])
+            .execute(
+                "UPDATE auth.identities SET identity_data = '{}'::jsonb, provider_id = $2 \
+                 WHERE id = $1::text::uuid",
+                &[&id, &obfuscated],
+            )
             .await
-            .map_err(|_| AuthError::internal("Database error deleting user"))?;
+            .map_err(|_| AuthError::internal("Error soft deleting user identities"))?;
     }
-    Ok(json_ok(json!({})))
+    Ok(())
 }
 
 struct LoadedUser {
+    id: String,
     email: Option<String>,
     phone: Option<String>,
+    email_change: Option<String>,
+    phone_change: Option<String>,
     deleted_at: Option<std::time::SystemTime>,
 }
 
-async fn load_user(
-    client: &tokio_postgres::Client,
-    user_id: &str,
-) -> Result<LoadedUser, AuthError> {
+async fn load_user<C>(client: &C, user_id: &str) -> Result<LoadedUser, AuthError>
+where
+    C: GenericClient + Sync,
+{
     let row = client
         .query_opt(
-            "SELECT email, phone, deleted_at FROM auth.users \
-             WHERE instance_id = $1::uuid AND id = $2::uuid",
+            "SELECT email, phone, email_change, phone_change, deleted_at FROM auth.users \
+             WHERE instance_id = $1::text::uuid AND id = $2::text::uuid",
             &[&NIL_INSTANCE, &user_id],
         )
         .await
@@ -851,16 +993,19 @@ async fn load_user(
         return Err(AuthError::not_found("user_not_found", "User not found"));
     };
     Ok(LoadedUser {
+        id: user_id.to_string(),
         email: row.try_get(0).ok().flatten(),
         phone: row.try_get(1).ok().flatten(),
-        deleted_at: row.try_get(2).ok().flatten(),
+        email_change: row.try_get(2).ok().flatten(),
+        phone_change: row.try_get(3).ok().flatten(),
+        deleted_at: row.try_get(4).ok().flatten(),
     })
 }
 
-async fn write_user_deleted_audit(
-    client: &tokio_postgres::Client,
-    user: &LoadedUser,
-) -> Result<(), AuthError> {
+async fn write_user_deleted_audit<C>(client: &C, user: &LoadedUser) -> Result<(), AuthError>
+where
+    C: GenericClient + Sync,
+{
     let payload = json!({
         "actor_id": NIL_INSTANCE,
         "actor_via_sso": false,
@@ -868,6 +1013,7 @@ async fn write_user_deleted_audit(
         "action": "user_deleted",
         "log_type": "team",
         "traits": {
+            "user_id": user.id,
             "user_email": user.email,
             "user_phone": user.phone,
         }
@@ -875,22 +1021,27 @@ async fn write_user_deleted_audit(
     client
         .execute(
             "INSERT INTO auth.audit_log_entries (instance_id, id, payload, created_at, ip_address) \
-             VALUES ($1::uuid, gen_random_uuid(), $2::json, NOW(), '')",
-            &[&NIL_INSTANCE, &payload.to_string()],
+             VALUES ($1::text::uuid, gen_random_uuid(), $2, NOW(), '')",
+            &[&NIL_INSTANCE, &PgJson(&payload)],
         )
         .await
         .map_err(|_| AuthError::internal("Error recording audit log entry"))?;
     Ok(())
 }
 
-fn obfuscate(value: &Option<String>, user_id: &str) -> Option<String> {
-    value.as_ref().map(|raw| {
-        if raw.is_empty() {
-            raw.clone()
-        } else {
-            format!("deleted_{user_id}")
-        }
-    })
+fn obfuscate_value(user_id: &str, value: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(user_id.as_bytes());
+    hasher.update(value.as_bytes());
+    URL_SAFE_NO_PAD.encode(hasher.finalize())
+}
+
+fn obfuscate_email(user_id: &str, email: &str) -> String {
+    obfuscate_value(user_id, email)
+}
+
+fn obfuscate_phone(user_id: &str, phone: &str) -> String {
+    obfuscate_value(user_id, phone).chars().take(15).collect()
 }
 
 // megabase:unit auth:route:DELETE /auth/v1/admin/users/{user_id}/factors/{factor_id}
@@ -908,7 +1059,7 @@ async fn delete_factor(
             "user_id must be an UUID",
         ));
     }
-    let client = connect(&state).await?;
+    let mut client = connect(&state).await?;
     let _user = load_user(&client, user_id).await?;
     if !is_uuid(factor_id) {
         return Err(AuthError::not_found(
@@ -920,7 +1071,7 @@ async fn delete_factor(
         .query_opt(
             "SELECT id::text, friendly_name, factor_type::text, status::text, \
                     created_at, updated_at, phone, last_challenged_at \
-             FROM auth.mfa_factors WHERE user_id = $1::uuid AND id = $2::uuid",
+             FROM auth.mfa_factors WHERE user_id = $1::text::uuid AND id = $2::text::uuid",
             &[&user_id, &factor_id],
         )
         .await
@@ -961,22 +1112,61 @@ async fn delete_factor(
     );
     factor.insert("last_challenged_at".into(), row_timestamptz(&row, 7));
 
-    client
-        .execute(
-            "DELETE FROM auth.mfa_factors WHERE id = $1::uuid",
+    let factor_type = factor
+        .get("factor_type")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    let amr = amr_method_for_factor_type(&factor_type)?;
+    let tx = client
+        .transaction()
+        .await
+        .map_err(|_| AuthError::internal("Database error deleting factor"))?;
+    tx.execute(
+        "DELETE FROM auth.mfa_factors WHERE id = $1::text::uuid",
+        &[&factor_id],
+    )
+    .await
+    .map_err(|_| AuthError::internal("Database error deleting factor"))?;
+    let sessions = tx
+        .query(
+            "SELECT id::text FROM auth.sessions WHERE factor_id = $1::text::uuid",
             &[&factor_id],
         )
         .await
-        .map_err(|_| AuthError::internal("Database error deleting factor"))?;
-    let _ = client
-        .execute(
-            "UPDATE auth.sessions SET aal = 'aal1' \
-             WHERE user_id = $1::uuid AND id IN \
-             (SELECT session_id FROM auth.mfa_amr_claims WHERE authentication_method = $2)",
-            &[&user_id, &factor_id],
+        .map_err(|_| AuthError::internal("Database error downgrading sessions"))?;
+    for session in sessions {
+        let session_id: String = session.try_get(0).unwrap_or_default();
+        tx.execute(
+            "DELETE FROM auth.mfa_amr_claims \
+             WHERE session_id = $1::text::uuid AND authentication_method = $2",
+            &[&session_id, &amr],
         )
-        .await;
+        .await
+        .map_err(|_| AuthError::internal("Database error downgrading sessions"))?;
+    }
+    tx.execute(
+        "UPDATE auth.sessions SET aal = 'aal1', factor_id = NULL \
+         WHERE user_id = $1::text::uuid AND factor_id = $2::text::uuid",
+        &[&user_id, &factor_id],
+    )
+    .await
+    .map_err(|_| AuthError::internal("Database error downgrading sessions"))?;
+    tx.commit()
+        .await
+        .map_err(|_| AuthError::internal("Database error deleting factor"))?;
     Ok(json_ok(Value::Object(factor)))
+}
+
+fn amr_method_for_factor_type(factor_type: &str) -> Result<String, AuthError> {
+    let method = match factor_type {
+        "totp" => "totp",
+        "phone" => "mfa/phone",
+        "webauthn" => "mfa/webauthn",
+        "recovery_code" => "mfa/recovery_code",
+        _ => return Err(AuthError::internal("Database error downgrading sessions")),
+    };
+    Ok(method.to_string())
 }
 
 // megabase:unit auth:route:DELETE /auth/v1/admin/users/{user_id}/passkeys/{passkey_id}
@@ -1004,7 +1194,7 @@ async fn delete_passkey(
     }
     let deleted = client
         .execute(
-            "DELETE FROM auth.webauthn_credentials WHERE id = $1::uuid AND user_id = $2::uuid",
+            "DELETE FROM auth.webauthn_credentials WHERE id = $1::text::uuid AND user_id = $2::text::uuid",
             &[&passkey_id, &user_id],
         )
         .await
@@ -1016,4 +1206,49 @@ async fn delete_passkey(
         ));
     }
     Ok(no_content())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn obfuscate_matches_gotrue_sha256() {
+        let user_id = "11111111-1111-1111-1111-111111111111";
+        let email = obfuscate_email(user_id, "user@example.com");
+        assert_eq!(email.len(), 43);
+        assert_eq!(email, obfuscate_value(user_id, "user@example.com"));
+        let phone = obfuscate_phone(user_id, "+15551234567");
+        assert_eq!(phone.len(), 15);
+        assert_eq!(phone, &obfuscate_value(user_id, "+15551234567")[..15]);
+    }
+
+    #[test]
+    fn amr_methods_match_factor_types() {
+        assert_eq!(amr_method_for_factor_type("totp").unwrap(), "totp");
+        assert_eq!(amr_method_for_factor_type("phone").unwrap(), "mfa/phone");
+        assert_eq!(
+            amr_method_for_factor_type("webauthn").unwrap(),
+            "mfa/webauthn"
+        );
+        assert_eq!(
+            amr_method_for_factor_type("recovery_code").unwrap(),
+            "mfa/recovery_code"
+        );
+        assert_eq!(
+            amr_method_for_factor_type("unknown")
+                .unwrap_err()
+                .error_code,
+            "unexpected_failure"
+        );
+    }
+
+    #[test]
+    fn split_csv_omits_empty() {
+        assert!(split_csv(String::new()).is_empty());
+        assert_eq!(
+            split_csv("https://a.example,https://b.example".into()),
+            ["https://a.example", "https://b.example"]
+        );
+    }
 }

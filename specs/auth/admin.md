@@ -119,7 +119,13 @@ Upstream: `internal/api/api.go:418`, `requireOAuthServerEnabled`
 
 **Output when `GOTRUE_OAUTH_SERVER_ENABLED=true`.** `200` JSON. Empty list
 is `{}` because `clients` is `omitempty`. Rows: `auth.oauth_clients`
-where `deleted_at IS NULL`, `created_at DESC`.
+where `deleted_at IS NULL`, `created_at DESC`. Each client is
+`OAuthServerClientResponse` (`handlers.go:30`): `client_id`,
+`client_type`, `redirect_uris`, `token_endpoint_auth_method`,
+`grant_types`, `response_types` (always `["code"]`), `client_name`,
+`client_uri`, `logo_uri`, `registration_type`, `created_at`,
+`updated_at`. Secret is never listed. Empty slices and empty strings
+are omitted (`omitempty`).
 
 ---
 
@@ -163,9 +169,12 @@ Empty body is hard delete (`ShouldSoftDelete` defaults false). Lookup:
 (`models/user.go:709`).
 
 **Output.** `200` `{}`. Hard delete destroys the `auth.users` row. Soft
-delete obfuscates identifiers, sets `deleted_at`, clears tokens and
-metadata, deletes factors / WebAuthn credentials / sessions
-(`admin.go:621`).
+delete and the audit row run in one transaction (`admin.go:612`). Soft
+delete hashes email / phone / email_change / phone_change with
+`SHA-256(id || value)` as raw URL-safe Base64 (`user.go:1186`; phone
+keeps 15 characters), sets `deleted_at`, clears tokens and metadata,
+empties each identity's `identity_data` and hashes `provider_id`,
+deletes one-time tokens, factors, WebAuthn credentials, and sessions.
 
 **Errors.** 404 `validation_failed` `user_id must be an UUID`. 404
 `user_not_found` `User not found`.
@@ -180,8 +189,12 @@ Upstream: `internal/api/api.go:376`, load user then
 **Inputs.** Both path ids are UUIDs. Factor must belong to that user
 (`FindOwnedFactorByID`).
 
-**Output.** `200` the factor JSON after destroy, then sessions for that
-factor are downgraded to AAL1.
+**Output.** `200` the factor JSON after destroy. In the same
+transaction, `DowngradeSessionsToAAL1` (`factor.go:449`) deletes
+`mfa_amr_claims` whose `authentication_method` is the factor type's
+AMR (`totp`, `mfa/phone`, `mfa/webauthn`, `mfa/recovery_code`) for
+sessions with that `factor_id`, then sets those sessions to `aal1`
+and `factor_id = NULL`.
 
 **Errors.** User load errors first (so a missing user is `user_not_found`,
 not `mfa_factor_not_found`). Invalid `factor_id`: 404 `validation_failed`
