@@ -6,3 +6,14 @@ coverage:
     patch:
       default:
         informational: true
+
+# cargo llvm-cov instruments workspace members only (crates/, tools/,
+# judge/harness). Do not ignore those paths to inflate the score.
+ignore:
+  # Frozen upstream spec (GOAL.md §2 / vendor.toml). Not compiled as
+  # workspace members; listed so a path change cannot pull vendored
+  # sources into the Codecov total.
+  - "vendor/**"
+  # Generated coverage artefacts and Kite-aligned SVGs written by
+  # megabase-coverage; they are data, not executable source.
+  - "coverage/**"

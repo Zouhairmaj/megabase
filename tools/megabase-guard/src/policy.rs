@@ -589,5 +589,52 @@ mod tests {
             after: None,
         };
         assert!(evaluate(&[deleted], &c).is_empty());
+        assert!(evaluate(
+            &[add("vendor/scripts/extract.py")],
+            &ctx(BOOTSTRAP_BRANCH, true)
+        )
+        .is_empty());
+        assert_eq!(evaluate(&[add("CODEOWNERS")], &c).len(), 1);
+        assert_eq!(
+            evaluate(&[add("tools/megabase-guard/src/main.rs")], &c).len(),
+            1
+        );
+        assert!(evaluate(
+            &[add("tools/megabase-guard/src/main.rs")],
+            &ctx("review/ok", false)
+        )
+        .is_empty());
+    }
+
+    #[test]
+    fn release_as_deletion_rejects_invalid_json_and_no_key() {
+        assert!(!is_release_as_deletion_only("not json", "{}"));
+        assert!(!is_release_as_deletion_only("{}", "not json"));
+        assert!(!is_release_as_deletion_only("[]", "[]"));
+        assert!(!is_release_as_deletion_only(
+            "{\"packages\":{}}",
+            "{\"packages\":{}}"
+        ));
+        assert!(is_release_as_deletion_only(
+            r#"{"release-as":"0.1.0"}"#,
+            "{}"
+        ));
+    }
+
+    #[test]
+    fn human_log_review_rejects_missing_heading_and_identity() {
+        assert!(!is_human_log_review_ok(
+            "no heading",
+            "## Pending\n\n- x\n\n---\n"
+        ));
+        assert!(!is_human_log_review_ok(
+            "## Pending\n\n- x\n\n---\n",
+            "no heading"
+        ));
+        let same =
+            "# H\n\n## Pending\n\n- x\n\n---\n\n*No completed human interventions recorded yet.*\n";
+        assert!(!is_human_log_review_ok(same, same));
+        let prefix_changed = "# other\n\n## Pending\n\n- x\n\n---\n\n*No completed human interventions recorded yet.*\n";
+        assert!(!is_human_log_review_ok(same, prefix_changed));
     }
 }

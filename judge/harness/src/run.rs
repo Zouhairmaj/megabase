@@ -293,5 +293,150 @@ mod tests {
         let mut v = serde_json::json!({"email": "a-{{run}}", "n": [1, "{{run}}"]});
         substitute_json(&mut v, &vars);
         assert_eq!(v, serde_json::json!({"email": "a-r1", "n": [1, "r1"]}));
+        let mut num = serde_json::json!(3);
+        substitute_json(&mut num, &vars);
+        assert_eq!(num, serde_json::json!(3));
+    }
+
+    fn json_observed(status: u16, body: serde_json::Value) -> Observed {
+        Observed {
+            status,
+            headers: BTreeMap::new(),
+            body: Body::Json(body),
+        }
+    }
+
+    fn step_with_capture(pointer: &str) -> Step {
+        Step {
+            method: "GET".into(),
+            path: "/".into(),
+            key: Key::Anon,
+            headers: BTreeMap::new(),
+            json: None,
+            body: None,
+            compare_headers: vec![],
+            ignore: vec!["/volatile".into()],
+            capture: [("id".into(), pointer.into())].into(),
+        }
+    }
+
+    #[test]
+    fn capture_reads_json_strings_and_other_types() {
+        let step = step_with_capture("/id");
+        let mut vars = BTreeMap::new();
+        capture(
+            &json_observed(200, serde_json::json!({"id": "abc"})),
+            &step,
+            &mut vars,
+        )
+        .unwrap();
+        assert_eq!(vars["id"], "abc");
+        vars.clear();
+        capture(
+            &json_observed(200, serde_json::json!({"id": 7})),
+            &step,
+            &mut vars,
+        )
+        .unwrap();
+        assert_eq!(vars["id"], "7");
+    }
+
+    #[test]
+    fn capture_requires_json_body_and_pointer() {
+        let step = step_with_capture("/id");
+        let mut vars = BTreeMap::new();
+        let text = Observed {
+            status: 200,
+            headers: BTreeMap::new(),
+            body: Body::Text("nope".into()),
+        };
+        assert!(capture(&text, &step, &mut vars)
+            .unwrap_err()
+            .to_string()
+            .contains("not JSON"));
+        assert!(capture(
+            &json_observed(200, serde_json::json!({"other": 1})),
+            &step,
+            &mut vars
+        )
+        .unwrap_err()
+        .to_string()
+        .contains("not in response"));
+    }
+
+    #[test]
+    fn normalized_applies_ignore_and_text_rules() {
+        let step = step_with_capture("/missing");
+        let json = json_observed(
+            200,
+            serde_json::json!({"volatile": 1, "keep": "2026-10-09T00:00:00Z"}),
+        );
+        match normalized(json, &step).body {
+            Body::Json(v) => {
+                assert!(v.get("volatile").is_none());
+                assert_eq!(v["keep"], "<timestamp>");
+            }
+            other => panic!("{other:?}"),
+        }
+        let text = Observed {
+            status: 200,
+            headers: BTreeMap::new(),
+            body: Body::Text("id 0b6a1f8e-3f43-4b5e-9c1d-2a0e5f6b7c8d".into()),
+        };
+        match normalized(text, &step).body {
+            Body::Text(t) => assert_eq!(t, "id <uuid>"),
+            other => panic!("{other:?}"),
+        }
+        let empty = Observed {
+            status: 204,
+            headers: BTreeMap::new(),
+            body: Body::Empty,
+        };
+        assert_eq!(normalized(empty, &step).body, Body::Empty);
+    }
+
+    #[test]
+    fn describe_reports_status_headers_body_and_truncates() {
+        let reference = json_observed(200, serde_json::json!({"ok": true}));
+        let megabase = json_observed(501, serde_json::json!({"code": "MEGABASE_NOT_IMPLEMENTED"}));
+        let msg = describe(&reference, &megabase);
+        assert!(msg.contains("status 200"));
+        assert!(msg.contains("501"));
+
+        let mut r = reference.clone();
+        r.headers
+            .insert("content-type".into(), "application/json".into());
+        let mut m = r.clone();
+        m.headers.insert("content-type".into(), "text/plain".into());
+        assert!(describe(&r, &m).contains("headers"));
+
+        let long = "x".repeat(400);
+        let r = Observed {
+            status: 200,
+            headers: BTreeMap::new(),
+            body: Body::Text(long.clone()),
+        };
+        let m = Observed {
+            status: 200,
+            headers: BTreeMap::new(),
+            body: Body::Empty,
+        };
+        let msg = describe(&r, &m);
+        assert!(msg.contains("…"));
+        assert!(msg.contains("<empty>"));
+        assert!(msg.chars().count() < long.len());
+    }
+
+    #[test]
+    fn observed_equality_is_the_response_snapshot() {
+        let a = json_observed(
+            200,
+            serde_json::json!({"users": [{"id": "<uuid>", "email": "a@example.com"}]}),
+        );
+        let b = a.clone();
+        assert_eq!(a, b);
+        let mut c = a.clone();
+        c.body = Body::Json(serde_json::json!({"users": []}));
+        assert_ne!(a, c);
     }
 }

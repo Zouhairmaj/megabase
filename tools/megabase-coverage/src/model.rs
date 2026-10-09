@@ -197,3 +197,80 @@ impl Collector {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn src(line: usize) -> Source {
+        Source {
+            repo: "postgrest".into(),
+            file: "a.hs".into(),
+            line,
+        }
+    }
+
+    #[test]
+    fn component_label_falls_back_to_id() {
+        assert_eq!(component_label("rest"), "REST");
+        assert_eq!(component_label("unknown"), "unknown");
+    }
+
+    #[test]
+    fn collector_dedups_ids_and_merges_tiny_route_groups() {
+        let mut c = Collector::default();
+        c.item(UnitSpec {
+            component: "auth",
+            group: "a",
+            kind: "k",
+            name: "n".into(),
+            level: 1,
+            source: src(1),
+        });
+        c.item(UnitSpec {
+            component: "auth",
+            group: "other",
+            kind: "k",
+            name: "n".into(),
+            level: 2,
+            source: src(9),
+        });
+        c.route("auth", "tiny", "GET", "/one", 1, src(2));
+        c.route("auth", "tiny", "POST", "/two", 1, src(3));
+        c.route("auth", "kept", "GET", "/a", 1, src(4));
+        c.route("auth", "kept", "GET", "/b", 1, src(5));
+        c.route("auth", "kept", "GET", "/c", 1, src(6));
+        c.exclude("auth", "GET /blocked".into(), "blocked", src(7));
+        c.exclude("auth", "GET /blocked".into(), "duplicate", src(8));
+        c.merge_small_route_groups("auth", 3);
+        let file = c.finish(vec![Pin {
+            name: "postgrest".into(),
+            path: "vendor/postgrest".into(),
+            repo: "https://example".into(),
+            tag: "v1".into(),
+            commit: "abc".into(),
+            license: "MIT".into(),
+            image: None,
+        }]);
+        assert_eq!(file.total, 6);
+        assert_eq!(file.schema, 1);
+        assert_eq!(file.by_component["auth"], 6);
+        let tiny: Vec<_> = file
+            .units
+            .iter()
+            .filter(|u| u.name.contains("/one") || u.name.contains("/two"))
+            .collect();
+        assert!(tiny.iter().all(|u| u.group == "endpoints"));
+        assert!(file.units.iter().any(|u| u.group == "kept"));
+        assert!(file.units.iter().any(|u| u.group == "a" && u.kind == "k"));
+        assert_eq!(file.excluded.len(), 1);
+        assert_eq!(
+            file.units
+                .iter()
+                .find(|u| u.id.contains(":k:n"))
+                .unwrap()
+                .level,
+            1
+        );
+    }
+}
