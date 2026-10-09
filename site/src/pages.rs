@@ -974,8 +974,8 @@ mod tests {
             .nth(1)
             .expect("stacked breakpoint");
         assert!(
-            mobile.contains("min-height: 0"),
-            "stacked cards must drop the desktop min-height and keep natural flow"
+            mobile.contains(".level-card {\n    min-height: 0;\n    height: auto;\n  }"),
+            "stacked .level-card must drop the desktop min-height and keep natural flow"
         );
     }
 
