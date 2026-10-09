@@ -73,6 +73,19 @@ const ONE_TIME_TOKENS: &str = include_str!("../sql/one_time_tokens.sql");
 // megabase:unit auth:sql-table:auth.refresh_tokens
 const REFRESH_TOKENS: &str = include_str!("../sql/refresh_tokens.sql");
 
+const USERS: &str = include_str!("../sql/users.sql");
+const SESSIONS: &str = include_str!("../sql/sessions.sql");
+const SCHEMA_MIGRATIONS: &str = include_str!("../sql/schema_migrations.sql");
+const SSO_PROVIDERS: &str = include_str!("../sql/sso_providers.sql");
+const SSO_DOMAINS: &str = include_str!("../sql/sso_domains.sql");
+const SAML_PROVIDERS: &str = include_str!("../sql/saml_providers.sql");
+const SAML_RELAY_STATES: &str = include_str!("../sql/saml_relay_states.sql");
+const SSO_SESSIONS: &str = include_str!("../sql/sso_sessions.sql");
+const SCIM_USERS: &str = include_str!("../sql/scim_users.sql");
+const SCIM_TOKENS: &str = include_str!("../sql/scim_tokens.sql");
+const WEBAUTHN_CREDENTIALS: &str = include_str!("../sql/webauthn_credentials.sql");
+const WEBAUTHN_CHALLENGES: &str = include_str!("../sql/webauthn_challenges.sql");
+
 const OBJECTS: &[&str] = &[
     SCHEMA,
     INSTANCES,
@@ -95,11 +108,25 @@ const OBJECTS: &[&str] = &[
     AUTH_ROLE,
     AUTH_EMAIL,
     AUTH_JWT,
+    USERS,
+    SESSIONS,
+    SCHEMA_MIGRATIONS,
+    SSO_PROVIDERS,
+    SSO_DOMAINS,
+    SAML_PROVIDERS,
+    SAML_RELAY_STATES,
+    SSO_SESSIONS,
+    SCIM_USERS,
+    SCIM_TOKENS,
+    WEBAUTHN_CREDENTIALS,
+    WEBAUTHN_CHALLENGES,
 ];
 
 /// SQL applied in one transaction when `DATABASE_URL` is set.
 fn install_sql() -> String {
-    let mut sql = String::from("BEGIN;\n");
+    let mut sql = String::from(
+        "BEGIN;\nSELECT pg_advisory_xact_lock(hashtext('megabase.auth.install_schema'));\n",
+    );
     for part in OBJECTS {
         sql.push_str(part);
         if !part.ends_with('\n') {
@@ -142,6 +169,18 @@ fn require_cleartext_postgres(database_url: &str) -> Result<(), SchemaError> {
 /// valid `tokio-postgres` sslmode and fails at parse. The connect and SQL
 /// run under a 30s deadline so a stalled PostgreSQL cannot hang startup.
 pub async fn install_schema(database_url: &str) -> Result<(), SchemaError> {
+    // megabase:unit auth:sql-table:auth.users
+    // megabase:unit auth:sql-table:auth.sessions
+    // megabase:unit auth:sql-table:auth.schema_migrations
+    // megabase:unit auth:sql-table:auth.sso_providers
+    // megabase:unit auth:sql-table:auth.sso_domains
+    // megabase:unit auth:sql-table:auth.saml_providers
+    // megabase:unit auth:sql-table:auth.saml_relay_states
+    // megabase:unit auth:sql-table:auth.sso_sessions
+    // megabase:unit auth:sql-table:auth.scim_users
+    // megabase:unit auth:sql-table:auth.scim_tokens
+    // megabase:unit auth:sql-table:auth.webauthn_credentials
+    // megabase:unit auth:sql-table:auth.webauthn_challenges
     install_schema_within(database_url, INSTALL_DEADLINE).await
 }
 
@@ -172,7 +211,15 @@ mod tests {
     fn install_sql_is_one_transaction() {
         let sql = install_sql();
         assert!(sql.starts_with("BEGIN;"), "{sql}");
+        assert!(
+            sql.contains("SELECT pg_advisory_xact_lock(hashtext('megabase.auth.install_schema'));"),
+            "{sql}"
+        );
         assert!(sql.trim_end().ends_with("COMMIT;"), "{sql}");
+        let begin = sql.find("BEGIN;").expect("begin");
+        let lock = sql.find("pg_advisory_xact_lock").expect("lock");
+        let first_create = sql.find("CREATE SCHEMA").expect("schema");
+        assert!(begin < lock && lock < first_create, "{sql}");
     }
 
     #[test]
@@ -284,6 +331,55 @@ mod tests {
         assert!(REFRESH_TOKENS.contains("DROP INDEX IF EXISTS auth.refresh_tokens_token_idx"));
         assert!(REFRESH_TOKENS.contains("refresh_tokens_session_id_fkey"));
         assert!(REFRESH_TOKENS.contains("parent varchar(255)"));
+        assert!(USERS.contains("encrypted_password"));
+        assert!(USERS.contains(
+            "GENERATED ALWAYS AS (LEAST (users.email_confirmed_at, users.phone_confirmed_at)) STORED"
+        ));
+        assert!(USERS.contains("users_email_partial_key"));
+        assert!(USERS.contains("DROP CONSTRAINT IF EXISTS users_email_key"));
+        assert!(USERS.contains("DROP INDEX auth.users_instance_id_email_idx"));
+        assert!(USERS.contains("indexdef NOT LIKE '%lower(%'"));
+        assert!(!USERS.contains("DROP INDEX IF EXISTS users_instance_id_email_idx"));
+        assert!(USERS.contains("is_anonymous"));
+        assert!(USERS.contains("is_sso_user"));
+        assert!(USERS.contains("ALTER COLUMN phone TYPE text"));
+        assert!(SESSIONS.contains("auth.aal_level"));
+        assert!(SESSIONS.contains("timestamp WITHOUT TIME ZONE"));
+        assert!(SESSIONS.contains("refresh_token_hmac_key"));
+        assert!(SESSIONS.contains("sessions_scopes_length"));
+        assert!(SESSIONS.contains("REFERENCES auth.oauth_clients(id) ON DELETE CASCADE"));
+        assert!(SSO_PROVIDERS.contains("disabled"));
+        assert!(SSO_PROVIDERS.contains("sso_providers_resource_id_pattern_idx"));
+        assert!(SAML_PROVIDERS.contains("name_id_format"));
+        assert!(SAML_RELAY_STATES.contains("flow_state_id"));
+        assert!(SAML_RELAY_STATES.contains("DROP COLUMN from_ip_address"));
+        assert!(!SAML_RELAY_STATES.contains("from_ip_address inet"));
+        assert!(SCIM_USERS.contains("GENERATED ALWAYS AS (lower(resource->>'userName')) STORED"));
+        assert!(SCIM_USERS.contains("COLLATE \"C\""));
+        assert!(SCIM_TOKENS.contains("token_hash ~ '^[0-9a-f]{64}$'"));
+        assert!(SCHEMA_MIGRATIONS.contains("schema_migrations_pkey"));
+        assert!(WEBAUTHN_CREDENTIALS.contains("credential_id bytea NOT NULL"));
+        assert!(WEBAUTHN_CREDENTIALS.contains("public_key bytea NOT NULL"));
+        assert!(WEBAUTHN_CREDENTIALS.contains("transports jsonb NOT NULL DEFAULT '[]'::jsonb"));
+        assert!(WEBAUTHN_CREDENTIALS.contains("webauthn_credentials_credential_id_key"));
+        assert!(WEBAUTHN_CREDENTIALS.contains("webauthn_credentials_user_id_idx"));
+        assert!(WEBAUTHN_CREDENTIALS.contains("REFERENCES auth.users (id) ON DELETE CASCADE"));
+        assert!(WEBAUTHN_CHALLENGES.contains("challenge_type text NOT NULL"));
+        assert!(WEBAUTHN_CHALLENGES.contains("session_data jsonb NOT NULL"));
+        assert!(WEBAUTHN_CHALLENGES
+            .contains("CHECK (challenge_type IN ('signup', 'registration', 'authentication'))"));
+        assert!(WEBAUTHN_CHALLENGES.contains("webauthn_challenges_expires_at_idx"));
+        assert!(WEBAUTHN_CHALLENGES.contains("webauthn_challenges_user_id_idx"));
+        assert!(WEBAUTHN_CHALLENGES.contains("REFERENCES auth.users (id) ON DELETE CASCADE"));
+        assert!(
+            WEBAUTHN_CHALLENGES.contains("user_id uuid,"),
+            "signup challenges require a nullable user_id"
+        );
+        assert!(WEBAUTHN_CHALLENGES.contains("ALTER COLUMN user_id DROP NOT NULL"));
+        assert!(
+            !WEBAUTHN_CHALLENGES.contains("ALTER COLUMN user_id SET NOT NULL"),
+            "do not force user_id NOT NULL on webauthn_challenges"
+        );
     }
 
     #[test]
@@ -309,12 +405,69 @@ mod tests {
     }
 
     #[test]
+    fn issue_12_tables_are_installed() {
+        let sql = install_sql();
+        for name in [
+            "auth.users",
+            "auth.sessions",
+            "auth.schema_migrations",
+            "auth.sso_providers",
+            "auth.sso_domains",
+            "auth.saml_providers",
+            "auth.saml_relay_states",
+            "auth.sso_sessions",
+            "auth.scim_users",
+            "auth.scim_tokens",
+        ] {
+            assert!(
+                sql.contains(&format!("CREATE TABLE IF NOT EXISTS {name}")),
+                "missing {name}"
+            );
+        }
+    }
+
+    #[test]
+    fn issue_13_tables_are_installed() {
+        let sql = install_sql();
+        for name in ["auth.webauthn_credentials", "auth.webauthn_challenges"] {
+            assert!(
+                sql.contains(&format!("CREATE TABLE IF NOT EXISTS {name}")),
+                "missing {name}"
+            );
+        }
+        let credentials = sql
+            .find("CREATE TABLE IF NOT EXISTS auth.webauthn_credentials")
+            .expect("credentials");
+        let challenges = sql
+            .find("CREATE TABLE IF NOT EXISTS auth.webauthn_challenges")
+            .expect("challenges");
+        assert!(
+            credentials < challenges,
+            "upstream creates credentials before challenges"
+        );
+    }
+
+    #[test]
+    fn sso_sessions_is_dropped_after_create() {
+        let create = SSO_SESSIONS
+            .find("CREATE TABLE IF NOT EXISTS auth.sso_sessions")
+            .expect("create");
+        let drop = SSO_SESSIONS
+            .find("DROP TABLE IF EXISTS auth.sso_sessions")
+            .expect("drop");
+        assert!(
+            create < drop,
+            "drop must follow create so the final shape matches the pin"
+        );
+    }
+
+    #[test]
     fn parent_keys_are_stubs_not_claimed_units() {
         assert!(SCHEMA.contains("CREATE TABLE IF NOT EXISTS auth.users"));
         assert!(SCHEMA.contains("CREATE TABLE IF NOT EXISTS auth.sessions"));
         assert!(
             !SCHEMA.contains("encrypted_password"),
-            "do not ship the full auth.users column list in this issue"
+            "do not ship the full auth.users column list as a stub"
         );
     }
 

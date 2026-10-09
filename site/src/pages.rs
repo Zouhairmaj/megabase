@@ -380,7 +380,7 @@ fn level_cards(metrics: &Metrics, detailed: bool) -> String {
             String::new()
         } else {
             format!(
-                r#"<div class="bar" aria-hidden="true"></div><p class="muted">{}</p>"#,
+                r#"<div class="level-foot"><div class="bar" aria-hidden="true"></div><p class="muted">{}</p></div>"#,
                 esc(&progress)
             )
         };
@@ -934,6 +934,49 @@ mod tests {
         assert!(html.contains("LEVEL 1 · NEXT"));
         assert!(!html.contains("40.0% · not started"));
         assert!(!html.contains("40% · not started"));
+        assert!(
+            html.contains(r#"class="level-foot""#),
+            "progress bar and status must share a footer so they pin together"
+        );
+        assert!(html.contains(r#"class="bar""#));
+        let foot_at = html.find("level-foot").expect("footer");
+        let bar_at = html.find(r#"class="bar""#).expect("bar");
+        assert!(
+            bar_at > foot_at,
+            "bar must live inside level-foot, not as a loose sibling of the description"
+        );
+        let detailed = level_cards(&live, true);
+        assert!(
+            !detailed.contains("level-foot"),
+            "status-page cards have no progress footer"
+        );
+    }
+
+    #[test]
+    fn level_card_css_pins_progress_to_the_bottom() {
+        let css = include_str!("../static/styles.css");
+        assert!(
+            css.contains(".level-card {\n  display: flex;\n  flex-direction: column;"),
+            "level cards are a flex column so leftover height can sit under the copy"
+        );
+        let foot = css.split(".level-foot {").nth(1).expect(".level-foot rule");
+        let foot_block = foot.split('}').next().expect("level-foot body");
+        assert!(
+            foot_block.contains("margin-top: auto"),
+            "level-foot must pin to the bottom of the card: {foot_block}"
+        );
+        assert!(
+            css.contains("min-height: 260px"),
+            "desktop cards share a floor height so the five-up grid lines up"
+        );
+        let mobile = css
+            .split("@media (max-width: 900px)")
+            .nth(1)
+            .expect("stacked breakpoint");
+        assert!(
+            mobile.contains(".level-card {\n    min-height: 0;\n    height: auto;\n  }"),
+            "stacked .level-card must drop the desktop min-height and keep natural flow"
+        );
     }
 
     #[test]
