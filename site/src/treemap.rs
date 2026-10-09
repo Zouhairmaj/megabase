@@ -349,20 +349,11 @@ fn pack_unit_grid(n: usize, x: f64, y: f64, w: f64, h: f64) -> Vec<(f64, f64, f6
     let grid_h = rows as f64 * s + (rows.saturating_sub(1) as f64) * PANEL_UNIT_GAP;
     let origin_x = x + ((w - grid_w) / 2.0).floor().max(0.0);
     let origin_y = y + ((h - grid_h) / 2.0).floor().max(0.0);
-    let rem = n % cols;
-    let last_row = rows.saturating_sub(1);
-    let last_count = if rem == 0 { cols } else { rem };
-    let last_offset = if rem == 0 {
-        0.0
-    } else {
-        ((cols - last_count) as f64 * (s + PANEL_UNIT_GAP) / 2.0).floor()
-    };
     let mut out = Vec::with_capacity(n);
     for i in 0..n {
         let r = i / cols;
         let c = i % cols;
-        let ox = if r == last_row { last_offset } else { 0.0 };
-        let sx = origin_x + ox + c as f64 * (s + PANEL_UNIT_GAP);
+        let sx = origin_x + c as f64 * (s + PANEL_UNIT_GAP);
         let sy = origin_y + r as f64 * (s + PANEL_UNIT_GAP);
         out.push((sx, sy, s));
     }
@@ -998,6 +989,47 @@ mod tests {
                 "functions",
                 "pooler"
             ]
+        );
+    }
+
+    #[test]
+    fn pack_last_row_is_left_aligned_and_grid_is_centered() {
+        let body_x = 10.0;
+        let body_y = 20.0;
+        let body_w = 40.0;
+        let body_h = 100.0;
+        let n = 5;
+        let cells = pack_unit_grid(n, body_x, body_y, body_w, body_h);
+        assert_eq!(cells.len(), n);
+        let mut rows: Vec<Vec<(f64, f64, f64)>> = Vec::new();
+        for cell in cells {
+            match rows.last_mut() {
+                Some(row) if (row[0].1 - cell.1).abs() < 0.01 => row.push(cell),
+                _ => rows.push(vec![cell]),
+            }
+        }
+        assert!(rows.len() >= 2, "need a leftover last row, got {rows:?}");
+        let first = &rows[0];
+        let last = rows.last().unwrap();
+        assert!(
+            last.len() < first.len(),
+            "last row should be partial: first={} last={}",
+            first.len(),
+            last.len()
+        );
+        for (i, cell) in last.iter().enumerate() {
+            assert!(
+                (cell.0 - first[i].0).abs() < 0.01,
+                "last row col {i} must share x with the column above"
+            );
+        }
+        let s = first[0].2;
+        let cols = first.len();
+        let grid_w = cols as f64 * s + (cols.saturating_sub(1) as f64) * PANEL_UNIT_GAP;
+        let expected_origin = body_x + ((body_w - grid_w) / 2.0).floor().max(0.0);
+        assert!(
+            (first[0].0 - expected_origin).abs() < 0.01,
+            "grid should stay centered in the block"
         );
     }
 
