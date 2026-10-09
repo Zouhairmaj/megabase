@@ -3,7 +3,7 @@ title: Configuration
 description: MEGABASE_HOST, MEGABASE_PORT, DATABASE_URL, JWT_SECRET — what each variable does.
 section: get-started
 order: 3
-card: Listen address and JWT_SECRET for HS256 verification. Auth and REST routes are still 501.
+card: Listen address, JWT_SECRET, and the GoTrue env flags the first Auth admin routes honor.
 ---
 
 # Configuration
@@ -16,8 +16,11 @@ other names. There is no `.env.example` in this tree; the judge uses
 | --- | --- |
 | MEGABASE_HOST | Bind address. Default `0.0.0.0`. |
 | MEGABASE_PORT | HTTP port. Default `8000`. |
-| DATABASE_URL | PostgreSQL connection string. PostgreSQL stays external; Megabase does not bundle it. When set, startup installs the Auth SQL objects listed in [`specs/auth/database.md`](../specs/auth/database.md). The statements are idempotent. Connect plus SQL must finish within 30 seconds or the process exits. If install fails, the process exits. Omit it to skip schema install (the HTTP server still starts). The judge sets this to the dedicated `megabase` database (`just judge-up` / CI), never to the official stack's `postgres` database. |
-| JWT_SECRET | HS256 secret used to verify JWTs (same name as the self-hosted demo stack). Raw UTF-8 bytes, not base64, and not a default. Omit it and the process still starts so `/_megabase/health` works; verification then fails with `Server lacks JWT secret`. A present value shorter than 32 bytes, including empty, aborts startup before listen: `JWT_SECRET is N bytes; HMAC-SHA-256 keys shorter than 32 bytes are disabled`. Length is bytes, not an entropy check. |
+| DATABASE_URL | PostgreSQL connection string. PostgreSQL stays external; Megabase does not bundle it. When set, startup installs the Auth SQL objects listed in [`specs/auth/database.md`](../specs/auth/database.md). The statements are idempotent. Connect plus SQL must finish within 30 seconds or the process exits. If install fails, the process exits. Served admin routes that read or write Auth tables use this URL per request and abort the connect after 30 seconds with 500. Omit it to skip schema install (the HTTP server still starts; admin calls that need the database then return 500). The judge sets this to the dedicated `megabase` database (`just judge-up` / CI), never to the official stack's `postgres` database. |
+| JWT_SECRET | HS256 secret used to verify JWTs (same name as the self-hosted demo stack). Raw UTF-8 bytes, not base64, and not a default. Omit it and the process still starts so `/_megabase/health` works; verification then fails with `Server lacks JWT secret`. A present value shorter than 32 bytes, including empty, aborts startup before listen: `JWT_SECRET is N bytes; HMAC-SHA-256 keys shorter than 32 bytes are disabled`. Length is bytes, not an entropy check. Required for `/auth/v1/admin` (a missing Bearer token is still 401). |
+| GOTRUE_JWT_ADMIN_ROLES | Comma-separated JWT `role` values that may call `/auth/v1/admin`. Default `service_role,supabase_admin`, same as GoTrue. |
+| GOTRUE_OAUTH_SERVER_ENABLED | GoTrue flag. Default `false`. When false, admin OAuth client routes return 404 `feature_disabled`. |
+| GOTRUE_CUSTOM_OAUTH_ENABLED | GoTrue flag. Default `true`. When false, admin custom-provider routes return 404 `feature_disabled`. |
 
 ## JWT verification
 
@@ -33,8 +36,10 @@ Rejected: forged signatures, expired `exp`, `alg=none` (or any algorithm
 other than `HS256`), and HMAC keys shorter than 32 bytes. Asymmetric keys
 and JWKS rotation are not implemented.
 
-Auth `/auth/v1` and REST `/rest/v1` still answer 501 until those units are
-ported; they will call this verifier instead of copying JWT logic.
+The first `/auth/v1/admin` GET/DELETE batch (issue #6, spec
+[`specs/auth/admin.md`](../specs/auth/admin.md)) verifies the Bearer token
+with this secret. Other Auth and REST routes still answer 501 until those
+units are ported.
 
 ## PostgreSQL TLS
 
@@ -59,7 +64,9 @@ Same URL layout as the Supabase gateway ([ADR 0002](adr/0002-gateway-layout.md))
 - `/functions/v1`
 - `/pg` (Postgres Meta)
 
-Until a unit passes the judge, each of those answers HTTP 501 with
-`code: MEGABASE_NOT_IMPLEMENTED`.
+Until a unit is served, each of those answers HTTP 501 with
+`code: MEGABASE_NOT_IMPLEMENTED`. Served Auth admin routes in
+[`specs/auth/admin.md`](../specs/auth/admin.md) return GoTrue statuses
+instead.
 
 How to build or run the container image is in [Install](install.md).
