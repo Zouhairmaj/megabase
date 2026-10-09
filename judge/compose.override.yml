@@ -78,7 +78,7 @@ services:
     environment:
       MEGABASE_PORT: "8000"
       JWT_SECRET: ${JWT_SECRET}
-      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD}@db:${POSTGRES_PORT}/${POSTGRES_DB}
+      DATABASE_URL: postgres://supabase_admin:${POSTGRES_PASSWORD}@db:${POSTGRES_PORT}/${POSTGRES_DB}
     ports:
       - "8100:8000"
     healthcheck:
