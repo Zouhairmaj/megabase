@@ -117,8 +117,18 @@ jobs:
           ATTEMPTS="${LOCKFILE_CHECK_ATTEMPTS:-60}"
           SLEEP_SECS="${LOCKFILE_CHECK_SLEEP_SECONDS:-6}"
 
-          if [ "${HAS_RELEASE_PLEASE_TOKEN}" = "true" ] && [ "${PUSHED:-false}" != "true" ]; then
-            echo "No lockfile commit; RELEASE_PLEASE_TOKEN pushes already trigger workflows."
+          missing_required() {
+            local CHECK_RUNS
+            CHECK_RUNS="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${SHA}/check-runs?per_page=100")"
+            jq -r --argjson required "${REQUIRED}" '
+              [.check_runs[].name] as $started
+              | $required - $started
+              | join(", ")
+            ' <<< "${CHECK_RUNS}"
+          }
+
+          if [ -z "$(missing_required)" ]; then
+            echo "Required checks already started on ${SHA}."
             exit 0
           fi
 
@@ -128,8 +138,11 @@ jobs:
           # that ref's workflow files lack workflow_dispatch, fall back to
           # Lockfile required checks on the default branch, which reports
           # the same check names onto this SHA via the Checks API.
-          if [ "${HAS_RELEASE_PLEASE_TOKEN}" != "true" ]; then
-            echo "RELEASE_PLEASE_TOKEN is unset; dispatching required checks for ${SHA} on ${BRANCH}"
+          # Dispatch whenever checks are missing, including a rerun after
+          # RELEASE_PLEASE_TOKEN is set but the existing head was pushed
+          # with GITHUB_TOKEN (no new lockfile commit).
+          if [ "${HAS_RELEASE_PLEASE_TOKEN}" != "true" ] || [ "${PUSHED:-false}" != "true" ]; then
+            echo "Required checks missing on ${SHA}; dispatching (RELEASE_PLEASE_TOKEN=${HAS_RELEASE_PLEASE_TOKEN} pushed=${PUSHED:-false})"
             if gh workflow run ci.yml --repo "${GITHUB_REPOSITORY}" --ref "${BRANCH}" \
                && gh workflow run bencher.yml --repo "${GITHUB_REPOSITORY}" --ref "${BRANCH}" \
                && gh workflow run judge.yml --repo "${GITHUB_REPOSITORY}" --ref "${BRANCH}"; then

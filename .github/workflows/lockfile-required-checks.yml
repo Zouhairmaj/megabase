@@ -18,8 +18,6 @@ on:
 
 permissions:
   contents: read
-  checks: write
-  pull-requests: write
 
 concurrency:
   group: lockfile-required-checks-${{ inputs.sha }}
@@ -33,7 +31,32 @@ env:
   TARGET_BRANCH: ${{ inputs.branch }}
 
 jobs:
+  validate-target:
+    name: Validate target
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Require release-please branch head
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          case "${TARGET_BRANCH}" in
+            release-please--branches--*) ;;
+            *)
+              echo "::error::Target branch must be a release-please branch, got ${TARGET_BRANCH}"
+              exit 1
+              ;;
+          esac
+          branch_sha="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/${TARGET_BRANCH}" --jq '.object.sha')"
+          if [ "${branch_sha}" != "${TARGET_SHA}" ]; then
+            echo "::error::SHA ${TARGET_SHA} is not the head of ${TARGET_BRANCH} (head is ${branch_sha})"
+            exit 1
+          fi
+
   build:
+    needs: validate-target
     name: Lockfile Build
     runs-on: ubuntu-latest
     permissions:
@@ -85,6 +108,7 @@ jobs:
             -f conclusion="${CONCLUSION}"
 
   llvm-cov:
+    needs: validate-target
     name: Lockfile Codecov
     runs-on: ubuntu-latest
     permissions:
@@ -143,6 +167,7 @@ jobs:
             -f conclusion="${CONCLUSION}"
 
   bencher:
+    needs: validate-target
     name: Lockfile Bencher
     runs-on: ubuntu-latest
     permissions:
@@ -224,6 +249,7 @@ jobs:
             -f conclusion="${CONCLUSION}"
 
   guard:
+    needs: validate-target
     name: Lockfile Protected paths
     runs-on: ubuntu-latest
     permissions:
@@ -280,6 +306,7 @@ jobs:
             -f conclusion="${CONCLUSION}"
 
   judge:
+    needs: validate-target
     name: Lockfile Judge
     runs-on: ubuntu-latest
     timeout-minutes: 45
