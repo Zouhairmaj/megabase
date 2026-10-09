@@ -15,7 +15,6 @@ Extends the root `AGENTS.md`; it does not relax it.
 - Tests live in the crate (`src/` unit tests, `tests/` integration tests).
   `cargo test` has no network or Docker; anything that needs the reference
   stack is a judge case.
-- Iterate with `cargo test -p <crate>` and
-  `cargo clippy -p <crate> --all-targets --locked -- -D warnings`.
+- Iteration commands are the root `AGENTS.md` Rust workflow.
 - `megabase`, `megabase-core` and `megabase-server` must build on Rust 1.89
   (CI MSRV job).
