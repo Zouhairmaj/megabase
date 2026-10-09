@@ -66,10 +66,7 @@ A unit is **done** only when it is conformant.
 Same endpoints, request syntax, status, JSON shape, error codes, headers
 the API documents (`content-type`, `content-range`, `location`,
 `preference-applied`), and the database objects apps and RLS depend on.
-The judge checks those objects on a dedicated Megabase database against
-the official stack: table/function catalogs (including constraints),
-and the per-case `auth.users` / `public.todos` row delta after mutating
-HTTP cases. Performance may differ; correctness may not.
+Performance may differ; correctness may not.
 
 Intentional divergences (none today) would be listed here and in
 `PROGRESS.md`.
@@ -93,7 +90,7 @@ In scope: **1024 units**. Excluded: **76** upstream items.
 | REST | query-params | 1 | 8 | 0 | 0 | 0 |
 | REST | resources | 1 | 10 | 0 | 0 | 0 |
 | REST | rpc | 1 | 4 | 0 | 0 | 0 |
-| Auth | admin | 1–2 | 28 | 0 | 0 | 0 |
+| Auth | admin | 1–2 | 28 | 10 | 10 | 0 |
 | Auth | database | 1 | 32 | 32 | 30 | 0 |
 | Auth | endpoints | 1–2 | 13 | 0 | 0 | 0 |
 | Auth | factors | 2 | 9 | 0 | 0 | 0 |
