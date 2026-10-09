@@ -360,11 +360,10 @@ mod tests {
         }
     }
 
-    #[test]
-    fn renders_home_card_with_bundled_fonts() {
+    fn render_home_card(load_fonts: bool) -> resvg::tiny_skia::Pixmap {
         let site_root = Path::new(env!("CARGO_MANIFEST_DIR"));
         let mut opt = resvg::usvg::Options::default();
-        {
+        if load_fonts {
             let db = opt.fontdb_mut();
             for weight in ["Regular", "Bold"] {
                 let path = site_root.join(format!("og-fonts/JetBrainsMono-{weight}.ttf"));
@@ -378,11 +377,19 @@ mod tests {
             resvg::tiny_skia::Transform::default(),
             &mut pixmap.as_mut(),
         );
-        assert!(
-            pixmap.data().iter().any(|&b| b != 0),
-            "harfrust/skrifa stack should paint the home card"
+        pixmap
+    }
+
+    #[test]
+    fn renders_home_card_with_bundled_fonts() {
+        let with_fonts = render_home_card(true);
+        let without_fonts = render_home_card(false);
+        assert_ne!(
+            with_fonts.data(),
+            without_fonts.data(),
+            "harfrust/skrifa must paint glyphs the unfonted render lacks"
         );
-        assert!(pixmap.encode_png().is_ok());
+        assert!(with_fonts.encode_png().is_ok());
     }
 
     #[test]
