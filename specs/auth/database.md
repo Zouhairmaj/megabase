@@ -231,5 +231,7 @@ Install runs at process start when `DATABASE_URL` is set. Failure aborts
 startup (GOAL.md fail loudly). Missing `DATABASE_URL` skips install; HTTP
 still serves. Objects are created in one transaction. After `ADD COLUMN IF
 NOT EXISTS`, required columns get `SET NOT NULL` so an older table is not
-left nullable. `sslmode=require` / `verify-*` abort; the connection is
+left nullable. `sslmode` is parsed by `tokio-postgres` (the same parser as
+the connection). `sslmode=require` aborts as TLS-required; `verify-*` is
+an invalid value for this client and also aborts. The connection is
 cleartext.

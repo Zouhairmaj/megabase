@@ -23,9 +23,9 @@ Omit `DATABASE_URL` to skip schema install (the HTTP server still starts).
 ## PostgreSQL TLS
 
 The installer connects **without TLS** (`NoTls`). That is the local judge
-database. `sslmode=require`, `verify-ca`, and `verify-full` abort startup
-instead of sending the password in the clear to a server that expected TLS.
-Use a Unix socket, an internal network, or `sslmode=disable`.
+database. `sslmode=require` aborts startup instead of sending the password
+in the clear. `verify-ca` and `verify-full` are not accepted by this client
+and also abort. Use a Unix socket, an internal network, or `sslmode=disable`.
 
 ## Listen address
 

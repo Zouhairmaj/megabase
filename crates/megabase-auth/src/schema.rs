@@ -3,7 +3,9 @@
 //! Ported from supabase/auth migrations (MIT), pin v2.197.0. HTTP `/auth/v1`
 //! is unchanged; this module is the database compatibility surface.
 
-use tokio_postgres::NoTls;
+use std::str::FromStr;
+use tokio_postgres::config::SslMode;
+use tokio_postgres::{Config, NoTls};
 
 const SCHEMA: &str = include_str!("../sql/00_schema.sql");
 
@@ -75,29 +77,12 @@ pub enum SchemaError {
     Postgres(#[from] tokio_postgres::Error),
 }
 
-fn sslmode(database_url: &str) -> Option<String> {
-    let lower = database_url.to_ascii_lowercase();
-    if lower.contains("://") {
-        let query = lower.split_once('?')?.1;
-        let query = query.split('#').next().unwrap_or(query);
-        named_param(query.split('&'), "sslmode")
-    } else {
-        named_param(lower.split_whitespace(), "sslmode")
-    }
-}
-
-fn named_param<'a>(mut pairs: impl Iterator<Item = &'a str>, key: &str) -> Option<String> {
-    pairs.find_map(|pair| {
-        let (k, v) = pair.split_once('=')?;
-        (k == key && !v.is_empty()).then(|| v.to_string())
-    })
-}
-
 fn require_cleartext_postgres(database_url: &str) -> Result<(), SchemaError> {
-    if let Some(mode) = sslmode(database_url) {
-        if matches!(mode.as_str(), "require" | "verify-ca" | "verify-full") {
-            return Err(SchemaError::TlsRequired { mode });
-        }
+    let config = Config::from_str(database_url)?;
+    if config.get_ssl_mode() == SslMode::Require {
+        return Err(SchemaError::TlsRequired {
+            mode: "require".into(),
+        });
     }
     Ok(())
 }
@@ -107,7 +92,8 @@ fn require_cleartext_postgres(database_url: &str) -> Result<(), SchemaError> {
 /// Idempotent. Safe to run against a database the official Auth migrations
 /// already applied. Aborts startup on error so a half-installed schema is
 /// not served as if it were complete. Connects without TLS; `sslmode=require`
-/// (and verify-*) fail instead of sending credentials in the clear.
+/// fails instead of sending credentials in the clear. `verify-*` is not a
+/// valid `tokio-postgres` sslmode and fails at parse.
 pub async fn install_schema(database_url: &str) -> Result<(), SchemaError> {
     require_cleartext_postgres(database_url)?;
     let (client, connection) = tokio_postgres::connect(database_url, NoTls).await?;
@@ -206,9 +192,25 @@ mod tests {
         );
         assert!(require_cleartext_postgres("postgres://u:sslmode=require@h/db").is_ok());
         assert!(require_cleartext_postgres("application_name=sslmode=require host=h").is_ok());
-        assert!(require_cleartext_postgres("postgres://u@h/db?sslmode=require").is_err());
+        match require_cleartext_postgres("postgres://u@h/db?sslmode=require") {
+            Err(SchemaError::TlsRequired { mode }) => assert_eq!(mode, "require"),
+            other => panic!("{other:?}"),
+        }
         assert!(require_cleartext_postgres("postgres://u@h/db?foo=1&sslmode=require").is_err());
         assert!(require_cleartext_postgres("postgres://u@h/db?sslmode=verify-full").is_err());
         assert!(require_cleartext_postgres("host=h sslmode=verify-ca user=u").is_err());
+        let err = require_cleartext_postgres("postgres://u@h/db?sslmode=require").unwrap_err();
+        assert!(err.to_string().contains("sslmode=require"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn install_schema_rejects_tls_before_connect() {
+        let err = install_schema("postgres://u@h/db?sslmode=require")
+            .await
+            .expect_err("must not connect");
+        match err {
+            SchemaError::TlsRequired { mode } => assert_eq!(mode, "require"),
+            other => panic!("{other:?}"),
+        }
     }
 }
