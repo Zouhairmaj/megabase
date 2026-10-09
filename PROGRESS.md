@@ -124,7 +124,8 @@ waiting on a human.
     errors (`value at path package.version is not tagged`). Config uses
     `release-type: simple` and bumps `[workspace.package].version` only.
     `bootstrap-sha` is Day 0 so the first release PR is Phase 0 at
-    `0.1.0` (`release-as`). Drop `release-as` when that PR lands.
+    `0.1.0` (`release-as`). The v0.1.0 release PR must delete
+    `release-as` before it merges.
     Container `FROM` lines are pinned by digest.
 
 ## Tracking
@@ -141,7 +142,7 @@ None.
 
 ### Follow-ups
 
-- [ ] After release-please opens the v0.1.0 PR: delete `"release-as": "0.1.0"` from `release-please-config.json` **in that PR** (or a same-day follow-up). The key is required to bootstrap Phase 0 as `0.1.0`; leaving it would force every later release to `0.1.0`. Tracked from PR #132.
+- [ ] When release-please opens the v0.1.0 PR: delete `"release-as": "0.1.0"` from `release-please-config.json` **in that PR before it merges**. The merge retriggers Release on `main`; leaving the key would propose another `0.1.0`. Tracked from PR #132.
 
 ### Blocked items
 
