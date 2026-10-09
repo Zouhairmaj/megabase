@@ -89,26 +89,35 @@ fn wait(args: &Args, keys: &Keys) -> Result<()> {
     let agent = ureq::AgentBuilder::new()
         .timeout(Duration::from_secs(5))
         .build();
+    // The pinned Kong config serves the PostgREST OpenAPI root (`/rest/v1/`
+    // exactly) to the admin consumer only, so that check needs the
+    // service_role key; anon gets 403 there.
     let checks = [
-        format!("{}/auth/v1/health", args.reference),
-        format!("{}/rest/v1/", args.reference),
-        format!("{}/_megabase/health", args.megabase),
+        (format!("{}/auth/v1/health", args.reference), &keys.anon),
+        (format!("{}/rest/v1/", args.reference), &keys.service_role),
+        (format!("{}/_megabase/health", args.megabase), &keys.anon),
     ];
     let deadline = Instant::now() + Duration::from_secs(args.timeout);
-    for url in &checks {
+    for (url, key) in &checks {
         loop {
-            let ok = agent
+            let last = match agent
                 .get(url)
-                .set("apikey", &keys.anon)
-                .set("Authorization", &format!("Bearer {}", keys.anon))
+                .set("apikey", key)
+                .set("Authorization", &format!("Bearer {key}"))
                 .call()
-                .is_ok_and(|r| r.status() == 200);
-            if ok {
-                eprintln!("ready: {url}");
-                break;
-            }
+            {
+                Ok(r) if r.status() == 200 => {
+                    eprintln!("ready: {url}");
+                    break;
+                }
+                Ok(r) | Err(ureq::Error::Status(_, r)) => format!("status {}", r.status()),
+                Err(err) => err.to_string(),
+            };
             if Instant::now() > deadline {
-                bail!("timed out after {}s waiting for {url}", args.timeout);
+                bail!(
+                    "timed out after {}s waiting for {url} (last: {last})",
+                    args.timeout
+                );
             }
             std::thread::sleep(Duration::from_secs(2));
         }
