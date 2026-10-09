@@ -14,8 +14,11 @@ the official stack already migrated.
 Parent keys: several tables reference `auth.users(id)` and
 `auth.sessions(id)`. The installer first creates those parent tables with
 only the columns the foreign keys need, then issue #12 upgrades them to
-the final column lists. `auth.aal_level` is created because
-`auth.sessions.aal` uses it.
+the final column lists. The `auth.users` stub starts with `instance_id`
+then `id` so attnum 1 matches
+`migrations/00_init_auth_schema.up.sql`. `CREATE TABLE IF NOT EXISTS`
+cannot reorder an already-created table. `auth.aal_level` is created
+because `auth.sessions.aal` uses it.
 
 ---
 
@@ -138,7 +141,6 @@ Final shape: rename `id` → `provider_id` and UUID PK
 
 | Column | Type | Notes |
 |---|---|---|
-| id | uuid | PK, `DEFAULT gen_random_uuid()` |
 | provider_id | text | NOT NULL |
 | user_id | uuid | NOT NULL, FK → `auth.users(id)` ON DELETE CASCADE |
 | identity_data | jsonb | NOT NULL |
@@ -147,11 +149,17 @@ Final shape: rename `id` → `provider_id` and UUID PK
 | created_at | timestamptz | NULL |
 | updated_at | timestamptz | NULL |
 | email | text | `GENERATED ALWAYS AS (lower(identity_data->>'email')) STORED` |
+| id | uuid | PK, `DEFAULT gen_random_uuid()` |
 
-Unique `(provider_id, provider)` as `identities_provider_id_provider_unique`.
+Pinned catalog attnum order is `provider_id` … `updated_at`, then `email`,
+then uuid `id` (`20221215195800` before `20231117164230`). Unique
+`(provider_id, provider)` as `identities_provider_id_provider_unique`.
 Indexes: `identities_user_id_idx`, `identities_email_idx` (`text_pattern_ops`).
 Comments as in those migrations. Installer must **not** `RENAME` `id`: that
-breaks a database that already has the UUID primary key.
+breaks a database that already has the UUID primary key. An empty table
+whose `email` attnum is after `id` is locked `ACCESS EXCLUSIVE` only when
+that order is seen, rechecked, then dropped if `EXISTS` finds no rows; a
+non-empty or already-ordered table keeps its existing attnums.
 
 ---
 
@@ -488,7 +496,11 @@ become `text` (`20230116124310`); `deleted_at` (`20230116124412`);
 and 22.
 
 Installer must **not** `RENAME` `confirmed_at` or `email_change_token`
-when the final names already exist.
+when the final names already exist. Those legacy renames run before
+`ADD COLUMN IF NOT EXISTS` for `email_confirmed_at` and
+`email_change_token_new`, so the add does not create empty replacements
+and skip the rename. After the stub, `ADD COLUMN` follows pin attnum
+order: `is_sso_user` before `deleted_at` before `is_anonymous`.
 
 | Column | Type | Notes |
 |---|---|---|
@@ -524,8 +536,8 @@ when the final names already exist.
 | banned_until | timestamptz | NULL |
 | reauthentication_token | varchar(255) | NULL DEFAULT `''` |
 | reauthentication_sent_at | timestamptz | NULL |
-| deleted_at | timestamptz | NULL |
 | is_sso_user | boolean | NOT NULL DEFAULT false |
+| deleted_at | timestamptz | NULL |
 | is_anonymous | boolean | NOT NULL DEFAULT false |
 
 Indexes: `users_instance_id_idx`; `users_instance_id_email_idx` on
@@ -565,9 +577,17 @@ lines 10 and 27.
 | ip | inet | NULL |
 | tag | text | NULL |
 | oauth_client_id | uuid | NULL, FK → `auth.oauth_clients(id)` ON DELETE CASCADE |
-| scopes | text | NULL, `char_length <= 4096` |
 | refresh_token_hmac_key | text | NULL |
 | refresh_token_counter | bigint | NULL |
+| scopes | text | NULL, `char_length <= 4096` |
+
+Pinned catalog attnum order is `oauth_client_id`, then
+`refresh_token_hmac_key` / `refresh_token_counter`, then `scopes`.
+An empty table with `scopes` before the refresh-token columns is locked
+`ACCESS EXCLUSIVE`, checked with `EXISTS`, then dropped and recreated
+(`refresh_tokens_session_id_fkey` and `mfa_amr_claims_session_id_fkey`
+are dropped and added again). A non-empty table keeps its existing
+attnums.
 
 Comment: `Auth: Stores session data associated to a user.` RLS on.
 

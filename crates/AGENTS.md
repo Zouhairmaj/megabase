@@ -17,5 +17,8 @@ Extends the root `AGENTS.md`; it does not relax it.
   stack is a judge case.
 - Iterate with `cargo test -p <crate>` and
   `cargo clippy -p <crate> --all-targets --locked -- -D warnings`.
+- Parser and JWT changes should stay panic-free on arbitrary input; the
+  cargo-fuzz targets in `fuzz/` (`jwt`, `gateway_http`, `rest_query`) exist
+  to catch that. See the root `AGENTS.md` and `docs/contributing.md`.
 - `megabase`, `megabase-core` and `megabase-server` must build on Rust 1.89
   (CI MSRV job).

@@ -41,7 +41,8 @@ jobs:
 
       # Trusted event SHA only. Do not download gh-pages or a
       # workflow_run artifact here: this job saves the default-branch
-      # Rust cache. Live badges are published by pages-badges.yml.
+      # Rust cache (save-if is a push to main). Live badges are
+      # published by pages-badges.yml.
       - name: Cache site workspace
         uses: ./.github/actions/rust-cache
         with:

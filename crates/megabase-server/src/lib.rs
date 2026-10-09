@@ -40,6 +40,37 @@ pub const GATEWAY_ROUTES: &[(&str, &str)] = &[
     ("/pg/", megabase_meta::COMPONENT),
 ];
 
+/// First Kong prefix that is a plain string prefix of `path`.
+///
+/// `None` is Studio, like Kong's catch-all `dashboard` route. `/auth/v1`
+/// without the trailing slash is therefore Studio.
+#[must_use]
+pub fn match_gateway_route(path: &str) -> Option<(&'static str, &'static str)> {
+    GATEWAY_ROUTES
+        .iter()
+        .copied()
+        .find(|(prefix, _)| path.starts_with(prefix))
+}
+
+/// Parse `raw` as an HTTP request-target (origin-form or absolute-form) and
+/// return the Kong component that would handle it.
+///
+/// Rejects non-UTF-8, NUL, and CR/LF so a request-target cannot smuggle a
+/// second line. This is the surface the `gateway_http` cargo-fuzz target hits.
+#[must_use]
+pub fn gateway_component_for_target(raw: &[u8]) -> Option<&'static str> {
+    let target = std::str::from_utf8(raw).ok()?;
+    if target.bytes().any(|b| matches!(b, b'\0' | b'\r' | b'\n')) {
+        return None;
+    }
+    let uri = target.parse::<axum::http::Uri>().ok()?;
+    Some(
+        match_gateway_route(uri.path())
+            .map(|(_, component)| component)
+            .unwrap_or(megabase_studio::COMPONENT),
+    )
+}
+
 #[derive(Clone)]
 struct Gateway {
     routes: Arc<Vec<(&'static str, Router)>>,
@@ -77,11 +108,14 @@ pub fn create_router() -> Router {
 
 async fn dispatch(State(gateway): State<Gateway>, request: Request) -> Response {
     let path = request.uri().path();
-    let router = gateway
-        .routes
-        .iter()
-        .find(|(prefix, _)| path.starts_with(prefix))
-        .map(|(_, router)| router.clone())
+    let router = match_gateway_route(path)
+        .and_then(|(prefix, _)| {
+            gateway
+                .routes
+                .iter()
+                .find(|(p, _)| *p == prefix)
+                .map(|(_, router)| router.clone())
+        })
         .unwrap_or_else(|| gateway.fallback.clone());
     match router.oneshot(request).await {
         Ok(response) => response,
@@ -111,4 +145,43 @@ pub async fn run(config: Config) -> std::io::Result<()> {
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     info!("megabase listening on {}", listener.local_addr()?);
     axum::serve(listener, create_router()).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn match_gateway_route_uses_kong_prefix() {
+        assert_eq!(
+            match_gateway_route("/rest/v1/todos"),
+            Some(("/rest/v1/", megabase_rest::COMPONENT))
+        );
+        assert_eq!(
+            match_gateway_route("/auth/v1/token"),
+            Some(("/auth/v1/", megabase_auth::COMPONENT))
+        );
+        assert_eq!(match_gateway_route("/rest/v1"), None);
+        assert_eq!(match_gateway_route("/auth/v1"), None);
+        assert_eq!(match_gateway_route("/"), None);
+    }
+
+    #[test]
+    fn gateway_component_for_target_parses_origin_form() {
+        assert_eq!(
+            gateway_component_for_target(b"/auth/v1/token"),
+            Some(megabase_auth::COMPONENT)
+        );
+        assert_eq!(
+            gateway_component_for_target(b"/rest/v1/todos?id=eq.1"),
+            Some(megabase_rest::COMPONENT)
+        );
+        assert_eq!(
+            gateway_component_for_target(b"/rest/v1"),
+            Some(megabase_studio::COMPONENT)
+        );
+        assert_eq!(gateway_component_for_target(b"\n/rest/v1/"), None);
+        assert_eq!(gateway_component_for_target(b"/rest/v1/\r"), None);
+        assert_eq!(gateway_component_for_target(&[0xff, 0xfe]), None);
+    }
 }

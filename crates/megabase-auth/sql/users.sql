@@ -49,44 +49,14 @@ CREATE TABLE IF NOT EXISTS auth.users (
     banned_until timestamptz NULL,
     reauthentication_token varchar(255) NULL DEFAULT '',
     reauthentication_sent_at timestamptz NULL,
-    deleted_at timestamptz NULL,
     is_sso_user boolean NOT NULL DEFAULT false,
+    deleted_at timestamptz NULL,
     is_anonymous boolean NOT NULL DEFAULT false,
     CONSTRAINT users_pkey PRIMARY KEY (id)
 );
 
-ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS instance_id uuid;
-ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS aud varchar(255);
-ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS role varchar(255);
-ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS email varchar(255);
-ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS encrypted_password varchar(255);
-ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS invited_at timestamptz;
-ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS confirmation_token varchar(255);
-ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS confirmation_sent_at timestamptz;
-ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS recovery_token varchar(255);
-ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS recovery_sent_at timestamptz;
-ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS email_change varchar(255);
-ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS email_change_sent_at timestamptz;
-ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS last_sign_in_at timestamptz;
-ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS raw_app_meta_data jsonb;
-ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS raw_user_meta_data jsonb;
-ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS is_super_admin bool;
-ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS created_at timestamptz;
-ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS updated_at timestamptz;
-ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS phone text;
-ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS phone_confirmed_at timestamptz;
-ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS phone_change text DEFAULT '';
-ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS phone_change_token varchar(255) DEFAULT '';
-ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS phone_change_sent_at timestamptz;
-ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS email_change_token_current varchar(255) DEFAULT '';
-ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS email_change_confirm_status smallint DEFAULT 0;
-ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS banned_until timestamptz;
-ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS reauthentication_token varchar(255) DEFAULT '';
-ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS reauthentication_sent_at timestamptz;
-ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS deleted_at timestamptz;
-ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS is_sso_user boolean NOT NULL DEFAULT false;
-ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS is_anonymous boolean NOT NULL DEFAULT false;
-
+-- Rename legacy confirmed_at / email_change_token before ADD COLUMN so
+-- IF NOT EXISTS does not create empty replacements and skip the rename.
 DO $$
 BEGIN
     IF NOT EXISTS (
@@ -112,8 +82,6 @@ BEGIN
     END IF;
 END $$;
 
-ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS email_confirmed_at timestamptz;
-
 DO $$
 BEGIN
     IF NOT EXISTS (
@@ -133,7 +101,43 @@ BEGIN
     END IF;
 END $$;
 
+-- ADD order matches pin attnums after the stub's instance_id, id
+-- (is_sso_user from 20221215195500 before deleted_at from 20230116124412).
+ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS instance_id uuid;
+ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS aud varchar(255);
+ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS role varchar(255);
+ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS email varchar(255);
+ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS encrypted_password varchar(255);
+ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS email_confirmed_at timestamptz;
+ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS invited_at timestamptz;
+ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS confirmation_token varchar(255);
+ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS confirmation_sent_at timestamptz;
+ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS recovery_token varchar(255);
+ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS recovery_sent_at timestamptz;
 ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS email_change_token_new varchar(255);
+ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS email_change varchar(255);
+ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS email_change_sent_at timestamptz;
+ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS last_sign_in_at timestamptz;
+ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS raw_app_meta_data jsonb;
+ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS raw_user_meta_data jsonb;
+ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS is_super_admin bool;
+ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS created_at timestamptz;
+ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS updated_at timestamptz;
+ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS phone text;
+ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS phone_confirmed_at timestamptz;
+ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS phone_change text DEFAULT '';
+ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS phone_change_token varchar(255) DEFAULT '';
+ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS phone_change_sent_at timestamptz;
+ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS confirmed_at timestamptz
+    GENERATED ALWAYS AS (LEAST (users.email_confirmed_at, users.phone_confirmed_at)) STORED;
+ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS email_change_token_current varchar(255) DEFAULT '';
+ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS email_change_confirm_status smallint DEFAULT 0;
+ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS banned_until timestamptz;
+ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS reauthentication_token varchar(255) DEFAULT '';
+ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS reauthentication_sent_at timestamptz;
+ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS is_sso_user boolean NOT NULL DEFAULT false;
+ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS deleted_at timestamptz;
+ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS is_anonymous boolean NOT NULL DEFAULT false;
 
 DO $$
 BEGIN
