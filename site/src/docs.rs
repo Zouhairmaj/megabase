@@ -378,7 +378,7 @@ pub fn status_table(metrics: &Metrics) -> String {
             r#"<div class="data-row" role="row"><span class="scope-name">{name}</span><span>{path}</span><span>{levels}</span><span>{units}</span><span>{conf}</span><span class="tag">{tag}</span></div>"#,
             name = esc(short_name(row)),
             path = esc(row.path),
-            levels = esc(row.levels.trim_start_matches('L')),
+            levels = esc(&row.levels.replace('L', "")),
             tag = metrics::status_tag(block),
         ));
     }

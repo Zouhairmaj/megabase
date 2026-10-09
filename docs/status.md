@@ -3,7 +3,7 @@ title: API status per service
 description: Units and conformance for REST, Auth, Storage, Realtime, Functions, Pooler, Meta and Studio.
 section: use
 order: 2
-card: Units and conformance for REST, Auth, Storage, Realtime, Functions, Pooler, Meta and Studio. All 0 today.
+card: Units and conformance for REST, Auth, Storage, Realtime, Functions, Pooler, Meta and Studio. Counts come from coverage/summary.json.
 tag: status
 ---
 
