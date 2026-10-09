@@ -367,6 +367,11 @@ async fn memory_signup(
             guard.confirm_existing(&cmd)?,
         )));
     }
+    // `users_email_partial_key` is unique on email for every non-SSO user,
+    // not per audience. A different `aud` still collides in PostgreSQL.
+    if guard.non_sso_email_elsewhere(&cmd.email, &cmd.aud) {
+        return Ok(SignupResult::AlreadyExists);
+    }
     Ok(SignupResult::Created(Box::new(
         guard.insert_new(&cmd, hash),
     )))
@@ -376,6 +381,13 @@ impl MemoryDb {
     fn find_email(&self, email: &str, aud: &str) -> Option<&UserRecord> {
         self.users.values().find(|user| {
             !user.is_sso_user && user.aud == aud && user.email.eq_ignore_ascii_case(email)
+        })
+    }
+
+    /// True when a non-SSO user already owns this email under another audience.
+    fn non_sso_email_elsewhere(&self, email: &str, aud: &str) -> bool {
+        self.users.values().any(|user| {
+            !user.is_sso_user && user.aud != aud && user.email.eq_ignore_ascii_case(email)
         })
     }
 
@@ -1084,7 +1096,13 @@ fn secure_alphanumeric(length: usize) -> String {
     let nbytes = (length * 5).div_ceil(8);
     let mut raw = Vec::with_capacity(nbytes);
     while raw.len() < nbytes {
-        raw.extend_from_slice(Uuid::new_v4().as_bytes());
+        // UUIDv4 fixes the version nibble in byte 6 and the variant bits in
+        // byte 8. GoTrue reads `crypto/rand` (`crypto.go` SecureAlphanumeric).
+        // Those two bytes stay out of the token.
+        let bytes = *Uuid::new_v4().as_bytes();
+        raw.extend_from_slice(&bytes[0..6]);
+        raw.push(bytes[7]);
+        raw.extend_from_slice(&bytes[9..16]);
     }
     raw.truncate(nbytes);
     base32_lower(&raw).chars().take(length).collect()

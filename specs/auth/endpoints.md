@@ -107,8 +107,11 @@ GoTrue's default API shape (no `X-Supabase-Api-Version: 2024-01-01`):
 ## Edge cases
 
 - Email is lowercased. A confirmed duplicate does not change the password.
-  An unconfirmed duplicate is confirmed and given a session; the stored
-  password hash stays as it was.
+  An unconfirmed duplicate in the same audience is confirmed and given a
+  session; the stored password hash stays as it was. A non-SSO email is
+  unique across audiences (`users_email_partial_key` on `email` where
+  `is_sso_user = false`). The same email with a different `x-jwt-aud` is
+  `user_already_exists`.
 - `scope=local` deletes that session. `scope=others` deletes the user's
   other sessions. Empty or `global` deletes every session for the user.
   A second global logout with the same token is `session_not_found`.

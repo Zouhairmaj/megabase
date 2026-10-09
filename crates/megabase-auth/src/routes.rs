@@ -1131,7 +1131,9 @@ mod tests {
         .await;
         assert_eq!(status, StatusCode::OK, "{body}");
         assert_eq!(body["user"]["aud"], "custom-aud");
-        let (status, _) = call(
+        // `users_email_partial_key` is email-only for non-SSO users, so a
+        // second audience does not create another account.
+        let (status, body) = call(
             app,
             "POST",
             "/auth/v1/signup",
@@ -1139,7 +1141,9 @@ mod tests {
             &[],
         )
         .await;
-        assert_eq!(status, StatusCode::OK);
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+        assert_eq!(body["error_code"], "user_already_exists");
+        assert_eq!(body["msg"], "User already registered");
     }
 
     #[test]
