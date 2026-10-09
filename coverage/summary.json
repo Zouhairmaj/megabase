@@ -2,12 +2,12 @@
   "schema": 1,
   "totals": {
     "units": 1024,
-    "implemented": 0,
+    "implemented": 10,
     "tested": 0,
     "conformant": 0
   },
   "percent": {
-    "coverage": 0.0,
+    "coverage": 1.0,
     "conformance": 0.0,
     "done": 0.0
   },
@@ -18,7 +18,7 @@
   "components": {
     "auth": {
       "units": 152,
-      "implemented": 0,
+      "implemented": 10,
       "tested": 0,
       "conformant": 0,
       "groups": {
@@ -30,7 +30,7 @@
         },
         "database": {
           "units": 32,
-          "implemented": 0,
+          "implemented": 10,
           "tested": 0,
           "conformant": 0
         },
@@ -555,5 +555,16 @@
       }
     }
   },
-  "units": {}
+  "units": {
+    "auth:sql-function:auth.email()": "implemented",
+    "auth:sql-function:auth.jwt()": "implemented",
+    "auth:sql-function:auth.role()": "implemented",
+    "auth:sql-function:auth.uid()": "implemented",
+    "auth:sql-table:auth.audit_log_entries": "implemented",
+    "auth:sql-table:auth.custom_oauth_providers": "implemented",
+    "auth:sql-table:auth.flow_state": "implemented",
+    "auth:sql-table:auth.identities": "implemented",
+    "auth:sql-table:auth.instances": "implemented",
+    "auth:sql-table:auth.mfa_amr_claims": "implemented"
+  }
 }

@@ -19,7 +19,9 @@ The table below is generated, not typed. Open [Status](/status/) for the treemap
 - **Conformant** is how many of those units currently match the judge.
 - **Status** is Day 0 until a component has coverage data.
 
-Phase 0 extracts the full denominator from pinned upstream source. Until that lands, every service is not started.
+The denominator is `coverage/units.json`. Implemented units are those with a
+`// megabase:unit` marker. Auth SQL objects are the first markers; HTTP
+routes are still 501.
 
 > [!NOTE]
 > Conformant 0 with a real denominator is still honest. Inventing a mockup total is not.

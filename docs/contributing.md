@@ -12,9 +12,7 @@ Read GOAL.md and MANIFESTO.md first. This page is a short map, not a substitute.
 
 ## Architecture
 
-One Cargo workspace, one final binary: `megabase`. One crate per Supabase-authored service (`megabase-rest`, `megabase-auth`, `megabase-realtime`, `megabase-storage`, `megabase-functions`, `megabase-pooler`, `megabase-meta`, `megabase-studio`), plus `megabase-core` and `megabase-server`. HTTP: axum on tokio. PostgreSQL stays external.
-
-Those crates are not in this repository yet. Phase 0 creates them.
+One Cargo workspace, one final binary: `megabase`. One crate per Supabase-authored service (`megabase-rest`, `megabase-auth`, `megabase-realtime`, `megabase-storage`, `megabase-functions`, `megabase-pooler`, `megabase-meta`, `megabase-studio`), plus `megabase-core` and `megabase-server`. HTTP: axum on tokio. PostgreSQL stays external. With `DATABASE_URL` set, the binary installs the Auth SQL objects it implements.
 
 ## The loop
 

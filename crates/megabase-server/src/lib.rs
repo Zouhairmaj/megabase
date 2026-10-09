@@ -99,6 +99,14 @@ async fn health() -> Json<serde_json::Value> {
 }
 
 pub async fn run(config: Config) -> std::io::Result<()> {
+    if let Some(url) = &config.database_url {
+        info!("installing auth schema");
+        megabase_auth::install_schema(url)
+            .await
+            .map_err(std::io::Error::other)?;
+    } else {
+        info!("DATABASE_URL unset; skipping auth schema install");
+    }
     let addr = config.bind_address();
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     info!("megabase listening on {}", listener.local_addr()?);
