@@ -12,3 +12,6 @@ Thumbs.db
 !vendor/supabase/docker/.env.example
 judge/data/
 *.log
+fuzz/target/
+fuzz/artifacts/
+fuzz/coverage/

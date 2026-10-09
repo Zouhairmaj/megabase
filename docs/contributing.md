@@ -34,6 +34,35 @@ Failures return HTTP 501 with `{"code":"MEGABASE_NOT_IMPLEMENTED",...}`. Never a
 - Credit upstream in a header comment; keep NOTICE current.
 - Conventional Commits for the site and docs; component unit commits follow GOAL.md.
 
+## Fuzzing
+
+OpenSSF Scorecard's Fuzzing check treats a Rust repo as fuzzed when a `*.rs`
+file contains `libfuzzer_sys` (`checks/raw/fuzzing.go`, tool
+`RustCargoFuzz`). `fuzz/` is a standalone cargo-fuzz workspace (not a member
+of the root workspace) with three targets:
+
+| Target | Exercises |
+|---|---|
+| `jwt` | `megabase-core` HS256 `verify_at` and `bearer_token` |
+| `gateway_http` | gateway request-target parse and Kong prefix matching |
+| `rest_query` | stub walker for PostgREST query strings (filter parsing is not implemented yet) |
+
+Needs a nightly toolchain and `cargo-fuzz` 0.13.2 (the root
+`rust-toolchain.toml` is stable; pass `+nightly`):
+
+```shell
+rustup toolchain install nightly
+cargo install cargo-fuzz --locked --version 0.13.2
+just fuzz jwt            # or gateway_http / rest_query; default 60s
+just fuzz jwt 600
+cargo +nightly fuzz list
+```
+
+`.github/workflows/fuzz.yml` runs each target for 60 seconds on pull
+requests and 10 minutes on a nightly schedule (and on `workflow_dispatch`).
+A crash uploads `fuzz/artifacts/`. Seed inputs live in `fuzz/corpus/<target>/`.
+Do not commit `fuzz/target/`, `fuzz/artifacts/`, or `fuzz/coverage/`.
+
 ## Design
 
 Mockups live in the [Kite identity file](https://kite.new/p/megabase-identity). The public site is generated from `site/` in Rust. No JavaScript framework.

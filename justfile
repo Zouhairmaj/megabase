@@ -61,6 +61,13 @@ backlog-dry:
 bench:
     cargo bench --locked --bench health
 
+# cargo-fuzz (nightly). CI: 60s on PRs, 600s on the schedule.
+fuzz target duration="60":
+    cargo +nightly fuzz run {{target}} -- -max_total_time={{duration}}
+
+fuzz-list:
+    cargo +nightly fuzz list
+
 ci: fmt-check lint test coverage-check
 
 clean:
