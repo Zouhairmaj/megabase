@@ -2,12 +2,12 @@
   "schema": 1,
   "totals": {
     "units": 1024,
-    "implemented": 30,
+    "implemented": 32,
     "tested": 0,
     "conformant": 0
   },
   "percent": {
-    "coverage": 2.9,
+    "coverage": 3.1,
     "conformance": 0.0,
     "done": 0.0
   },
@@ -18,7 +18,7 @@
   "components": {
     "auth": {
       "units": 152,
-      "implemented": 30,
+      "implemented": 32,
       "tested": 0,
       "conformant": 0,
       "groups": {
@@ -30,7 +30,7 @@
         },
         "database": {
           "units": 32,
-          "implemented": 30,
+          "implemented": 32,
           "tested": 0,
           "conformant": 0
         },
@@ -585,6 +585,8 @@
     "auth:sql-table:auth.sso_domains": "implemented",
     "auth:sql-table:auth.sso_providers": "implemented",
     "auth:sql-table:auth.sso_sessions": "implemented",
-    "auth:sql-table:auth.users": "implemented"
+    "auth:sql-table:auth.users": "implemented",
+    "auth:sql-table:auth.webauthn_challenges": "implemented",
+    "auth:sql-table:auth.webauthn_credentials": "implemented"
   }
 }

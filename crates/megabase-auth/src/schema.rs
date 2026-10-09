@@ -83,6 +83,8 @@ const SAML_RELAY_STATES: &str = include_str!("../sql/saml_relay_states.sql");
 const SSO_SESSIONS: &str = include_str!("../sql/sso_sessions.sql");
 const SCIM_USERS: &str = include_str!("../sql/scim_users.sql");
 const SCIM_TOKENS: &str = include_str!("../sql/scim_tokens.sql");
+const WEBAUTHN_CREDENTIALS: &str = include_str!("../sql/webauthn_credentials.sql");
+const WEBAUTHN_CHALLENGES: &str = include_str!("../sql/webauthn_challenges.sql");
 
 const OBJECTS: &[&str] = &[
     SCHEMA,
@@ -116,6 +118,8 @@ const OBJECTS: &[&str] = &[
     SSO_SESSIONS,
     SCIM_USERS,
     SCIM_TOKENS,
+    WEBAUTHN_CREDENTIALS,
+    WEBAUTHN_CHALLENGES,
 ];
 
 /// SQL applied in one transaction when `DATABASE_URL` is set.
@@ -175,6 +179,8 @@ pub async fn install_schema(database_url: &str) -> Result<(), SchemaError> {
     // megabase:unit auth:sql-table:auth.sso_sessions
     // megabase:unit auth:sql-table:auth.scim_users
     // megabase:unit auth:sql-table:auth.scim_tokens
+    // megabase:unit auth:sql-table:auth.webauthn_credentials
+    // megabase:unit auth:sql-table:auth.webauthn_challenges
     install_schema_within(database_url, INSTALL_DEADLINE).await
 }
 
@@ -352,6 +358,28 @@ mod tests {
         assert!(SCIM_USERS.contains("COLLATE \"C\""));
         assert!(SCIM_TOKENS.contains("token_hash ~ '^[0-9a-f]{64}$'"));
         assert!(SCHEMA_MIGRATIONS.contains("schema_migrations_pkey"));
+        assert!(WEBAUTHN_CREDENTIALS.contains("credential_id bytea NOT NULL"));
+        assert!(WEBAUTHN_CREDENTIALS.contains("public_key bytea NOT NULL"));
+        assert!(WEBAUTHN_CREDENTIALS.contains("transports jsonb NOT NULL DEFAULT '[]'::jsonb"));
+        assert!(WEBAUTHN_CREDENTIALS.contains("webauthn_credentials_credential_id_key"));
+        assert!(WEBAUTHN_CREDENTIALS.contains("webauthn_credentials_user_id_idx"));
+        assert!(WEBAUTHN_CREDENTIALS.contains("REFERENCES auth.users (id) ON DELETE CASCADE"));
+        assert!(WEBAUTHN_CHALLENGES.contains("challenge_type text NOT NULL"));
+        assert!(WEBAUTHN_CHALLENGES.contains("session_data jsonb NOT NULL"));
+        assert!(WEBAUTHN_CHALLENGES
+            .contains("CHECK (challenge_type IN ('signup', 'registration', 'authentication'))"));
+        assert!(WEBAUTHN_CHALLENGES.contains("webauthn_challenges_expires_at_idx"));
+        assert!(WEBAUTHN_CHALLENGES.contains("webauthn_challenges_user_id_idx"));
+        assert!(WEBAUTHN_CHALLENGES.contains("REFERENCES auth.users (id) ON DELETE CASCADE"));
+        assert!(
+            WEBAUTHN_CHALLENGES.contains("user_id uuid,"),
+            "signup challenges require a nullable user_id"
+        );
+        assert!(WEBAUTHN_CHALLENGES.contains("ALTER COLUMN user_id DROP NOT NULL"));
+        assert!(
+            !WEBAUTHN_CHALLENGES.contains("ALTER COLUMN user_id SET NOT NULL"),
+            "do not force user_id NOT NULL on webauthn_challenges"
+        );
     }
 
     #[test]
@@ -396,6 +424,27 @@ mod tests {
                 "missing {name}"
             );
         }
+    }
+
+    #[test]
+    fn issue_13_tables_are_installed() {
+        let sql = install_sql();
+        for name in ["auth.webauthn_credentials", "auth.webauthn_challenges"] {
+            assert!(
+                sql.contains(&format!("CREATE TABLE IF NOT EXISTS {name}")),
+                "missing {name}"
+            );
+        }
+        let credentials = sql
+            .find("CREATE TABLE IF NOT EXISTS auth.webauthn_credentials")
+            .expect("credentials");
+        let challenges = sql
+            .find("CREATE TABLE IF NOT EXISTS auth.webauthn_challenges")
+            .expect("challenges");
+        assert!(
+            credentials < challenges,
+            "upstream creates credentials before challenges"
+        );
     }
 
     #[test]

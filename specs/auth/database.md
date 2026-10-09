@@ -1,6 +1,6 @@
-# Auth: database (issues 10, 11, and 12)
+# Auth: database (issues 10–13)
 
-Issues #10, #11, and #12 port Auth SQL objects. HTTP `/auth/v1` is
+Issues #10 through #13 port Auth SQL objects. HTTP `/auth/v1` is
 unchanged (501). These objects are the compatibility surface that RLS
 policies and clients call inside PostgreSQL.
 
@@ -718,6 +718,60 @@ this pin. Only the SHA-256 digest is stored.
 
 Unique `scim_tokens_token_hash_key`. Indexes on `sso_provider_id`,
 `expires_at`, `revoked_at`.
+
+---
+
+## `auth:sql-table:auth.webauthn_credentials`
+
+Upstream create:
+`migrations/20260302000000_add_passkeys.up.sql:3`. No later migration
+and no RLS/grant in this pin. Foreign key is `auth.users(id)`.
+
+| Column | Type | Notes |
+|---|---|---|
+| id | uuid | NOT NULL, PK, `DEFAULT gen_random_uuid()` |
+| user_id | uuid | NOT NULL, FK → `auth.users(id)` ON DELETE CASCADE |
+| credential_id | bytea | NOT NULL |
+| public_key | bytea | NOT NULL |
+| attestation_type | text | NOT NULL DEFAULT `''` |
+| aaguid | uuid | NULL |
+| sign_count | bigint | NOT NULL DEFAULT 0 |
+| transports | jsonb | NOT NULL DEFAULT `[]` |
+| backup_eligible | boolean | NOT NULL DEFAULT false |
+| backed_up | boolean | NOT NULL DEFAULT false |
+| friendly_name | text | NOT NULL DEFAULT `''` |
+| created_at | timestamptz | NOT NULL DEFAULT `now()` |
+| updated_at | timestamptz | NOT NULL DEFAULT `now()` |
+| last_used_at | timestamptz | NULL |
+
+Unique index `webauthn_credentials_credential_id_key` on
+`credential_id`. Index `webauthn_credentials_user_id_idx` on `user_id`.
+No table comment.
+
+---
+
+## `auth:sql-table:auth.webauthn_challenges`
+
+Upstream create:
+`migrations/20260302000000_add_passkeys.up.sql:31`. No later migration
+and no RLS/grant in this pin. `user_id` is nullable so a signup
+challenge can exist before `auth.users` has a row (GoTrue
+`WebAuthnChallengeTypeSignup`).
+
+| Column | Type | Notes |
+|---|---|---|
+| id | uuid | NOT NULL, PK, `DEFAULT gen_random_uuid()` |
+| user_id | uuid | NULL, FK → `auth.users(id)` ON DELETE CASCADE |
+| challenge_type | text | NOT NULL, CHECK `signup` / `registration` / `authentication` |
+| session_data | jsonb | NOT NULL |
+| created_at | timestamptz | NOT NULL DEFAULT `now()` |
+| expires_at | timestamptz | NOT NULL |
+
+Indexes: `webauthn_challenges_user_id_idx` on `user_id`,
+`webauthn_challenges_expires_at_idx` on `expires_at` (cleanup of expired
+rows). No table comment. Installer `DROP NOT NULL` on `user_id` so a
+table that already has a required `user_id` can still store signup
+challenges.
 
 ---
 
