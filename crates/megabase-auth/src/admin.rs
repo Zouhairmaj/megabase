@@ -308,7 +308,7 @@ async fn get_audit(
         format_link(gotrue_path, &pairs)
     ));
 
-    let mut response = json_ok(Value::Array(logs));
+    let mut response = json_ok(&Value::Array(logs));
     response
         .headers_mut()
         .insert("x-total-count", format!("{total}").parse().expect("digits"));
@@ -432,7 +432,7 @@ async fn list_custom_providers(
     .map_err(|_| AuthError::internal("Error retrieving custom OAuth providers"))?;
 
     let providers: Vec<Value> = rows.iter().map(custom_provider_json).collect();
-    Ok(json_ok(json!({ "providers": providers })))
+    Ok(json_ok(&json!({ "providers": providers })))
 }
 
 // megabase:unit auth:route:GET /auth/v1/admin/custom-providers/{identifier}
@@ -446,7 +446,7 @@ async fn get_custom_provider(
     validate_custom_identifier(&identifier)?;
     let client = connect(&state).await?;
     let provider = load_custom_provider(&client, &identifier).await?;
-    Ok(json_ok(provider))
+    Ok(json_ok(&provider))
 }
 
 // megabase:unit auth:route:DELETE /auth/v1/admin/custom-providers/{identifier}
@@ -631,10 +631,10 @@ async fn list_oauth_clients(
         .await
         .map_err(|_| AuthError::internal("Error listing OAuth clients"))?;
     if rows.is_empty() {
-        return Ok(json_ok(json!({})));
+        return Ok(json_ok(&json!({})));
     }
     let clients: Vec<Value> = rows.iter().map(oauth_client_json).collect();
-    Ok(json_ok(json!({ "clients": clients })))
+    Ok(json_ok(&json!({ "clients": clients })))
 }
 
 fn oauth_client_json(row: &tokio_postgres::Row) -> Value {
@@ -650,7 +650,7 @@ fn oauth_client_json(row: &tokio_postgres::Row) -> Value {
     insert_nonempty_list(
         &mut object,
         "redirect_uris",
-        split_csv(row.try_get::<_, String>(2).unwrap_or_default()),
+        &split_csv(&row.try_get::<_, String>(2).unwrap_or_default()),
     );
     insert_opt_str(
         &mut object,
@@ -660,7 +660,7 @@ fn oauth_client_json(row: &tokio_postgres::Row) -> Value {
     insert_nonempty_list(
         &mut object,
         "grant_types",
-        split_csv(row.try_get::<_, String>(4).unwrap_or_default()),
+        &split_csv(&row.try_get::<_, String>(4).unwrap_or_default()),
     );
     object.insert("response_types".into(), json!(["code"]));
     insert_opt_str(
@@ -688,7 +688,7 @@ fn oauth_client_json(row: &tokio_postgres::Row) -> Value {
     Value::Object(object)
 }
 
-fn split_csv(raw: String) -> Vec<String> {
+fn split_csv(raw: &str) -> Vec<String> {
     if raw.is_empty() {
         Vec::new()
     } else {
@@ -696,11 +696,7 @@ fn split_csv(raw: String) -> Vec<String> {
     }
 }
 
-fn insert_nonempty_list(
-    object: &mut serde_json::Map<String, Value>,
-    key: &str,
-    values: Vec<String>,
-) {
+fn insert_nonempty_list(object: &mut serde_json::Map<String, Value>, key: &str, values: &[String]) {
     if !values.is_empty() {
         object.insert(key.into(), json!(values));
     }
@@ -837,7 +833,7 @@ async fn delete_sso_provider(
     );
     provider.insert("created_at".into(), created_at);
     provider.insert("updated_at".into(), updated_at);
-    Ok(json_ok(Value::Object(provider)))
+    Ok(json_ok(&Value::Object(provider)))
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -889,7 +885,7 @@ async fn delete_user(
     tx.commit()
         .await
         .map_err(|_| AuthError::internal("Database error deleting user"))?;
-    Ok(json_ok(json!({})))
+    Ok(json_ok(&json!({})))
 }
 
 async fn soft_delete_user<C>(client: &C, user: &LoadedUser) -> Result<(), AuthError>
@@ -1162,7 +1158,7 @@ async fn delete_factor(
     tx.commit()
         .await
         .map_err(|_| AuthError::internal("Database error deleting factor"))?;
-    Ok(json_ok(Value::Object(factor)))
+    Ok(json_ok(&Value::Object(factor)))
 }
 
 fn amr_method_for_factor_type(factor_type: &str) -> Result<String, AuthError> {
@@ -1252,9 +1248,9 @@ mod tests {
 
     #[test]
     fn split_csv_omits_empty() {
-        assert!(split_csv(String::new()).is_empty());
+        assert!(split_csv("").is_empty());
         assert_eq!(
-            split_csv("https://a.example,https://b.example".into()),
+            split_csv("https://a.example,https://b.example"),
             ["https://a.example", "https://b.example"]
         );
     }

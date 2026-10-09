@@ -259,11 +259,11 @@ mod tests {
         Hs256::new(DEMO_SECRET.as_bytes()).unwrap()
     }
 
-    fn sign(secret: &[u8], header: Value, payload: Value) -> String {
+    fn sign(secret: &[u8], header: &Value, payload: &Value) -> String {
         sign_raw(
             secret,
-            &serde_json::to_vec(&header).unwrap(),
-            &serde_json::to_vec(&payload).unwrap(),
+            &serde_json::to_vec(header).unwrap(),
+            &serde_json::to_vec(payload).unwrap(),
         )
     }
 
@@ -322,8 +322,8 @@ mod tests {
     fn user_token_exposes_role_sub_exp() {
         let token = sign(
             DEMO_SECRET.as_bytes(),
-            hs256_header(),
-            json!({
+            &hs256_header(),
+            &json!({
                 "role": "authenticated",
                 "sub": "11111111-1111-1111-1111-111111111111",
                 "exp": DURING_DEMO + 3600,
@@ -342,8 +342,8 @@ mod tests {
     fn forged_signature_is_rejected() {
         let token = sign(
             b"some-other-secret-that-is-not-the-demo-secret!!",
-            hs256_header(),
-            json!({"role": "authenticated", "exp": DURING_DEMO + 3600}),
+            &hs256_header(),
+            &json!({"role": "authenticated", "exp": DURING_DEMO + 3600}),
         );
         assert_eq!(
             verifier().verify_at(&token, DURING_DEMO).unwrap_err(),
@@ -355,8 +355,8 @@ mod tests {
     fn tampered_payload_is_rejected() {
         let token = sign(
             DEMO_SECRET.as_bytes(),
-            hs256_header(),
-            json!({"role": "anon", "exp": DURING_DEMO + 3600}),
+            &hs256_header(),
+            &json!({"role": "anon", "exp": DURING_DEMO + 3600}),
         );
         let (h, rest) = token.split_once('.').unwrap();
         let (_, sig) = rest.rsplit_once('.').unwrap();
@@ -393,8 +393,8 @@ mod tests {
     fn alg_none_with_hs256_signature_is_still_rejected() {
         let token = sign(
             DEMO_SECRET.as_bytes(),
-            json!({"alg": "none", "typ": "JWT"}),
-            json!({"role": "authenticated", "exp": DURING_DEMO + 3600}),
+            &json!({"alg": "none", "typ": "JWT"}),
+            &json!({"role": "authenticated", "exp": DURING_DEMO + 3600}),
         );
         assert_eq!(
             verifier().verify_at(&token, DURING_DEMO).unwrap_err(),
@@ -406,8 +406,8 @@ mod tests {
     fn expired_token_is_rejected() {
         let token = sign(
             DEMO_SECRET.as_bytes(),
-            hs256_header(),
-            json!({"role": "authenticated", "exp": DURING_DEMO - 3600}),
+            &hs256_header(),
+            &json!({"role": "authenticated", "exp": DURING_DEMO - 3600}),
         );
         assert_eq!(
             verifier().verify_at(&token, DURING_DEMO).unwrap_err(),
@@ -419,8 +419,8 @@ mod tests {
     fn exp_leeway_matches_postgrest() {
         let token = sign(
             DEMO_SECRET.as_bytes(),
-            hs256_header(),
-            json!({"role": "anon", "exp": DURING_DEMO}),
+            &hs256_header(),
+            &json!({"role": "anon", "exp": DURING_DEMO}),
         );
         verifier()
             .verify_at(&token, DURING_DEMO + EXP_LEEWAY_SECS)
@@ -437,8 +437,8 @@ mod tests {
     fn rs256_header_is_rejected_without_trying_asymmetric() {
         let token = sign(
             DEMO_SECRET.as_bytes(),
-            json!({"alg": "RS256", "typ": "JWT"}),
-            json!({"role": "authenticated", "exp": DURING_DEMO + 3600}),
+            &json!({"alg": "RS256", "typ": "JWT"}),
+            &json!({"role": "authenticated", "exp": DURING_DEMO + 3600}),
         );
         assert_eq!(
             verifier().verify_at(&token, DURING_DEMO).unwrap_err(),
@@ -450,8 +450,8 @@ mod tests {
     fn kid_is_ignored_and_hs256_secret_is_used() {
         let token = sign(
             DEMO_SECRET.as_bytes(),
-            json!({"alg": "HS256", "typ": "JWT", "kid": "legacy"}),
-            json!({"role": "authenticated", "sub": "user-1", "exp": DURING_DEMO + 60}),
+            &json!({"alg": "HS256", "typ": "JWT", "kid": "legacy"}),
+            &json!({"role": "authenticated", "sub": "user-1", "exp": DURING_DEMO + 60}),
         );
         let claims = verifier().verify_at(&token, DURING_DEMO).unwrap();
         assert_eq!(claims.sub.as_deref(), Some("user-1"));
@@ -481,8 +481,8 @@ mod tests {
     fn exp_must_be_a_number_when_present() {
         let token = sign(
             DEMO_SECRET.as_bytes(),
-            hs256_header(),
-            json!({"role": "anon", "exp": "soon"}),
+            &hs256_header(),
+            &json!({"role": "anon", "exp": "soon"}),
         );
         assert_eq!(
             verifier().verify_at(&token, DURING_DEMO).unwrap_err(),
@@ -543,8 +543,8 @@ mod tests {
     fn verify_uses_wall_clock() {
         let token = sign(
             DEMO_SECRET.as_bytes(),
-            hs256_header(),
-            json!({
+            &hs256_header(),
+            &json!({
                 "role": "authenticated",
                 "exp": i64::MAX / 2,
             }),
@@ -571,8 +571,8 @@ mod tests {
     fn missing_or_non_object_alg_is_rejected() {
         let token = sign(
             DEMO_SECRET.as_bytes(),
-            json!({"typ": "JWT"}),
-            json!({"role": "anon"}),
+            &json!({"typ": "JWT"}),
+            &json!({"role": "anon"}),
         );
         assert_eq!(
             verifier().verify_at(&token, DURING_DEMO).unwrap_err(),
@@ -629,15 +629,15 @@ mod tests {
     fn missing_or_null_exp_is_allowed() {
         let token = sign(
             DEMO_SECRET.as_bytes(),
-            hs256_header(),
-            json!({"role": "anon"}),
+            &hs256_header(),
+            &json!({"role": "anon"}),
         );
         let claims = verifier().verify_at(&token, DURING_DEMO).unwrap();
         assert_eq!(claims.exp, None);
         let token = sign(
             DEMO_SECRET.as_bytes(),
-            hs256_header(),
-            json!({"role": "anon", "exp": null}),
+            &hs256_header(),
+            &json!({"role": "anon", "exp": null}),
         );
         let claims = verifier().verify_at(&token, DURING_DEMO).unwrap();
         assert_eq!(claims.exp, None);
@@ -647,16 +647,16 @@ mod tests {
     fn exp_accepts_float_and_rejects_u64_overflow() {
         let token = sign(
             DEMO_SECRET.as_bytes(),
-            hs256_header(),
-            json!({"role": "anon", "exp": 1_791_504_000.9}),
+            &hs256_header(),
+            &json!({"role": "anon", "exp": 1_791_504_000.9}),
         );
         let claims = verifier().verify_at(&token, DURING_DEMO).unwrap();
         assert_eq!(claims.exp, Some(DURING_DEMO));
 
         let token = sign(
             DEMO_SECRET.as_bytes(),
-            hs256_header(),
-            json!({"role": "anon", "exp": u64::MAX}),
+            &hs256_header(),
+            &json!({"role": "anon", "exp": u64::MAX}),
         );
         assert_eq!(
             verifier().verify_at(&token, DURING_DEMO).unwrap_err(),
@@ -665,8 +665,8 @@ mod tests {
 
         let token = sign(
             DEMO_SECRET.as_bytes(),
-            hs256_header(),
-            json!({"role": "anon", "exp": 1e40}),
+            &hs256_header(),
+            &json!({"role": "anon", "exp": 1e40}),
         );
         assert_eq!(
             verifier().verify_at(&token, DURING_DEMO).unwrap_err(),

@@ -232,7 +232,7 @@ async fn signup(State(state): State<AuthState>, headers: HeaderMap, body: Body) 
             return unexpected("error generating jwt token").into_response();
         }
     };
-    let body = session_json(&issued, access_token, state.config.jwt_exp_seconds, now);
+    let body = session_json(&issued, &access_token, state.config.jwt_exp_seconds, now);
     let mut response = JsonOk(body).into_response();
     insert_header(
         &mut response,
@@ -268,7 +268,7 @@ async fn logout(State(state): State<AuthState>, headers: HeaderMap, uri: Uri) ->
     };
     let claims = match jwt.verify(token) {
         Ok(claims) => claims,
-        Err(error) => return jwt_failure(error),
+        Err(error) => return jwt_failure(&error),
     };
     let Some(sub) = claims.sub.as_deref() else {
         return GoTrueError::new(
@@ -548,7 +548,7 @@ fn banned(until: Option<SystemTime>) -> bool {
     until.is_some_and(|until| SystemTime::now() < until)
 }
 
-fn jwt_failure(error: JwtError) -> Response {
+fn jwt_failure(error: &JwtError) -> Response {
     GoTrueError::new(
         StatusCode::FORBIDDEN,
         "bad_jwt",

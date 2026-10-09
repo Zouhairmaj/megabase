@@ -222,6 +222,15 @@ waiting on a human.
     An unset `JWT_SECRET` fails signup before insert. A present secret
     shorter than 32 bytes aborts startup (decision in #170). Phone signup,
     anonymous signup, and email signup with autoconfirm off stay HTTP 501.
+22. **Rust agent ergonomics** (2026-10-09). Cloud Agent setup warms the
+    registry and check cache (`cargo fetch`, then
+    `cargo check --workspace --all-targets`, in `.cursor/environment.json`).
+    Agents iterate with per-crate `cargo check` / `cargo clippy` and run
+    full tests only before pushing. `[workspace.lints.clippy]` denies the
+    clone and borrow lints; CI clippy stays `-D warnings`. `deny.toml`
+    bans external crates that are not on the `[bans] allow` list (the
+    current lockfile graph, plus `sqlx` and `jsonwebtoken`). Propose a
+    new crate with the steps in that file.
 
 ## Tracking
 

@@ -24,7 +24,7 @@ pub fn unix_secs(time: SystemTime) -> i64 {
 
 pub fn session_json(
     issued: &IssuedSession,
-    access_token: String,
+    access_token: &str,
     expires_in: i64,
     now: i64,
 ) -> Value {

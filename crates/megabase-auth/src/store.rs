@@ -872,7 +872,7 @@ async fn find_email<C: GenericClient + Sync>(
         )
         .await?;
     if let Some(row) = by_identity {
-        let id = parse_uuid(row.get(0))?;
+        let id = parse_uuid(&row.get::<_, String>(0))?;
         return find_user_by_id(client, id).await;
     }
     let by_user = client
@@ -887,7 +887,7 @@ async fn find_email<C: GenericClient + Sync>(
         )
         .await?;
     match by_user {
-        Some(row) => find_user_by_id(client, parse_uuid(row.get(0))?).await,
+        Some(row) => find_user_by_id(client, parse_uuid(&row.get::<_, String>(0))?).await,
         None => Ok(None),
     }
 }
@@ -913,7 +913,7 @@ async fn find_user_by_id<C: GenericClient + Sync>(
     let Some(row) = row else {
         return Ok(None);
     };
-    let id = parse_uuid(row.get(0))?;
+    let id = parse_uuid(&row.get::<_, String>(0))?;
     let identities = load_identities(client, id).await?;
     let created_at: Option<SystemTime> = row.get(7);
     let updated_at: Option<SystemTime> = row.get(8);
@@ -956,9 +956,9 @@ async fn load_identities<C: GenericClient + Sync>(
         let updated_at: Option<SystemTime> = row.get(8);
         let now = SystemTime::now();
         identities.push(IdentityRecord {
-            id: parse_uuid(row.get(0))?,
+            id: parse_uuid(&row.get::<_, String>(0))?,
             provider_id: row.get(1),
-            user_id: parse_uuid(row.get(2))?,
+            user_id: parse_uuid(&row.get::<_, String>(2))?,
             identity_data: parse_json_text(&row.get::<_, String>(3)),
             provider: row.get(4),
             email: row.get(5),
@@ -989,8 +989,8 @@ fn unique_violation(error: &tokio_postgres::Error) -> bool {
     error.code().is_some_and(|code| code.code() == "23505")
 }
 
-fn parse_uuid(value: String) -> Result<Uuid, StoreError> {
-    Uuid::parse_str(&value).map_err(|_| StoreError::Unavailable)
+fn parse_uuid(value: &str) -> Result<Uuid, StoreError> {
+    Uuid::parse_str(value).map_err(|_| StoreError::Unavailable)
 }
 
 fn parse_json_text(value: &str) -> Value {

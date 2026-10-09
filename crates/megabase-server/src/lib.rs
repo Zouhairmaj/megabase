@@ -94,16 +94,16 @@ fn component_router(component: &str, auth: &megabase_auth::AuthState) -> Router 
 /// Benches and the 501 route tests use this. `run` passes a configured
 /// [`megabase_auth::AuthState`] so signup and logout share one backend.
 pub fn create_router() -> Router {
-    create_router_with(megabase_auth::AuthState::reference())
+    create_router_with(&megabase_auth::AuthState::reference())
 }
 
 /// Gateway whose `/auth/v1/` and OAuth discovery prefixes share `auth`.
-pub fn create_router_with(auth: megabase_auth::AuthState) -> Router {
+pub fn create_router_with(auth: &megabase_auth::AuthState) -> Router {
     let gateway = Gateway {
         routes: Arc::new(
             GATEWAY_ROUTES
                 .iter()
-                .map(|(prefix, component)| (*prefix, component_router(component, &auth)))
+                .map(|(prefix, component)| (*prefix, component_router(component, auth)))
                 .collect(),
         ),
         fallback: megabase_studio::router(),
@@ -158,7 +158,7 @@ pub async fn run(config: Config) -> std::io::Result<()> {
     let addr = config.bind_address();
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     info!("megabase listening on {}", listener.local_addr()?);
-    axum::serve(listener, create_router_with(auth)).await
+    axum::serve(listener, create_router_with(&auth)).await
 }
 
 #[cfg(test)]
