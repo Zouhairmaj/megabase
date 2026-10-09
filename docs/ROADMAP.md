@@ -104,10 +104,13 @@ walks workspace members and fails on `version.workspace = true`
 A TOML extra-file updater bumps `[workspace.package].version`; member
 crates inherit. `bootstrap-sha` is Day 0 (`25ebab3`, exclusive) so the
 first release PR covers Phase 0. `release-as` is `0.1.0` for that
-bootstrap only — delete the key in the v0.1.0 release PR (or right
-after it merges) so later `feat` / `fix` / `conformance` commits go
-back to patch bumps. release-please ignores `bootstrap-sha` after the
-first release PR merges. Do not add a `version.txt`.
+bootstrap only. Follow-up (PROGRESS.md): delete the key **in the
+v0.1.0 release PR** (or a same-day follow-up) so later `feat` /
+`fix` / `conformance` commits go back to patch bumps. Do not delete it
+before that PR exists: without it, Phase 0 would cut `0.0.1` and the
+`rust` strategy on `main` today fails with `package.version is not
+tagged`. release-please ignores `bootstrap-sha` after the first
+release PR merges. Do not add a `version.txt`.
 
 Cadence:
 

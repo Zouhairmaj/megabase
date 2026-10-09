@@ -139,6 +139,10 @@ waiting on a human.
 
 None.
 
+### Follow-ups
+
+- [ ] After release-please opens the v0.1.0 PR: delete `"release-as": "0.1.0"` from `release-please-config.json` **in that PR** (or a same-day follow-up). The key is required to bootstrap Phase 0 as `0.1.0`; leaving it would force every later release to `0.1.0`. Tracked from PR #132.
+
 ### Blocked items
 
 None.
