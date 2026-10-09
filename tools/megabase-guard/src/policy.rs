@@ -134,8 +134,15 @@ pub fn is_human_log_review_ok(before: &str, after: &str) -> bool {
     };
     let pending_ok = new_pending == old_pending
         || new_pending.starts_with(old_pending)
-        || old_pending.starts_with(new_pending);
+        || (old_pending.starts_with(new_pending)
+            && pending_shrink_ends_at_item_boundary(old_pending, new_pending));
     pending_ok && is_completed_section_ok(old_rest, new_rest) && after != before
+}
+
+fn pending_shrink_ends_at_item_boundary(old_pending: &str, new_pending: &str) -> bool {
+    old_pending
+        .get(new_pending.len()..)
+        .is_some_and(|removed| removed.trim_start_matches('\n').starts_with("- **Date**"))
 }
 
 fn is_completed_section_ok(old_rest: &str, new_rest: &str) -> bool {
@@ -491,21 +498,21 @@ mod tests {
 
     #[test]
     fn review_branch_may_complete_human_log_pending() {
-        let before = "# Human Intervention Log\n\n## Pending\n\n- keep\n\n- done\n\n---\n\n*No completed human interventions recorded yet.*\n";
+        let before = "# Human Intervention Log\n\n## Pending\n\n- **Date**: 2026-10-09\n- **Action**: keep\n\n- **Date**: 2026-10-10\n- **Action**: done\n\n---\n\n*No completed human interventions recorded yet.*\n";
         let after =
-            "# Human Intervention Log\n\n## Pending\n\n- keep\n\n---\n\n## Completed\n\n- done\n";
+            "# Human Intervention Log\n\n## Pending\n\n- **Date**: 2026-10-09\n- **Action**: keep\n\n---\n\n## Completed\n\n- done\n";
         let c = ctx("review/release-ci", false);
         assert!(evaluate(&[modified("HUMAN_LOG.md", before, after)], &c).is_empty());
-        let before_placeholder = "# Human Intervention Log\n\n## Pending\n\n- keep\n\n---\n\n*No completed human interventions recorded yet.*\n";
+        let before_placeholder = "# Human Intervention Log\n\n## Pending\n\n- **Date**: 2026-10-09\n- **Action**: keep\n\n---\n\n*No completed human interventions recorded yet.*\n";
         assert!(evaluate(&[modified("HUMAN_LOG.md", before_placeholder, after)], &c).is_empty());
         let rewritten_completed =
-            "# Human Intervention Log\n\n## Pending\n\n- keep\n\n---\n\n## Completed\n\n- other\n";
+            "# Human Intervention Log\n\n## Pending\n\n- **Date**: 2026-10-09\n- **Action**: keep\n\n---\n\n## Completed\n\n- other\n";
         assert_eq!(
             evaluate(&[modified("HUMAN_LOG.md", after, rewritten_completed)], &c).len(),
             1
         );
         let appended_completed =
-            "# Human Intervention Log\n\n## Pending\n\n- keep\n\n---\n\n## Completed\n\n- done\n\n- later\n";
+            "# Human Intervention Log\n\n## Pending\n\n- **Date**: 2026-10-09\n- **Action**: keep\n\n---\n\n## Completed\n\n- done\n\n- later\n";
         assert!(evaluate(&[modified("HUMAN_LOG.md", after, appended_completed)], &c).is_empty());
         assert_eq!(
             evaluate(
@@ -515,6 +522,31 @@ mod tests {
             .len(),
             1
         );
+    }
+
+    #[test]
+    fn review_branch_pending_shrink_must_end_at_item_boundary() {
+        let header = "# Human Intervention Log\n\n## Pending\n\n";
+        let rest = "\n---\n\n*No completed human interventions recorded yet.*\n";
+        let keep = "- **Date**: 2026-10-09\n- **Action**: keep\n- **Reason**: still open\n";
+        let drop = "- **Date**: 2026-10-10\n- **Action**: drop\n- **Reason**: done elsewhere\n";
+        let before = format!("{header}{keep}\n{drop}{rest}");
+        let shrink = format!("{header}{keep}{rest}");
+        let c = ctx("review/release-ci", false);
+        assert!(evaluate(&[modified("HUMAN_LOG.md", &before, &shrink)], &c).is_empty());
+        assert!(pending_shrink_ends_at_item_boundary(
+            &format!("\n{keep}\n{drop}"),
+            &format!("\n{keep}")
+        ));
+        let mid_item = format!("{header}- **Date**: 2026-10-09\n- **Action**: keep\n- **Re{rest}");
+        assert_eq!(
+            evaluate(&[modified("HUMAN_LOG.md", &before, &mid_item)], &c).len(),
+            1
+        );
+        assert!(!pending_shrink_ends_at_item_boundary(
+            keep,
+            "- **Date**: 2026-10-09\n- **Action**: keep\n- **Re"
+        ));
     }
 
     #[test]
