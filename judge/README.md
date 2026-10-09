@@ -66,7 +66,14 @@ job by itself. New failures of cases that never passed stay grey on the
 treemap.
 
 CI starts only the reference stack in Docker and runs Megabase on the
-runner (no image build). Local `just judge-up` builds the Megabase image.
+runner (no image build). It reads `JWT_SECRET` and `POSTGRES_PASSWORD`
+from `vendor/supabase/docker/.env.example` and sets
+`DATABASE_URL=postgres://supabase_admin:<password>@127.0.0.1:54322/megabase`
+after `prepare` creates that database. Host `:5432` is Supavisor; the
+`postgres` role cannot `CREATE` in schema `auth`, so CI uses
+`supabase_admin`. Sharing the official `postgres` database would make
+catalog and row comparisons vacuous. Local `just judge-up` builds the
+Megabase image and points it at `db`/`megabase` with the same role.
 
 ## Cases
 
