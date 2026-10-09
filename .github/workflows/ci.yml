@@ -5,6 +5,9 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # Release lockfile sync dispatches this on the release-please branch when
+  # GITHUB_TOKEN pushed the lockfile (that push does not start workflows).
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -82,7 +85,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -96,9 +99,10 @@ jobs:
           key: guard
       - name: Policy (docs/adr/0003-protected-paths.md)
         env:
-          BASE_REF: ${{ github.base_ref }}
-          HEAD_REF: ${{ github.head_ref }}
+          BASE_REF: ${{ github.base_ref || 'main' }}
+          HEAD_REF: ${{ github.head_ref || github.ref_name }}
         run: |
+          git fetch --no-tags origin "${BASE_REF}"
           cargo run --locked -p megabase-guard -- \
             --base "origin/${BASE_REF}" \
             --head HEAD \
