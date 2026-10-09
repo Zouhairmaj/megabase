@@ -292,6 +292,18 @@ pub fn load(repo_root: &Path) -> Metrics {
     // treemaps match the generated README treemap.
     if let Some(summary) = summary_value.as_ref() {
         apply_summary_states(&mut metrics, summary);
+        // apply_units counted conformant flags on units.json, which has none.
+        // Restore the headline from the summary total, not a component sum.
+        if metrics.source == "coverage/units.json" {
+            if let Some(n) = summary
+                .get("totals")
+                .and_then(|totals| totals.get("conformant"))
+                .and_then(Value::as_u64)
+                .or_else(|| summary.get("conformant").and_then(Value::as_u64))
+            {
+                metrics.passing = Some(n as usize);
+            }
+        }
     }
 
     metrics
@@ -866,8 +878,27 @@ pub fn compact_pct(value: f64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
-    use std::path::Path;
+    use serde_json::{json, Value};
+    use std::path::{Path, PathBuf};
+
+    fn write_coverage(dir: &Path, summary: Value, units: Value) {
+        let cov = dir.join("coverage");
+        std::fs::create_dir_all(&cov).expect("coverage dir");
+        std::fs::write(
+            cov.join("summary.json"),
+            serde_json::to_string(&summary).unwrap(),
+        )
+        .expect("summary");
+        std::fs::write(cov.join("units.json"), serde_json::to_string(&units).unwrap()).expect("units");
+    }
+
+    fn temp_dir(tag: &str) -> PathBuf {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!("megabase-site-metrics-{tag}-{stamp}"))
+    }
 
     #[test]
     fn placeholder_uses_em_dash_not_a_fake_total() {
@@ -925,16 +956,10 @@ mod tests {
 
     #[test]
     fn summary_counts_paint_units_that_have_no_status_field() {
-        let stamp = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let dir = std::env::temp_dir().join(format!("megabase-site-metrics-{stamp}"));
-        let cov = dir.join("coverage");
-        std::fs::create_dir_all(&cov).expect("coverage dir");
-        std::fs::write(
-            cov.join("summary.json"),
-            serde_json::to_string(&json!({
+        let dir = temp_dir("paint");
+        write_coverage(
+            &dir,
+            json!({
                 "schema": 1,
                 "totals": { "units": 3, "implemented": 2, "tested": 0, "conformant": 0 },
                 "percent": { "coverage": 66.7, "conformance": 0.0, "done": 0.0 },
@@ -954,13 +979,8 @@ mod tests {
                         }
                     }
                 }
-            }))
-            .unwrap(),
-        )
-        .expect("summary");
-        std::fs::write(
-            cov.join("units.json"),
-            serde_json::to_string(&json!({
+            }),
+            json!({
                 "schema": 1,
                 "total": 3,
                 "by_component": { "auth": 3 },
@@ -969,10 +989,8 @@ mod tests {
                     { "id": "auth:database:b", "component": "auth", "group": "database" },
                     { "id": "auth:database:c", "component": "auth", "group": "database" }
                 ]
-            }))
-            .unwrap(),
-        )
-        .expect("units");
+            }),
+        );
         let metrics = load(&dir);
         let _ = std::fs::remove_dir_all(&dir);
         let auth = metrics.component("auth").expect("auth");
@@ -995,6 +1013,62 @@ mod tests {
             db.units.contains(&UnitStatus::Implemented),
             "implemented units must survive a units.json that has no status field"
         );
+        assert_eq!(metrics.passing, Some(0));
+        assert_eq!(metrics.passing_total_label(), "0 / 3");
+    }
+
+    #[test]
+    fn summary_conformant_restores_passing_headline() {
+        let dir = temp_dir("passing");
+        write_coverage(
+            &dir,
+            json!({
+                "schema": 1,
+                "totals": { "units": 2, "implemented": 1, "tested": 1, "conformant": 1 },
+                "percent": { "coverage": 50.0, "conformance": 50.0, "done": 50.0 },
+                "components": {
+                    "auth": {
+                        "units": 2,
+                        "implemented": 1,
+                        "tested": 1,
+                        "conformant": 1,
+                        "groups": {
+                            "database": {
+                                "units": 2,
+                                "implemented": 1,
+                                "tested": 1,
+                                "conformant": 1
+                            }
+                        }
+                    }
+                }
+            }),
+            json!({
+                "schema": 1,
+                "total": 2,
+                "by_component": { "auth": 2 },
+                "units": [
+                    { "id": "auth:database:a", "component": "auth", "group": "database" },
+                    { "id": "auth:database:b", "component": "auth", "group": "database" }
+                ]
+            }),
+        );
+        let metrics = load(&dir);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(
+            metrics.passing,
+            Some(1),
+            "headline must use summary totals.conformant, not the units.json overlay of 0"
+        );
+        assert_eq!(metrics.passing_total_label(), "1 / 2");
+        let auth = metrics.component("auth").expect("auth");
+        assert_eq!(auth.conformant, 1);
+        assert_eq!(auth.not_started, 1);
+        assert!(auth
+            .groups
+            .iter()
+            .flat_map(|g| g.units.iter())
+            .any(|s| *s == UnitStatus::Conformant));
     }
 
     #[test]
@@ -1008,18 +1082,16 @@ mod tests {
             auth.implemented > 0,
             "live summary lists implemented Auth units; the site must not paint them as not started"
         );
-        let database = auth
+        assert!(
+            auth.groups.iter().any(|g| g.id == "database"),
+            "auth database group"
+        );
+        let painted: usize = auth
             .groups
             .iter()
-            .find(|g| g.id == "database")
-            .expect("auth database group");
-        assert_eq!(
-            database
-                .units
-                .iter()
-                .filter(|s| **s == UnitStatus::Implemented)
-                .count(),
-            auth.implemented
-        );
+            .flat_map(|g| g.units.iter())
+            .filter(|s| **s == UnitStatus::Implemented)
+            .count();
+        assert_eq!(painted, auth.implemented);
     }
 }
