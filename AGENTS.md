@@ -212,8 +212,9 @@ The board must match reality at all times.
   updates that PR (`gh pr edit`) instead of opening another. The title is
   Conventional Commits; the body follows
   `.github/pull_request_template.md` and includes `Closes #<n>`. The
-  workflow prefers `MEGABASE_AGENT_GH_TOKEN` so the opened PR triggers CI
-  (`GITHUB_TOKEN` can create a PR but does not start workflows).
+  workflow prefers `MEGABASE_AGENT_GH_TOKEN` so CI runs automatically
+  (`GITHUB_TOKEN` can open a PR, but its `pull_request` workflow runs
+  require approval).
 - **Orchestrator.** It alone merges (`gh pr merge <n> --squash`), and only
   when three things hold: the approval covers the current head SHA
   (`gh pr view <n> --json headRefOid`), no change request is open, and every
