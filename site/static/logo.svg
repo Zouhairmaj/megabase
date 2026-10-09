@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 30 30" width="30" height="30" fill="none" aria-hidden="true" class="logo">
+  <!-- 3x3 mark: 8px squares, 3px gaps. Outer #303235, center #00D892. -->
+  <rect x="0" y="0" width="8" height="8" fill="#303235"/>
+  <rect x="11" y="0" width="8" height="8" fill="#303235"/>
+  <rect x="22" y="0" width="8" height="8" fill="#303235"/>
+  <rect x="0" y="11" width="8" height="8" fill="#303235"/>
+  <rect x="11" y="11" width="8" height="8" fill="#00D892"/>
+  <rect x="22" y="11" width="8" height="8" fill="#303235"/>
+  <rect x="0" y="22" width="8" height="8" fill="#303235"/>
+  <rect x="11" y="22" width="8" height="8" fill="#303235"/>
+  <rect x="22" y="22" width="8" height="8" fill="#303235"/>
+</svg>

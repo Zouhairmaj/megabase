@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{{title}}</title>
+    <meta name="description" content="{{description}}" />
+    <link rel="canonical" href="{{canonical}}" />
+    <meta name="theme-color" content="#0B0E12" />
+    <meta name="color-scheme" content="dark" />
+    {{robots}}
+    <link rel="icon" href="{{asset}}favicon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="{{asset}}apple-touch-icon.png" />
+    {{preload}}
+    <link rel="stylesheet" href="{{asset}}styles.css" />
+    <meta property="og:type" content="{{og_type}}" />
+    <meta property="og:site_name" content="Megabase" />
+    <meta property="og:title" content="{{title}}" />
+    <meta property="og:description" content="{{description}}" />
+    <meta property="og:url" content="{{canonical}}" />
+    <meta property="og:image" content="{{origin}}/og-card.png" />
+    <meta property="og:image:type" content="image/png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="Megabase: The Supabase API. One Rust binary." />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="{{title}}" />
+    <meta name="twitter:description" content="{{description}}" />
+    <meta name="twitter:image" content="{{origin}}/og-card.png" />
+  </head>
+  <body class="{{body_class}}">
+    <a class="skip-link" href="#main">Skip to content</a>
+    <div class="page {{page_class}}">
+      {{header}}
+      {{content}}
+      {{footer}}
+    </div>
+    {{scripts}}
+  </body>
+</html>
