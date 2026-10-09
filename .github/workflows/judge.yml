@@ -11,6 +11,9 @@ env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: 0
 
+permissions:
+  contents: read
+
 jobs:
   judge:
     name: Judge
@@ -24,8 +27,10 @@ jobs:
         with:
           submodules: recursive
           fetch-depth: 1
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: Build harness and binary
         run: cargo build --release --locked -p megabase -p megabase-judge --bin megabase --bin megabase-judge
       - name: Reference stack
@@ -108,8 +113,10 @@ jobs:
           name: judge-results
           path: /tmp/judge
       - run: cp /tmp/judge/judge-results.json coverage/judge-results.json
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - run: cargo run --locked -p megabase-coverage -- update
       - name: Commit generated status
         run: |

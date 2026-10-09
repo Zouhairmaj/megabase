@@ -7,6 +7,8 @@ reviews:
   auto_review:
     enabled: true
     drafts: true
+    base_branches:
+      - main
   path_filters:
     - "!vendor/**"
   path_instructions:

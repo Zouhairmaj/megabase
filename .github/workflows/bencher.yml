@@ -8,8 +8,6 @@ on:
 
 permissions:
   contents: read
-  pull-requests: write
-  checks: write
 
 env:
   CARGO_TERM_COLOR: always
@@ -19,6 +17,10 @@ jobs:
   benchmark:
     name: Bencher
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      checks: write
     # Fork PRs do not receive repo secrets; skip instead of failing.
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     env:
@@ -31,15 +33,17 @@ jobs:
       - uses: actions/checkout@v4
         if: env.BENCHER_API_TOKEN != ''
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
         if: env.BENCHER_API_TOKEN != ''
+        with:
+          toolchain: stable
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         if: env.BENCHER_API_TOKEN != ''
         with:
           key: bencher
 
-      - uses: bencherdev/bencher@main
+      - uses: bencherdev/bencher@b4cfdddf418fc547e694b8fa6cc7c846a9c77435 # main
         if: env.BENCHER_API_TOKEN != ''
 
       - name: Ensure Bencher project megabase

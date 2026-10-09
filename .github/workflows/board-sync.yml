@@ -15,8 +15,6 @@ on:
 
 permissions:
   contents: read
-  issues: read
-  pull-requests: read
 
 concurrency:
   group: board-sync
@@ -26,6 +24,10 @@ jobs:
   sync:
     name: Sync Status
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     env:
       PROJECT_TOKEN: ${{ secrets.PROJECT_TOKEN }}
