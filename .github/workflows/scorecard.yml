@@ -29,6 +29,10 @@ jobs:
         with:
           results_file: results.sarif
           results_format: sarif
+          # Fine-grained read-only PAT (Administration, Contents, Metadata,
+          # Pull requests). Branch-Protection cannot read classic rules with
+          # GITHUB_TOKEN alone. Secret SCORECARD_TOKEN is set on the repo.
+          repo_token: ${{ secrets.SCORECARD_TOKEN }}
           publish_results: true
       - name: Upload artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

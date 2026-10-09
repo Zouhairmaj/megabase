@@ -213,6 +213,10 @@ Physically impossible for the agent (repository settings or credentials):
 - [x] Install the [Claude GitHub App](https://github.com/apps/claude) on this
       repository (2026-10-09)
 - [x] Set repo secret `CLAUDE_CODE_OAUTH_TOKEN` (2026-10-09)
+- [x] Set repo secret `SCORECARD_TOKEN` (fine-grained PAT, read-only
+      Administration / Contents / Metadata / Pull requests) so OpenSSF
+      Scorecard's Branch-Protection check can read classic branch
+      protection rules (2026-10-09)
 - [ ] Enable GitHub private vulnerability reporting (Settings → Code
       security) so the path in `SECURITY.md` works
 - [ ] Optionally register an [OpenSSF Best Practices](https://www.bestpractices.dev/)
