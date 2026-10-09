@@ -513,4 +513,58 @@ mod tests {
         assert_eq!(dbs.reference, "postgres://u:p@db:5432/postgres");
         assert_eq!(dbs.megabase, "postgres://u:p@db:5432/megabase");
     }
+
+    #[test]
+    fn compose_override_images_use_mirrors_and_digests() {
+        let path =
+            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../compose.override.yml");
+        let text = std::fs::read_to_string(&path).expect("compose.override.yml");
+        let mut images = 0usize;
+        for (i, line) in text.lines().enumerate() {
+            let trimmed = line.trim();
+            let Some(rest) = trimmed.strip_prefix("image:") else {
+                continue;
+            };
+            images += 1;
+            let image = rest.trim().trim_matches('"').trim_matches('\'');
+            assert!(
+                !image.contains("docker.io/"),
+                "line {} must not pull from Docker Hub, got {image}",
+                i + 1
+            );
+            assert!(
+                image.starts_with("public.ecr.aws/") || image.starts_with("ghcr.io/"),
+                "line {} must use public.ecr.aws or ghcr.io, got {image}",
+                i + 1
+            );
+            let Some((_, digest)) = image.rsplit_once("@sha256:") else {
+                panic!("line {} must pin a sha256 digest, got {image}", i + 1);
+            };
+            assert_eq!(digest.len(), 64, "sha256 on line {} is not 64 hex", i + 1);
+            assert!(
+                digest.chars().all(|c| c.is_ascii_hexdigit()),
+                "sha256 on line {} is not hex: {digest}",
+                i + 1
+            );
+        }
+        assert!(
+            images >= 11,
+            "expected every reference-stack service to pin an image, got {images}"
+        );
+    }
+
+    #[test]
+    fn kong_entrypoint_replaces_vendor_script() {
+        let path =
+            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../compose.override.yml");
+        let text = std::fs::read_to_string(&path).expect("compose.override.yml");
+        assert!(
+            text.contains("entrypoint: !override"),
+            "Compose appends entrypoint sequences; without !override the vendor script still execs /entrypoint.sh"
+        );
+        assert!(
+            text.contains("/docker-entrypoint.sh"),
+            "the ECR library Kong image has /docker-entrypoint.sh, not /entrypoint.sh"
+        );
+    }
 }

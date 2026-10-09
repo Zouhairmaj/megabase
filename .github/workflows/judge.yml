@@ -39,36 +39,39 @@ jobs:
       - uses: ./.github/actions/rust-cache
       - name: Build harness and binary
         run: cargo build --release --locked -p megabase -p megabase-judge --bin megabase --bin megabase-judge
-      # Do not use `secrets.*` in `if:` — that context is unavailable when
-      # GitHub evaluates the workflow graph and skips the Judge job on PRs.
-      - name: Docker Hub login
-        env:
-          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+      - uses: ./.github/actions/dockerhub-login
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Pull reference images
         run: |
           set -euo pipefail
-          if [ -z "${DOCKERHUB_TOKEN}" ]; then
-            echo "DOCKERHUB_TOKEN unset; image pulls stay unauthenticated"
-            exit 0
-          fi
-          echo "${DOCKERHUB_TOKEN}" | docker login --username "${DOCKERHUB_USERNAME}" --password-stdin
+          # public.ecr.aws rejects a parallel burst with "toomanyrequests:
+          # Rate exceeded". Pull one image at a time and retry.
+          mapfile -t images < <(docker compose -p megabase-judge \
+            -f vendor/supabase/docker/docker-compose.yml \
+            -f judge/compose.override.yml \
+            --env-file vendor/supabase/docker/.env.example \
+            config --images)
+          for image in "${images[@]}"; do
+            [ -n "$image" ] || continue
+            attempt=1
+            until docker pull "$image"; do
+              if [ "$attempt" -ge 8 ]; then
+                echo "failed to pull $image" >&2
+                exit 1
+              fi
+              sleep $((attempt * 5))
+              attempt=$((attempt + 1))
+            done
+          done
       - name: Reference stack
         run: |
-          set -euo pipefail
-          # Hub 429s on unauthenticated pulls of supabase/*; retry a few times.
-          for attempt in 1 2 3 4 5; do
-            if docker compose -p megabase-judge \
-              -f vendor/supabase/docker/docker-compose.yml \
-              -f judge/compose.override.yml \
-              --env-file vendor/supabase/docker/.env.example \
-              up -d --wait --wait-timeout 300; then
-              exit 0
-            fi
-            echo "compose up failed (attempt ${attempt}/5); sleeping before retry"
-            sleep $((attempt * 20))
-          done
-          echo "::error::Reference stack compose up failed after 5 attempts"
-          exit 1
+          docker compose -p megabase-judge \
+            -f vendor/supabase/docker/docker-compose.yml \
+            -f judge/compose.override.yml \
+            --env-file vendor/supabase/docker/.env.example \
+            up -d --pull never --wait --wait-timeout 300
       - name: Prepare Megabase database
         run: ./target/release/megabase-judge prepare
       - name: Megabase on :8100
@@ -136,40 +139,3 @@ jobs:
               repo: context.repo.repo,
               body,
             });
-
-  coverage-on-main:
-    name: Update coverage on main
-    needs: judge
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    concurrency:
-      group: judge-main
-      cancel-in-progress: false
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          submodules: recursive
-          token: ${{ secrets.GITHUB_TOKEN }}
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          name: judge-results
-          path: /tmp/judge
-      - run: cp /tmp/judge/judge-results.json coverage/judge-results.json
-      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
-        with:
-          toolchain: stable
-      - uses: ./.github/actions/rust-cache
-      - run: cargo run --locked -p megabase-coverage -- update
-      - name: Commit generated status
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add coverage README.md PROGRESS.md docs/COMPATIBILITY.md docs/epics
-          if git diff --staged --quiet; then
-            echo "no coverage drift"
-            exit 0
-          fi
-          git commit -m "ci(coverage): regenerate status from judge on main"
-          git push

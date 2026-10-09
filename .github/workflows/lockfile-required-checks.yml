@@ -335,13 +335,39 @@ jobs:
       - uses: ./.github/actions/rust-cache
       - name: Build harness and binary
         run: cargo build --release --locked -p megabase -p megabase-judge --bin megabase --bin megabase-judge
+      - uses: ./.github/actions/dockerhub-login
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Pull reference images
+        run: |
+          set -euo pipefail
+          # public.ecr.aws rejects a parallel burst with "toomanyrequests:
+          # Rate exceeded". Pull one image at a time and retry.
+          mapfile -t images < <(docker compose -p megabase-judge \
+            -f vendor/supabase/docker/docker-compose.yml \
+            -f judge/compose.override.yml \
+            --env-file vendor/supabase/docker/.env.example \
+            config --images)
+          for image in "${images[@]}"; do
+            [ -n "$image" ] || continue
+            attempt=1
+            until docker pull "$image"; do
+              if [ "$attempt" -ge 8 ]; then
+                echo "failed to pull $image" >&2
+                exit 1
+              fi
+              sleep $((attempt * 5))
+              attempt=$((attempt + 1))
+            done
+          done
       - name: Reference stack
         run: |
           docker compose -p megabase-judge \
             -f vendor/supabase/docker/docker-compose.yml \
             -f judge/compose.override.yml \
             --env-file vendor/supabase/docker/.env.example \
-            up -d --wait --wait-timeout 300
+            up -d --pull never --wait --wait-timeout 300
       - name: Megabase on :8100
         run: |
           MEGABASE_PORT=8100 MEGABASE_HOST=0.0.0.0 \

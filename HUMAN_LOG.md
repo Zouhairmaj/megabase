@@ -29,11 +29,6 @@ Each entry should include:
 - **Reason**: OpenSSF Scorecard Signed-Releases inspects assets on the last five GitHub Releases. Packaging also wants a public package. `attest-build-provenance` records the run SHA, so the backfill must run on that tag. Agents cannot change package visibility or start that dispatch from this environment.
 - **Files affected**: GitHub Packages and Actions (not in git)
 
-- **Date**: 2026-10-09
-- **Action**: (pending) Add repo secrets `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` (read-only Hub token) so Judge can `docker login` before pulling `supabase/*`, `postgrest/*`, and `kong/*`. GitHub-hosted runners hit Hub 429 unauthenticated.
-- **Reason**: Those images are not official Docker Hub library images, so `public.ecr.aws/docker/library` cannot serve them. The root Dockerfile already pulls rust/debian via ECR Public. Agents cannot create Hub credentials.
-- **Files affected**: GitHub Actions secrets (not in git)
-
 ---
 
 ## Completed
@@ -47,3 +42,8 @@ Each entry should include:
 - **Action**: Created repo secret `SCORECARD_TOKEN` (fine-grained PAT, read-only: Administration, Contents, Metadata, Pull requests).
 - **Reason**: OpenSSF Scorecard's Branch-Protection check cannot read classic branch protection rules with `GITHUB_TOKEN` alone. The workflow now passes `repo_token` from secret `SCORECARD_TOKEN` and keeps `publish_results: true`.
 - **Files affected**: GitHub Actions secrets (not in git)
+
+- **Date**: 2026-10-09
+- **Action**: Zouhair created a Docker Hub account and repository secrets `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` (read-only PAT).
+- **Reason**: Unauthenticated Docker Hub pulls were returning HTTP 429 and failing Judge, the container image build, and cargo-deny. CI logs in with these secrets before image pulls and builds, and skips login when the token is empty (fork pull requests). Digest-pinned `public.ecr.aws` and `ghcr.io` mirrors stay in place.
+- **Files affected**: GitHub Actions repository secrets (not in git)
