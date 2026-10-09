@@ -71,7 +71,10 @@ pub fn evaluate(changes: &[Change], ctx: &Context) -> Vec<String> {
                 && path == "HUMAN_LOG.md"
                 && change.status == Status::Added
                 && ctx.human_log_size == Some(0);
-            if !creating_empty_log {
+            // Phase 0 only: the lead approved landing the Design (Kite)
+            // section in GOAL.md on the bootstrap branch.
+            let bootstrap_goal = bootstrap && path == "GOAL.md";
+            if !creating_empty_log && !bootstrap_goal {
                 violations.push(format!(
                     "{path}: human-owned file; only maintainers edit it"
                 ));
@@ -141,11 +144,16 @@ mod tests {
     }
 
     #[test]
-    fn bootstrap_never_touches_goal_or_a_non_empty_log() {
+    fn bootstrap_never_touches_manifesto_or_a_non_empty_log() {
         let mut c = ctx(BOOTSTRAP_BRANCH, true);
-        assert_eq!(evaluate(&[add("GOAL.md")], &c).len(), 1);
+        assert!(evaluate(&[add("GOAL.md")], &c).is_empty());
+        assert_eq!(evaluate(&[add("MANIFESTO.md")], &c).len(), 1);
         c.human_log_size = Some(12);
         assert_eq!(evaluate(&[add("HUMAN_LOG.md")], &c).len(), 1);
+        assert_eq!(
+            evaluate(&[add("GOAL.md")], &ctx(BOOTSTRAP_BRANCH, false)).len(),
+            1
+        );
     }
 
     #[test]

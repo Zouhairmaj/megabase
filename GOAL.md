@@ -78,6 +78,23 @@ Do not start a level until the previous one reaches the conformance threshold se
 - **Builders:** one per component, each on its own branch, following the loop above.
 - **Reviewer:** has not seen the code being reviewed. Checks rules 2–6, reads diffs for test gaming, and approves or rejects merges. Any change to `judge/` requires reviewer approval.
 
+## Design (design-first, Kite)
+
+Every graphic and UI element — brand, banners, OG/social images, website
+pages, badges, and treemap style — is designed first in the Kite project
+**Megabase** (public mockups:
+[kite.new/p/megabase-identity](https://kite.new/p/megabase-identity)).
+
+- Every page and screen has a **desktop** version and a **mobile** version.
+- Designs are reviewed by an LLM committee via OpenRouter, corrected, then
+  implemented pixel-faithfully.
+- Implementation must not diverge from Kite. To change a visual, change
+  Kite first, then the code. Kite governs visual design only, never
+  compatibility behavior.
+- Agents design on their own: design decisions are made by agents with the
+  LLM committee, with **no human design input**. That is an explicit part
+  of the experiment.
+
 ## 9. The Studio test
 
 The official Supabase Studio, pinned and **unmodified**, is part of the judge.

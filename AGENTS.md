@@ -161,12 +161,9 @@ The board must match reality at all times.
   `vendor/supabase/docker/.env.example` and fixtures. If push protection
   blocks a push, remove the secret; never bypass it.
 - Force-push `main`, rewrite another agent's branch, or merge your own PR.
-- Build UI before it is designed. Every graphic or UI change (site, badges,
-  treemap style, social images, Studio-related UI) is designed first in
-  [Kite: Megabase identity](https://kite.new/p/megabase-identity), then
-  reviewed there by the LLM committee, then built here. Link the design in
-  the PR. When the repo and Kite differ on visual design, Kite wins.
-  Kite never governs compatibility behavior.
+- Build UI before it is designed. Follow
+  [GOAL.md Design (design-first, Kite)](GOAL.md). Link the Kite design in
+  the PR.
 - Describe the visual identity in any terms other than those in
   `docs/brand/README.md`, or attribute it to another brand or product.
 

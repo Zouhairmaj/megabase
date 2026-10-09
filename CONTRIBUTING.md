@@ -15,7 +15,7 @@ agent or human. This file covers only what AGENTS.md does not.
 | What is being worked on | GitHub Project [Megabase Backlog](https://github.com/users/Zouhairmaj/projects/1) |
 | Decisions and overall state | `PROGRESS.md` |
 | Compatibility contract | `docs/COMPATIBILITY.md` |
-| Graphic and UI design | [Kite: Megabase identity](https://kite.new/p/megabase-identity), see `docs/brand/README.md` |
+| Graphic and UI design | [GOAL.md Design (design-first, Kite)](GOAL.md); [Kite: Megabase identity](https://kite.new/p/megabase-identity), `docs/brand/README.md` |
 | Coverage denominator | `coverage/units.json` (extracted from `vendor/`) |
 | Correctness | `judge/` against the pinned reference stack |
 | Versioning and releases | [`docs/ROADMAP.md`](docs/ROADMAP.md#versioning-and-releases) |

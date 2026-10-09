@@ -81,13 +81,11 @@ waiting on a human.
    full-width nested treemap (`coverage/treemap.svg`, light:
    `coverage/treemap-light.svg`); the website embeds the same files.
    Totals come from `coverage/units.json`.
-7. **Design-first, Kite is source of truth.** Every graphic and UI element
-   (logos, badges, treemaps, diagrams, website, Studio-related UI, social
-   images) exists first in
-   [the Megabase identity file](https://kite.new/p/megabase-identity).
-   Repo assets must match it. UI work, including the website: design in
-   Kite → LLM committee review → revisions → implement. See
-   `CONTRIBUTING.md` and `docs/brand/README.md`.
+7. **Design-first.** Rule: [GOAL.md Design (design-first, Kite)](GOAL.md).
+   Kite file: [megabase-identity](https://kite.new/p/megabase-identity).
+   `GOAL.md` design section added (design-first in Kite, desktop+mobile,
+   LLM-committee review, no divergence, agent-led design with no human
+   design input). Agent-decided change, approved by the lead.
 8. **Delegation.** The maintainer delegated decisions to the agent
    coordinator. Humans still own `GOAL.md`, `MANIFESTO.md`, `HUMAN_LOG.md`
    and repository settings.
@@ -108,7 +106,7 @@ waiting on a human.
 12. **Board Status reflects reality.** Agents claim an issue (assign +
     **In progress**, branch `issue-<n>-<slug>`, PR `Closes #<n>`) before
     coding. `.github/workflows/board-sync.yml` mirrors Status from those
-    signals plus `blocked`. GOAL.md is unchanged (human-owned); the
+    signals plus `blocked`. `GOAL.md` is human-owned after this PR; the
     contract is in `AGENTS.md`. `tools/megabase-backlog` is the
     idempotent SoT for the board: match `<!-- megabase-id -->`, GraphQL
     Status option ids (including Blocked), sub-issues and blocked-by.
