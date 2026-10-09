@@ -41,6 +41,7 @@ jobs:
             judge
             coverage
             site
+            ci
           requireScope: false
           subjectPattern: ^(?![A-Z]).+$
           subjectPatternError: |

@@ -1,6 +1,8 @@
 # Keep GitHub Project "Megabase Backlog" Status aligned with reality.
-# Requires repo secret PROJECT_TOKEN: a classic PAT with the `project` scope
-# (the default GITHUB_TOKEN cannot set Project v2 field values).
+# Requires repo secret MEGABASE_GH_PROJECT_TOKEN (PROJECT_TOKEN is a fallback):
+# a classic PAT with the `project` scope. GITHUB_TOKEN cannot set Project v2
+# field values. The board is the user-owned project
+# https://github.com/users/Zouhairmaj/projects/1 ("Megabase Backlog").
 name: Board sync
 
 on:
@@ -30,14 +32,15 @@ jobs:
       pull-requests: read
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     env:
-      PROJECT_TOKEN: ${{ secrets.PROJECT_TOKEN }}
+      PROJECT_TOKEN: ${{ secrets.MEGABASE_GH_PROJECT_TOKEN || secrets.PROJECT_TOKEN }}
       PROJECT_TITLE: Megabase Backlog
+      PROJECT_NUMBER: "1"
     steps:
-      - name: Skip without PROJECT_TOKEN
+      - name: Skip without project token
         if: env.PROJECT_TOKEN == ''
         run: |
-          echo "PROJECT_TOKEN is not set; skipping board sync."
-          echo "Add a classic PAT with the project scope as the PROJECT_TOKEN repo secret."
+          echo "MEGABASE_GH_PROJECT_TOKEN is not set; skipping board sync."
+          echo "Add a classic PAT with the project scope as MEGABASE_GH_PROJECT_TOKEN."
 
       - name: Update project Status
         if: env.PROJECT_TOKEN != ''
@@ -47,7 +50,7 @@ jobs:
           REF_TYPE: ${{ github.event.ref_type }}
           REF_NAME: ${{ github.event.ref }}
         with:
-          github-token: ${{ secrets.PROJECT_TOKEN }}
+          github-token: ${{ secrets.MEGABASE_GH_PROJECT_TOKEN || secrets.PROJECT_TOKEN }}
           script: |
             const PROJECT_TITLE = process.env.PROJECT_TITLE;
             const owner = context.repo.owner;
@@ -82,47 +85,48 @@ jobs:
             }
 
             async function findProject() {
-              const data = await github.graphql(
-                `query($login: String!) {
-                  user(login: $login) {
-                    projectsV2(first: 50) {
-                      nodes { id number title }
-                    }
-                  }
-                  organization(login: $login) {
-                    projectsV2(first: 50) {
-                      nodes { id number title }
-                    }
-                  }
-                }`,
-                { login: owner }
-              );
-              const nodes = [
-                ...(data.user?.projectsV2?.nodes || []),
-                ...(data.organization?.projectsV2?.nodes || []),
-              ];
-              const project = nodes.find((p) => p.title === PROJECT_TITLE);
-              if (!project) {
-                throw new Error(
-                  `Project "${PROJECT_TITLE}" not found for ${owner}. Create it (just backlog) and set PROJECT_TOKEN.`
-                );
-              }
-              const fieldData = await github.graphql(
-                `query($id: ID!) {
-                  node(id: $id) {
-                    ... on ProjectV2 {
-                      field(name: "Status") {
-                        ... on ProjectV2SingleSelectField {
-                          id
-                          options { id name }
+              // User-owned project (not an org). Querying organization(login)
+              // for a user login makes GraphQL return NOT_FOUND and octokit
+              // throws GraphqlResponseError even when user.projectsV2 is present.
+              const number = Number(process.env.PROJECT_NUMBER || "1");
+              let data;
+              try {
+                data = await github.graphql(
+                  `query($login: String!, $number: Int!) {
+                    user(login: $login) {
+                      projectV2(number: $number) {
+                        id
+                        number
+                        title
+                        field(name: "Status") {
+                          ... on ProjectV2SingleSelectField {
+                            id
+                            options { id name }
+                          }
                         }
                       }
                     }
-                  }
-                }`,
-                { id: project.id }
-              );
-              const field = fieldData.node?.field;
+                  }`,
+                  { login: owner, number }
+                );
+              } catch (err) {
+                const msg = err && err.message ? err.message : String(err);
+                throw new Error(
+                  `Failed to load user project "${PROJECT_TITLE}" (#${number}) for ${owner}: ${msg}. MEGABASE_GH_PROJECT_TOKEN needs the classic PAT project scope.`
+                );
+              }
+              const project = data.user?.projectV2;
+              if (!project?.id) {
+                throw new Error(
+                  `User project #${number} not found for ${owner}. Create "${PROJECT_TITLE}" and set MEGABASE_GH_PROJECT_TOKEN (classic PAT, project scope).`
+                );
+              }
+              if (project.title !== PROJECT_TITLE) {
+                throw new Error(
+                  `User project #${number} is "${project.title}", expected "${PROJECT_TITLE}".`
+                );
+              }
+              const field = project.field;
               if (!field?.id || !field.options) {
                 throw new Error(
                   `Project "${PROJECT_TITLE}" has no Status single-select field.`
@@ -139,7 +143,7 @@ jobs:
                 }
                 options[name] = opt;
               }
-              return { ...project, fieldId: field.id, options };
+              return { id: project.id, number: project.number, title: project.title, fieldId: field.id, options };
             }
 
             async function loadIssue(number) {
