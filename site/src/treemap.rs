@@ -1356,7 +1356,7 @@ fn paint_cells(out: &mut String, layout: &Layout, g: &PlacedGroup) {
         let fill = pattern_id(layout.preset.id, status);
         for p in &paths {
             out.push_str(&format!(
-                r##"<path class="tm-cells" data-status="{st}" fill="url(#{fill})" d="M{x} {y}h{w}v{h}h-{w}z"/>"##,
+                r##"<path class="tm-cells {st}" data-status="{st}" fill="url(#{fill})" d="M{x} {y}h{w}v{h}h-{w}z"/>"##,
                 st = status_slug(status),
                 x = p.x,
                 y = p.y,
@@ -1842,6 +1842,44 @@ mod tests {
                 assert_layout(&metrics, *preset);
             }
         }
+    }
+
+    #[test]
+    fn implemented_unit_renders_implemented_class_and_color() {
+        let mut metrics = Metrics::placeholder();
+        metrics.total = Some(2);
+        metrics.passing = Some(0);
+        metrics.components = vec![ComponentBlock::from_counts("auth", "Auth", 1, 1, 0, 0)];
+        for preset in [HERO_DESKTOP, HERO_MOBILE, STATUS_DESKTOP, STATUS_MOBILE] {
+            let svg = render(&metrics, preset);
+            assert!(
+                svg.contains(r#"class="tm-cells implemented""#),
+                "preset {} must mark implemented cells with the implemented class",
+                preset.id
+            );
+            assert!(
+                svg.contains(r#"data-status="implemented""#),
+                "preset {} must expose data-status=implemented",
+                preset.id
+            );
+            assert!(
+                svg.contains(IMPLEMENTED),
+                "preset {} must paint implemented cells {IMPLEMENTED}",
+                preset.id
+            );
+            assert!(svg.contains(NOT_STARTED));
+        }
+        let live = real_metrics();
+        assert!(
+            live.components.iter().any(|c| c.implemented > 0),
+            "live coverage must include implemented units for this check"
+        );
+        let live_svg = render(&live, HERO_DESKTOP);
+        assert!(
+            live_svg.contains(r#"class="tm-cells implemented""#),
+            "live hero treemap must render implemented cells with the implemented class"
+        );
+        assert!(live_svg.contains(IMPLEMENTED));
     }
 
     #[test]
