@@ -55,9 +55,53 @@ CREATE TABLE IF NOT EXISTS auth.users (
     CONSTRAINT users_pkey PRIMARY KEY (id)
 );
 
+-- Rename legacy confirmed_at / email_change_token before ADD COLUMN so
+-- IF NOT EXISTS does not create empty replacements and skip the rename.
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = 'auth'
+          AND table_name = 'users'
+          AND column_name = 'email_confirmed_at'
+    ) AND EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = 'auth'
+          AND table_name = 'users'
+          AND column_name = 'confirmed_at'
+    ) AND EXISTS (
+        SELECT 1
+        FROM pg_attribute
+        WHERE attrelid = 'auth.users'::regclass
+          AND attname = 'confirmed_at'
+          AND attgenerated = ''
+    ) THEN
+        ALTER TABLE auth.users RENAME COLUMN confirmed_at TO email_confirmed_at;
+    END IF;
+END $$;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = 'auth'
+          AND table_name = 'users'
+          AND column_name = 'email_change_token_new'
+    ) AND EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = 'auth'
+          AND table_name = 'users'
+          AND column_name = 'email_change_token'
+    ) THEN
+        ALTER TABLE auth.users RENAME COLUMN email_change_token TO email_change_token_new;
+    END IF;
+END $$;
+
 -- ADD order matches pin attnums after the stub's instance_id, id.
--- email_confirmed_at / email_change_token_new / confirmed_at are also
--- added later for databases that still have the pre-rename names.
 ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS instance_id uuid;
 ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS aud varchar(255);
 ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS role varchar(255);
@@ -93,54 +137,6 @@ ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS reauthentication_sent_at timesta
 ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS deleted_at timestamptz;
 ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS is_sso_user boolean NOT NULL DEFAULT false;
 ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS is_anonymous boolean NOT NULL DEFAULT false;
-
-DO $$
-BEGIN
-    IF NOT EXISTS (
-        SELECT 1
-        FROM information_schema.columns
-        WHERE table_schema = 'auth'
-          AND table_name = 'users'
-          AND column_name = 'email_confirmed_at'
-    ) AND EXISTS (
-        SELECT 1
-        FROM information_schema.columns
-        WHERE table_schema = 'auth'
-          AND table_name = 'users'
-          AND column_name = 'confirmed_at'
-    ) AND EXISTS (
-        SELECT 1
-        FROM pg_attribute
-        WHERE attrelid = 'auth.users'::regclass
-          AND attname = 'confirmed_at'
-          AND attgenerated = ''
-    ) THEN
-        ALTER TABLE auth.users RENAME COLUMN confirmed_at TO email_confirmed_at;
-    END IF;
-END $$;
-
-ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS email_confirmed_at timestamptz;
-
-DO $$
-BEGIN
-    IF NOT EXISTS (
-        SELECT 1
-        FROM information_schema.columns
-        WHERE table_schema = 'auth'
-          AND table_name = 'users'
-          AND column_name = 'email_change_token_new'
-    ) AND EXISTS (
-        SELECT 1
-        FROM information_schema.columns
-        WHERE table_schema = 'auth'
-          AND table_name = 'users'
-          AND column_name = 'email_change_token'
-    ) THEN
-        ALTER TABLE auth.users RENAME COLUMN email_change_token TO email_change_token_new;
-    END IF;
-END $$;
-
-ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS email_change_token_new varchar(255);
 
 DO $$
 BEGIN

@@ -9,7 +9,8 @@
 -- attnum order matches the pin: email was added before the uuid `id`
 -- (`20221215195800` then `20231117164230`). ADD COLUMN IF NOT EXISTS
 -- cannot reorder an existing table; drop an empty wrong-order table so
--- CREATE below can rebuild it.
+-- CREATE below can rebuild it. ACCESS EXCLUSIVE before COUNT so a
+-- concurrent insert cannot land between the emptiness check and DROP.
 DO $$
 DECLARE
     email_att smallint;
@@ -19,6 +20,7 @@ BEGIN
     IF to_regclass('auth.identities') IS NULL THEN
         RETURN;
     END IF;
+    LOCK TABLE auth.identities IN ACCESS EXCLUSIVE MODE;
     SELECT COUNT(*) INTO n FROM auth.identities;
     SELECT a.attnum INTO email_att
       FROM pg_attribute a

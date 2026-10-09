@@ -14,7 +14,8 @@
 
 -- Pin attnum order is refresh_token_* then scopes. An empty table created
 -- with scopes first is dropped so CREATE can rebuild it; inbound FKs are
--- dropped here and re-added later.
+-- dropped here and re-added later. ACCESS EXCLUSIVE before COUNT so a
+-- concurrent insert cannot land between the emptiness check and DROP.
 DO $$
 DECLARE
     hmac_att smallint;
@@ -24,6 +25,7 @@ BEGIN
     IF to_regclass('auth.sessions') IS NULL THEN
         RETURN;
     END IF;
+    LOCK TABLE auth.sessions IN ACCESS EXCLUSIVE MODE;
     SELECT COUNT(*) INTO n FROM auth.sessions;
     SELECT a.attnum INTO hmac_att
       FROM pg_attribute a
@@ -127,6 +129,32 @@ BEGIN
     ) THEN
         ALTER TABLE auth.sessions
             ADD CONSTRAINT sessions_scopes_length CHECK (char_length(scopes) <= 4096);
+    END IF;
+END $$;
+
+DO $$
+BEGIN
+    IF to_regclass('auth.refresh_tokens') IS NOT NULL
+       AND NOT EXISTS (
+           SELECT 1
+           FROM pg_constraint
+           WHERE conname = 'refresh_tokens_session_id_fkey'
+             AND conrelid = to_regclass('auth.refresh_tokens')
+       ) THEN
+        ALTER TABLE auth.refresh_tokens
+            ADD CONSTRAINT refresh_tokens_session_id_fkey
+            FOREIGN KEY (session_id) REFERENCES auth.sessions(id) ON DELETE CASCADE;
+    END IF;
+    IF to_regclass('auth.mfa_amr_claims') IS NOT NULL
+       AND NOT EXISTS (
+           SELECT 1
+           FROM pg_constraint
+           WHERE conname = 'mfa_amr_claims_session_id_fkey'
+             AND conrelid = to_regclass('auth.mfa_amr_claims')
+       ) THEN
+        ALTER TABLE auth.mfa_amr_claims
+            ADD CONSTRAINT mfa_amr_claims_session_id_fkey
+            FOREIGN KEY (session_id) REFERENCES auth.sessions(id) ON DELETE CASCADE;
     END IF;
 END $$;
 

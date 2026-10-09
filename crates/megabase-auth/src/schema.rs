@@ -272,6 +272,19 @@ mod tests {
             IDENTITIES.contains("DROP TABLE auth.identities"),
             "empty wrong-order identities must be rebuilt"
         );
+        let lock = IDENTITIES
+            .find("LOCK TABLE auth.identities IN ACCESS EXCLUSIVE MODE")
+            .expect("identities lock");
+        let count = IDENTITIES
+            .find("SELECT COUNT(*) INTO n FROM auth.identities")
+            .expect("identities count");
+        let drop = IDENTITIES
+            .find("DROP TABLE auth.identities")
+            .expect("identities drop");
+        assert!(
+            lock < count && count < drop,
+            "ACCESS EXCLUSIVE must precede COUNT and DROP"
+        );
     }
 
     #[test]
@@ -349,6 +362,12 @@ mod tests {
         assert!(REFRESH_TOKENS.contains("refresh_tokens_session_id_fkey"));
         assert!(REFRESH_TOKENS.contains("parent varchar(255)"));
         assert!(USERS.contains("encrypted_password"));
+        let rename_confirmed = USERS
+            .find("RENAME COLUMN confirmed_at TO email_confirmed_at")
+            .expect("rename confirmed_at");
+        let rename_token = USERS
+            .find("RENAME COLUMN email_change_token TO email_change_token_new")
+            .expect("rename email_change_token");
         let email_confirmed = USERS
             .find("ADD COLUMN IF NOT EXISTS email_confirmed_at")
             .expect("email_confirmed_at");
@@ -370,6 +389,14 @@ mod tests {
         let token_current = USERS
             .find("ADD COLUMN IF NOT EXISTS email_change_token_current")
             .expect("email_change_token_current");
+        assert!(
+            rename_confirmed < email_confirmed,
+            "rename legacy confirmed_at before ADD COLUMN email_confirmed_at"
+        );
+        assert!(
+            rename_token < token_new,
+            "rename legacy email_change_token before ADD COLUMN email_change_token_new"
+        );
         assert!(
             email_confirmed < invited,
             "pin attnum order is email_confirmed_at then invited_at"
@@ -411,6 +438,29 @@ mod tests {
         assert!(
             SESSIONS.contains("DROP TABLE auth.sessions"),
             "empty wrong-order sessions must be rebuilt"
+        );
+        let lock = SESSIONS
+            .find("LOCK TABLE auth.sessions IN ACCESS EXCLUSIVE MODE")
+            .expect("sessions lock");
+        let count = SESSIONS
+            .find("SELECT COUNT(*) INTO n FROM auth.sessions")
+            .expect("sessions count");
+        let drop = SESSIONS
+            .find("DROP TABLE auth.sessions")
+            .expect("sessions drop");
+        assert!(
+            lock < count && count < drop,
+            "ACCESS EXCLUSIVE must precede COUNT and DROP"
+        );
+        let restore_refresh = SESSIONS[drop..]
+            .find("ADD CONSTRAINT refresh_tokens_session_id_fkey")
+            .expect("restore refresh_tokens FK");
+        let restore_amr = SESSIONS[drop..]
+            .find("ADD CONSTRAINT mfa_amr_claims_session_id_fkey")
+            .expect("restore mfa_amr_claims FK");
+        assert!(
+            restore_refresh > 0 && restore_amr > 0,
+            "inbound session FKs must be re-added after DROP"
         );
         assert!(SSO_PROVIDERS.contains("disabled"));
         assert!(SSO_PROVIDERS.contains("sso_providers_resource_id_pattern_idx"));
@@ -536,9 +586,12 @@ mod tests {
         let create = SCHEMA
             .find("CREATE TABLE IF NOT EXISTS auth.users")
             .expect("users stub");
-        let stub = &SCHEMA[create..];
-        let instance_id = stub.find("instance_id").expect("instance_id");
-        let id = stub.find("id uuid").expect("id");
+        let sessions = SCHEMA[create..]
+            .find("CREATE TABLE IF NOT EXISTS auth.sessions")
+            .expect("sessions stub");
+        let stub = &SCHEMA[create..create + sessions];
+        let instance_id = stub.find("instance_id uuid NULL").expect("instance_id");
+        let id = stub.find("id uuid NOT NULL").expect("id");
         assert!(instance_id < id, "pin attnum 1 is instance_id, then id");
     }
 

@@ -157,8 +157,8 @@ then uuid `id` (`20221215195800` before `20231117164230`). Unique
 Indexes: `identities_user_id_idx`, `identities_email_idx` (`text_pattern_ops`).
 Comments as in those migrations. Installer must **not** `RENAME` `id`: that
 breaks a database that already has the UUID primary key. An empty table
-whose `email` attnum is after `id` is dropped and recreated; a non-empty
-table keeps its existing attnums.
+whose `email` attnum is after `id` is locked `ACCESS EXCLUSIVE`, counted,
+then dropped and recreated; a non-empty table keeps its existing attnums.
 
 ---
 
@@ -495,7 +495,10 @@ become `text` (`20230116124310`); `deleted_at` (`20230116124412`);
 and 22.
 
 Installer must **not** `RENAME` `confirmed_at` or `email_change_token`
-when the final names already exist.
+when the final names already exist. Those legacy renames run before
+`ADD COLUMN IF NOT EXISTS` for `email_confirmed_at` and
+`email_change_token_new`, so the add does not create empty replacements
+and skip the rename.
 
 | Column | Type | Notes |
 |---|---|---|
@@ -578,9 +581,11 @@ lines 10 and 27.
 
 Pinned catalog attnum order is `oauth_client_id`, then
 `refresh_token_hmac_key` / `refresh_token_counter`, then `scopes`.
-An empty table with `scopes` before the refresh-token columns is dropped
-and recreated (inbound FKs are dropped and added again). A non-empty
-table keeps its existing attnums.
+An empty table with `scopes` before the refresh-token columns is locked
+`ACCESS EXCLUSIVE`, counted, then dropped and recreated
+(`refresh_tokens_session_id_fkey` and `mfa_amr_claims_session_id_fkey`
+are dropped and added again). A non-empty table keeps its existing
+attnums.
 
 Comment: `Auth: Stores session data associated to a user.` RLS on.
 
