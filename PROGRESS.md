@@ -270,6 +270,11 @@ Physically impossible for the agent (repository settings or credentials):
       `v0.1.0`) so that release gains signed assets (it shipped without
       binaries). Scorecard Signed-Releases looks at the last five
       GitHub Releases.
+- [ ] Set repo secrets `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN`
+      (read-only) so Judge can log in to Docker Hub. GitHub-hosted
+      runners 429 on unauthenticated pulls of the reference stack
+      (`supabase/*`, `postgrest/*`, `kong/*`). Exact steps:
+      `HUMAN_LOG.md` Pending, 2026-10-09.
 
 Log each of these in `HUMAN_LOG.md` when it is done. The delegation of
 decisions itself is a human intervention to log.
