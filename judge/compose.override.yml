@@ -1,0 +1,93 @@
+# Judge overlay for the official self-hosted Supabase stack.
+#
+# Used together with the unmodified upstream compose file:
+#
+#   docker compose -p megabase-judge \
+#     -f vendor/supabase/docker/docker-compose.yml \
+#     -f judge/compose.override.yml \
+#     --env-file vendor/supabase/docker/.env.example up -d --wait --wait-timeout 300
+#
+# Relative paths below resolve against vendor/supabase/docker (the directory
+# of the first compose file). This overlay only:
+#   1. pins each service image to the tag of the source pinned in vendor.toml,
+#   2. keeps all runtime data in named volumes so nothing is written into
+#      vendor/,
+#   3. loads the judge fixtures into the reference database,
+#   4. turns on email autoconfirm, because the self-hosted stack ships no
+#      mail server and sign-up cases need a session back,
+#   5. optionally adds Megabase on host port 8100 (`--profile with-megabase`),
+#   6. keeps the pooler alive on GitHub Actions (RLIMIT_NOFILE + a longer
+#      healthcheck; Elixir migrate+eval+server is slower than compose --wait
+#      would otherwise allow).
+# Studio, Kong and Postgres keep the versions pinned by vendor/supabase.
+# CI starts Megabase on the runner instead of building this image.
+
+services:
+  auth:
+    image: supabase/gotrue:v2.197.0
+    environment:
+      GOTRUE_MAILER_AUTOCONFIRM: "true"
+  rest:
+    image: postgrest/postgrest:v16.4
+  realtime:
+    image: supabase/realtime:v2.143.3
+  storage:
+    image: supabase/storage-api:v1.80.2
+    volumes:
+      - judge-storage:/var/lib/storage
+  imgproxy:
+    volumes:
+      - judge-storage:/var/lib/storage
+  meta:
+    image: supabase/postgres-meta:v0.100.0
+  functions:
+    image: supabase/edge-runtime:v1.77.4
+  supavisor:
+    image: supabase/supavisor:2.9.13
+    # Image ENV is RLIMIT_NOFILE=100000. limits.sh runs `ulimit -n` under
+    # `set -e`, so raising the limit on GitHub Actions (not permitted)
+    # exits the container before migrate. Same workaround as upstream
+    # supabase/docker self-host smoke tests.
+    environment:
+      RLIMIT_NOFILE: "1024"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "curl",
+          "-sf",
+          "http://127.0.0.1:4000/api/health",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 36
+      start_period: 120s
+  studio:
+    volumes:
+      - judge-snippets:/app/snippets
+  db:
+    volumes:
+      - judge-db-data:/var/lib/postgresql/data
+      - ../../../judge/fixtures/schema.sql:/docker-entrypoint-initdb.d/migrations/99-zz-judge-fixtures.sql:ro
+
+  megabase:
+    profiles: ["with-megabase"]
+    build:
+      context: ../../..
+      dockerfile: Dockerfile
+    environment:
+      MEGABASE_PORT: "8000"
+      JWT_SECRET: ${JWT_SECRET}
+      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD}@db:${POSTGRES_PORT}/${POSTGRES_DB}
+    ports:
+      - "8100:8000"
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/megabase-healthcheck"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+
+volumes:
+  judge-db-data:
+  judge-storage:
+  judge-snippets:

@@ -1,0 +1,80 @@
+Megabase
+Copyright 2026 The Megabase Authors
+
+This product is a port of open-source software. SPDX identifiers and
+copyright lines below are taken from each vendored repository's LICENSE
+file at the pin in vendor.toml (not from package.json / mix.exs). Full
+texts are copied into LICENSES/.
+
+PostgREST
+  SPDX-License-Identifier: MIT
+  Copyright (c) 2014-2026 The PostgREST contributors
+  vendor/postgrest  https://github.com/PostgREST/postgrest
+  LICENSES/postgrest.txt
+
+Supabase Auth
+  SPDX-License-Identifier: MIT
+  Copyright (c) 2021-2025 Supabase <support@supabase.com>
+  vendor/auth  https://github.com/supabase/auth
+  LICENSES/supabase-auth.txt
+  The LICENSE file at this pin is MIT (not Apache-2.0).
+
+Supabase Realtime
+  SPDX-License-Identifier: Apache-2.0
+  Copyright 2019 Supabase
+  vendor/realtime  https://github.com/supabase/realtime
+  LICENSES/supabase-realtime.txt
+
+Supabase Storage
+  SPDX-License-Identifier: Apache-2.0
+  Copyright 2019 Supabase
+  vendor/storage  https://github.com/supabase/storage
+  LICENSES/supabase-storage.txt
+
+Supavisor
+  SPDX-License-Identifier: Apache-2.0
+  Copyright notice in LICENSE is the Apache boilerplate placeholder.
+  vendor/supavisor  https://github.com/supabase/supavisor
+  LICENSES/supavisor.txt
+
+Postgres Meta
+  SPDX-License-Identifier: Apache-2.0
+  Copyright notice in LICENSE is the Apache boilerplate placeholder.
+  vendor/postgres-meta  https://github.com/supabase/postgres-meta
+  LICENSES/postgres-meta.txt
+  LICENSE (and README) are Apache-2.0; package.json at this pin says MIT.
+  NOTICE follows the LICENSE file.
+
+Supabase Edge Runtime
+  SPDX-License-Identifier: MIT
+  Copyright (c) 2023 Supabase
+  vendor/edge-runtime  https://github.com/supabase/edge-runtime
+  LICENSES/edge-runtime.txt
+  The LICENSE file at this pin is MIT (not Apache-2.0).
+
+Supabase (Studio / self-hosted stack)
+  SPDX-License-Identifier: Apache-2.0
+  Copyright 2024 Supabase
+  vendor/supabase  https://github.com/supabase/supabase
+  LICENSES/supabase.txt
+
+supabase-js
+  SPDX-License-Identifier: MIT
+  Copyright (c) 2020 Supabase
+  vendor/supabase-js  https://github.com/supabase/supabase-js
+  LICENSES/supabase-js.txt
+
+JetBrains Mono (wordmark and treemap/banner outlines)
+  SPDX-License-Identifier: OFL-1.1
+  Copyright 2020 The JetBrains Mono Project Authors
+  LICENSES/OFL-1.1-JetBrains-Mono.txt
+
+Megabase itself is Apache-2.0 (LICENSE). Generic Apache-2.0 and MIT texts
+are in LICENSES/Apache-2.0.txt and LICENSES/MIT.txt.
+
+When logic is ported from an upstream file, the Rust source names that
+repository, path and license in a header comment.
+
+Megabase is independent. It is not affiliated with, endorsed by, or
+sponsored by Supabase. "Supabase" is a trademark of its owner and is used
+here only to describe compatibility.

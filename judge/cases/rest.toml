@@ -1,0 +1,109 @@
+# REST (PostgREST) cases against the fixtures in judge/fixtures/schema.sql.
+
+[[case]]
+id = "rest.select.all"
+description = "Select every row of a table"
+units = ["rest:route:GET /rest/v1/{relation}", "rest:query-param:select", "rest:query-param:order"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?select=*&order=id"
+
+[[case]]
+id = "rest.select.columns"
+description = "Select a subset of columns"
+units = ["rest:route:GET /rest/v1/{relation}", "rest:query-param:select"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?select=id,title&order=id.desc"
+
+[[case]]
+id = "rest.filter.eq"
+description = "Horizontal filter with eq"
+units = ["rest:route:GET /rest/v1/{relation}", "rest:filter-operator:eq"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?done=eq.true"
+
+[[case]]
+id = "rest.filter.gt-lt"
+description = "Range filters with gt and lt"
+units = ["rest:filter-operator:gt", "rest:filter-operator:lt"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?priority=gt.1&priority=lt.3"
+
+[[case]]
+id = "rest.filter.in"
+description = "List membership with in"
+units = ["rest:filter-operator:in"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?id=in.(1,3)&order=id"
+
+[[case]]
+id = "rest.filter.unknown-operator"
+description = "An unknown operator is a PGRST100 parse error"
+units = ["rest:route:GET /rest/v1/{relation}"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?id=nope.1"
+
+[[case]]
+id = "rest.limit-offset"
+description = "Pagination with limit and offset"
+units = ["rest:query-param:limit", "rest:query-param:offset", "rest:query-param:order"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?order=id&limit=1&offset=1"
+
+[[case]]
+id = "rest.count.exact"
+description = "Prefer count=exact sets Content-Range with the total"
+units = ["rest:prefer:count=exact"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?select=id&order=id"
+headers = { Prefer = "count=exact" }
+
+[[case]]
+id = "rest.object.single"
+description = "Singular object media type"
+units = ["rest:media-type:application/vnd.pgrst.object+json"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?id=eq.1"
+headers = { Accept = "application/vnd.pgrst.object+json" }
+
+[[case]]
+id = "rest.missing-table"
+description = "Unknown relation is a 404 PGRST205 with a hint"
+units = ["rest:route:GET /rest/v1/{relation}"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/does_not_exist"
+
+[[case]]
+id = "rest.insert.rls-denied"
+description = "Insert as anon is denied by RLS (no insert policy)"
+units = ["rest:route:POST /rest/v1/{relation}"]
+[[case.step]]
+method = "POST"
+path = "/rest/v1/todos"
+json = { title = "judge" }
+
+[[case]]
+id = "rest.rpc.post"
+description = "Call a function with a JSON body"
+units = ["rest:route:POST /rest/v1/rpc/{function}"]
+[[case.step]]
+method = "POST"
+path = "/rest/v1/rpc/add_numbers"
+json = { a = 2, b = 3 }
+
+[[case]]
+id = "rest.rpc.get"
+description = "Call a function with query parameters"
+units = ["rest:route:GET /rest/v1/rpc/{function}"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/rpc/add_numbers?a=4&b=5"

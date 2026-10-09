@@ -1,0 +1,14 @@
+# Human maintainers own the mission, the frozen specification and the
+# intervention log. Agents cannot change these without a logged human
+# review. The reviewer agent additionally owns judge/ (GOAL.md rule 2).
+
+/MANIFESTO.md           @Zouhairmaj
+/GOAL.md                @Zouhairmaj
+/HUMAN_LOG.md           @Zouhairmaj
+/vendor/                @Zouhairmaj
+/vendor.toml            @Zouhairmaj
+/.gitmodules            @Zouhairmaj
+/judge/                 @Zouhairmaj
+/.github/               @Zouhairmaj
+/tools/megabase-guard/  @Zouhairmaj
+/CODEOWNERS             @Zouhairmaj

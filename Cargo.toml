@@ -1,0 +1,66 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/megabase",
+    "crates/megabase-core",
+    "crates/megabase-server",
+    "crates/megabase-rest",
+    "crates/megabase-auth",
+    "crates/megabase-realtime",
+    "crates/megabase-storage",
+    "crates/megabase-functions",
+    "crates/megabase-pooler",
+    "crates/megabase-meta",
+    "crates/megabase-studio",
+    "tools/megabase-coverage",
+    "tools/megabase-guard",
+    "tools/megabase-backlog",
+    "judge/harness",
+]
+exclude = ["site"]
+default-members = [
+    "crates/megabase",
+    "crates/megabase-core",
+    "crates/megabase-server",
+    "crates/megabase-rest",
+    "crates/megabase-auth",
+    "crates/megabase-realtime",
+    "crates/megabase-storage",
+    "crates/megabase-functions",
+    "crates/megabase-pooler",
+    "crates/megabase-meta",
+    "crates/megabase-studio",
+]
+
+[workspace.package]
+version = "0.0.0"
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/Zouhairmaj/megabase"
+rust-version = "1.89"
+
+[workspace.dependencies]
+tokio = { version = "1.40", features = ["full"] }
+axum = "0.7.9"
+tower = { version = "0.5", features = ["util"] }
+tower-http = { version = "0.6", features = ["trace"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+thiserror = "2"
+regex = "1"
+toml = "0.8"
+ureq = { version = "2", default-features = false, features = ["json"] }
+anyhow = "1"
+
+megabase-core = { path = "crates/megabase-core" }
+megabase-server = { path = "crates/megabase-server" }
+megabase-rest = { path = "crates/megabase-rest" }
+megabase-auth = { path = "crates/megabase-auth" }
+megabase-realtime = { path = "crates/megabase-realtime" }
+megabase-storage = { path = "crates/megabase-storage" }
+megabase-functions = { path = "crates/megabase-functions" }
+megabase-pooler = { path = "crates/megabase-pooler" }
+megabase-meta = { path = "crates/megabase-meta" }
+megabase-studio = { path = "crates/megabase-studio" }

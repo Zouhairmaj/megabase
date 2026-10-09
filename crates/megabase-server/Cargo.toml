@@ -1,0 +1,33 @@
+[package]
+name = "megabase-server"
+description = "Gateway and assembly for Megabase"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+megabase-core = { workspace = true }
+megabase-rest = { workspace = true }
+megabase-auth = { workspace = true }
+megabase-realtime = { workspace = true }
+megabase-storage = { workspace = true }
+megabase-functions = { workspace = true }
+megabase-pooler = { workspace = true }
+megabase-meta = { workspace = true }
+megabase-studio = { workspace = true }
+axum = { workspace = true }
+tower = { workspace = true }
+tokio = { workspace = true }
+tower-http = { workspace = true }
+tracing = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+criterion = { version = "0.5", default-features = false, features = ["cargo_bench_support"] }
+
+[[bench]]
+name = "health"
+harness = false
+

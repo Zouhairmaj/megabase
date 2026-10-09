@@ -1,0 +1,6 @@
+target
+vendor
+.git
+coverage
+docs
+assets

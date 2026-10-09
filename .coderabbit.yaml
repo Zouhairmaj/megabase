@@ -1,0 +1,58 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+language: en-US
+
+reviews:
+  profile: assertive
+  high_level_summary: true
+  auto_review:
+    enabled: true
+    drafts: true
+    base_branches:
+      - main
+  path_filters:
+    - "!vendor/**"
+  path_instructions:
+    - path: "**/*"
+      instructions: |
+        Enforce GOAL.md. This repository is an agent-written Rust port of
+        self-hosted Supabase. Flag violations of these rules:
+
+        - vendor/ is a frozen specification. Never suggest editing files under
+          vendor/, vendor.toml, or .gitmodules. Pin changes are human-owned.
+        - judge/ is human-owned for day-to-day work. After Phase 0, changes
+          belong on a review/* branch for the reviewer agent. Do not suggest
+          weakening comparisons, skipping cases, or changing what the harness
+          compares against.
+        - Product code is Rust only. Do not suggest Python, TypeScript, Go,
+          Elixir, or other language source outside vendor/. Configuration,
+          SQL, Markdown, YAML, TOML and SVG are allowed.
+        - Unimplemented behavior must return HTTP 501 with
+          {"code":"MEGABASE_NOT_IMPLEMENTED",...}. Never return a silently
+          wrong or guessed answer. Do not suggest fake success responses.
+        - Do not weaken, skip, or delete tests to make CI pass. Fix the code
+          or the fixture.
+        - Credit upstream: new crates and ported behavior should name the
+          vendor file and preserve license notices (NOTICE, LICENSES/).
+        - Pull request titles must be Conventional Commits
+          (`feat|fix|perf|refactor|docs|test|ci|build|chore|conformance`
+          with optional scopes rest, auth, realtime, storage, functions,
+          pooler, meta, studio, judge, coverage, site).
+        - Do not suggest edits to GOAL.md, MANIFESTO.md, or HUMAN_LOG.md
+          (human-owned).
+
+    - path: "crates/**"
+      instructions: |
+        Ported behavior lives here. Require `// megabase:unit <id>` on
+        implemented units, upstream credit in the crate docs, and structured
+        501 MEGABASE_NOT_IMPLEMENTED for anything not yet done.
+
+    - path: "judge/**"
+      instructions: |
+        The judge is the external arbiter. Reject suggestions that change
+        expected comparison, skip cases, or write into vendor/. Demo keys
+        come only from vendor/supabase/docker/.env.example.
+
+    - path: "tools/megabase-guard/**"
+      instructions: |
+        Do not weaken the protected-path policy. The Phase 0 bootstrap
+        exception is branch-name + empty-base only and must self-expire.

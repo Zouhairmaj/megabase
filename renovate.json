@@ -1,0 +1,48 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    ":semanticCommits",
+    ":semanticCommitTypeAll(chore)",
+    "helpers:pinGitHubActionDigests",
+    "schedule:weekly"
+  ],
+  "dependencyDashboard": true,
+  "ignorePaths": ["**/vendor/**", "judge/**"],
+  "git-submodules": {
+    "enabled": false
+  },
+  "packageRules": [
+    {
+      "description": "judge/ is human-owned; never open updates for it",
+      "matchFileNames": ["judge/**"],
+      "enabled": false
+    },
+    {
+      "description": "Group non-major cargo runtime updates weekly",
+      "matchManagers": ["cargo"],
+      "matchDepTypes": ["dependencies", "workspace.dependencies"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "cargo (non-major)"
+    },
+    {
+      "description": "Group non-major cargo dev/build updates weekly; automerge when CI is green",
+      "matchManagers": ["cargo"],
+      "matchDepTypes": ["dev-dependencies", "build-dependencies"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "cargo dev (non-major)",
+      "automerge": true,
+      "automergeType": "pr",
+      "platformAutomerge": true
+    },
+    {
+      "description": "Group non-major GitHub Actions weekly; automerge patch/minor when CI is green",
+      "matchManagers": ["github-actions"],
+      "matchUpdateTypes": ["minor", "patch", "digest", "pin"],
+      "groupName": "github-actions (non-major)",
+      "automerge": true,
+      "automergeType": "pr",
+      "platformAutomerge": true
+    }
+  ]
+}

@@ -1,0 +1,559 @@
+{
+  "schema": 1,
+  "totals": {
+    "units": 1024,
+    "implemented": 0,
+    "tested": 0,
+    "conformant": 0
+  },
+  "percent": {
+    "coverage": 0.0,
+    "conformance": 0.0,
+    "done": 0.0
+  },
+  "judge": {
+    "cases": 30,
+    "passing": 0
+  },
+  "components": {
+    "auth": {
+      "units": 152,
+      "implemented": 0,
+      "tested": 0,
+      "conformant": 0,
+      "groups": {
+        "admin": {
+          "units": 28,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "database": {
+          "units": 32,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "endpoints": {
+          "units": 13,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "factors": {
+          "units": 9,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "oauth": {
+          "units": 6,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "oauth-providers": {
+          "units": 26,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "passkeys": {
+          "units": 7,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "scim": {
+          "units": 3,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "sso": {
+          "units": 3,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "token": {
+          "units": 6,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "user": {
+          "units": 6,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "verify": {
+          "units": 10,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "well-known": {
+          "units": 3,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        }
+      }
+    },
+    "functions": {
+      "units": 276,
+      "implemented": 0,
+      "tested": 0,
+      "conformant": 0,
+      "groups": {
+        "ai": {
+          "units": 5,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "env": {
+          "units": 4,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "event_worker": {
+          "units": 2,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "invoke": {
+          "units": 1,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "node": {
+          "units": 233,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "os": {
+          "units": 1,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "runtime": {
+          "units": 25,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "workers": {
+          "units": 5,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        }
+      }
+    },
+    "meta": {
+      "units": 69,
+      "implemented": 0,
+      "tested": 0,
+      "conformant": 0,
+      "groups": {
+        "column-privileges": {
+          "units": 3,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "columns": {
+          "units": 5,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "endpoints": {
+          "units": 14,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "extensions": {
+          "units": 5,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "functions": {
+          "units": 5,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "policies": {
+          "units": 5,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "publications": {
+          "units": 5,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "query": {
+          "units": 4,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "roles": {
+          "units": 5,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "schemas": {
+          "units": 5,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "table-privileges": {
+          "units": 3,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "tables": {
+          "units": 5,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "triggers": {
+          "units": 5,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        }
+      }
+    },
+    "pooler": {
+      "units": 16,
+      "implemented": 0,
+      "tested": 0,
+      "conformant": 0,
+      "groups": {
+        "clusters": {
+          "units": 3,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "endpoints": {
+          "units": 4,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "pool-modes": {
+          "units": 2,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "tenants": {
+          "units": 7,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        }
+      }
+    },
+    "realtime": {
+      "units": 19,
+      "implemented": 0,
+      "tested": 0,
+      "conformant": 0,
+      "groups": {
+        "client-events": {
+          "units": 3,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "http-api": {
+          "units": 3,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "protocol": {
+          "units": 6,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "server-events": {
+          "units": 6,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "websocket": {
+          "units": 1,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        }
+      }
+    },
+    "rest": {
+      "units": 93,
+      "implemented": 0,
+      "tested": 0,
+      "conformant": 0,
+      "groups": {
+        "aggregates": {
+          "units": 5,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "embedding": {
+          "units": 2,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "filtering": {
+          "units": 28,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "logic": {
+          "units": 3,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "media-types": {
+          "units": 13,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "ordering": {
+          "units": 4,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "prefer": {
+          "units": 16,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "query-params": {
+          "units": 8,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "resources": {
+          "units": 10,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "rpc": {
+          "units": 4,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        }
+      }
+    },
+    "storage": {
+      "units": 149,
+      "implemented": 0,
+      "tested": 0,
+      "conformant": 0,
+      "groups": {
+        "bucket": {
+          "units": 6,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "cdn": {
+          "units": 3,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "database": {
+          "units": 46,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "health": {
+          "units": 1,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "iceberg": {
+          "units": 13,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "object": {
+          "units": 22,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "render": {
+          "units": 3,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "resumable": {
+          "units": 16,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "s3": {
+          "units": 26,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "vector": {
+          "units": 13,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        }
+      }
+    },
+    "studio": {
+      "units": 250,
+      "implemented": 0,
+      "tested": 0,
+      "conformant": 0,
+      "groups": {
+        "advisors": {
+          "units": 4,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "api-ai": {
+          "units": 12,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "api-platform": {
+          "units": 85,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "api-v1": {
+          "units": 10,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "auth": {
+          "units": 18,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "database": {
+          "units": 23,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "editor": {
+          "units": 3,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "endpoints": {
+          "units": 22,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "functions": {
+          "units": 8,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "integrations": {
+          "units": 4,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "logs": {
+          "units": 19,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "observability": {
+          "units": 12,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "realtime": {
+          "units": 3,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "settings": {
+          "units": 14,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "sql": {
+          "units": 4,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "storage": {
+          "units": 9,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        }
+      }
+    }
+  },
+  "units": {}
+}

@@ -1,0 +1,14 @@
+/target/
+**/*.rs.bk
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+.env
+.env.local
+*.env
+!vendor/supabase/docker/.env.example
+judge/data/
+*.log

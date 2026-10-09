@@ -1,0 +1,25 @@
+[package]
+name = "megabase-judge"
+description = "Differential judge: sends identical requests to the Supabase reference stack and to Megabase"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+[[bin]]
+name = "megabase-judge"
+path = "src/main.rs"
+
+[[bin]]
+name = "megabase-healthcheck"
+path = "src/bin/healthcheck.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+regex = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = { workspace = true }
+ureq = { workspace = true }

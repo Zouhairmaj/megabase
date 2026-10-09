@@ -1,0 +1,90 @@
+name: Bencher
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    types: [opened, reopened, synchronize]
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  benchmark:
+    name: Bencher
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      checks: write
+    # Fork PRs do not receive repo secrets; skip instead of failing.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    env:
+      # The current CLI rejects --token / BENCHER_API_TOKEN for API keys.
+      BENCHER_API_KEY: ${{ secrets.BENCHER_API_TOKEN }}
+    steps:
+      - name: Skip without BENCHER_API_TOKEN
+        if: env.BENCHER_API_KEY == ''
+        run: echo "BENCHER_API_TOKEN is not set; skipping continuous benchmarking."
+
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        if: env.BENCHER_API_KEY != ''
+        with:
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+        if: env.BENCHER_API_KEY != ''
+        with:
+          toolchain: stable
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        if: env.BENCHER_API_KEY != ''
+        with:
+          key: bencher
+
+      - uses: bencherdev/bencher@b4cfdddf418fc547e694b8fa6cc7c846a9c77435 # main
+        if: env.BENCHER_API_KEY != ''
+
+      - name: Track benchmarks (main)
+        if: env.BENCHER_API_KEY != '' && github.event_name == 'push'
+        run: |
+          bencher run \
+            --project megabase \
+            --ci-on-the-fly \
+            --branch main \
+            --testbed github-actions \
+            --adapter rust_criterion \
+            --threshold-measure latency \
+            --threshold-test t_test \
+            --threshold-upper-boundary 0.99 \
+            --error-on-alert \
+            "cargo bench --locked --bench health"
+
+      - name: Track benchmarks (pull request)
+        if: env.BENCHER_API_KEY != '' && github.event_name == 'pull_request'
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+          BASE_REF: ${{ github.base_ref }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          bencher run \
+            --project megabase \
+            --ci-on-the-fly \
+            --branch "$HEAD_REF" \
+            --start-point "$BASE_REF" \
+            --start-point-hash "$BASE_SHA" \
+            --start-point-clone-thresholds \
+            --start-point-reset \
+            --testbed github-actions \
+            --adapter rust_criterion \
+            --threshold-measure latency \
+            --threshold-test t_test \
+            --threshold-upper-boundary 0.99 \
+            --error-on-alert \
+            --github-actions "$GH_TOKEN" \
+            "cargo bench --locked --bench health"

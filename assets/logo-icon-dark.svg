@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" width="96" height="96" role="img" aria-labelledby="t">
+  <title id="t">Megabase</title>
+  <g fill="#303235">
+    <rect x="0" y="0" width="30" height="30"/>
+    <rect x="33" y="0" width="30" height="30"/>
+    <rect x="66" y="0" width="30" height="30"/>
+    <rect x="0" y="33" width="30" height="30"/>
+    <rect x="66" y="33" width="30" height="30"/>
+    <rect x="0" y="66" width="30" height="30"/>
+    <rect x="33" y="66" width="30" height="30"/>
+    <rect x="66" y="66" width="30" height="30"/>
+  </g>
+  <rect x="33" y="33" width="30" height="30" fill="#00D892"/>
+</svg>
