@@ -101,6 +101,7 @@ pub fn panel(metrics: &Metrics, width: f64, height: f64) -> String {
         r##"<svg class="panel-treemap" viewBox="0 0 {width} {height}" width="{width}" height="{height}" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false"><rect width="{width}" height="{height}" fill="{BG}"/>"##
     ));
     if blocks.is_empty() {
+        paint_day0_catalog(&mut out, width, height);
         out.push_str("</svg>");
         return out;
     }
@@ -1008,6 +1009,23 @@ mod tests {
         assert!(!svg.contains("334"));
         assert!(!svg.contains("1024"));
         assert!(super::panel_alt(&metrics).contains("no coverage data"));
+        for id in [
+            "rest",
+            "auth",
+            "storage",
+            "realtime",
+            "functions",
+            "pooler",
+            "meta",
+            "studio",
+        ] {
+            assert!(
+                svg.contains(&format!("data-component=\"{id}\"")),
+                "Day-0 panel missing catalog tile {id}"
+            );
+        }
+        assert!(svg.contains("REST"));
+        assert!(svg.contains("#2A2C2F"));
     }
 
     #[derive(Debug)]

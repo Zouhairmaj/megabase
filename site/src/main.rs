@@ -683,32 +683,67 @@ fn copy_dir(src: &Path, dst: &Path) -> io::Result<()> {
 mod tests {
     use super::*;
 
-    fn generate_tmp() -> (PathBuf, PathBuf) {
+    fn generate_tmp() -> PathBuf {
+        generate_tmp_with(|_| {})
+    }
+
+    /// Isolated repo root: real manifesto/devlog/human-log, never `coverage/`.
+    fn generate_tmp_with(extra: impl FnOnce(&Path)) -> PathBuf {
         let site_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        let repo_root = site_root.parent().unwrap().to_path_buf();
+        let real_root = site_root.parent().unwrap().to_path_buf();
         let stamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_nanos();
+        let tmp_root = std::env::temp_dir().join(format!("megabase-site-root-{stamp}"));
         let out = std::env::temp_dir().join(format!("megabase-site-{stamp}"));
-        let mut metrics = metrics::load(&repo_root);
-        let human = human_log::load(
-            &fs::read_to_string(repo_root.join("HUMAN_LOG.md")).unwrap_or_default(),
-        );
+        seed_repo_without_coverage(&real_root, &tmp_root);
+        extra(&tmp_root);
+        let mut metrics = metrics::load(&tmp_root);
+        let human =
+            human_log::load(&fs::read_to_string(tmp_root.join("HUMAN_LOG.md")).unwrap_or_default());
         metrics.human_interventions = human.completed;
-        build(&site_root, &repo_root, &out, &metrics, &human).expect("build");
-        (out, repo_root)
+        build(&site_root, &tmp_root, &out, &metrics, &human).expect("build");
+        let _ = fs::remove_dir_all(&tmp_root);
+        out
+    }
+
+    fn seed_repo_without_coverage(real_root: &Path, tmp_root: &Path) {
+        fs::create_dir_all(tmp_root).expect("tmp root");
+        for name in ["MANIFESTO.md", "HUMAN_LOG.md"] {
+            let src = real_root.join(name);
+            if src.is_file() {
+                fs::copy(&src, tmp_root.join(name)).expect(name);
+            }
+        }
+        let roadmap = real_root.join("docs/ROADMAP.md");
+        if roadmap.is_file() {
+            fs::create_dir_all(tmp_root.join("docs")).expect("docs");
+            fs::copy(&roadmap, tmp_root.join("docs/ROADMAP.md")).expect("roadmap");
+        }
+        let devlog = real_root.join("devlog");
+        if devlog.is_dir() {
+            let dest = tmp_root.join("devlog");
+            fs::create_dir_all(&dest).expect("devlog");
+            for entry in fs::read_dir(&devlog).expect("read devlog") {
+                let entry = entry.expect("devlog entry");
+                let path = entry.path();
+                if path.extension().and_then(|e| e.to_str()) == Some("md") {
+                    fs::copy(&path, dest.join(entry.file_name())).expect("devlog copy");
+                }
+            }
+        }
     }
 
     #[test]
     fn day0_does_not_invent_a_unit_total() {
-        let (out, _) = generate_tmp();
+        let out = generate_tmp();
         let home = fs::read_to_string(out.join("index.html")).unwrap();
         assert!(
             !home.contains("334"),
             "placeholder must not hardcode the Kite mock 334"
         );
-        assert!(!home.contains("1024") || metrics::load(&PathBuf::from(".")).has_data());
+        assert!(!home.contains("1024"));
         assert!(home.contains("Not affiliated with or endorsed by Supabase, Inc."));
         assert!(!home.to_ascii_lowercase().contains("oxide"));
         assert!(home.contains("EXPERIMENT STATUS"));
@@ -722,7 +757,7 @@ mod tests {
 
     #[test]
     fn every_kite_route_is_written() {
-        let (out, _) = generate_tmp();
+        let out = generate_tmp();
         for rel in [
             "index.html",
             "manifesto/index.html",
@@ -748,7 +783,7 @@ mod tests {
 
     #[test]
     fn status_uses_generated_treemap_until_coverage_svgs_exist() {
-        let (out, _) = generate_tmp();
+        let out = generate_tmp();
         let html = fs::read_to_string(out.join("status/index.html")).unwrap();
         assert!(html.contains("data-component=\"rest\""));
         assert!(!html.contains("coverage/treemap.svg"));
@@ -757,8 +792,32 @@ mod tests {
     }
 
     #[test]
+    fn status_embeds_coverage_svgs_when_present() {
+        let out = generate_tmp_with(|root| {
+            let cov = root.join("coverage");
+            fs::create_dir_all(&cov).expect("coverage dir");
+            fs::write(
+                cov.join("treemap.svg"),
+                "<svg xmlns=\"http://www.w3.org/2000/svg\"/>",
+            )
+            .expect("dark svg");
+            fs::write(
+                cov.join("treemap-light.svg"),
+                "<svg xmlns=\"http://www.w3.org/2000/svg\"/>",
+            )
+            .expect("light svg");
+        });
+        let html = fs::read_to_string(out.join("status/index.html")).unwrap();
+        assert!(html.contains("coverage/treemap.svg"));
+        assert!(html.contains("coverage/treemap-light.svg"));
+        assert!(out.join("coverage/treemap.svg").is_file());
+        assert!(!html.contains("data-component=\"rest\""));
+        let _ = fs::remove_dir_all(&out);
+    }
+
+    #[test]
     fn four_oh_four_uses_root_absolute_urls() {
-        let (out, _) = generate_tmp();
+        let out = generate_tmp();
         let html = fs::read_to_string(out.join("404.html")).unwrap();
         assert!(html.contains("href=\"/\""));
         assert!(html.contains("href=\"/components/\""));
