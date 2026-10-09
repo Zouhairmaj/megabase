@@ -10,8 +10,5 @@ tests only before pushing. `[workspace.lints.clippy]` denies the clone and
 borrow lints; CI clippy stays `-D warnings`. `deny.toml` bans external
 crates that are not on the `[bans] allow` list (the current lockfile graph,
 plus `sqlx` and `jsonwebtoken`). Propose a new crate with the steps in
-that file.
-
-The same Cloud Agent install also links with mold when `mold` is on
-`PATH`. CI test runs use cargo-nextest; local `just test` stays
-`cargo test`.
+that file. CI test and linker choices are
+[0021](0021-ci-nextest-mold-judge-matrix.md).

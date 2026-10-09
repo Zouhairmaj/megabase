@@ -11,8 +11,10 @@ does not run them. `nextest` is installed with
 
 Linux CI and the Cursor Cloud image link with mold when the `mold` binary
 is installed (`.github/actions/linux-mold`, `CARGO_TARGET_*_RUSTFLAGS`, and
-`$CARGO_HOME/config.toml` in the Cloud image). A machine without mold keeps
-the default linker. Release musl cross builds do not set those flags.
+`$CARGO_HOME/config.toml` in the Cloud image). `apt-get update` failures
+are ignored, so a runner that cannot install mold still reaches the
+availability check and keeps the default linker. Release musl cross builds
+do not set those flags.
 
 The Judge workflow runs one job per `judge/cases/*.toml` file
 (`Judge (auth)`, `Judge (rest)`, …) so a failure names the service file.

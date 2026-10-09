@@ -13,7 +13,7 @@ runs:
         set -euo pipefail
         if ! command -v mold >/dev/null 2>&1; then
           if command -v apt-get >/dev/null 2>&1 && command -v sudo >/dev/null 2>&1; then
-            sudo apt-get update
+            sudo apt-get update || true
             sudo apt-get install -y --no-install-recommends mold || true
           fi
         fi
