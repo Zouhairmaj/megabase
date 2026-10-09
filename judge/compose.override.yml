@@ -10,6 +10,8 @@
 # Relative paths below resolve against vendor/supabase/docker (the directory
 # of the first compose file). This overlay only:
 #   1. pins each service image to the tag of the source pinned in vendor.toml,
+#      pulled from public.ecr.aws or ghcr.io (digest-pinned) so CI does not
+#      hit Docker Hub anonymous 429s,
 #   2. keeps all runtime data in named volumes so nothing is written into
 #      vendor/,
 #   3. loads the judge fixtures into the reference database,
@@ -22,31 +24,61 @@
 #   6. keeps the pooler alive on GitHub Actions (RLIMIT_NOFILE + a longer
 #      healthcheck; Elixir migrate+eval+server is slower than compose --wait
 #      would otherwise allow).
-# Studio, Kong and Postgres keep the versions pinned by vendor/supabase.
+# Kong uses the Docker official `kong:3.9.3` library image on ECR (same
+# 3.9.3 as vendor `kong/kong:3.9.3`; `kong/kong` has no public ECR/GHCR
+# mirror). That library image's entrypoint is `/docker-entrypoint.sh`;
+# the vendor script execs `/entrypoint.sh` from `kong/kong`. `!override`
+# replaces the vendor entrypoint (Compose appends sequences otherwise,
+# so the container kept running the script that cannot exec
+# `/entrypoint.sh` and became unhealthy). The wrapper rewrites that one
+# path. imgproxy is the same digest as `darthsim/imgproxy:v3.30.1`.
 # CI starts Megabase on the runner instead of building this image.
 
 services:
+  studio:
+    image: public.ecr.aws/supabase/studio:2026.08.03-sha-022b374@sha256:606aca9fdaa753b60968d5c304e2ada83869b76c9043684e63d5885aca9550e8
+    volumes:
+      - judge-snippets:/app/snippets
+  kong:
+    image: public.ecr.aws/docker/library/kong:3.9.3@sha256:92035d16d7ff86b7bc12fb1d0090d29357d924238b1880f78735f3f2fea6b631
+    entrypoint: !override
+      - /bin/sh
+      - -c
+      - |
+        set -eu
+        sed 's#/entrypoint.sh#/docker-entrypoint.sh#' /home/kong/kong-entrypoint.sh > /tmp/kong-entrypoint.sh
+        exec /bin/sh /tmp/kong-entrypoint.sh
   auth:
-    image: supabase/gotrue:v2.197.0
+    image: public.ecr.aws/supabase/gotrue:v2.197.0@sha256:1736a63078f5922b198c4cbe50f80ab9a2d3b54fe8b7b6cfb2e9dc5dbbc12c6b
     environment:
       GOTRUE_MAILER_AUTOCONFIRM: "true"
   rest:
-    image: postgrest/postgrest:v16.4
+    image: ghcr.io/postgrest/postgrest:v16.4@sha256:d155c6718ed9a9f990d159a2ab7c0a3f16944dbb6d0a0344557421042acfe0df
   realtime:
-    image: supabase/realtime:v2.143.3
+    image: public.ecr.aws/supabase/realtime:v2.143.3@sha256:768b559241dd234c4e8852c5c0f504e598b80f1df2ad4dd78d5486fbed2f17a2
   storage:
-    image: supabase/storage-api:v1.80.2
+    image: public.ecr.aws/supabase/storage-api:v1.80.2@sha256:95b217a9c59e0ac06c6dcb539df3189a1668a2445fb43dbf29660d6968ffd7d2
     volumes:
       - judge-storage:/var/lib/storage
   imgproxy:
+    image: ghcr.io/imgproxy/imgproxy:v3.30.1@sha256:3b709e4a0e5e8e0e959b556b7031229202b4b8e7e7d955c517ea7abed68ee34d
     volumes:
       - judge-storage:/var/lib/storage
   meta:
-    image: supabase/postgres-meta:v0.100.0
+    image: public.ecr.aws/supabase/postgres-meta:v0.100.0@sha256:145325b7e39f8ef4931d6e8cfd3f6f4d655de09d72a2ccc96d9513542c2202bd
   functions:
-    image: supabase/edge-runtime:v1.77.4
+    image: public.ecr.aws/supabase/edge-runtime:v1.77.4@sha256:ad45164b7548bf5820ed7be714789c17ac2865edce79a09cfb4c3756c3d365a8
+  db:
+    image: public.ecr.aws/supabase/postgres:17.6.1.136@sha256:f371b5f3f2ac0a05703f33d6e6134515fb2498cab708fb948a0aeb7481467c00
+    # Official compose publishes 5432 on the pooler. The harness needs a
+    # direct Postgres port for CREATE DATABASE and catalog snapshots.
+    ports:
+      - "54322:5432"
+    volumes:
+      - judge-db-data:/var/lib/postgresql/data
+      - ../../../judge/fixtures/schema.sql:/docker-entrypoint-initdb.d/migrations/99-zz-judge-fixtures.sql:ro
   supavisor:
-    image: supabase/supavisor:2.9.13
+    image: public.ecr.aws/supabase/supavisor:2.9.13@sha256:07f1a6098ffc04b80263bca4eb5c3e7bd2e03dfd1fc465aa108d7329000a1a4e
     # Image ENV is RLIMIT_NOFILE=100000. limits.sh runs `ulimit -n` under
     # `set -e`, so raising the limit on GitHub Actions (not permitted)
     # exits the container before migrate. Same workaround as upstream
@@ -65,17 +97,6 @@ services:
       timeout: 5s
       retries: 36
       start_period: 120s
-  studio:
-    volumes:
-      - judge-snippets:/app/snippets
-  db:
-    # Official compose publishes 5432 on the pooler. The harness needs a
-    # direct Postgres port for CREATE DATABASE and catalog snapshots.
-    ports:
-      - "54322:5432"
-    volumes:
-      - judge-db-data:/var/lib/postgresql/data
-      - ../../../judge/fixtures/schema.sql:/docker-entrypoint-initdb.d/migrations/99-zz-judge-fixtures.sql:ro
 
   megabase:
     profiles: ["with-megabase"]

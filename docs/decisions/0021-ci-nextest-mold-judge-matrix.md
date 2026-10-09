@@ -16,5 +16,7 @@ the default linker. Release musl cross builds do not set those flags.
 
 The Judge workflow runs one job per `judge/cases/*.toml` file
 (`Judge (auth)`, `Judge (rest)`, …) so a failure names the service file.
-A final job named `Judge` merges the results. That name is the required
-status check.
+A final job named `Judge` merges the results and uploads the
+`judge-results` artifact for `pages-badges.yml`. That job name is the
+required status check. It does not push coverage onto `main`
+([0022](0022-no-coverage-push-image-mirrors.md)).

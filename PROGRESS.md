@@ -5,6 +5,11 @@ the source of truth for **current state** (phase, pins, status, level gates,
 tracking). Decisions are one file each under
 [`docs/decisions/`](docs/decisions/).
 
+GOAL.md §10 and §11 still name this file for decisions as well as state.
+GOAL.md is human-only, so that wording stays until a human updates it.
+Until then, agents follow AGENTS.md: add `docs/decisions/NNNN-slug.md`, and
+change this file only for current state, blocked items, and judge disputes.
+
 ## Current phase
 
 PHASE 0 COMPLETE. Level 1 feature work is in progress.
@@ -92,7 +97,7 @@ None.
 - [x] Judge (compose overlay, Rust harness, cases, normalization)
 - [x] `coverage/units.json` extracted from `vendor/` (1024 units, 76 excluded)
 - [x] Treemaps and badges in the Megabase palette
-- [x] CI: build, MSRV, coverage check, protected paths, judge, coverage commit on `main`
+- [x] CI: build, MSRV, coverage check, protected paths, judge, shields JSON on `gh-pages`
 - [x] NOTICE, LICENSES/ (SPDX from each vendored LICENSE)
 - [x] HUMAN_LOG.md present (human-owned; already on `main`, not created empty)
 - [x] CODEOWNERS (`@Zouhairmaj`)
@@ -129,7 +134,9 @@ Physically impossible for the agent (repository settings or credentials):
       Exact steps: `HUMAN_LOG.md` Pending, 2026-10-09.
 - [ ] Allow `github-actions` to publish GitHub Releases / tags on `main`
 - [ ] Enforce CODEOWNERS
-- [ ] Allow `github-actions` to push coverage commits to `main`
+- [x] Coverage commits on `main` are not used. Shields JSON is
+      published to the `gh-pages` branch (no exception to branch
+      protection).
 - [ ] Dedicated bot / GitHub App for agents
 - [ ] Run `just backlog` with a token that can write issues and Projects,
       so **Megabase Backlog** is filled from `coverage/units.json`
@@ -143,6 +150,10 @@ Physically impossible for the agent (repository settings or credentials):
       Administration / Contents / Metadata / Pull requests) so OpenSSF
       Scorecard's Branch-Protection check can read classic branch
       protection rules (2026-10-09)
+- [x] Set repo secrets `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN`
+      (Docker Hub account and read-only PAT, Zouhair, 2026-10-09) so CI
+      can log in before image pulls. Mirrors stay. Fork PRs skip login
+      when the token is empty.
 - [ ] Set repo secret `MEGABASE_AGENT_GH_TOKEN` (PAT for
       `megabase-agent` with repo and pull-request scope) so Claude-opened
       PRs run CI without approval (`GITHUB_TOKEN` `pull_request` runs
@@ -157,11 +168,6 @@ Physically impossible for the agent (repository settings or credentials):
       `v0.1.0`) so that release gains signed assets (it shipped without
       binaries). Scorecard Signed-Releases looks at the last five
       GitHub Releases.
-- [ ] Set repo secrets `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN`
-      (read-only) so Judge can log in to Docker Hub. GitHub-hosted
-      runners 429 on unauthenticated pulls of the reference stack
-      (`supabase/*`, `postgrest/*`, `kong/*`). Exact steps:
-      `HUMAN_LOG.md` Pending, 2026-10-09.
 
 Log each of these in `HUMAN_LOG.md` when it is done. The delegation of
 decisions itself is a human intervention to log.

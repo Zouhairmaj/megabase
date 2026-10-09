@@ -68,6 +68,15 @@ audit:
     cargo audit --file Cargo.lock
     cargo audit --file site/Cargo.lock
 
+# cargo-fuzz (nightly). CI: 60s on PRs, 600s on the schedule.
+# Force the host triple: a musl-built cargo-fuzz otherwise picks
+# x86_64-unknown-linux-musl, which AddressSanitizer cannot link.
+fuzz target duration="60":
+    cargo +nightly fuzz run {{target}} --target "$(rustc +nightly -vV | awk '/^host:/{print $2}')" -- -max_total_time={{duration}}
+
+fuzz-list:
+    cargo +nightly fuzz list
+
 ci: fmt-check lint test coverage-check
 
 clean:

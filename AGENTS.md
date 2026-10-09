@@ -31,6 +31,7 @@ git submodule update --init --recursive              # vendor/ pins; coverage an
 cargo test -p <crate>                 # one crate first; per-crate details in crates/AGENTS.md
 just fmt                              # cargo fmt --all
 just run                              # serves :8000 (MEGABASE_PORT / MEGABASE_HOST)
+just fuzz jwt                         # cargo-fuzz (nightly); also gateway_http, rest_query
 
 # judge: when served behavior changed (Docker)
 git fetch origin main && git restore --source=origin/main --worktree -- coverage/judge-results.json
@@ -49,8 +50,17 @@ git push -u origin HEAD
 ```
 
 PR checks: **Build, MSRV 1.89, Coverage check, Protected paths, Container
-image, Judge, Conventional Commits title**. GitHub does not enforce them yet.
+image, Judge, Conventional Commits title, Fuzz**. GitHub does not enforce them yet.
 Treat every one as required anyway.
+
+`fuzz/` is a standalone cargo-fuzz workspace (excluded from the root
+workspace). Targets: `jwt` (`megabase-core` HS256 + `bearer_token`),
+`gateway_http` (URI / Kong prefix matching), `rest_query` (stub query-string
+walker until PostgREST filter parsing exists). Scorecard's Fuzzing check
+detects `libfuzzer_sys` in those `*.rs` files. `.github/workflows/fuzz.yml`
+runs each target for 60 seconds on PRs and 10 minutes on a schedule, and
+uploads `fuzz/artifacts/` on a crash. Needs nightly and `cargo-fuzz` 0.13.2;
+see [Contributing](docs/contributing.md#fuzzing).
 
 **Generated files. Never hand-edit them; run the generator.**
 - `just coverage` writes `coverage/**`, the
@@ -187,6 +197,8 @@ The board must match reality at all times.
   Do not invent a 1.0.0 or a minor bump; level gates use a `Release-As:`
   footer from the orchestrator.
 - Keep docs current. Follow [GOAL.md Documentation](GOAL.md).
+- Follow the secure-design record in [`docs/SECURE_DESIGN.md`](docs/SECURE_DESIGN.md)
+  when changing authentication, cryptography, SQL, or request handling.
 
 **Ask first**
 - New broad-impact dependencies or MSRV changes: open an issue with your
