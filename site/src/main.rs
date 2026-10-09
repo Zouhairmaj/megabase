@@ -1003,6 +1003,16 @@ mod tests {
         assert!(!status.contains("coverage/treemap-light.svg"));
         assert!(!status.to_ascii_lowercase().contains("oxide"));
         assert!(!home.to_ascii_lowercase().contains("the spend"));
+        assert!(
+            home.contains(r#"class="tm-cells implemented""#),
+            "home hero/live treemaps must paint implemented units"
+        );
+        assert!(home.contains("#005441"));
+        assert!(status.contains(r#"class="tm-cells implemented""#));
+        assert!(status.contains("#005441"));
+        assert!(home.contains("status-panel-legend"));
+        assert!(home.contains("Units passing the judge"));
+        assert!(status.contains("conformant (matches real Supabase)"));
         let _ = fs::remove_dir_all(&out);
     }
 

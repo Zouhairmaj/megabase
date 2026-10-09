@@ -7,7 +7,8 @@ use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::case::{toml_to_json, Case, Key, Step};
+use crate::case::{toml_to_json, Case, DbKind, Key, Step};
+use crate::db::{self, Databases};
 use crate::normalize;
 
 pub struct Keys {
@@ -217,11 +218,18 @@ pub fn run_case(
     megabase: &Target,
     keys: &Keys,
     run_id: &str,
+    databases: &Databases,
 ) -> Result<Outcome> {
     let agent = agent();
     let base_vars: BTreeMap<String, String> = [("run".to_string(), run_id.to_string())].into();
     let mut ref_vars = base_vars.clone();
     let mut mb_vars = base_vars;
+    let snapshot_rels = case.snapshot_relations();
+    let before = if snapshot_rels.is_empty() {
+        None
+    } else {
+        Some(db::snapshot_relations(databases, &snapshot_rels)?)
+    };
     for (i, step) in case.step.iter().enumerate() {
         // Reference-stack `send`/`capture` errors abort the run on purpose:
         // an unreachable reference stack is an environment failure, not a
@@ -271,12 +279,46 @@ pub fn run_case(
             });
         }
     }
+    if let Some(detail) = compare_side_effects(case, databases, before.as_deref())? {
+        return Ok(Outcome {
+            id: case.id.clone(),
+            description: case.description.clone(),
+            pass: false,
+            detail: Some(detail),
+        });
+    }
     Ok(Outcome {
         id: case.id.clone(),
         description: case.description.clone(),
         pass: true,
         detail: None,
     })
+}
+
+fn compare_side_effects(
+    case: &Case,
+    databases: &Databases,
+    before: Option<&[db::RelationSnapshot]>,
+) -> Result<Option<String>> {
+    for (i, check) in case.db.iter().enumerate() {
+        let detail = match check.kind()? {
+            DbKind::Table { name, rows, absent } => {
+                db::compare_table(databases, name, rows, absent)?
+            }
+            DbKind::Function { name, absent } => db::compare_function(databases, name, absent)?,
+        };
+        if let Some(detail) = detail {
+            return Ok(Some(format!("db check {}: {detail}", i + 1)));
+        }
+    }
+    if let Some(before) = before {
+        let raws: Vec<String> = before.iter().map(|s| s.raw.clone()).collect();
+        let after = db::snapshot_relations(databases, &raws)?;
+        if let Some(detail) = db::compare_snapshot_deltas(before, &after)? {
+            return Ok(Some(format!("snapshot: {detail}")));
+        }
+    }
+    Ok(None)
 }
 
 #[cfg(test)]

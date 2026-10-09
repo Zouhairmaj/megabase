@@ -657,6 +657,7 @@ a:hover {
   color: var(--text);
   font-size: 14px;
   letter-spacing: 2px;
+  flex-wrap: wrap;
 }
 
 .treemap-block-foot {
@@ -673,6 +674,11 @@ a:hover {
   color: var(--body);
   font-size: 13px;
   letter-spacing: 0;
+}
+
+.status-panel-legend {
+  gap: 10px 14px;
+  font-size: 12px;
 }
 
 .swatch-row {
@@ -2090,6 +2096,17 @@ body:has(#licensing-and-credits:target) .toc-list a[href="#licensing-and-credits
     gap: 16px;
     padding: 20px;
     font-size: 13px;
+  }
+
+  .status-panel-legend {
+    gap: 8px 12px;
+    font-size: 11px;
+  }
+
+  .treemap-block-head .legend-inline {
+    width: 100%;
+    gap: 8px 12px;
+    font-size: 11px;
   }
 
   #status-title,

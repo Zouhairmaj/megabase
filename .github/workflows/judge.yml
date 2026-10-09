@@ -39,24 +39,41 @@ jobs:
       - uses: ./.github/actions/rust-cache
       - name: Build harness and binary
         run: cargo build --release --locked -p megabase -p megabase-judge --bin megabase --bin megabase-judge
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        if: ${{ secrets.DOCKERHUB_TOKEN != '' }}
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
       - name: Reference stack
         run: |
-          docker compose -p megabase-judge \
-            -f vendor/supabase/docker/docker-compose.yml \
-            -f judge/compose.override.yml \
-            --env-file vendor/supabase/docker/.env.example \
-            up -d --wait --wait-timeout 300
+          set -euo pipefail
+          # Hub 429s on unauthenticated pulls of supabase/*; retry a few times.
+          for attempt in 1 2 3 4 5; do
+            if docker compose -p megabase-judge \
+              -f vendor/supabase/docker/docker-compose.yml \
+              -f judge/compose.override.yml \
+              --env-file vendor/supabase/docker/.env.example \
+              up -d --wait --wait-timeout 300; then
+              exit 0
+            fi
+            echo "compose up failed (attempt ${attempt}/5); sleeping before retry"
+            sleep $((attempt * 20))
+          done
+          echo "::error::Reference stack compose up failed after 5 attempts"
+          exit 1
+      - name: Prepare Megabase database
+        run: ./target/release/megabase-judge prepare
       - name: Megabase on :8100
         run: |
           set -euo pipefail
           JWT_SECRET=$(grep '^JWT_SECRET=' vendor/supabase/docker/.env.example | cut -d= -f2-)
           POSTGRES_PASSWORD=$(grep '^POSTGRES_PASSWORD=' vendor/supabase/docker/.env.example | cut -d= -f2-)
-          POSTGRES_DB=$(grep '^POSTGRES_DB=' vendor/supabase/docker/.env.example | cut -d= -f2-)
-          # Host :5432 is Supavisor. Talk to the compose Postgres directly.
-          # `postgres` is not a superuser here and cannot CREATE in schema
-          # auth; `supabase_admin` can run install_schema.
-          DB_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' supabase-db)
-          DATABASE_URL="postgres://supabase_admin:${POSTGRES_PASSWORD}@${DB_IP}:5432/${POSTGRES_DB}"
+          # Host :5432 is Supavisor. Direct Postgres is on 54322
+          # (judge/compose.override.yml). Dedicated `megabase` database
+          # (created by prepare). Sharing the official `postgres`
+          # database would make catalog and row comparisons vacuous.
+          # `supabase_admin` can run install_schema.
+          DATABASE_URL="postgres://supabase_admin:${POSTGRES_PASSWORD}@127.0.0.1:54322/megabase"
           MEGABASE_PORT=8100 MEGABASE_HOST=0.0.0.0 \
             JWT_SECRET="$JWT_SECRET" DATABASE_URL="$DATABASE_URL" \
             ./target/release/megabase > /tmp/megabase.log 2>&1 &

@@ -118,15 +118,29 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
-      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+      # Binary install, not cargo-deny-action: that action's image is
+      # rust:1.85.0-alpine from Docker Hub and 429s on unauthenticated pulls.
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
         with:
-          command: check advisories licenses bans sources
+          toolchain: stable
+      - uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
+        with:
+          tool: cargo-deny
+      - run: cargo deny check advisories licenses bans sources
 
   cargo-audit:
     name: cargo-audit
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        # Every Cargo.lock we own. vendor/** lockfiles are the frozen
+        # upstream spec (ADR 0003) and are not patched here.
+        lockfile:
+          - Cargo.lock
+          - site/Cargo.lock
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -137,7 +151,7 @@ jobs:
       - uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
         with:
           tool: cargo-audit
-      - run: cargo audit
+      - run: cargo audit --file ${{ matrix.lockfile }}
 
   llvm-cov:
     name: Codecov
