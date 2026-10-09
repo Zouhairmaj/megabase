@@ -650,16 +650,14 @@ fn jsonld(page: &Page, url: &str) -> String {
 
 fn copy_coverage_svgs(repo_root: &Path, out: &Path) -> io::Result<bool> {
     let dark = repo_root.join("coverage/treemap.svg");
-    if !dark.is_file() {
+    let light = repo_root.join("coverage/treemap-light.svg");
+    if !dark.is_file() || !light.is_file() {
         return Ok(false);
     }
     let dest = out.join("coverage");
     fs::create_dir_all(&dest)?;
     fs::copy(&dark, dest.join("treemap.svg"))?;
-    let light = repo_root.join("coverage/treemap-light.svg");
-    if light.is_file() {
-        fs::copy(&light, dest.join("treemap-light.svg"))?;
-    }
+    fs::copy(&light, dest.join("treemap-light.svg"))?;
     Ok(true)
 }
 
@@ -813,6 +811,24 @@ mod tests {
         assert!(html.contains("coverage/treemap-light.svg"));
         assert!(out.join("coverage/treemap.svg").is_file());
         assert!(!html.contains("data-component=\"rest\""));
+        let _ = fs::remove_dir_all(&out);
+    }
+
+    #[test]
+    fn coverage_svg_mode_requires_both_assets() {
+        let out = generate_tmp_with(|root| {
+            let cov = root.join("coverage");
+            fs::create_dir_all(&cov).expect("coverage dir");
+            fs::write(
+                cov.join("treemap.svg"),
+                "<svg xmlns=\"http://www.w3.org/2000/svg\"/>",
+            )
+            .expect("dark svg");
+        });
+        let html = fs::read_to_string(out.join("status/index.html")).unwrap();
+        assert!(!html.contains("coverage/treemap.svg"));
+        assert!(!out.join("coverage/treemap.svg").exists());
+        assert!(html.contains("data-component=\"rest\""));
         let _ = fs::remove_dir_all(&out);
     }
 
