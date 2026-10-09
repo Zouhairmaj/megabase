@@ -133,10 +133,17 @@ pub fn is_human_log_review_ok(before: &str, after: &str) -> bool {
         return false;
     };
     let pending_ok = new_pending == old_pending
-        || new_pending.starts_with(old_pending)
+        || (new_pending.starts_with(old_pending)
+            && pending_grow_starts_at_item_boundary(old_pending, new_pending))
         || (old_pending.starts_with(new_pending)
             && pending_shrink_ends_at_item_boundary(old_pending, new_pending));
     pending_ok && is_completed_section_ok(old_rest, new_rest) && after != before
+}
+
+fn pending_grow_starts_at_item_boundary(old_pending: &str, new_pending: &str) -> bool {
+    new_pending
+        .get(old_pending.len()..)
+        .is_some_and(|added| added.trim_start_matches('\n').starts_with("- "))
 }
 
 fn pending_shrink_ends_at_item_boundary(old_pending: &str, new_pending: &str) -> bool {
@@ -494,6 +501,20 @@ mod tests {
             .len(),
             1
         );
+        let continuation =
+            "# Human Intervention Log\n\n## Pending\n\n- old\n  continuation\n\n---\n\n*No completed human interventions recorded yet.*\n";
+        assert_eq!(
+            evaluate(&[modified("HUMAN_LOG.md", before, continuation)], &c).len(),
+            1
+        );
+        assert!(pending_grow_starts_at_item_boundary(
+            "\n- old\n",
+            "\n- old\n\n- new pending\n"
+        ));
+        assert!(!pending_grow_starts_at_item_boundary(
+            "\n- old\n",
+            "\n- old\n  continuation\n"
+        ));
     }
 
     #[test]

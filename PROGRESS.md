@@ -79,8 +79,9 @@ waiting on a human.
    `release-please--branches--*` may change only `CHANGELOG.md`,
    `.release-please-manifest.json`, `Cargo.toml`, `Cargo.lock`, and
    delete `release-as` from `release-please-config.json`. `review/*`
-   may append or complete `HUMAN_LOG.md` Pending items (shrinks must
-   end at a `- **Date**` item) and grow the Completed section.
+   may append or complete `HUMAN_LOG.md` Pending items (grows must
+   start a new `- ` item; shrinks must end at a `- **Date**` item)
+   and grow the Completed section.
 6. **README status is generated.** `megabase-coverage update` on `main`;
    `check` is a required CI job. Agents keep it current. Status is one
    full-width nested treemap (`coverage/treemap.svg`, light:

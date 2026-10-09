@@ -104,6 +104,8 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PUSHED: ${{ steps.commit.outputs.pushed }}
           BRANCH: ${{ steps.branch.outputs.name }}
+          LOCKFILE_CHECK_ATTEMPTS: 60
+          LOCKFILE_CHECK_SLEEP_SECONDS: 6
         run: |
           set -euo pipefail
           if [ "${PUSHED:-false}" != "true" ]; then
@@ -112,8 +114,10 @@ jobs:
           fi
           SHA="$(git rev-parse HEAD)"
           REQUIRED='["Build","Codecov","Bencher","Protected paths","Judge"]'
-          echo "Waiting for required check runs on ${SHA} (${BRANCH}): ${REQUIRED}"
-          for i in $(seq 1 20); do
+          ATTEMPTS="${LOCKFILE_CHECK_ATTEMPTS:-60}"
+          SLEEP_SECS="${LOCKFILE_CHECK_SLEEP_SECONDS:-6}"
+          echo "Waiting for required check runs on ${SHA} (${BRANCH}): ${REQUIRED} (${ATTEMPTS} attempts, ${SLEEP_SECS}s)"
+          for i in $(seq 1 "${ATTEMPTS}"); do
             CHECK_RUNS="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${SHA}/check-runs?per_page=100")"
             COUNT="$(jq '.total_count' <<< "${CHECK_RUNS}")"
             MISSING="$(jq -r --argjson required "${REQUIRED}" '
@@ -121,12 +125,12 @@ jobs:
               | $required - $started
               | join(", ")
             ' <<< "${CHECK_RUNS}")"
-            echo "attempt ${i}: ${COUNT} check runs; missing required: ${MISSING:-none}"
+            echo "attempt ${i}/${ATTEMPTS}: ${COUNT} check runs; missing required: ${MISSING:-none}"
             if [ -z "${MISSING}" ]; then
               jq '.check_runs | map(.name)' <<< "${CHECK_RUNS}"
               exit 0
             fi
-            sleep 6
+            sleep "${SLEEP_SECS}"
           done
           echo "::error::Required checks did not start for ${SHA} (need Build, Codecov, Bencher, Protected paths, Judge). A GITHUB_TOKEN push does not trigger workflows. Set repo secret RELEASE_PLEASE_TOKEN (PAT or GitHub App installation token with contents:write) so the lockfile commit is the head that CI checks."
           exit 1

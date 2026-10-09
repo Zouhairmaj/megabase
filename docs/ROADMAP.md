@@ -109,7 +109,9 @@ Protected paths, Judge) stays green. That commit is pushed with
 `RELEASE_PLEASE_TOKEN` when set, so required checks start on the new
 head; `GITHUB_TOKEN` pushes do not trigger workflows. The lockfile job
 polls until Build, Codecov, Bencher, Protected paths, and Judge have
-started on that SHA, not merely until any check run exists. PR titles use `chore: release ${version}` (no `main` scope);
+started on that SHA, not merely until any check run exists. The window
+is 60 attempts of 6s by default (about six minutes) and is configurable
+via `LOCKFILE_CHECK_ATTEMPTS` and `LOCKFILE_CHECK_SLEEP_SECONDS`. PR titles use `chore: release ${version}` (no `main` scope);
 `semantic-pr.yml` also allows scope `main` as a fallback.
 `bootstrap-sha` is the Phase 0 merge (`7aa41e8`, exclusive): commits
 before it (`Day 0`, `[phase0]`, `[brand]`) are not conventional and

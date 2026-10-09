@@ -77,12 +77,13 @@ and product code. This is narrower than a `review/*` exception: the bot
 cannot land CI or judge changes through a release PR.
 
 `review/*` may append or remove items under `## Pending` in `HUMAN_LOG.md`
-(prefix grow, or a shrink that ends at a complete Pending item whose
-removed suffix starts with `- **Date**`) and may grow the Completed
-section (replace the empty-log placeholder, or append after existing
-completed entries). A shrink does not have to add a Completed entry.
-Format text and earlier completed entries stay unchanged. Mid-item
-Pending truncations are rejected.
+(a grow whose added suffix starts a new `- ` item, or a shrink that ends
+at a complete Pending item whose removed suffix starts with `- **Date**`)
+and may grow the Completed section (replace the empty-log placeholder,
+or append after existing completed entries). A shrink does not have to
+add a Completed entry. Format text and earlier completed entries stay
+unchanged. Mid-item Pending truncations and continuation-line growth
+are rejected.
 
 ## Consequences
 
