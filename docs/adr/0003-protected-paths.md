@@ -57,6 +57,21 @@ The exception cannot apply to a later PR: after this lands, the base has
 `vendor.toml` and condition 1 is false. It cannot apply to a different
 branch name even before this lands. It is not a label anyone can add.
 
+### Release-please exception
+
+Branches named `release-please--branches--*` may change only the version
+bump set:
+
+- `CHANGELOG.md`
+- `.release-please-manifest.json`
+- `Cargo.toml` (workspace package version)
+- `Cargo.lock` (workspace member versions, kept in sync by extra-files
+  and `cargo update -w`)
+
+Any other path on those branches is rejected, including reviewed paths
+and product code. This is narrower than a `review/*` exception: the bot
+cannot land CI or judge changes through a release PR.
+
 ## Consequences
 
 A required status check named **Protected paths** should be set on `main`

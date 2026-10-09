@@ -19,11 +19,71 @@ jobs:
       release_created: ${{ steps.release.outputs.release_created }}
       tag_name: ${{ steps.release.outputs.tag_name }}
     steps:
+      # bootstrap-sha is the Phase 0 merge (7aa41e8, exclusive). Commits
+      # before it use [phase0]/[brand]/Day 0 subjects that
+      # conventional-commits-parser rejects. Those are warnings, not
+      # release-please failures; skipping them keeps the log clean. The
+      # job still fails on real errors (config, permissions, API).
       - uses: googleapis/release-please-action@5c625bfb5d1ff62eadeeb3772007f7f66fdcf071 # v4.4.0
         id: release
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+
+  sync-lockfile:
+    name: Sync Cargo.lock
+    needs: release-please
+    if: ${{ always() && !cancelled() }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - name: Checkout the release-please branch
+        id: branch
+        run: |
+          set -euo pipefail
+          git fetch origin '+refs/heads/release-please--branches--*:refs/remotes/origin/release-please--branches--*'
+          mapfile -t BRANCHES < <(git for-each-ref --format='%(refname:short)' 'refs/remotes/origin/release-please--branches--*' | sed 's#^origin/##')
+          if [ "${#BRANCHES[@]}" -eq 0 ]; then
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "No release-please branch on origin."
+            exit 0
+          fi
+          BRANCH="${BRANCHES[0]}"
+          for b in "${BRANCHES[@]}"; do
+            if [[ "$b" == *megabase* ]]; then
+              BRANCH="$b"
+              break
+            fi
+          done
+          git checkout --track "origin/${BRANCH}"
+          echo "exists=true" >> "$GITHUB_OUTPUT"
+          echo "name=${BRANCH}" >> "$GITHUB_OUTPUT"
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+        if: steps.branch.outputs.exists == 'true'
+        with:
+          toolchain: stable
+      - name: Match lockfile workspace versions
+        if: steps.branch.outputs.exists == 'true'
+        run: cargo update -w
+      - name: Commit Cargo.lock if it changed
+        if: steps.branch.outputs.exists == 'true'
+        env:
+          BRANCH: ${{ steps.branch.outputs.name }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Cargo.lock
+          if git diff --cached --quiet; then
+            echo "Cargo.lock already matches workspace versions."
+            exit 0
+          fi
+          git commit -m "chore: sync Cargo.lock with workspace version"
+          git push origin "HEAD:refs/heads/${BRANCH}"
 
   annotate-release:
     name: Coverage delta on release

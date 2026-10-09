@@ -1,5 +1,6 @@
 //! The protected-path policy, as a pure function of the change set.
-//! Rationale and the bootstrap exception: `docs/adr/0003-protected-paths.md`.
+//! Rationale, bootstrap exception and release-please exception:
+//! `docs/adr/0003-protected-paths.md`.
 
 /// Files only humans edit (GOAL.md section 11, MANIFESTO.md rule 2).
 pub const HUMAN_OWNED: &[&str] = &["GOAL.md", "MANIFESTO.md", "HUMAN_LOG.md"];
@@ -12,6 +13,17 @@ pub const FROZEN: &[&str] = &["vendor/", "vendor.toml", ".gitmodules"];
 pub const REVIEWED: &[&str] = &["judge/", ".github/", "tools/megabase-guard/", "CODEOWNERS"];
 
 pub const REVIEW_BRANCH_PREFIX: &str = "review/";
+
+/// release-please opens `release-please--branches--<target>--components--<name>`.
+pub const RELEASE_PLEASE_BRANCH_PREFIX: &str = "release-please--branches--";
+
+/// Version-bump files release-please (and the lockfile sync job) may change.
+pub const RELEASE_PLEASE_ALLOWED: &[&str] = &[
+    "CHANGELOG.md",
+    ".release-please-manifest.json",
+    "Cargo.toml",
+    "Cargo.lock",
+];
 
 /// The one branch allowed to create the protected tree, and only while the
 /// base branch does not have it yet.
@@ -60,12 +72,26 @@ pub fn is_bootstrap(ctx: &Context) -> bool {
     ctx.base_is_pre_bootstrap && ctx.head_ref == BOOTSTRAP_BRANCH
 }
 
+pub fn is_release_please(ctx: &Context) -> bool {
+    ctx.head_ref.starts_with(RELEASE_PLEASE_BRANCH_PREFIX)
+}
+
 pub fn evaluate(changes: &[Change], ctx: &Context) -> Vec<String> {
     let bootstrap = is_bootstrap(ctx);
     let review = ctx.head_ref.starts_with(REVIEW_BRANCH_PREFIX);
+    let release_please = is_release_please(ctx);
     let mut violations = Vec::new();
     for change in changes {
         let path = change.path.as_str();
+        if release_please {
+            if matches(path, RELEASE_PLEASE_ALLOWED) {
+                continue;
+            }
+            violations.push(format!(
+                "{path}: release-please branches may only change CHANGELOG.md, .release-please-manifest.json, Cargo.toml and Cargo.lock"
+            ));
+            continue;
+        }
         if matches(path, HUMAN_OWNED) {
             let creating_empty_log = bootstrap
                 && path == "HUMAN_LOG.md"
@@ -190,6 +216,28 @@ mod tests {
             assert_eq!(evaluate(&[add("judge/harness/src/main.rs")], &c).len(), 1);
             assert_eq!(evaluate(&[add("MANIFESTO.md")], &c).len(), 1);
         }
+    }
+
+    #[test]
+    fn release_please_branches_may_only_bump_version_files() {
+        let c = ctx(
+            "release-please--branches--main--components--megabase",
+            false,
+        );
+        assert!(evaluate(
+            &[
+                add("CHANGELOG.md"),
+                add(".release-please-manifest.json"),
+                add("Cargo.toml"),
+                add("Cargo.lock"),
+            ],
+            &c
+        )
+        .is_empty());
+        assert_eq!(evaluate(&[add("crates/megabase/src/main.rs")], &c).len(), 1);
+        assert_eq!(evaluate(&[add("vendor/auth")], &c).len(), 1);
+        assert_eq!(evaluate(&[add(".github/workflows/ci.yml")], &c).len(), 1);
+        assert!(evaluate(&[add("GOAL.md")], &c)[0].contains("release-please"));
     }
 
     #[test]

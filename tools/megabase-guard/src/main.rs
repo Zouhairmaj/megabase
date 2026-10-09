@@ -151,6 +151,12 @@ fn run() -> Result<bool> {
             policy::BOOTSTRAP_BRANCH
         );
     }
+    if policy::is_release_please(&ctx) {
+        eprintln!(
+            "release-please exception active: branch `{}` may change only CHANGELOG.md, .release-please-manifest.json, Cargo.toml and Cargo.lock",
+            ctx.head_ref
+        );
+    }
 
     let changes = changes(&base, &head)?;
     let violations = policy::evaluate(&changes, &ctx);

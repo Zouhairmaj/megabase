@@ -76,6 +76,8 @@ waiting on a human.
    bootstrap; `judge/`, CI and the guard only on `review/*`. The Phase 0
    bootstrap exception applies solely to branch
    `cursor/phase-0-bootstrap-121c` while `main` still has no `vendor.toml`.
+   `release-please--branches--*` may change only `CHANGELOG.md`,
+   `.release-please-manifest.json`, `Cargo.toml` and `Cargo.lock`.
 6. **README status is generated.** `megabase-coverage update` on `main`;
    `check` is a required CI job. Agents keep it current. Status is one
    full-width nested treemap (`coverage/treemap.svg`, light:

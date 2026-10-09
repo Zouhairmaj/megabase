@@ -102,8 +102,15 @@ release-please (`release-please-config.json`):
 walks workspace members and fails on `version.workspace = true`
 ([googleapis/release-please#2478](https://github.com/googleapis/release-please/issues/2478)).
 A TOML extra-file updater bumps `[workspace.package].version`; member
-crates inherit. `bootstrap-sha` is Day 0 (`25ebab3`, exclusive) so the
-first release PR covers Phase 0. `release-as` is `0.1.0` for that
+crates inherit. A generic extra-file updater rewrites matching versions
+in `Cargo.lock`. The Release workflow then runs `cargo update -w` on
+`release-please--branches--*` and commits if the lockfile still drifts,
+so `--locked` CI (Build, Codecov, Bencher, Protected paths, Judge) stays
+green. PR titles use `chore: release ${version}` (no `main` scope);
+`semantic-pr.yml` also allows scope `main` as a fallback.
+`bootstrap-sha` is the Phase 0 merge (`7aa41e8`, exclusive): commits
+before it (`Day 0`, `[phase0]`, `[brand]`) are not conventional and
+must not fail the Release job. `release-as` is `0.1.0` for that
 bootstrap only. The v0.1.0 **release PR itself** must delete
 `"release-as"` from `release-please-config.json` before it merges
 (PROGRESS.md). The Release workflow runs again on that merge; leaving
@@ -121,7 +128,8 @@ Cadence:
 - **Hotfix** for a severe regression, without waiting for Monday.
 
 Only the **orchestrator** merges release PRs, and only after reviewer
-approval of the current head SHA and green CI. If the release PR's
-lockfile is stale, regenerate it with `cargo generate-lockfile` on that
-PR. Each GitHub Release body is annotated with the coverage /
-conformance delta versus the previous tag.
+approval of the current head SHA and green CI. The lockfile is part of
+the release PR (extra-files plus `cargo update -w`). If it is still
+stale, run `cargo update -w` on that branch. Each GitHub Release body
+is annotated with the coverage / conformance delta versus the previous
+tag.
