@@ -12,8 +12,9 @@ Extends the root `AGENTS.md`; it does not relax it.
 - Deployed to GitHub Pages by `.github/workflows/pages.yml` on push to `main`.
 - Root design gate: the PR links the approved Kite frame and its committee
   review.
-- The Status section embeds `coverage/treemap.svg` and
-  `coverage/treemap-light.svg`; never copy them. OG images are generated in
-  Rust (`src/og.rs`).
+- Treemaps are generated in Rust (`src/treemap.rs`) from
+  `coverage/summary.json` and `coverage/units.json` and inlined as dark SVGs.
+  Do not embed `coverage/treemap.svg` or `coverage/treemap-light.svg`. OG
+  images are generated in Rust (`src/og.rs`).
 - The disclaimer "Not affiliated with or endorsed by Supabase, Inc." stays
   word-for-word identical everywhere.
