@@ -11,13 +11,17 @@ rust-version.workspace = true
 megabase-core = { workspace = true }
 axum = { workspace = true }
 base64 = { workspace = true }
+bcrypt = "0.19.3"
+chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }
+regex.workspace = true
 serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
-tokio-postgres = { workspace = true, features = ["with-serde_json-1"] }
+tokio-postgres = { workspace = true, features = ["with-serde_json-1", "with-uuid-1"] }
 tracing = { workspace = true }
+uuid = { version = "1.27.0", features = ["v4"] }
 
 [dev-dependencies]
 base64 = { workspace = true }

@@ -2,12 +2,12 @@
   "schema": 1,
   "totals": {
     "units": 1024,
-    "implemented": 42,
-    "tested": 40,
+    "implemented": 46,
+    "tested": 44,
     "conformant": 0
   },
   "percent": {
-    "coverage": 4.1,
+    "coverage": 4.5,
     "conformance": 0.0,
     "done": 0.0
   },
@@ -18,8 +18,8 @@
   "components": {
     "auth": {
       "units": 152,
-      "implemented": 42,
-      "tested": 40,
+      "implemented": 46,
+      "tested": 44,
       "conformant": 0,
       "groups": {
         "admin": {
@@ -36,8 +36,8 @@
         },
         "endpoints": {
           "units": 13,
-          "implemented": 0,
-          "tested": 0,
+          "implemented": 4,
+          "tested": 4,
           "conformant": 0
         },
         "factors": {
@@ -566,6 +566,10 @@
     "auth:route:GET /auth/v1/admin/custom-providers": "tested",
     "auth:route:GET /auth/v1/admin/custom-providers/{identifier}": "tested",
     "auth:route:GET /auth/v1/admin/oauth/clients": "tested",
+    "auth:route:GET /auth/v1/health": "tested",
+    "auth:route:GET /auth/v1/settings": "tested",
+    "auth:route:POST /auth/v1/logout": "tested",
+    "auth:route:POST /auth/v1/signup": "tested",
     "auth:sql-function:auth.email()": "tested",
     "auth:sql-function:auth.jwt()": "tested",
     "auth:sql-function:auth.role()": "tested",

@@ -193,14 +193,24 @@ async fn install_schema_within(database_url: &str, deadline: Duration) -> Result
 }
 
 async fn install_schema_inner(database_url: &str) -> Result<(), SchemaError> {
+    let client = connect(database_url).await?;
+    client.batch_execute(&install_sql()).await?;
+    Ok(())
+}
+
+/// Open one cleartext PostgreSQL connection for Auth HTTP.
+///
+/// The caller keeps the client for the process lifetime. `sslmode=require`
+/// fails the same way as [`install_schema`].
+pub async fn connect(database_url: &str) -> Result<tokio_postgres::Client, SchemaError> {
+    require_cleartext_postgres(database_url)?;
     let (client, connection) = tokio_postgres::connect(database_url, NoTls).await?;
     tokio::spawn(async move {
         if let Err(error) = connection.await {
-            tracing::error!(%error, "postgres connection closed during auth schema install");
+            tracing::error!(%error, "auth postgres connection closed");
         }
     });
-    client.batch_execute(&install_sql()).await?;
-    Ok(())
+    Ok(client)
 }
 
 #[cfg(test)]
