@@ -72,7 +72,18 @@ jobs:
             echo "match=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          status="$(gh api --jq '.status // empty' "repos/${GITHUB_REPOSITORY}/compare/${JUDGE_SHA}...${checked_out}")"
+          # Retry a transient compare failure. Do not treat it as match=false:
+          # a green skip is how results were dropped. The last failure exits.
+          status=""
+          attempt=1
+          until status="$(gh api --jq '.status // empty' "repos/${GITHUB_REPOSITORY}/compare/${JUDGE_SHA}...${checked_out}")"; do
+            if [ "$attempt" -ge 3 ]; then
+              echo "Compare API failed for $JUDGE_SHA...$checked_out" >&2
+              exit 1
+            fi
+            sleep $((attempt * 2))
+            attempt=$((attempt + 1))
+          done
           if [ "$status" = "ahead" ] || [ "$status" = "identical" ]; then
             echo "Judge commit $JUDGE_SHA is contained in $checked_out ($status). Applying results as data."
             echo "match=true" >> "$GITHUB_OUTPUT"

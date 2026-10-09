@@ -516,6 +516,14 @@ units = ["{get_id}"]
             "the job that reads the Judge artifact must not write the default-branch cache"
         );
         assert!(badges.contains("judge_results_apply"));
+        assert!(
+            badges.contains("[[ ! \"$JUDGE_SHA\" =~ ^[0-9a-f]{40}$ ]]"),
+            "workflow must reject a Judge SHA that is not a commit id"
+        );
+        assert!(
+            badges.contains("[ \"$checked_out\" = \"$JUDGE_SHA\" ]"),
+            "equal SHAs apply without the compare API"
+        );
         assert!(badges.contains("[ \"$status\" = \"ahead\" ] || [ \"$status\" = \"identical\" ]"));
         assert!(badges.contains("actions/deploy-pages"));
         assert!(badges.contains("group: pages"));
