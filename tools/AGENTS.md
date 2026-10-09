@@ -5,6 +5,10 @@ Extends the root `AGENTS.md`; it does not relax it.
 - `megabase-coverage` (`update`, `check`, `verify-pins`): if you change
   extraction or rendering, commit the regenerated output (`just coverage`)
   in the same PR, and explain any change in the unit count in the PR body.
+  README coverage/conformance shields.io badges read
+  `coverage/badge-coverage.json` and `coverage/badge-conformance.json`
+  (shields endpoint schema, including `color`). Colors: red below 50%,
+  orange from 50% to under 90%, green at 90% and above.
 - `megabase-backlog`: `plan` writes `docs/backlog/PLAN.md`. `sync` writes
   to GitHub and is run by the orchestrator only. Keep it idempotent: it
   matches on `megabase-id`.
