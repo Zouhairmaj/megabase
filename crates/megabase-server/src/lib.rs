@@ -143,6 +143,7 @@ async fn health() -> Json<serde_json::Value> {
 
 pub async fn run(config: Config) -> std::io::Result<()> {
     let mut auth = megabase_auth::AuthState::try_from_env().map_err(std::io::Error::other)?;
+    auth.database_url = config.database_url.clone();
     if let Some(url) = auth.database_url.clone() {
         info!("installing auth schema");
         megabase_auth::install_schema(&url)
