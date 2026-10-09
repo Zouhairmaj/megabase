@@ -354,6 +354,7 @@ pub struct ExistingIssue {
     body: String,
     labels: BTreeSet<String>,
     milestone: Option<String>,
+    state: String,
 }
 
 #[derive(Deserialize)]
@@ -375,6 +376,7 @@ struct IssueRow {
     #[serde(default)]
     labels: Vec<LabelName>,
     milestone: Option<MilestoneRef>,
+    state: String,
 }
 
 pub fn load_issues_by_id() -> Result<BTreeMap<String, ExistingIssue>> {
@@ -403,6 +405,7 @@ pub fn load_issues_by_id() -> Result<BTreeMap<String, ExistingIssue>> {
                             body: body.clone(),
                             labels: issue.labels.into_iter().map(|l| l.name).collect(),
                             milestone: issue.milestone.map(|m| m.title),
+                            state: issue.state,
                         },
                     );
                 }
@@ -526,6 +529,7 @@ pub fn ensure_issues(
                 body: item.body.clone(),
                 labels: labels.iter().cloned().collect(),
                 milestone: milestone_title,
+                state: "open".to_string(),
             },
         );
         created += 1;
@@ -537,6 +541,9 @@ pub fn ensure_issues(
             continue;
         }
         if !(key.starts_with("epic:") || key.starts_with("task:")) {
+            continue;
+        }
+        if ex.state != "open" {
             continue;
         }
         if sync.dry_run {

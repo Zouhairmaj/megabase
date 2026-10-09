@@ -223,6 +223,10 @@ pub fn run_case(
     let mut ref_vars = base_vars.clone();
     let mut mb_vars = base_vars;
     for (i, step) in case.step.iter().enumerate() {
+        // Reference-stack `send`/`capture` errors abort the run on purpose:
+        // an unreachable reference stack is an environment failure, not a
+        // Megabase regression, so the harness must not write a results file
+        // or treat a baseline pass as a case failure.
         let r = send(&agent, reference, step, keys, &ref_vars)?;
         let m = match send(&agent, megabase, step, keys, &mb_vars) {
             Ok(observed) => observed,
