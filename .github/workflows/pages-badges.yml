@@ -5,6 +5,11 @@ name: Publish coverage badges
 # push or workflow_dispatch trigger and no cache action, so applying
 # the Judge artifact cannot poison that cache. Do not merge it back
 # into pages.yml.
+#
+# Checkout uses the default ref (the default branch). Do not set
+# actions/checkout ref from the triggering run: Scorecard
+# Dangerous-Workflow treats that ref as an untrusted checkout. The
+# Judge file below is data, interpreted by the default-branch tools.
 
 on:
   workflow_run:
@@ -33,10 +38,11 @@ jobs:
     outputs:
       shields: ${{ steps.site.outputs.shields }}
     steps:
-      - name: Check out Judge commit
+      # No ref. For this trigger the default is the default branch.
+      # A ref taken from the triggering run is an untrusted checkout.
+      - name: Check out default branch
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
           persist-credentials: false
           submodules: recursive
 
@@ -80,7 +86,7 @@ jobs:
     needs: build
     if: needs.build.result == 'success' && needs.build.outputs.shields == 'true'
     runs-on: ubuntu-latest
-    # Does not check out workflow_run.head_sha. The site itself is
+    # Does not check the repository out. The site itself is
     # deployed only by pages.yml from the event SHA.
     permissions:
       contents: write

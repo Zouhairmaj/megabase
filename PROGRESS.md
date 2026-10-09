@@ -201,13 +201,15 @@ waiting on a human.
     entrypoint, which execs the missing path and leaves `supabase-kong`
     unhealthy) and rewrites that one path to `/docker-entrypoint.sh`.
     Pages badge publication is `.github/workflows/pages-badges.yml`
-    (`workflow_run` only, no cache action) so a Judge artifact cannot
-    poison the default-branch Actions cache.
-    `.github/workflows/pages.yml` is push and `workflow_dispatch` only,
-    checks out the event SHA, and does not download `gh-pages` or a
-    Judge artifact (that job saves the default-branch Rust cache).
-    `pages-badges.yml` publishes shields JSON only; it does not deploy
-    the site.
+    (`workflow_run` only, no cache action). It checks out the default
+    branch and does not set `actions/checkout` `ref` from the triggering
+    run (Scorecard Dangerous-Workflow treats that ref as an untrusted
+    checkout). It applies the Judge JSON as data, then publishes shields
+    JSON only. `.github/workflows/pages.yml` is push and
+    `workflow_dispatch` only, checks out the event SHA, and does not
+    download `gh-pages` or a Judge artifact, because that job saves the
+    default-branch Rust cache. `pages-badges.yml` does not deploy the
+    site.
 
 ## Tracking
 
