@@ -58,6 +58,14 @@ Site: [megabase.sh](https://megabase.sh) · mission: [MANIFESTO.md](MANIFESTO.md
 
 `just` lists every recipe that works today.
 
+## Install
+
+Signed linux binaries (`x86_64` and `aarch64`, musl-static) are GitHub
+Release assets. `ghcr.io/zouhairmaj/megabase:<tag>` is published to GHCR
+after the Release workflow runs (`v0.1.0` has neither). Download,
+checksum, and Sigstore / SLSA verification are in
+[`docs/install.md`](docs/install.md). Building from source is Quick start.
+
 ## How it works
 
 Agents follow [GOAL.md](GOAL.md) ([AGENTS.md](AGENTS.md) is the checklist):
