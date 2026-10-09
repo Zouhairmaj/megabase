@@ -217,6 +217,10 @@ Physically impossible for the agent (repository settings or credentials):
       Administration / Contents / Metadata / Pull requests) so OpenSSF
       Scorecard's Branch-Protection check can read classic branch
       protection rules (2026-10-09)
+- [ ] Set repo secret `MEGABASE_AGENT_GH_TOKEN` (PAT for
+      `megabase-agent` with repo and pull-request scope) so Claude-opened
+      PRs run CI without approval (`GITHUB_TOKEN` `pull_request` runs
+      require approval)
 - [ ] Enable GitHub private vulnerability reporting (Settings → Code
       security) so the path in `SECURITY.md` works
 - [ ] Optionally register an [OpenSSF Best Practices](https://www.bestpractices.dev/)
