@@ -94,7 +94,7 @@ fn gh_json(args: &[&str]) -> Result<Value> {
     serde_json::from_str(&text).context("parsing gh json")
 }
 
-fn graphql(query: &str, variables: Value) -> Result<Value> {
+fn graphql(query: &str, variables: &Value) -> Result<Value> {
     let payload = json!({ "query": query, "variables": variables });
     let mut child = Command::new("gh")
         .args(["api", "graphql", "--input", "-"])
@@ -123,7 +123,7 @@ fn graphql(query: &str, variables: Value) -> Result<Value> {
     Ok(v["data"].clone())
 }
 
-fn graphql_ok(query: &str, variables: Value) -> Result<Value> {
+fn graphql_ok(query: &str, variables: &Value) -> Result<Value> {
     match graphql(query, variables) {
         Ok(v) => Ok(v),
         Err(err) => {
@@ -218,7 +218,7 @@ impl Sync {
         }
     }
 
-    fn mutate(&self, desc: &str, query: &str, variables: Value) -> Result<Value> {
+    fn mutate(&self, desc: &str, query: &str, variables: &Value) -> Result<Value> {
         if self.dry_run {
             eprintln!("dry-run: {desc}");
             return Ok(Value::Null);
@@ -627,7 +627,7 @@ fn load_schema(project_id: &str) -> Result<Schema> {
             }
           }
         }"#,
-        json!({ "id": project_id }),
+        &json!({ "id": project_id }),
     )?;
     let mut status = None;
     let mut level = None;
@@ -693,7 +693,7 @@ fn load_project_items(project_id: &str) -> Result<BTreeMap<u64, ProjectItem>> {
                 }
               }
             }"#,
-            json!({ "id": project_id, "cursor": cursor }),
+            &json!({ "id": project_id, "cursor": cursor }),
         )?;
         let conn = &data["node"]["items"];
         for node in conn["nodes"].as_array().context("project items")? {
@@ -761,7 +761,7 @@ fn set_select(
     sync.mutate(
         desc,
         SET_SELECT,
-        json!({
+        &json!({
             "projectId": project_id,
             "itemId": item_id,
             "fieldId": field.id,
@@ -792,7 +792,7 @@ pub fn apply_project(
             let data = sync.mutate(
                 &format!("add #{} to project", issue.number),
                 ADD_ITEM,
-                json!({ "projectId": project_id, "contentId": issue.node_id }),
+                &json!({ "projectId": project_id, "contentId": issue.node_id }),
             )?;
             if let Some(id) = data["addProjectV2ItemById"]["item"]["id"].as_str() {
                 slot.insert(ProjectItem {
@@ -888,7 +888,7 @@ pub fn apply_project(
         if let Err(err) = sync.mutate(
             &format!("sub-issue #{} ← #{}", parent.number, child.number),
             ADD_SUB,
-            json!({
+            &json!({
                 "issueId": parent.node_id,
                 "subIssueId": child.node_id,
             }),
@@ -908,7 +908,7 @@ pub fn apply_project(
             if let Err(err) = sync.mutate(
                 &format!("#{} blocked-by #{}", blocked.number, blocker.number),
                 ADD_BLOCKED,
-                json!({
+                &json!({
                     "issueId": blocked.node_id,
                     "blockingIssueId": blocker.node_id,
                 }),

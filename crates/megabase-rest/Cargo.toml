@@ -10,3 +10,6 @@ rust-version.workspace = true
 [dependencies]
 megabase-core = { workspace = true }
 axum = { workspace = true }
+
+[lints]
+workspace = true
