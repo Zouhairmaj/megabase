@@ -4,10 +4,10 @@
 </picture>
 
 [![CI](https://img.shields.io/github/actions/workflow/status/Zouhairmaj/megabase/ci.yml?branch=main&label=CI&style=flat-square)](https://github.com/Zouhairmaj/megabase/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/Zouhairmaj/megabase?style=flat-square&color=00D892)](https://github.com/Zouhairmaj/megabase/releases)
+[![Release](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2FZouhairmaj%2Fmegabase%2Fmain%2F.release-please-manifest.json&query=%24%5B%22.%22%5D&prefix=v&label=release&style=flat-square&color=00D892)](https://github.com/Zouhairmaj/megabase/releases)
 [![License](https://img.shields.io/badge/license-Apache--2.0-00D892?style=flat-square)](LICENSE)
 [![OpenSSF Scorecard](https://img.shields.io/ossf-scorecard/github.com/Zouhairmaj/megabase?label=openssf%20scorecard&style=flat-square)](https://scorecard.dev/viewer/?uri=github.com/Zouhairmaj/megabase)
-[![Codecov](https://img.shields.io/codecov/c/github/Zouhairmaj/megabase?style=flat-square)](https://codecov.io/gh/Zouhairmaj/megabase)
+[![Codecov](https://img.shields.io/codecov/c/github/Zouhairmaj/megabase?label=codecov&style=flat-square)](https://codecov.io/gh/Zouhairmaj/megabase)
 [![Bencher](https://img.shields.io/badge/bencher-benchmarks-00D892?style=flat-square)](https://bencher.dev/perf/megabase)
 [![CodeRabbit](https://img.shields.io/coderabbit/prs/github/Zouhairmaj/megabase?style=flat-square)](https://coderabbit.ai)
 [![cargo-deny](https://img.shields.io/github/check-runs/Zouhairmaj/megabase/main?nameFilter=cargo-deny&label=cargo-deny&style=flat-square)](https://github.com/Zouhairmaj/megabase/actions/workflows/ci.yml)
