@@ -143,6 +143,17 @@ waiting on a human.
     `#e05d44` below 50%, `#fe7d37` from 50% to under 90%, `#00D892` at
     90% and above (`flat-square`). Treemap chips and generated SVG
     badges stay on the brand greens in `docs/brand/README.md`.
+17. **Owned lockfiles.** Scorecard/OSV flagged RUSTSEC-2026-0206
+    (`rustybuzz` unmaintained) and RUSTSEC-2026-0192 (`ttf-parser`
+    unmaintained) in `site/Cargo.lock`, not the workspace lockfile and
+    not `vendor/`. `site/` is excluded from the workspace, so root
+    `cargo audit` missed them. Fix: `resvg` 0.45 → 0.48 (harfrust +
+    skrifa). `just audit` scans every owned lockfile (`Cargo.lock`,
+    `site/Cargo.lock`). The target CI `cargo-audit` job must pass
+    `--file` for each of those; implementing this target is a follow-up
+    (#157), and a workspace-only run misses `site/`. `vendor/**`
+    lockfiles stay frozen; do not add an OSV ignore unless a finding
+    exists only there.
 
 ## Tracking
 
