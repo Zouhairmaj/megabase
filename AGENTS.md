@@ -202,7 +202,15 @@ The board must match reality at all times.
 - **CodeRabbit** reviews every PR (including drafts). **CodeQL** / GitHub
   Advanced Security does too. Fix each finding or dismiss it with a reason.
   Leave no unresolved CodeRabbit threads and no open CodeQL alerts.
-- **Claude Code.** `@claude` mentions from `megabase-agent` run via `.github/workflows/claude.yml`.
+- **Claude Code.** `@claude` mentions from `megabase-agent` only, via
+  `.github/workflows/claude.yml` (60-minute timeout, write limited to
+  contents, pull-requests, and issues). When Claude implements an issue it
+  opens the pull request itself with `gh pr create` (or
+  `mcp__github__create_pull_request`) after pushing — it does not stop at a
+  Create-a-PR compare link. The title is Conventional Commits; the body
+  follows `.github/pull_request_template.md` and includes `Closes #<n>`.
+  The workflow prefers `MEGABASE_AGENT_GH_TOKEN` so the opened PR triggers
+  CI (`GITHUB_TOKEN` can create a PR but does not start workflows).
 - **Orchestrator.** It alone merges (`gh pr merge <n> --squash`), and only
   when three things hold: the approval covers the current head SHA
   (`gh pr view <n> --json headRefOid`), no change request is open, and every

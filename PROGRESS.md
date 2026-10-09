@@ -209,6 +209,9 @@ Physically impossible for the agent (repository settings or credentials):
 - [x] Install the [Claude GitHub App](https://github.com/apps/claude) on this
       repository (2026-10-09)
 - [x] Set repo secret `CLAUDE_CODE_OAUTH_TOKEN` (2026-10-09)
+- [ ] Set repo secret `MEGABASE_AGENT_GH_TOKEN` (PAT for
+      `megabase-agent` with repo and pull-request scope) so Claude-opened
+      PRs trigger CI (`GITHUB_TOKEN` does not)
 - [ ] Enable GitHub private vulnerability reporting (Settings → Code
       security) so the path in `SECURITY.md` works
 - [ ] Optionally register an [OpenSSF Best Practices](https://www.bestpractices.dev/)
