@@ -23,14 +23,15 @@ judge/
 
 The overlay retags images to the pins, uses named volumes so nothing is
 written into `vendor/`, turns on Auth autoconfirm (the stack has no mail
-server), and can start Megabase on host port 8100.
+server), and can start Megabase on host port 8100 against a dedicated
+`megabase` database.
 
 ## Commands
 
 From the repository root:
 
 ```bash
-just judge-up     # reference stack + Megabase; wait until healthy
+just judge-up     # reference stack, prepare megabase DB, Megabase
 just judge        # wait, run cases, write coverage/judge-results.json
 just judge-down
 ```
@@ -42,7 +43,11 @@ docker compose -p megabase-judge \
   -f vendor/supabase/docker/docker-compose.yml \
   -f judge/compose.override.yml \
   --env-file vendor/supabase/docker/.env.example \
-  --profile with-megabase up -d --build --wait --wait-timeout 300
+  up -d --wait --wait-timeout 300
+
+cargo run -p megabase-judge -- prepare
+# then start Megabase with DATABASE_URL=.../megabase (compose profile
+# with-megabase, or the host binary in CI)
 
 cargo run -p megabase-judge -- wait
 cargo run -p megabase-judge -- run \
@@ -66,8 +71,39 @@ runner (no image build). Local `just judge-up` builds the Megabase image.
 ## Cases
 
 A case is a TOML table with an id, the `coverage/units.json` ids it
-exercises, and one or more steps (`method`, `path`, optional `json` /
-`headers` / `key` / `capture` / `ignore`). See `judge/cases/`.
+exercises, and at least one HTTP `[[case.step]]` (`method`, `path`,
+optional `json` / `headers` / `key` / `capture` / `ignore`) and/or one
+`[[case.db]]` check (`table` or `function`, optional `rows = true`).
+See `judge/cases/`.
+
+## Database side-effects
+
+The harness opens two PostgreSQL connections (it does not import Megabase
+crates):
+
+| Side | Default URL |
+|---|---|
+| Reference | `postgres://postgres:…@127.0.0.1:5432/postgres` |
+| Megabase | `postgres://postgres:…@127.0.0.1:5432/megabase` |
+
+`prepare` creates the `megabase` database on the official cluster and
+loads `judge/fixtures/schema.sql` into it. Megabase then installs its
+Auth SQL there (`DATABASE_URL`). Sharing the official `postgres`
+database would make row and catalog comparisons vacuous.
+
+After every mutating HTTP case (POST / PUT / PATCH / DELETE), the
+harness snapshots `auth.users` and `public.todos` on both databases and
+compares the normalized rows. Auth sign-up and REST insert therefore
+fail when the database state diverges even if the HTTP responses match.
+Set `snapshot = []` to skip, or `snapshot = ["schema.table", …]` to
+choose other relations. `storage.objects` is Level 2.
+
+`[[case.db]]` compares a table catalog (columns, nullability, generated
+expressions, RLS flag, `pg_get_indexdef`) or a function (arguments,
+result type, language, volatility, normalized body) so
+`auth:sql-table:*` and `auth:sql-function:*` units can become
+conformant. A missing object on the reference stack aborts the run; a
+missing object on Megabase fails the case.
 
 Studio browser sessions (`judge/studio/`, a Rust harness such as
 fantoccini or chromiumoxide driving Chromium against official Studio
@@ -83,9 +119,9 @@ none of these weaken existing cases.
 weekly; only pass/fail counts are published. Stops overfitting to the
 visible TOML.
 
-**Database side-effects.** After a mutating case, snapshot `auth.users`,
-`storage.objects` and the public fixture tables on both databases and
-compare. HTTP equality is not enough for sign-up or uploads.
+**Database side-effects.** Built for Level 1: `auth.users` and
+`public.todos` after mutating cases, plus `[[case.db]]` catalog checks.
+`storage.objects` waits for Level 2.
 
 **Concurrency.** Same email signed up ten times, parallel refresh, parallel
 upload to one path. The reference's winner/loser pattern is the spec.

@@ -20,7 +20,8 @@ One Cargo workspace, one final binary: `megabase`. One crate per Supabase-author
 2. Take one Ready issue.
 3. Spec the unit from `vendor/` if the spec file is missing.
 4. Implement in Rust.
-5. Run the judge (`just judge` or the equivalent once `judge/` exists).
+5. Run the judge (`just judge`). Mutating cases also compare database
+   side-effects; judge harness changes stay on `review/*`.
 6. Keep the commit only if total conformance does not fall.
 7. Record: PR, coverage, PROGRESS.md for decisions that outlive one issue.
 

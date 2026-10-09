@@ -2,11 +2,12 @@
 //! Supabase stack and Megabase. See `judge/README.md`.
 
 mod case;
+mod db;
 mod normalize;
 mod run;
 
 use std::fmt::Write as _;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -17,13 +18,17 @@ use run::{CaseResult, Keys, Outcome, Results, Target};
 const USAGE: &str = "\
 usage:
   megabase-judge wait [--timeout SECS] [common]
+  megabase-judge prepare [--fixtures FILE] [common]
   megabase-judge run [--cases DIR] [--out FILE] [--baseline FILE] [--summary FILE] [common]
 
 common:
-  --reference URL   reference gateway (default http://localhost:8000)
-  --megabase URL    Megabase (default http://localhost:8100)
-  --env FILE        env file with ANON_KEY and SERVICE_ROLE_KEY
-                    (default vendor/supabase/docker/.env.example)";
+  --reference URL              reference gateway (default http://localhost:8000)
+  --megabase URL               Megabase (default http://localhost:8100)
+  --reference-database URL     reference Postgres (default from --env)
+  --megabase-database URL      Megabase Postgres (default from --env, db megabase)
+  --env FILE                   env file with ANON_KEY, SERVICE_ROLE_KEY,
+                               POSTGRES_PASSWORD, POSTGRES_PORT
+                               (default vendor/supabase/docker/.env.example)";
 
 struct Args {
     command: String,
@@ -35,6 +40,9 @@ struct Args {
     baseline: Option<PathBuf>,
     summary: Option<PathBuf>,
     timeout: u64,
+    reference_database: Option<String>,
+    megabase_database: Option<String>,
+    fixtures: PathBuf,
 }
 
 fn parse_args() -> Result<Args> {
@@ -50,17 +58,23 @@ fn parse_args() -> Result<Args> {
         baseline: None,
         summary: None,
         timeout: 300,
+        reference_database: None,
+        megabase_database: None,
+        fixtures: "judge/fixtures/schema.sql".into(),
     };
     while let Some(flag) = it.next() {
         let mut value = || it.next().with_context(|| format!("{flag} needs a value"));
         match flag.as_str() {
             "--reference" => args.reference = value()?,
             "--megabase" => args.megabase = value()?,
+            "--reference-database" => args.reference_database = Some(value()?),
+            "--megabase-database" => args.megabase_database = Some(value()?),
             "--env" => args.env = value()?.into(),
             "--cases" => args.cases = value()?.into(),
             "--out" => args.out = Some(value()?.into()),
             "--baseline" => args.baseline = Some(value()?.into()),
             "--summary" => args.summary = Some(value()?.into()),
+            "--fixtures" => args.fixtures = value()?.into(),
             "--timeout" => args.timeout = value()?.parse().context("--timeout")?,
             other => bail!("unknown argument `{other}`\n{USAGE}"),
         }
@@ -68,20 +82,53 @@ fn parse_args() -> Result<Args> {
     Ok(args)
 }
 
+fn env_value(text: &str, path: &Path, name: &str) -> Result<String> {
+    text.lines()
+        .filter_map(|l| l.split_once('='))
+        .find(|(k, _)| k.trim() == name)
+        .map(|(_, v)| v.trim().trim_matches('"').to_string())
+        .filter(|v| !v.is_empty())
+        .with_context(|| format!("{name} not set in {}", path.display()))
+}
+
 fn load_keys(path: &PathBuf) -> Result<Keys> {
     let text =
         std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
-    let get = |name: &str| {
-        text.lines()
-            .filter_map(|l| l.split_once('='))
-            .find(|(k, _)| k.trim() == name)
-            .map(|(_, v)| v.trim().trim_matches('"').to_string())
-            .filter(|v| !v.is_empty())
-            .with_context(|| format!("{name} not set in {}", path.display()))
-    };
     Ok(Keys {
-        anon: get("ANON_KEY")?,
-        service_role: get("SERVICE_ROLE_KEY")?,
+        anon: env_value(&text, path, "ANON_KEY")?,
+        service_role: env_value(&text, path, "SERVICE_ROLE_KEY")?,
+    })
+}
+
+fn percent_encode(raw: &str) -> String {
+    let mut out = String::new();
+    for b in raw.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char);
+            }
+            _ => out.push_str(&format!("%{b:02X}")),
+        }
+    }
+    out
+}
+
+fn default_databases(args: &Args) -> Result<db::Databases> {
+    let text = std::fs::read_to_string(&args.env)
+        .with_context(|| format!("reading {}", args.env.display()))?;
+    let password = percent_encode(&env_value(&text, &args.env, "POSTGRES_PASSWORD")?);
+    let port = env_value(&text, &args.env, "POSTGRES_PORT").unwrap_or_else(|_| "5432".into());
+    let reference = args
+        .reference_database
+        .clone()
+        .unwrap_or_else(|| format!("postgres://postgres:{password}@127.0.0.1:{port}/postgres"));
+    let megabase = args
+        .megabase_database
+        .clone()
+        .unwrap_or_else(|| format!("postgres://postgres:{password}@127.0.0.1:{port}/megabase"));
+    Ok(db::Databases {
+        reference,
+        megabase,
     })
 }
 
@@ -122,7 +169,38 @@ fn wait(args: &Args, keys: &Keys) -> Result<()> {
             std::thread::sleep(Duration::from_secs(2));
         }
     }
+    let databases = default_databases(args)?;
+    let deadline = Instant::now() + Duration::from_secs(args.timeout);
+    for (label, url) in [
+        ("reference database", databases.reference.as_str()),
+        ("megabase database", databases.megabase.as_str()),
+    ] {
+        loop {
+            match db::ping(url) {
+                Ok(()) => {
+                    eprintln!("ready: {label}");
+                    break;
+                }
+                Err(err) => {
+                    if Instant::now() > deadline {
+                        bail!(
+                            "timed out after {}s waiting for {label}: {err:#}",
+                            args.timeout
+                        );
+                    }
+                    std::thread::sleep(Duration::from_secs(2));
+                }
+            }
+        }
+    }
     Ok(())
+}
+
+fn prepare(args: &Args) -> Result<()> {
+    let databases = default_databases(args)?;
+    let fixtures = std::fs::read_to_string(&args.fixtures)
+        .with_context(|| format!("reading {}", args.fixtures.display()))?;
+    db::prepare(&databases.reference, &databases.megabase, &fixtures)
 }
 
 fn summary_markdown(outcomes: &[Outcome], regressions: &[String]) -> String {
@@ -173,9 +251,10 @@ fn run_all(args: &Args, keys: &Keys) -> Result<bool> {
             .map(|d| d.as_millis())
             .unwrap_or(0)
     );
+    let databases = default_databases(args)?;
     let mut outcomes = Vec::new();
     for case in &cases {
-        let outcome = run::run_case(case, &reference, &megabase, keys, &run_id)
+        let outcome = run::run_case(case, &reference, &megabase, keys, &run_id, &databases)
             .with_context(|| format!("case `{}`", case.id))?;
         eprintln!(
             "{} {}",
@@ -232,6 +311,7 @@ fn main() -> ExitCode {
         let keys = load_keys(&args.env)?;
         match args.command.as_str() {
             "wait" => wait(&args, &keys).map(|_| true),
+            "prepare" => prepare(&args).map(|_| true),
             "run" => run_all(&args, &keys),
             other => bail!("unknown command `{other}`\n{USAGE}"),
         }

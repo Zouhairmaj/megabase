@@ -36,6 +36,22 @@ Error codes, error messages, JSON field names, row order when the request
 asked for `order=`, and header names other than `content-type`. If those
 differ, the case fails.
 
+## Database
+
+Applied identically to the reference database (`postgres`) and the
+Megabase database (`megabase`) before a catalog or row snapshot is
+compared. Implemented in `judge/harness/src/db.rs`.
+
+| Kind | Compared | Normalized |
+|---|---|---|
+| Table catalog | column name, `pg_type.typname`, `NOT NULL`, generated expression, `relrowsecurity`, `pg_get_indexdef` | SQL text: strip `--` comments, collapse whitespace, lowercase |
+| Function catalog | identity arguments, result type, language, `provolatile`, `prosrc` | same SQL normalization on result type and body |
+| Row snapshot | `jsonb_agg(row_to_json(t))` of `SELECT *` ordered by the first column | same JSON rules as HTTP bodies (JWT, UUID, timestamp, volatile keys) |
+
+Owners, ACLs, `column_default` and comments are not compared: they
+depend on which cluster roles exist and on cosmetic `COMMENT ON`.
+`storage.objects` is out of scope until Level 2.
+
 ## Captures
 
 A step may set `capture.name = "/json/pointer"`. The value is read from

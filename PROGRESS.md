@@ -134,6 +134,14 @@ waiting on a human.
     before it merges.
     Container `FROM` lines are pinned by digest (root image and
     `.cursor/Dockerfile`).
+16. **Judge databases are separate** (2026-10-09, issue #113). Side-effect
+    checks compare the official cluster's `postgres` database with a
+    dedicated `megabase` database on the same instance (`megabase-judge
+    prepare`, then `DATABASE_URL=…/megabase`). Sharing one database would
+    make catalog and row comparisons vacuous or inverted. Level 1
+    snapshots `auth.users` and `public.todos` after mutating HTTP cases
+    and compares `auth` table/function catalogs. `storage.objects` stays
+    Level 2.
 
 ## Tracking
 

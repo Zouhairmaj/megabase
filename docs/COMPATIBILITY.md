@@ -66,7 +66,10 @@ A unit is **done** only when it is conformant.
 Same endpoints, request syntax, status, JSON shape, error codes, headers
 the API documents (`content-type`, `content-range`, `location`,
 `preference-applied`), and the database objects apps and RLS depend on.
-Performance may differ; correctness may not.
+The judge checks those objects on a dedicated Megabase database against
+the official stack: table/function catalogs, and `auth.users` /
+`public.todos` rows after mutating HTTP cases. Performance may differ;
+correctness may not.
 
 Intentional divergences (none today) would be listed here and in
 `PROGRESS.md`.

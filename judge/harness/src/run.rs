@@ -7,7 +7,8 @@ use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::case::{toml_to_json, Case, Key, Step};
+use crate::case::{toml_to_json, Case, DbKind, Key, Step};
+use crate::db::{self, Databases};
 use crate::normalize;
 
 pub struct Keys {
@@ -217,6 +218,7 @@ pub fn run_case(
     megabase: &Target,
     keys: &Keys,
     run_id: &str,
+    databases: &Databases,
 ) -> Result<Outcome> {
     let agent = agent();
     let base_vars: BTreeMap<String, String> = [("run".to_string(), run_id.to_string())].into();
@@ -271,12 +273,38 @@ pub fn run_case(
             });
         }
     }
+    if let Some(detail) = compare_side_effects(case, databases)? {
+        return Ok(Outcome {
+            id: case.id.clone(),
+            description: case.description.clone(),
+            pass: false,
+            detail: Some(detail),
+        });
+    }
     Ok(Outcome {
         id: case.id.clone(),
         description: case.description.clone(),
         pass: true,
         detail: None,
     })
+}
+
+fn compare_side_effects(case: &Case, databases: &Databases) -> Result<Option<String>> {
+    for (i, check) in case.db.iter().enumerate() {
+        let detail = match check.kind()? {
+            DbKind::Table { name, rows } => db::compare_table(databases, name, rows, true)?,
+            DbKind::Function { name } => db::compare_function(databases, name, true)?,
+        };
+        if let Some(detail) = detail {
+            return Ok(Some(format!("db check {}: {detail}", i + 1)));
+        }
+    }
+    for relation in case.snapshot_relations() {
+        if let Some(detail) = db::compare_row_snapshot(databases, &relation, true)? {
+            return Ok(Some(format!("snapshot `{relation}`: {detail}")));
+        }
+    }
+    Ok(None)
 }
 
 #[cfg(test)]
