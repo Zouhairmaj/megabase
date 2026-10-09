@@ -3,15 +3,21 @@
 Dark-first and technical: a monospace wordmark, a grid of tiles, one green
 accent.
 
+**Source of truth:** the Kite design file
+[Megabase identity](https://kite.new/p/megabase-identity) holds the
+definitive logo (dark and light), palette and all Megabase graphic and UI
+design. The SVGs in `assets/` and the colors in generated graphics must match
+it; when they differ, the Kite file wins and the repository is updated.
+
 ## Mark
 
 A 3×3 grid of square tiles with even gaps. Eight neutral tiles surround one
 green center tile. The grid is the treemap of units the project is measured
 by; the green tile is a unit that is done.
 
-[`reference.png`](reference.png) is the reference for proportions and layout
-(icon, stacked lockup, dark card, rounded app icon). Its colors are
-superseded by the Megabase palette below.
+[`reference.png`](reference.png) is an earlier brand sheet kept for
+proportions and layout (icon, stacked lockup, dark card, rounded app icon).
+Its colors are superseded by the Megabase palette below.
 
 ## Megabase palette
 
@@ -62,7 +68,7 @@ In Markdown, pick the variant automatically:
 
 ## Wordmark
 
-`MEGABASE` set in JetBrains Mono Bold with wide tracking (150/1000 em),
+`MEGABASE` set in JetBrains Mono Bold with letter-spacing 0.16em,
 converted to SVG paths so it renders without the font installed. JetBrains
 Mono is licensed under the SIL Open Font License 1.1; see
 [`LICENSES/OFL-1.1-JetBrains-Mono.txt`](../../LICENSES/OFL-1.1-JetBrains-Mono.txt).
