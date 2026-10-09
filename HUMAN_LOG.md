@@ -19,6 +19,11 @@ Each entry should include:
 - **Reason**: The placeholder site deploys with `actions/configure-pages` (`enablement: true`), `actions/upload-pages-artifact`, and `actions/deploy-pages` on push to `main`. Pages is not enabled yet (`GET /pages` is 404). `enablement: true` cannot turn Pages on with `GITHUB_TOKEN` alone (it needs a PAT or GitHub App token with Pages write). After the source is set to GitHub Actions, re-run **Deploy placeholder site**.
 - **Files affected**: GitHub Pages settings (not in git)
 
+- **Date**: 2026-10-09
+- **Action**: (pending) Create repository secret `RELEASE_PLEASE_TOKEN`. Settings → Secrets and variables → Actions → New repository secret. Name: `RELEASE_PLEASE_TOKEN`. Value: a fine-grained PAT **or** GitHub App installation token for `Zouhairmaj/megabase` with `contents: write` and `pull-requests: write`. The token must be a user/app credential whose **pushes start GitHub Actions** (the default `GITHUB_TOKEN` does not). Classic PAT equivalent: `repo` scope. After saving, re-run the **Release** workflow on `main` (Actions → Release → Run workflow) so lockfile commits on `release-please--branches--*` pick up the token.
+- **Reason**: Preferred path so release-please and `cargo update -w` lockfile commits trigger required checks natively. Release.yml now `workflow_dispatch`es CI when the secret is unset (GITHUB_TOKEN can start `workflow_dispatch`), but pull_request-only checks (for example Conventional Commits title) and a release branch that does not yet contain those `workflow_dispatch` triggers still need this token. Run 37980727582 failed on Sync Cargo.lock waiting for Build, Codecov, Bencher, Protected paths, and Judge on SHA `b8c1e454…`.
+- **Files affected**: GitHub Actions repository secrets (not in git)
+
 ---
 
 ## Completed

@@ -25,10 +25,12 @@ jobs:
       # release-please failures; skipping them keeps the log clean. The
       # job still fails on real errors (config, permissions, API).
       #
-      # RELEASE_PLEASE_TOKEN must be a PAT or GitHub App token that can
-      # create PRs and whose pushes start workflows. GITHUB_TOKEN cannot
-      # create PRs until the Actions setting is enabled, and even then a
-      # GITHUB_TOKEN push still does not trigger workflows.
+      # RELEASE_PLEASE_TOKEN is preferred: a PAT or GitHub App token that
+      # can create PRs and whose pushes start workflows. GITHUB_TOKEN can
+      # create PRs when the Actions setting is enabled, but a GITHUB_TOKEN
+      # push still does not trigger push/pull_request workflows. The
+      # lockfile job then workflow_dispatches required checks onto that
+      # SHA (see sync-lockfile).
       - uses: googleapis/release-please-action@5c625bfb5d1ff62eadeeb3772007f7f66fdcf071 # v4.4.0
         id: release
         with:
@@ -104,18 +106,54 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PUSHED: ${{ steps.commit.outputs.pushed }}
           BRANCH: ${{ steps.branch.outputs.name }}
+          HAS_RELEASE_PLEASE_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN != '' }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           LOCKFILE_CHECK_ATTEMPTS: 60
           LOCKFILE_CHECK_SLEEP_SECONDS: 6
         run: |
           set -euo pipefail
-          if [ "${PUSHED:-false}" != "true" ]; then
-            echo "No lockfile commit; nothing to confirm."
-            exit 0
-          fi
           SHA="$(git rev-parse HEAD)"
           REQUIRED='["Build","Codecov","Bencher","Protected paths","Judge"]'
           ATTEMPTS="${LOCKFILE_CHECK_ATTEMPTS:-60}"
           SLEEP_SECS="${LOCKFILE_CHECK_SLEEP_SECONDS:-6}"
+
+          missing_required() {
+            local CHECK_RUNS
+            CHECK_RUNS="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${SHA}/check-runs?per_page=100")"
+            jq -r --argjson required "${REQUIRED}" '
+              [.check_runs[].name] as $started
+              | $required - $started
+              | join(", ")
+            ' <<< "${CHECK_RUNS}"
+          }
+
+          if [ -z "$(missing_required)" ]; then
+            echo "Required checks already started on ${SHA}."
+            exit 0
+          fi
+
+          # GITHUB_TOKEN may not start push/pull_request workflows, but it
+          # can create workflow_dispatch runs. Prefer dispatching CI, Bencher,
+          # and Judge on the release branch (native checks on this SHA). If
+          # that ref's workflow files lack workflow_dispatch, fall back to
+          # Lockfile required checks on the default branch, which reports
+          # the same check names onto this SHA via the Checks API.
+          # Dispatch whenever checks are missing, including a rerun after
+          # RELEASE_PLEASE_TOKEN is set but the existing head was pushed
+          # with GITHUB_TOKEN (no new lockfile commit).
+          if [ "${HAS_RELEASE_PLEASE_TOKEN}" != "true" ] || [ "${PUSHED:-false}" != "true" ]; then
+            echo "Required checks missing on ${SHA}; dispatching (RELEASE_PLEASE_TOKEN=${HAS_RELEASE_PLEASE_TOKEN} pushed=${PUSHED:-false})"
+            if gh workflow run ci.yml --repo "${GITHUB_REPOSITORY}" --ref "${BRANCH}" \
+               && gh workflow run bencher.yml --repo "${GITHUB_REPOSITORY}" --ref "${BRANCH}" \
+               && gh workflow run judge.yml --repo "${GITHUB_REPOSITORY}" --ref "${BRANCH}"; then
+              echo "Dispatched CI, Bencher, and Judge on ${BRANCH} (head ${SHA})"
+            else
+              echo "workflow_dispatch on ${BRANCH} failed or is unavailable; dispatching Lockfile required checks on ${DEFAULT_BRANCH} for ${SHA}"
+              gh workflow run lockfile-required-checks.yml --repo "${GITHUB_REPOSITORY}" --ref "${DEFAULT_BRANCH}" \
+                -f "sha=${SHA}" -f "branch=${BRANCH}"
+            fi
+          fi
+
           echo "Waiting for required check runs on ${SHA} (${BRANCH}): ${REQUIRED} (${ATTEMPTS} attempts, ${SLEEP_SECS}s)"
           for i in $(seq 1 "${ATTEMPTS}"); do
             CHECK_RUNS="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${SHA}/check-runs?per_page=100")"
@@ -132,7 +170,7 @@ jobs:
             fi
             sleep "${SLEEP_SECS}"
           done
-          echo "::error::Required checks did not start for ${SHA} (need Build, Codecov, Bencher, Protected paths, Judge). A GITHUB_TOKEN push does not trigger workflows. Set repo secret RELEASE_PLEASE_TOKEN (PAT or GitHub App installation token with contents:write) so the lockfile commit is the head that CI checks."
+          echo "::error::Required checks did not start for ${SHA} (need Build, Codecov, Bencher, Protected paths, Judge). A GITHUB_TOKEN push does not trigger push/pull_request workflows. The job dispatches CI/Bencher/Judge or Lockfile required checks; if that also failed, set repo secret RELEASE_PLEASE_TOKEN (PAT or GitHub App installation token with contents:write). Exact steps are in HUMAN_LOG.md."
           exit 1
 
   annotate-release:
