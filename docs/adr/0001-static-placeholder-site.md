@@ -20,7 +20,7 @@ Static site assets are allowed under `GOAL.md` rule 1 by the same rationale as S
 
 Constraints:
 
-1. Isolation. Everything for the public site lives under the top-level `site/` directory, plus `wrangler.toml` and one GitHub Actions workflow that publishes it to Cloudflare Workers static assets. No JavaScript framework, no Node bundler, no GitHub Pages.
+1. Isolation. Everything for the public site lives under the top-level `site/` directory, plus one GitHub Actions workflow that publishes the generated files to GitHub Pages. No JavaScript framework, no Node bundler.
 2. Shared chrome. A tiny Rust generator (`site/`, package `megabase-site`) wraps every page in one layout, nav, footer and logo. New pages are a `Page` entry plus a template under `site/templates/pages/`. Forthcoming routes are listed in the generator and are not invented ahead of the Kite design.
 3. Coverage is data, not a client fetch. When `coverage/units.json` (and optionally `coverage/summary.json`) exist, the generator inlines the unit total, passing count, treemap and Scope table at publish time. The denominator is always the length of `units` (currently 334 on Phase 0), never a hardcoded number. If those files are absent, Day-0 placeholders show an em dash (`—`) rather than a fake total, `Phase 0 · bootstrap` for the stage, and an empty treemap. The treemap is one labeled block per component. Inside each block, every unit is exactly one whole square; all squares are the same size, centered in the block, and never clipped. Colors are brand only: background `#0B0E12`, not started `#303235`, implemented `#005441`, tested `#009366`, conformant `#00D892`.
 4. The manifesto body is rendered from `MANIFESTO.md` so the page stays in sync with the file.
@@ -32,4 +32,4 @@ Constraints:
 - Agents working on crates, `judge/`, or `coverage/` do not need to touch `site/`.
 - Merging this work with Phase 0 is order-independent: the generator reads `coverage/` when present and otherwise keeps placeholders.
 - Adding Status, Roadmap and the rest is a template plus a registry row, not a layout rewrite.
-- Deploy is Cloudflare Workers static assets (`megabase-site`). The workflow skips instead of failing when `CLOUDFLARE_API_TOKEN` or `CLOUDFLARE_ACCOUNT_ID` are unset. Token setup is recorded as pending in `HUMAN_LOG.md`.
+- Deploy is GitHub Pages (`actions/configure-pages` with `enablement: true`, `actions/upload-pages-artifact`, `actions/deploy-pages`) on push to `main`. If Pages is still off after the first run, a human sets Settings → Pages → Source to GitHub Actions (pending in `HUMAN_LOG.md`).

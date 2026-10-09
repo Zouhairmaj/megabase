@@ -3,7 +3,7 @@
 __pycache__/
 _render-*.html
 
-# Built HTML/CSS copied to ./site for Wrangler (`--out site`).
+# Built HTML/CSS if someone generates with `--out site`.
 /index.html
 /404.html
 /sitemap.xml

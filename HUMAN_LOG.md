@@ -14,12 +14,10 @@ Each entry should include:
 
 ## Pending
 
-Human actions that have not happened yet. The deploy workflow skips cleanly until these secrets exist.
-
 - **Date**: 2026-10-09
-- **Action**: (pending) Create a Cloudflare API token with **Account → Cloudflare Workers → Edit**, then add GitHub Actions repository secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`. After the first successful deploy, record the `*.workers.dev` URL here.
-- **Reason**: The repository is private, so GitHub Pages cannot host the placeholder site. Deploy is Cloudflare Workers static assets (`wrangler.toml`, worker name `megabase-site`). The token needs Workers Edit so Wrangler can upload the generated `./site` assets.
-- **Files affected**: GitHub repository secrets (not committed)
+- **Action**: (pending) Repository Settings → Pages → Build and deployment → Source: **GitHub Actions**.
+- **Reason**: The placeholder site deploys with `actions/configure-pages` (`enablement: true`), `actions/upload-pages-artifact`, and `actions/deploy-pages` on push to `main`. Pages is not enabled yet (`GET /pages` is 404). `enablement: true` cannot turn Pages on with `GITHUB_TOKEN` alone (it needs a PAT or GitHub App token with Pages write). After the source is set to GitHub Actions, re-run **Deploy placeholder site**.
+- **Files affected**: GitHub Pages settings (not in git)
 
 ---
 

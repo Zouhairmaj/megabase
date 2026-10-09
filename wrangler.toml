@@ -1,9 +1,0 @@
-# Assets-only Worker: no `main` script. HTML is generated into ./site
-# (`cargo run --manifest-path site/Cargo.toml -- --out site`).
-name = "megabase-site"
-compatibility_date = "2026-10-09"
-
-[assets]
-directory = "./site"
-not_found_handling = "404-page"
-html_handling = "auto-trailing-slash"
