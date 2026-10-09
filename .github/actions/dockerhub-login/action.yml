@@ -32,7 +32,6 @@ runs:
       id: action
       if: steps.dockerhub.outputs.login == 'true'
       continue-on-error: true
-      timeout-minutes: 2
       uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
       with:
         username: ${{ inputs.username }}
