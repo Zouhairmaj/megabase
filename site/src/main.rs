@@ -27,7 +27,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use chrome::Paths;
-use html::subst;
+use html::{esc, subst};
 use metrics::Metrics;
 
 pub const GITHUB: &str = "https://github.com/Zouhairmaj/megabase";
@@ -486,8 +486,8 @@ fn wrap(
     let asset = paths.asset();
     let canonical = loc.map(str::to_string).unwrap_or_else(|| page_url(page));
     let mut vars = BTreeMap::new();
-    vars.insert("title".into(), page.title.into());
-    vars.insert("description".into(), page.description.into());
+    vars.insert("title".into(), esc(page.title));
+    vars.insert("description".into(), esc(page.description));
     vars.insert(
         "canonical_tags".into(),
         if is_404 {
@@ -501,7 +501,7 @@ fn wrap(
     );
     vars.insert("og_type".into(), page.og_type.into());
     vars.insert("og_image".into(), format!("{ORIGIN}/{}", page.og_image));
-    vars.insert("og_alt".into(), page.og_alt.into());
+    vars.insert("og_alt".into(), esc(page.og_alt));
     vars.insert("jsonld".into(), jsonld(page, &canonical));
     vars.insert("origin".into(), ORIGIN.into());
     vars.insert("asset".into(), asset.into());
@@ -873,6 +873,7 @@ mod tests {
         assert!(home.contains("https://analytics.ahrefs.com/analytics.js"));
         assert!(home.contains("footer-measure"));
         assert!(home.contains("IP-derived city/country"));
+        assert!(home.contains("NOTHING PASSES YET"));
         let _ = fs::remove_dir_all(&out);
     }
 
@@ -971,6 +972,24 @@ mod tests {
         assert!(!html.contains("coverage/treemap.svg"));
         assert!(!out.join("coverage/treemap.svg").exists());
         assert!(html.contains("data-component=\"rest\""));
+        let _ = fs::remove_dir_all(&out);
+    }
+
+    #[test]
+    fn article_metadata_escapes_quotes() {
+        let out = generate_tmp_with(|root| {
+            let dir = root.join("devlog");
+            fs::create_dir_all(&dir).expect("devlog");
+            fs::write(
+                dir.join("2099-01-01.md"),
+                "# Called it \"compatible\" today\n\nCalled it \"compatible\" today.\n",
+            )
+            .expect("devlog entry");
+        });
+        let html = fs::read_to_string(out.join("devlog/2099-01-01/index.html")).unwrap();
+        assert!(html.contains("Called it &quot;compatible&quot; today"));
+        assert!(html.contains("content=\"Called it &quot;compatible&quot; today.\""));
+        assert!(!html.contains("content=\"Called it \"compatible\""));
         let _ = fs::remove_dir_all(&out);
     }
 
