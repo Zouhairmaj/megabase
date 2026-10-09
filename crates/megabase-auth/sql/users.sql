@@ -49,8 +49,8 @@ CREATE TABLE IF NOT EXISTS auth.users (
     banned_until timestamptz NULL,
     reauthentication_token varchar(255) NULL DEFAULT '',
     reauthentication_sent_at timestamptz NULL,
-    deleted_at timestamptz NULL,
     is_sso_user boolean NOT NULL DEFAULT false,
+    deleted_at timestamptz NULL,
     is_anonymous boolean NOT NULL DEFAULT false,
     CONSTRAINT users_pkey PRIMARY KEY (id)
 );
@@ -101,7 +101,8 @@ BEGIN
     END IF;
 END $$;
 
--- ADD order matches pin attnums after the stub's instance_id, id.
+-- ADD order matches pin attnums after the stub's instance_id, id
+-- (is_sso_user from 20221215195500 before deleted_at from 20230116124412).
 ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS instance_id uuid;
 ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS aud varchar(255);
 ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS role varchar(255);
@@ -134,8 +135,8 @@ ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS email_change_confirm_status smal
 ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS banned_until timestamptz;
 ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS reauthentication_token varchar(255) DEFAULT '';
 ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS reauthentication_sent_at timestamptz;
-ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS deleted_at timestamptz;
 ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS is_sso_user boolean NOT NULL DEFAULT false;
+ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS deleted_at timestamptz;
 ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS is_anonymous boolean NOT NULL DEFAULT false;
 
 DO $$

@@ -499,7 +499,8 @@ Installer must **not** `RENAME` `confirmed_at` or `email_change_token`
 when the final names already exist. Those legacy renames run before
 `ADD COLUMN IF NOT EXISTS` for `email_confirmed_at` and
 `email_change_token_new`, so the add does not create empty replacements
-and skip the rename.
+and skip the rename. After the stub, `ADD COLUMN` follows pin attnum
+order: `is_sso_user` before `deleted_at` before `is_anonymous`.
 
 | Column | Type | Notes |
 |---|---|---|
@@ -535,8 +536,8 @@ and skip the rename.
 | banned_until | timestamptz | NULL |
 | reauthentication_token | varchar(255) | NULL DEFAULT `''` |
 | reauthentication_sent_at | timestamptz | NULL |
-| deleted_at | timestamptz | NULL |
 | is_sso_user | boolean | NOT NULL DEFAULT false |
+| deleted_at | timestamptz | NULL |
 | is_anonymous | boolean | NOT NULL DEFAULT false |
 
 Indexes: `users_instance_id_idx`; `users_instance_id_email_idx` on

@@ -424,8 +424,26 @@ mod tests {
         assert!(USERS.contains("DROP INDEX auth.users_instance_id_email_idx"));
         assert!(USERS.contains("indexdef NOT LIKE '%lower(%'"));
         assert!(!USERS.contains("DROP INDEX IF EXISTS users_instance_id_email_idx"));
-        assert!(USERS.contains("is_anonymous"));
-        assert!(USERS.contains("is_sso_user"));
+        let is_sso = USERS
+            .find("ADD COLUMN IF NOT EXISTS is_sso_user")
+            .expect("is_sso_user");
+        let deleted_at = USERS
+            .find("ADD COLUMN IF NOT EXISTS deleted_at")
+            .expect("deleted_at");
+        let is_anonymous = USERS
+            .find("ADD COLUMN IF NOT EXISTS is_anonymous")
+            .expect("is_anonymous");
+        assert!(
+            is_sso < deleted_at && deleted_at < is_anonymous,
+            "pin attnum order is is_sso_user then deleted_at then is_anonymous"
+        );
+        let create_tail = USERS
+            .find("    is_sso_user boolean NOT NULL DEFAULT false,\n    deleted_at timestamptz NULL,\n    is_anonymous boolean NOT NULL DEFAULT false,")
+            .expect("CREATE lists is_sso_user before deleted_at");
+        assert!(
+            create_tail < is_sso,
+            "CREATE column list precedes ADD COLUMN repairs"
+        );
         assert!(USERS.contains("ALTER COLUMN phone TYPE text"));
         assert!(SESSIONS.contains("auth.aal_level"));
         assert!(SESSIONS.contains("timestamp WITHOUT TIME ZONE"));
