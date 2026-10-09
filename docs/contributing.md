@@ -40,7 +40,7 @@ Mockups live in the [Kite identity file](https://kite.new/p/megabase-identity). 
 
 ## Supply chain
 
-Megabase owns two Rust lockfiles: the workspace `Cargo.lock` and `site/Cargo.lock` (the static generator is a standalone crate). `just audit` scans both. OpenSSF Scorecard's OSV check walks every `Cargo.lock` in the tree, including `site/`. CI currently audits only `Cargo.lock`; a follow-up should make the `cargo-audit` job run `cargo audit --file` once per owned lockfile because a workspace-only `cargo audit` misses `site/`.
+Megabase owns two Rust lockfiles: the workspace `Cargo.lock` and `site/Cargo.lock` (the static generator is a standalone crate). `just audit` and the CI `cargo-audit` matrix each run `cargo audit --file` once per owned lockfile. A workspace-only `cargo audit` misses `site/`. OpenSSF Scorecard's OSV check walks every `Cargo.lock` in the tree, including `site/`.
 
 Lockfiles under `vendor/` belong to the pinned upstream spec. Agents never edit them ([ADR 0003](adr/0003-protected-paths.md)). Report issues in those trees upstream; do not add an OSV ignore unless a Scorecard finding is only in `vendor/` and cannot be fixed without bumping a pin.
 
