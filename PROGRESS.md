@@ -149,9 +149,9 @@ waiting on a human.
     not `vendor/`. `site/` is excluded from the workspace, so root
     `cargo audit` missed them. Fix: `resvg` 0.45 → 0.48 (harfrust +
     skrifa). `just audit` scans every owned lockfile (`Cargo.lock`,
-    `site/Cargo.lock`). The target CI `cargo-audit` job must pass
-    `--file` for each of those; implementing this target is a follow-up
-    (#157), and a workspace-only run misses `site/`. `vendor/**`
+    `site/Cargo.lock`). CI on this change still audits only
+    `Cargo.lock`. Dual-lockfile `cargo audit --file` is follow-up #157;
+    a workspace-only run misses `site/`. `vendor/**`
     lockfiles stay frozen; do not add an OSV ignore unless a finding
     exists only there.
 
