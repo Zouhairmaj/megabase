@@ -206,7 +206,17 @@ BEGIN
     END IF;
 END $$;
 
-DROP INDEX IF EXISTS users_instance_id_email_idx;
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM pg_indexes
+        WHERE schemaname = 'auth'
+          AND indexname = 'users_instance_id_email_idx'
+          AND indexdef NOT LIKE '%lower(%'
+    ) THEN
+        DROP INDEX auth.users_instance_id_email_idx;
+    END IF;
+END $$;
 CREATE INDEX IF NOT EXISTS users_instance_id_idx ON auth.users USING btree (instance_id);
 CREATE INDEX IF NOT EXISTS users_instance_id_email_idx ON auth.users USING btree (instance_id, lower(email));
 CREATE UNIQUE INDEX IF NOT EXISTS confirmation_token_idx ON auth.users USING btree (confirmation_token) WHERE confirmation_token !~ '^[0-9 ]*$';

@@ -59,7 +59,9 @@ const OBJECTS: &[&str] = &[
 
 /// SQL applied in one transaction when `DATABASE_URL` is set.
 fn install_sql() -> String {
-    let mut sql = String::from("BEGIN;\n");
+    let mut sql = String::from(
+        "BEGIN;\nSELECT pg_advisory_xact_lock(hashtext('megabase.auth.install_schema'));\n",
+    );
     for part in OBJECTS {
         sql.push_str(part);
         if !part.ends_with('\n') {
@@ -132,7 +134,15 @@ mod tests {
     fn install_sql_is_one_transaction() {
         let sql = install_sql();
         assert!(sql.starts_with("BEGIN;"), "{sql}");
+        assert!(
+            sql.contains("SELECT pg_advisory_xact_lock(hashtext('megabase.auth.install_schema'));"),
+            "{sql}"
+        );
         assert!(sql.trim_end().ends_with("COMMIT;"), "{sql}");
+        let begin = sql.find("BEGIN;").expect("begin");
+        let lock = sql.find("pg_advisory_xact_lock").expect("lock");
+        let first_create = sql.find("CREATE SCHEMA").expect("schema");
+        assert!(begin < lock && lock < first_create, "{sql}");
     }
 
     #[test]
@@ -173,6 +183,9 @@ mod tests {
         ));
         assert!(USERS.contains("users_email_partial_key"));
         assert!(USERS.contains("DROP CONSTRAINT IF EXISTS users_email_key"));
+        assert!(USERS.contains("DROP INDEX auth.users_instance_id_email_idx"));
+        assert!(USERS.contains("indexdef NOT LIKE '%lower(%'"));
+        assert!(!USERS.contains("DROP INDEX IF EXISTS users_instance_id_email_idx"));
         assert!(USERS.contains("is_anonymous"));
         assert!(USERS.contains("is_sso_user"));
         assert!(USERS.contains("ALTER COLUMN phone TYPE text"));

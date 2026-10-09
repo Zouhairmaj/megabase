@@ -79,8 +79,9 @@ when the final names already exist.
 | is_anonymous | boolean | NOT NULL DEFAULT false |
 
 Indexes: `users_instance_id_idx`; `users_instance_id_email_idx` on
-`(instance_id, lower(email))`; partial unique token indexes matching
-`WHERE … !~ '^[0-9 ]*$'`; `users_email_partial_key`;
+`(instance_id, lower(email))` (drop the pre-`20220114185221` definition in
+schema `auth` only when `indexdef` lacks `lower(`); partial unique token
+indexes matching `WHERE … !~ '^[0-9 ]*$'`; `users_email_partial_key`;
 `users_is_anonymous_idx`. Comment: `Auth: Stores user login data within a
 secure schema.` RLS on. Select grant to `postgres` when that role exists.
 
@@ -274,7 +275,9 @@ Unique `scim_tokens_token_hash_key`. Indexes on `sso_provider_id`,
 
 Install runs at process start when `DATABASE_URL` is set. Failure aborts
 startup (GOAL.md fail loudly). Missing `DATABASE_URL` skips install; HTTP
-still serves. Objects are created in one transaction under a 30s deadline.
+still serves. Objects are created in one transaction under a 30s deadline, after
+`pg_advisory_xact_lock(hashtext('megabase.auth.install_schema'))` so
+concurrent Megabase processes do not race on DDL.
 After `ADD COLUMN IF NOT EXISTS`, required columns get `SET NOT NULL` so
 an older table is not left nullable. `sslmode` is parsed by
 `tokio-postgres` (the same parser as the connection). `sslmode=require`
