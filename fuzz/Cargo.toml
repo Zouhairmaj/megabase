@@ -1,0 +1,48 @@
+[package]
+name = "megabase-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+base64 = "0.22"
+hmac = "0.12"
+libfuzzer-sys = "0.4"
+sha2 = "0.10"
+
+[dependencies.megabase-core]
+path = "../crates/megabase-core"
+
+[dependencies.megabase-rest]
+path = "../crates/megabase-rest"
+
+[dependencies.megabase-server]
+path = "../crates/megabase-server"
+
+# Standalone workspace so the root workspace never adopts this crate.
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "jwt"
+path = "fuzz_targets/jwt.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "gateway_http"
+path = "fuzz_targets/gateway_http.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "rest_query"
+path = "fuzz_targets/rest_query.rs"
+test = false
+doc = false
+bench = false

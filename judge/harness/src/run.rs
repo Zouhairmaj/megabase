@@ -445,7 +445,7 @@ mod tests {
         assert!(msg.contains("status 200"));
         assert!(msg.contains("501"));
 
-        let mut r = reference.clone();
+        let mut r = reference;
         r.headers
             .insert("content-type".into(), "application/json".into());
         let mut m = r.clone();

@@ -17,7 +17,7 @@ members = [
     "tools/megabase-backlog",
     "judge/harness",
 ]
-exclude = ["site"]
+exclude = ["site", "fuzz"]
 default-members = [
     "crates/megabase",
     "crates/megabase-core",
@@ -69,3 +69,16 @@ megabase-functions = { path = "crates/megabase-functions" }
 megabase-pooler = { path = "crates/megabase-pooler" }
 megabase-meta = { path = "crates/megabase-meta" }
 megabase-studio = { path = "crates/megabase-studio" }
+
+# Clone and borrow lints. CI runs clippy with `-D warnings`, which also
+# denies every other warning. These are deny so a per-crate `cargo clippy`
+# fails on them without extra flags.
+[workspace.lints.clippy]
+redundant_clone = "deny"
+clone_on_ref_ptr = "deny"
+needless_pass_by_value = "deny"
+clone_on_copy = "deny"
+cloned_instead_of_copied = "deny"
+implicit_clone = "deny"
+map_clone = "deny"
+unnecessary_to_owned = "deny"

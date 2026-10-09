@@ -80,8 +80,8 @@ pub fn squarify(values: &[f64], rect: Rect) -> Vec<Rect> {
     let areas: Vec<f64> = order.iter().map(|i| values[*i] * scale).collect();
     let worst = |row: &[f64], side: f64| {
         let sum: f64 = row.iter().sum();
-        let max = row.iter().cloned().fold(f64::MIN, f64::max);
-        let min = row.iter().cloned().fold(f64::MAX, f64::min);
+        let max = row.iter().copied().fold(f64::MIN, f64::max);
+        let min = row.iter().copied().fold(f64::MAX, f64::min);
         f64::max(
             side * side * max / (sum * sum),
             sum * sum / (side * side * min),
@@ -682,7 +682,7 @@ fn draw_card(
 }
 
 pub fn render(
-    heading: Heading,
+    heading: &Heading,
     units: &[&Unit],
     status: &Status,
     metric: Metric,
@@ -1032,7 +1032,7 @@ mod tests {
             .collect();
         let all: Vec<&Unit> = rest.iter().chain(pooler.iter()).collect();
         let svg = render(
-            Heading::Status,
+            &Heading::Status,
             &all,
             &empty_status(),
             Metric::State,
@@ -1068,7 +1068,7 @@ mod tests {
             .collect();
         let all: Vec<&Unit> = rest.iter().collect();
         let svg = render(
-            Heading::Status,
+            &Heading::Status,
             &all,
             &empty_status(),
             Metric::State,
@@ -1097,7 +1097,7 @@ mod tests {
         };
         let all: Vec<&Unit> = rest.iter().collect();
         let svg = render(
-            Heading::Status,
+            &Heading::Status,
             &all,
             &status,
             Metric::State,
@@ -1135,7 +1135,7 @@ mod tests {
         }
         let all: Vec<&Unit> = owned.iter().collect();
         let svg = render(
-            Heading::Status,
+            &Heading::Status,
             &all,
             &empty_status(),
             Metric::State,
