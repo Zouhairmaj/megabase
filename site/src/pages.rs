@@ -140,6 +140,17 @@ pub fn home(paths: &Paths, metrics: &Metrics) -> String {
     )
 }
 
+fn coverage_map(paths: &Paths, generated: &str, coverage_svg: bool) -> String {
+    if !coverage_svg {
+        return generated.to_string();
+    }
+    let dark = format!("{}coverage/treemap.svg", paths.asset());
+    let light = format!("{}coverage/treemap-light.svg", paths.asset());
+    format!(
+        r#"<picture><source srcset="{light}" media="(prefers-color-scheme: light)" /><img src="{dark}" alt="Component coverage treemap. Each cell is one unit." width="1248" height="360" /></picture>"#
+    )
+}
+
 fn home_mobile_stats(metrics: &Metrics) -> String {
     format!(
         r#"<div class="home-mobile-stats hide-desktop">
@@ -421,8 +432,9 @@ fn day0_strip(metrics: &Metrics) -> String {
     )
 }
 
-pub fn status(paths: &Paths, metrics: &Metrics) -> String {
-    let treemap = treemap::svg_size(metrics, 1248.0, 360.0);
+pub fn status(paths: &Paths, metrics: &Metrics, coverage_svg: bool) -> String {
+    let generated = treemap::svg_size(metrics, 1248.0, 360.0);
+    let treemap = coverage_map(paths, &generated, coverage_svg);
     let mut rows = String::from(
         r#"<div class="data-table status-table" role="table" aria-label="By component">
 <div class="data-row head" role="row"><span>Component</span><span>Path</span><span>Level</span><span>Units</span><span>Status</span></div>"#,

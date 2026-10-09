@@ -282,6 +282,7 @@ struct SiteData<'a> {
     human: &'a human_log::HumanLog,
     entries: &'a [devlog::Entry],
     roadmap_md: Option<&'a str>,
+    coverage_svg: bool,
 }
 
 fn build(
@@ -295,6 +296,7 @@ fn build(
         fs::remove_dir_all(out)?;
     }
     copy_dir(&site_root.join("static"), out)?;
+    let coverage_svg = copy_coverage_svgs(repo_root, out)?;
 
     let layout = fs::read_to_string(site_root.join("templates/layout.html"))?;
     let logo = fs::read_to_string(site_root.join("static/logo.svg"))?
@@ -307,6 +309,7 @@ fn build(
         human,
         entries: &entries,
         roadmap_md: roadmap_md.as_deref(),
+        coverage_svg,
     };
 
     for page in PAGES {
@@ -407,7 +410,7 @@ fn content(
             )
         }
         Kind::HowItWorks => pages::how_it_works(paths, data.metrics),
-        Kind::Status => pages::status(paths, data.metrics),
+        Kind::Status => pages::status(paths, data.metrics, data.coverage_svg),
         Kind::Roadmap => pages::roadmap(paths, data.metrics, data.roadmap_md),
         Kind::Components => pages::components(paths, data.metrics),
         Kind::Devlog => pages::devlog_index(paths, data.entries),
@@ -645,6 +648,21 @@ fn jsonld(page: &Page, url: &str) -> String {
     format!(r#"<script type="application/ld+json">{body}</script>"#)
 }
 
+fn copy_coverage_svgs(repo_root: &Path, out: &Path) -> io::Result<bool> {
+    let dark = repo_root.join("coverage/treemap.svg");
+    if !dark.is_file() {
+        return Ok(false);
+    }
+    let dest = out.join("coverage");
+    fs::create_dir_all(&dest)?;
+    fs::copy(&dark, dest.join("treemap.svg"))?;
+    let light = repo_root.join("coverage/treemap-light.svg");
+    if light.is_file() {
+        fs::copy(&light, dest.join("treemap-light.svg"))?;
+    }
+    Ok(true)
+}
+
 fn copy_dir(src: &Path, dst: &Path) -> io::Result<()> {
     fs::create_dir_all(dst)?;
     for entry in fs::read_dir(src)? {
@@ -719,6 +737,16 @@ mod tests {
         let sitemap = fs::read_to_string(out.join("sitemap.xml")).unwrap();
         assert!(sitemap.contains("https://megabase.sh/status/"));
         assert!(!sitemap.contains("/404"));
+        let _ = fs::remove_dir_all(&out);
+    }
+
+    #[test]
+    fn status_uses_generated_treemap_until_coverage_svgs_exist() {
+        let (out, _) = generate_tmp();
+        let html = fs::read_to_string(out.join("status/index.html")).unwrap();
+        assert!(html.contains("data-component=\"rest\""));
+        assert!(!html.contains("coverage/treemap.svg"));
+        assert!(!out.join("coverage/treemap.svg").exists());
         let _ = fs::remove_dir_all(&out);
     }
 

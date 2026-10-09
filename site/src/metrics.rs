@@ -353,7 +353,11 @@ fn apply_summary(metrics: &mut Metrics, value: &Value) {
 fn merge_phase0_components(metrics: &mut Metrics, map: &serde_json::Map<String, Value>) {
     if !metrics.components.is_empty() {
         for (name, stats) in map {
-            if let Some(n) = stats.get("units").and_then(Value::as_u64) {
+            if let Some(n) = stats
+                .get("units")
+                .or_else(|| stats.get("total"))
+                .and_then(Value::as_u64)
+            {
                 if n > 0 {
                     metrics.by_component.insert(
                         name.clone(),
@@ -816,5 +820,19 @@ mod tests {
             .expect("auth");
         assert_eq!(auth.tested, 1);
         assert_eq!(auth.conformant, 1);
+    }
+
+    #[test]
+    fn phase0_component_percent_falls_back_to_total() {
+        let mut metrics = Metrics::placeholder();
+        metrics.components = vec![ComponentBlock::from_counts("rest", "REST", 2, 0, 0, 0)];
+        let map = json!({
+            "rest": { "total": 10, "implemented": 2 }
+        })
+        .as_object()
+        .unwrap()
+        .clone();
+        merge_phase0_components(&mut metrics, &map);
+        assert_eq!(metrics.by_component.get("rest"), Some(&20.0));
     }
 }
