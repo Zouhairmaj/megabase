@@ -1,9 +1,15 @@
 -- Ported from supabase/auth migrations (MIT), pin v2.197.0.
--- Schema plus parent keys for foreign keys. Full auth.users /
--- auth.sessions definitions are later units; do not mark them done.
+-- Schema plus parent stubs. Full auth.users / auth.sessions column
+-- lists are later units; do not mark the stubs as those units.
 
 CREATE SCHEMA IF NOT EXISTS auth;
 GRANT USAGE ON SCHEMA auth TO PUBLIC;
+
+DO $$ BEGIN
+    CREATE TYPE auth.aal_level AS ENUM ('aal1', 'aal2', 'aal3');
+EXCEPTION
+    WHEN duplicate_object THEN NULL;
+END $$;
 
 CREATE TABLE IF NOT EXISTS auth.users (
     id uuid NOT NULL,

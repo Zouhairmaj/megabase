@@ -2,12 +2,12 @@
   "schema": 1,
   "totals": {
     "units": 1024,
-    "implemented": 22,
+    "implemented": 32,
     "tested": 0,
     "conformant": 0
   },
   "percent": {
-    "coverage": 2.1,
+    "coverage": 3.1,
     "conformance": 0.0,
     "done": 0.0
   },
@@ -18,7 +18,7 @@
   "components": {
     "auth": {
       "units": 152,
-      "implemented": 22,
+      "implemented": 32,
       "tested": 0,
       "conformant": 0,
       "groups": {
@@ -30,7 +30,7 @@
         },
         "database": {
           "units": 32,
-          "implemented": 22,
+          "implemented": 32,
           "tested": 0,
           "conformant": 0
         },
@@ -576,6 +576,16 @@
     "auth:sql-table:auth.oauth_consents": "implemented",
     "auth:sql-table:auth.one_time_tokens": "implemented",
     "auth:sql-table:auth.refresh_tokens": "implemented",
+    "auth:sql-table:auth.saml_providers": "implemented",
+    "auth:sql-table:auth.saml_relay_states": "implemented",
+    "auth:sql-table:auth.schema_migrations": "implemented",
+    "auth:sql-table:auth.scim_tokens": "implemented",
+    "auth:sql-table:auth.scim_users": "implemented",
+    "auth:sql-table:auth.sessions": "implemented",
+    "auth:sql-table:auth.sso_domains": "implemented",
+    "auth:sql-table:auth.sso_providers": "implemented",
+    "auth:sql-table:auth.sso_sessions": "implemented",
+    "auth:sql-table:auth.users": "implemented",
     "auth:sql-table:auth.webauthn_challenges": "implemented",
     "auth:sql-table:auth.webauthn_credentials": "implemented"
   }
