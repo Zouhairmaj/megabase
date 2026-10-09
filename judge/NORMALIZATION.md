@@ -44,9 +44,9 @@ compared. Implemented in `judge/harness/src/db.rs`.
 
 | Kind | Compared | Normalized |
 |---|---|---|
-| Table catalog | column name and attnum order, `pg_type.typname`, `NOT NULL`, generated expression, `relrowsecurity`, `pg_get_indexdef` | SQL text: strip `--` comments, collapse whitespace, lowercase. `absent = true` passes only when both databases lack the relation |
+| Table catalog | column name and attnum order, `pg_type.typname`, `NOT NULL`, generated expression, `relrowsecurity`, `pg_get_indexdef` | SQL text: strip `--` comments, collapse whitespace, lowercase outside `'quoted'` literals. `absent = true` passes only when both databases lack the relation |
 | Function catalog | identity arguments, result type, language, `provolatile`, `prosrc` | same SQL normalization on result type and body |
-| Row snapshot | `jsonb_agg(row_to_json(t))` of `SELECT *` ordered by the first column | same JSON rules as HTTP bodies (JWT, UUID, timestamp, volatile keys) |
+| Row snapshot | `jsonb_agg(row_to_json(t))` of `SELECT *` | same JSON rules as HTTP bodies (JWT, UUID, timestamp, volatile keys), then sort the array by serialized row text so `ORDER BY 1` is not the only order (the first `auth.users` column is `instance_id`, shared by every row) |
 
 Owners, ACLs, `column_default` and comments are not compared: they
 depend on which cluster roles exist and on cosmetic `COMMENT ON`.

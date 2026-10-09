@@ -177,11 +177,41 @@ pub fn normalize_sql(sql: &str) -> String {
     let without_line_comments = regex::Regex::new(r"--[^\n]*")
         .expect("comment regex")
         .replace_all(sql, " ");
-    regex::Regex::new(r"\s+")
+    let compact = regex::Regex::new(r"\s+")
         .expect("ws regex")
         .replace_all(&without_line_comments, " ")
         .trim()
-        .to_ascii_lowercase()
+        .to_string();
+    lowercase_sql_outside_literals(&compact)
+}
+
+/// Lowercase SQL keywords and identifiers, but keep `'quoted'` literal case
+/// so `'email'` and `'EMAIL'` do not compare equal.
+fn lowercase_sql_outside_literals(sql: &str) -> String {
+    let mut result = String::with_capacity(sql.len());
+    let mut in_literal = false;
+    let mut chars = sql.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '\'' {
+            result.push(ch);
+            if in_literal && chars.peek() == Some(&'\'') {
+                result.push(chars.next().expect("escaped quote"));
+            } else {
+                in_literal = !in_literal;
+            }
+        } else if in_literal {
+            result.push(ch);
+        } else {
+            result.extend(ch.to_lowercase());
+        }
+    }
+    result
+}
+
+fn sort_row_array(value: &mut Value) {
+    if let Value::Array(items) = value {
+        items.sort_by_cached_key(Value::to_string);
+    }
 }
 
 fn table_catalog(client: &mut Client, rel: &Relation) -> Result<Option<TableCatalog>> {
@@ -506,6 +536,8 @@ pub fn compare_row_snapshot(
     };
     normalize::json(&mut ref_rows, &[]);
     normalize::json(&mut mb_rows, &[]);
+    sort_row_array(&mut ref_rows);
+    sort_row_array(&mut mb_rows);
     if ref_rows != mb_rows {
         return Ok(Some(format!(
             "rows in `{raw}` differ: {} vs {}",
@@ -549,6 +581,18 @@ mod tests {
         assert_eq!(
             normalize_sql("SELECT\n  -- note\n  coalesce(a, b)"),
             "select coalesce(a, b)"
+        );
+        assert_eq!(
+            normalize_sql("identity_data->>'email'"),
+            "identity_data->>'email'"
+        );
+        assert_ne!(
+            normalize_sql("identity_data->>'EMAIL'"),
+            normalize_sql("identity_data->>'email'")
+        );
+        assert_eq!(
+            normalize_sql("WHERE name = 'O''Brien'"),
+            "where name = 'O''Brien'"
         );
     }
 
