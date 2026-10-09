@@ -1,28 +1,13 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<!-- Megabase Wordmark - Original design, Apache-2.0 licensed -->
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 80" width="400" height="80">
-  <defs>
-    <linearGradient id="wordGrad" x1="0%" y1="100%" x2="100%" y2="0%">
-      <stop offset="0%" style="stop-color:#1e3a5f"/>
-      <stop offset="50%" style="stop-color:#3b5998"/>
-      <stop offset="100%" style="stop-color:#6366f1"/>
-    </linearGradient>
-    <linearGradient id="wordGradLight" x1="0%" y1="100%" x2="100%" y2="0%">
-      <stop offset="0%" style="stop-color:#3b5998"/>
-      <stop offset="100%" style="stop-color:#818cf8"/>
-    </linearGradient>
-  </defs>
-  <!-- Mini logo -->
-  <g transform="translate(0, 8) scale(0.5)">
-    <rect x="12" y="100" width="104" height="12" rx="3" fill="url(#wordGrad)"/>
-    <rect x="16" y="44" width="24" height="56" rx="4" fill="url(#wordGrad)"/>
-    <rect x="52" y="16" width="24" height="84" rx="4" fill="url(#wordGradLight)"/>
-    <rect x="88" y="44" width="24" height="56" rx="4" fill="url(#wordGrad)"/>
-    <polygon points="28,44 64,16 64,28 40,48" fill="url(#wordGrad)" opacity="0.9"/>
-    <polygon points="64,16 100,44 88,48 64,28" fill="url(#wordGrad)" opacity="0.9"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1076 100" width="1076" height="100" role="img" aria-labelledby="t">
+  <title id="t">MEGABASE</title>
+  <g fill="#1F1F1F">
+    <path fill-rule="nonzero" d="M0 0 17 0 17 100 0 100ZM79 0 96 0 96 100 79 100ZM0 0 20 0 48 44 76 0 96 0 96 24 55 66 41 66 0 24Z"/>
+    <path transform="translate(140)" fill-rule="evenodd" d="M0 0 96 0 96 17 17 17 17 41.5 86 41.5 86 58.5 17 58.5 17 83 96 83 96 100 0 100Z"/>
+    <path transform="translate(280)" fill-rule="evenodd" d="M14 0 96 0 96 17 24 17 17 24 17 76 24 83 79 83 79 61 52 61 52 44 96 44 96 86 82 100 14 100 0 86 0 14Z"/>
+    <path transform="translate(420)" fill-rule="evenodd" d="M0 100 0 14 14 0 82 0 96 14 96 100 79 100 79 62 17 62 17 100ZM17 45 79 45 79 24 72 17 24 17 17 24Z"/>
+    <path transform="translate(560)" fill-rule="evenodd" d="M0 0 82 0 96 14 96 42 88 50 96 58 96 86 82 100 0 100ZM17 17 72 17 79 24 79 41.5 17 41.5ZM17 58.5 79 58.5 79 76 72 83 17 83Z"/>
+    <path transform="translate(700)" fill-rule="evenodd" d="M0 100 0 14 14 0 82 0 96 14 96 100 79 100 79 62 17 62 17 100ZM17 45 79 45 79 24 72 17 24 17 17 24Z"/>
+    <path transform="translate(840)" fill-rule="evenodd" d="M14 0 96 0 96 17 24 17 17 24 17 34.5 24 41.5 82 41.5 96 55.5 96 86 82 100 0 100 0 83 72 83 79 76 79 65.5 72 58.5 14 58.5 0 44.5 0 14Z"/>
+    <path transform="translate(980)" fill-rule="evenodd" d="M0 0 96 0 96 17 17 17 17 41.5 86 41.5 86 58.5 17 58.5 17 83 96 83 96 100 0 100Z"/>
   </g>
-  <!-- Text -->
-  <text x="80" y="55" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="42" font-weight="700" fill="#1e3a5f">
-    <tspan>Mega</tspan><tspan fill="url(#wordGradLight)">base</tspan>
-  </text>
 </svg>

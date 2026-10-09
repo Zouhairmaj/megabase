@@ -1,74 +1,86 @@
-# Megabase Brand Guidelines
+# Megabase brand
 
-## Logo
+## Mark
 
-The Megabase logo represents a bold, ascending "M" formed by three database column pillars rising from a shared foundation. The center pillar reaches highest, symbolizing growth and the unified nature of the single-binary architecture.
+A 3×3 grid of square tiles with even gaps. Eight charcoal tiles surround one
+green center tile. The grid is the treemap of units the project is measured
+by; the green tile is a unit that is done: implemented and conformant.
 
-### Design Elements
+The wordmark `MEGABASE` is drawn as SVG paths in a squared geometric
+monospace style (every letter the same width, chamfered corners, wide
+tracking), so it renders identically everywhere and needs no font.
 
-- **Three Pillars**: Represent the core services (REST, Auth, Realtime) unified into one
-- **Connecting Beams**: Show how components work together seamlessly
-- **Base Platform**: The PostgreSQL foundation everything builds upon
+The definitive reference for proportions is the brand sheet in
+[`docs/brand/reference.png`](../docs/brand/reference.png). The sheet shows an
+orange center tile; the accent has since changed to Megabase green (below), and
+everything else on the sheet still applies.
 
-### Files
+The mark is original. The green accent is a nod to the project Megabase is
+compatible with, but it is deliberately a different green from Supabase's
+brand greens (`#3ECF8E`, `#24B47E`): a purer, more saturated green with less blue, and it is
+never used with a lightning bolt or any Supabase shape.
 
-| File | Use Case |
-|------|----------|
-| `logo.svg` | Primary logo for light backgrounds |
-| `logo-dark.svg` | Logo variant for dark backgrounds |
-| `wordmark.svg` | Full wordmark for headers, light backgrounds |
-| `wordmark-dark.svg` | Wordmark for dark backgrounds |
+## Files
 
-## Colors
+All files are hand-written SVG in this directory.
 
-The Megabase palette uses a blue-to-indigo gradient, deliberately distinct from Supabase's green branding.
+| File | Use |
+|---|---|
+| `logo-icon.svg` / `logo-icon-dark.svg` | Icon only (avatars, small spaces) |
+| `logo-horizontal.svg` / `logo-horizontal-dark.svg` | Icon + wordmark side by side (README header, docs) |
+| `logo-stacked.svg` / `logo-stacked-dark.svg` | Icon above wordmark (square-ish placements) |
+| `wordmark.svg` / `wordmark-dark.svg` | Wordmark only |
+| `app-icon.svg` / `app-icon-dark.svg` | Rounded-square app icon (off-white card, or charcoal card with off-white tiles) |
+| `favicon.svg` | Favicon; switches to the dark palette with `prefers-color-scheme` |
 
-### Primary Palette
+The plain files are for light backgrounds; `-dark` files are for dark
+backgrounds. In Markdown, pick automatically with `<picture>`:
 
-| Name | Hex | Usage |
-|------|-----|-------|
-| Deep Navy | `#1e3a5f` | Primary dark, text on light |
-| Royal Blue | `#3b5998` | Gradient midpoint |
-| Indigo | `#6366f1` | Accent, links |
-| Light Indigo | `#818cf8` | Highlights |
-
-### Dark Mode Palette
-
-| Name | Hex | Usage |
-|------|-----|-------|
-| Sky Blue | `#60a5fa` | Primary on dark |
-| Soft Indigo | `#818cf8` | Gradient midpoint |
-| Lavender | `#a78bfa` | Accent on dark |
-| Light Lavender | `#c4b5fd` | Highlights on dark |
-
-### Text Colors
-
-- Light mode: `#1e3a5f` (Deep Navy)
-- Dark mode: `#e2e8f0` (Slate 200)
-
-## Typography
-
-Use system fonts for maximum compatibility:
-
-```css
-font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+```html
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/logo-horizontal-dark.svg">
+  <img alt="Megabase" src="assets/logo-horizontal.svg" width="360">
+</picture>
 ```
 
-The wordmark uses **700 weight** (bold).
+## Palette
 
-## Usage Guidelines
+| Name | Hex | Use |
+|---|---|---|
+| Charcoal | `#1F1F1F` | Tiles and wordmark on light backgrounds |
+| Off-white | `#F5F2EA` | Tiles and wordmark on dark backgrounds |
+| Megabase green | `#1FCB5B` | Center tile; the only accent color |
 
-1. **Do** use the appropriate variant for the background (light/dark)
-2. **Do** maintain aspect ratio when scaling
-3. **Do** provide adequate padding around the logo
-4. **Don't** modify the colors or gradient direction
-5. **Don't** add effects like shadows or outlines
-6. **Don't** use the logo in ways that imply Supabase endorsement
+Do not substitute Supabase's greens (`#3ECF8E`, `#24B47E`) for the accent.
 
-## Non-Affiliation Notice
+The coverage treemaps use the same palette: charcoal for units not yet
+implemented, lighter grey for implemented but untested, deep green for tested
+but not yet passing, and Megabase green `#1FCB5B` for conformant.
 
-Megabase is an independent project. "Supabase" is a trademark of Supabase, Inc. The Megabase logo and brand are original designs that intentionally differ from Supabase's visual identity.
+## Geometry
+
+- Icon: 96×96 units, tiles 30×30, gaps 3 (a tenth of a tile).
+- Wordmark: cap height 100, every letter 96 wide, stroke 17, 45° chamfers of
+  14, letter spacing 44. The full word is 1076×100.
+- Stacked lockup: wordmark about twice the icon width, gap between icon and
+  wordmark about a quarter of the icon height.
+- Horizontal lockup: cap height 0.28 of the icon height, vertically centered,
+  gap of 0.3 icon heights between icon and wordmark.
+- App icon: 512×512 rounded square (corner radius 112), grid at 60% of the
+  width, centered.
+- Clear space around any lockup: at least one tile width.
+
+## Rules
+
+1. Use the variant that matches the background.
+2. Scale proportionally; never stretch, recolor, rotate or add effects.
+3. Never use the mark in a way that implies endorsement by Supabase.
+
+## Non-affiliation
+
+Megabase is independent and not affiliated with Supabase. "Supabase" is a
+trademark of its owner and is used only to describe compatibility.
 
 ## License
 
-The Megabase logo and brand assets are released under Apache-2.0, the same license as the project.
+Apache-2.0, like the rest of the project.
