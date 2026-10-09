@@ -1,0 +1,67 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    name: release-please
+    runs-on: ubuntu-latest
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+    steps:
+      - uses: googleapis/release-please-action@v4
+        id: release
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+  annotate-release:
+    name: Coverage delta on release
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Append coverage and conformance delta
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.release-please.outputs.tag_name }}
+        run: |
+          set -euo pipefail
+          sumline() {
+            local file="$1" label="$2"
+            jq -r --arg l "$label" '
+              "- \($l): coverage \(.percent.coverage)% (\(.totals.implemented)/\(.totals.units) units implemented), conformance \(.percent.conformance)% (\(.judge.passing)/\(.judge.cases) judge cases)"
+            ' "$file"
+          }
+          git show "${TAG}:coverage/summary.json" > /tmp/cur.json
+          {
+            echo
+            echo "## Coverage and conformance"
+            echo
+            sumline /tmp/cur.json "This release"
+            PREV="$(git tag --list 'v*' --sort=-v:refname | awk -v t="$TAG" '$0 != t { print; exit }')"
+            if [ -n "${PREV:-}" ] && git cat-file -e "${PREV}:coverage/summary.json" 2>/dev/null; then
+              git show "${PREV}:coverage/summary.json" > /tmp/prev.json
+              sumline /tmp/prev.json "Previous release (\`${PREV}\`)"
+              jq -s -r '
+                "- Delta: coverage \((.[0].percent.coverage - .[1].percent.coverage) | tostring) pp, conformance \((.[0].percent.conformance - .[1].percent.conformance) | tostring) pp"
+              ' /tmp/cur.json /tmp/prev.json
+            else
+              echo "- Initial release (no previous tag)."
+            fi
+          } > /tmp/delta.md
+          gh release view "$TAG" --json body --jq .body > /tmp/release-body.md
+          cat /tmp/delta.md >> /tmp/release-body.md
+          gh release edit "$TAG" --notes-file /tmp/release-body.md
