@@ -7,6 +7,7 @@
 //! cargo run -p megabase-coverage -- verify-pins
 //! ```
 
+#[allow(dead_code)] // generator kept for tests; committed SVGs are Kite assets
 mod banner;
 mod extract;
 mod glyphs;

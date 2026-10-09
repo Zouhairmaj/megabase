@@ -204,11 +204,9 @@ pub fn render(units: &UnitsFile, status: &Status, summary: &Summary) -> Result<O
         cov.join("badge-units.svg"),
         badge("units", &t.units.to_string(), "#303235"),
     );
-    let (banner_dark, banner_light) = crate::banner::pair();
-    out.files
-        .insert("docs/brand/banner-dark.svg".into(), banner_dark);
-    out.files
-        .insert("docs/brand/banner-light.svg".into(), banner_light);
+    // README banners live in docs/brand/ as Kite assets. Coverage must not
+    // overwrite them: float formatting differs across rustc, and Kite wins
+    // on visual design (GOAL.md).
 
     out.blocks
         .push(("README.md".into(), "status", readme_status(units, summary)));
