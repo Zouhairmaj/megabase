@@ -14,7 +14,6 @@ megabase-auth = { workspace = true }
 megabase-realtime = { workspace = true }
 megabase-storage = { workspace = true }
 megabase-functions = { workspace = true }
-megabase-pooler = { workspace = true }
 megabase-meta = { workspace = true }
 megabase-studio = { workspace = true }
 axum = { workspace = true }
@@ -25,7 +24,7 @@ tracing = { workspace = true }
 serde_json = { workspace = true }
 
 [dev-dependencies]
-criterion = { version = "0.5", default-features = false, features = ["cargo_bench_support"] }
+criterion = { workspace = true }
 
 [[bench]]
 name = "health"

@@ -1061,7 +1061,6 @@ dependencies = [
  "megabase-core",
  "megabase-functions",
  "megabase-meta",
- "megabase-pooler",
  "megabase-realtime",
  "megabase-rest",
  "megabase-storage",

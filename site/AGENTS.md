@@ -9,7 +9,9 @@ Extends the root `AGENTS.md`; it does not relax it.
   cargo clippy --manifest-path site/Cargo.toml -- -D warnings
   cargo audit --file site/Cargo.lock
   ```
-  CI does not lint it, so run fmt/clippy yourself. Scorecard/OSV,
+  CI does not lint it, so run fmt/clippy yourself. `[lints.rust]`
+  forbids `unsafe_code` here because this crate cannot inherit
+  `[workspace.lints]`. Scorecard/OSV,
   `just audit`, and the CI `cargo-audit` matrix all scan
   `site/Cargo.lock`. Keep `resvg` on the harfrust/skrifa stack (0.48+);
   do not regress to rustybuzz or ttf-parser (RUSTSEC-2026-0206,

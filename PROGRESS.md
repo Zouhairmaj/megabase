@@ -234,6 +234,25 @@ waiting on a human.
     bans external crates that are not on the `[bans] allow` list (the
     current lockfile graph, plus `sqlx` and `jsonwebtoken`). Propose a
     new crate with the steps in that file.
+23. **Rust supply-chain and API checks** (2026-10-09). Workspace
+    package metadata, `[workspace.dependencies]`, and
+    `lints.workspace = true` were already in place (decision 22). This
+    adds `[workspace.lints.rust] unsafe_code = "forbid"` and moves the
+    remaining direct deps (`bcrypt`, `chrono`, `uuid`, `criterion`)
+    into `[workspace.dependencies]`. `site/` repeats the forbid lint
+    because it stays outside the workspace. `fuzz/` does not: the
+    libfuzzer harness emits `unsafe`. `cargo-vet` 0.10 imports Mozilla,
+    Google, and Bytecode Alliance audits; everything else is an
+    exemption in `supply-chain/config.toml` (36 audited, 184 exempted
+    at introduction). CI runs `cargo vet --locked`. Unused dependencies
+    use `cargo-machete` (stable). `cargo-udeps` needs nightly, so it is
+    not the CI tool. `cargo hack check --each-feature` runs only on
+    workspace crates that declare features, so it does not rebuild the
+    workspace while none do. API style for new code is the short list
+    in `AGENTS.md` (Pragmatic Rust Guidelines and Rust API Guidelines):
+    newtypes, dedicated error types, `Result` for input failures, and
+    rustdoc. `megabase-server` no longer depends on `megabase-pooler`;
+    Supavisor has no Kong prefix (ADR 0002) and the crate was unused.
 
 ## Tracking
 
