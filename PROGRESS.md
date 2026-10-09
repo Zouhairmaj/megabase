@@ -98,12 +98,12 @@ waiting on a human.
     Runtime (`vendor/edge-runtime`) are MIT. Postgres Meta's LICENSE is
     Apache-2.0 (its `package.json` at this pin says MIT; NOTICE follows
     LICENSE).
-11. **Versioning.** Conventional Commits (squash-merge PR titles).
-    release-please v4 on `main` publishes one rust version for the
-    `megabase` binary (`workspace.package.version`, starting at `0.0.0`,
-    `bump-minor-pre-major`). Changelog sections: Features, Bug Fixes,
-    Performance, Conformance/judge, Documentation. `chore` / `ci` / `test`
-    are hidden. Release bodies include coverage and conformance deltas.
+11. **Versioning.** Policy lives only in
+    [`docs/ROADMAP.md`](docs/ROADMAP.md#versioning-and-releases)
+    (Phase 0 = `0.1.0`, each Level a minor, `1.0.0` at Level 5,
+    patch between gates, weekly Monday release PR). Changelog sections:
+    Features, Bug Fixes, Performance, Conformance/judge, Documentation.
+    `chore` / `ci` / `test` are hidden.
 12. **Board Status reflects reality.** Agents claim an issue (assign +
     **In progress**, branch `issue-<n>-<slug>`, PR `Closes #<n>`) before
     coding. `.github/workflows/board-sync.yml` mirrors Status from those
@@ -147,7 +147,8 @@ None.
 - [x] NOTICE, LICENSES/ (SPDX from each vendored LICENSE)
 - [x] HUMAN_LOG.md created empty (0 bytes; bootstrap exception)
 - [x] CODEOWNERS (`@Zouhairmaj`)
-- [x] Versioning: release-please v4, Conventional Commits PR titles, `0.0.0`
+- [x] Versioning: policy in `docs/ROADMAP.md` (Phase 0 = `0.1.0`)
+- [x] `AGENTS.md` (committee-reviewed) plus nested guides
 - [x] Backlog *generator* (`tools/megabase-backlog`); GitHub write is a
       human-only action in this environment (token cannot create issues)
 - [x] Brand (Kite-aligned SVGs, palette, design-first rule)

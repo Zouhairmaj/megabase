@@ -415,7 +415,7 @@ fn infra() -> Vec<Item> {
             body: concat!(
                 "<!-- megabase-id: epic:judge:studio:4 -->\n\n",
                 "GOAL.md section 9: official Studio twice, scripted sessions, compare network, UI errors and DB state.\n\n",
-                "**In:** Playwright runner in Rust or a reviewed judge tool, `judge/studio/`. **Out:** rewriting Studio.\n\n",
+                "**In:** a Rust browser-testing harness (fantoccini or chromiumoxide driving Chromium) in `judge/studio/`. **Out:** rewriting Studio; no non-Rust runner.\n\n",
                 "On a `review/*` branch. Blocked by Level 4 Meta/Auth admin/Storage.\n\n",
                 "**Effort:** XL. **Milestone:** Level 4. **Labels:** `component:judge`, `level:4`, `type:infra`.\n"
             )
@@ -479,12 +479,12 @@ fn website() -> Vec<Item> {
         title: "Website".into(),
         body: concat!(
             "<!-- megabase-id: epic:website:site:later -->\n\n",
-            "Public website for the experiment. **Not a compatibility level.** Follows the design-first rule:\n\n",
+            "Public website for the experiment. **Not a compatibility level.** Status embeds `coverage/treemap.svg` / `coverage/treemap-light.svg` (same files as the README). Follows the design-first rule:\n\n",
             "1. Design in [Kite: Megabase identity](https://kite.new/p/megabase-identity).\n",
             "2. LLM committee review (several external models).\n",
             "3. Apply corrections in Kite.\n",
             "4. Implement in this repository so assets match Kite.\n\n",
-            "## Scope\n\n**In:** marketing/docs site, social images, diagrams. Status uses the generated `coverage/treemap.svg` / `coverage/treemap-light.svg` (same treemap as the README). **Out:** Studio rewrite, product API.\n\n",
+            "## Scope\n\n**In:** marketing/docs site, social images, diagrams. **Out:** Studio rewrite, product API.\n\n",
             "Child issues below must be done **in order**. Do not implement before the committee signs off.\n\n",
             "**Effort:** XL. **Labels:** `type:feature`. No level milestone.\n"
         )
@@ -510,7 +510,7 @@ fn website() -> Vec<Item> {
             key: (*key).into(),
             title: (*title).into(),
             body: format!(
-                "<!-- megabase-id: {key} -->\n\n{scope}\n\nParent: **Website**. Step {} of 4. Design-first: CONTRIBUTING.md.\n\n**Effort:** M. **Labels:** `type:feature`.\n",
+                "<!-- megabase-id: {key} -->\n\n{scope}\n\nParent: **Website**. Step {} of 4. Design-first: AGENTS.md.\n\n**Effort:** M. **Labels:** `type:feature`.\n",
                 i + 1
             ),
             labels: vec!["type:feature"],
@@ -593,6 +593,26 @@ mod tests {
         assert!(items.len() < 150, "{}", items.len());
         assert!(items.iter().any(|i| i.key == "epic:website:site:later"));
         assert!(items.iter().any(|i| i.title == "Website: design in Kite"));
+        let studio = items
+            .iter()
+            .find(|i| i.key == "epic:judge:studio:4")
+            .expect("studio harness");
+        assert!(
+            studio.body.contains("fantoccini") && studio.body.contains("chromiumoxide"),
+            "Studio tests must be Rust browser automation"
+        );
+        assert!(
+            !studio.body.contains("Playwright") && !studio.body.contains("TypeScript"),
+            "Studio tests must not specify Playwright or TypeScript"
+        );
+        let website = items
+            .iter()
+            .find(|i| i.key == "epic:website:site:later")
+            .expect("website epic");
+        assert_eq!(website.component, "website");
+        assert!(website
+            .body
+            .contains("Status embeds `coverage/treemap.svg`"));
     }
 
     #[test]

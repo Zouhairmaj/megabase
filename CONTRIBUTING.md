@@ -18,16 +18,16 @@ agent or human. This file covers only what AGENTS.md does not.
 | Graphic and UI design | [Kite: Megabase identity](https://kite.new/p/megabase-identity), see `docs/brand/README.md` |
 | Coverage denominator | `coverage/units.json` (extracted from `vendor/`) |
 | Correctness | `judge/` against the pinned reference stack |
+| Versioning and releases | [`docs/ROADMAP.md`](docs/ROADMAP.md#versioning-and-releases) |
 
 ## Releases
 
 PRs are squash-merged, and the PR title becomes the changelog entry.
-`conformance` titles land in the **Conformance/judge** section. release-please
-(v4, `rust` strategy, `bump-minor-pre-major`) cuts releases from `main`. The
-single version is `workspace.package.version` in `Cargo.toml`, starting at
-`0.0.0`. Each GitHub Release body is annotated with the coverage and
-conformance delta against the previous tag. If a release PR's lockfile is
-stale, run `cargo generate-lockfile` on that PR.
+`conformance` titles land in the **Conformance/judge** section. Versioning,
+cadence and who may merge a release PR are in
+[`docs/ROADMAP.md`](docs/ROADMAP.md#versioning-and-releases) (do not restate
+them here). If a release PR's lockfile is stale, run `cargo generate-lockfile`
+on that PR.
 
 ## Questions
 

@@ -70,4 +70,45 @@ and leaves live Status values (`In progress`, `In review`, `Blocked`,
 
 Board **Status** is kept in sync with branches, PRs and the `blocked` label
 by `.github/workflows/board-sync.yml` (secret `PROJECT_TOKEN`). Agents still
-claim the issue themselves before starting work; see `CONTRIBUTING.md`.
+claim the issue themselves before starting work; see `AGENTS.md`.
+
+## Versioning and releases
+
+This is the only copy of the policy. `CONTRIBUTING.md` and `AGENTS.md` point
+here.
+
+**1.0.0** is Supabase drop-in parity: Level 5 reached and judge-verified.
+Do not mint 1.0.0 any other way (no `BREAKING CHANGE` / `type!` for that).
+
+Pre-1.0 versions:
+
+| Event | Version |
+|---|---|
+| Phase 0 (bootstrap) | `0.1.0` |
+| Level 1 reached | `0.2.0` |
+| Level 2 reached | `0.3.0` |
+| Level 3 reached | `0.4.0` |
+| Level 4 reached | `0.5.0` |
+| Level 5 reached (parity) | `1.0.0` |
+
+At each level gate the orchestrator lands a commit whose body includes a
+`Release-As: 0.x.0` footer (or `Release-As: 1.0.0` at Level 5) so
+release-please cuts that exact version. Between gates, `feat` / `fix` /
+`conformance` only bump **patch**.
+
+release-please (`release-please-config.json`):
+`bump-minor-pre-major` is **false**, `bump-patch-for-minor-pre-major` is
+**true**. The rust strategy still updates `workspace.package.version`.
+
+Cadence:
+
+- **Weekly:** merge the release PR on Monday if there are unpublished
+  changes.
+- **Immediately** when a Level gate is reached (`Release-As` footer).
+- **Hotfix** for a severe regression, without waiting for Monday.
+
+Only the **orchestrator** merges release PRs, and only after reviewer
+approval of the current head SHA and green CI. If the release PR's
+lockfile is stale, regenerate it with `cargo generate-lockfile` on that
+PR. Each GitHub Release body is annotated with the coverage /
+conformance delta versus the previous tag.

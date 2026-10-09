@@ -119,7 +119,9 @@ The board must match reality at all times.
    `.github/workflows/semantic-pr.yml`, for example `feat(rest): add eq filter`.
    Leave out the scope for core, server or repo-wide changes.
    The body follows `.github/pull_request_template.md`, with `Closes #<n>`
-   and the measured deltas.
+   and the measured deltas. Keep the PR draft while work is in progress.
+   **As soon as the work is complete and CI is green, mark it ready for
+   review** — do not leave a finished PR in draft.
 8. **Judge cases** for your units go in a separate PR on
    `review/issue-<n>-cases`, cross-linked to the feature PR. Each case must
    pass on the reference stack. The case PR merges first; then rebase the
@@ -176,6 +178,9 @@ The board must match reality at all times.
   your session. Record failed approaches and decisions briefly, and leave out
   prompt transcripts and private context.
 - Write repository content in English.
+- Follow [versioning and releases](docs/ROADMAP.md#versioning-and-releases).
+  Do not invent a 1.0.0 or a minor bump; level gates use a `Release-As:`
+  footer from the orchestrator.
 
 **Ask first**
 - New broad-impact dependencies or MSRV changes: open an issue with your
@@ -194,8 +199,9 @@ The board must match reality at all times.
   account it posts a comment instead:
   `REVIEW: APPROVED <head-sha>` or `REVIEW: CHANGES REQUESTED <head-sha>`,
   followed by its findings.
-- **CodeRabbit** reviews every PR too. Fix each actionable comment or reply
-  with the reason you didn't. Leave no unresolved threads.
+- **CodeRabbit** reviews every PR (including drafts). **CodeQL** / GitHub
+  Advanced Security does too. Fix each finding or dismiss it with a reason.
+  Leave no unresolved CodeRabbit threads and no open CodeQL alerts.
 - **Orchestrator.** It alone merges (`gh pr merge <n> --squash`), and only
   when three things hold: the approval covers the current head SHA
   (`gh pr view <n> --json headRefOid`), no change request is open, and every

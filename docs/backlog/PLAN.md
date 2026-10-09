@@ -5099,7 +5099,7 @@ On a `review/*` branch. Needs a human-held secret store (human-only action).
 
 GOAL.md section 9: official Studio twice, scripted sessions, compare network, UI errors and DB state.
 
-**In:** Playwright runner in Rust or a reviewed judge tool, `judge/studio/`. **Out:** rewriting Studio.
+**In:** a Rust browser-testing harness (fantoccini or chromiumoxide driving Chromium) in `judge/studio/`. **Out:** rewriting Studio; no non-Rust runner.
 
 On a `review/*` branch. Blocked by Level 4 Meta/Auth admin/Storage.
 
@@ -5129,7 +5129,7 @@ On a `review/*` branch. Blocks calling Level 1 'done' (no P0 security issues).
 
 ### Website (epic)
 
-- Status: Backlog · Milestone: — · Effort: XL · Component: studio · Level: None
+- Status: Backlog · Milestone: — · Effort: XL · Component: website · Level: None
 
 <!-- megabase-id: epic:website:site:later -->
 
@@ -5150,49 +5150,49 @@ Child issues below must be done **in order**. Do not implement before the commit
 
 ### Website: design in Kite (task)
 
-- Status: Backlog · Milestone: — · Effort: M · Component: studio · Level: None
+- Status: Backlog · Milestone: — · Effort: M · Component: website · Level: None
 
 <!-- megabase-id: task:website:design:later -->
 
 Add website frames to https://kite.new/p/megabase-identity (home, status, docs). Palette and logo from the identity file. Stop when a reviewer can click through the Kite file.
 
-Parent: **Website**. Step 1 of 4. Design-first: CONTRIBUTING.md.
+Parent: **Website**. Step 1 of 4. Design-first: AGENTS.md.
 
 **Effort:** M. **Labels:** `type:feature`.
 
 ### Website: LLM committee review (task)
 
-- Status: Backlog · Milestone: — · Effort: M · Component: studio · Level: None
+- Status: Backlog · Milestone: — · Effort: M · Component: website · Level: None
 
 <!-- megabase-id: task:website:committee:later -->
 
 Send the Kite frames to several external LLMs. Collect written review. Blocked by design.
 
-Parent: **Website**. Step 2 of 4. Design-first: CONTRIBUTING.md.
+Parent: **Website**. Step 2 of 4. Design-first: AGENTS.md.
 
 **Effort:** M. **Labels:** `type:feature`.
 
 ### Website: apply committee revisions in Kite (task)
 
-- Status: Backlog · Milestone: — · Effort: M · Component: studio · Level: None
+- Status: Backlog · Milestone: — · Effort: M · Component: website · Level: None
 
 <!-- megabase-id: task:website:revisions:later -->
 
 Update the Kite file. Do not start implementation. Blocked by committee review.
 
-Parent: **Website**. Step 3 of 4. Design-first: CONTRIBUTING.md.
+Parent: **Website**. Step 3 of 4. Design-first: AGENTS.md.
 
 **Effort:** M. **Labels:** `type:feature`.
 
 ### Website: implement matching Kite (task)
 
-- Status: Backlog · Milestone: — · Effort: M · Component: studio · Level: None
+- Status: Backlog · Milestone: — · Effort: M · Component: website · Level: None
 
 <!-- megabase-id: task:website:implement:later -->
 
 Implement only what is in Kite after revisions. Repo assets must match. The Status page embeds `coverage/treemap.svg` / `coverage/treemap-light.svg`. Blocked by revisions.
 
-Parent: **Website**. Step 4 of 4. Design-first: CONTRIBUTING.md.
+Parent: **Website**. Step 4 of 4. Design-first: AGENTS.md.
 
 **Effort:** M. **Labels:** `type:feature`.
 

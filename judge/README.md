@@ -68,9 +68,10 @@ A case is a TOML table with an id, the `coverage/units.json` ids it
 exercises, and one or more steps (`method`, `path`, optional `json` /
 `headers` / `key` / `capture` / `ignore`). See `judge/cases/`.
 
-Studio browser sessions (`judge/studio/`, Playwright against official
-Studio twice) are **planned**: they land with Level 4, on a `review/*`
-branch, and are the Studio test in GOAL.md section 9.
+Studio browser sessions (`judge/studio/`, a Rust harness such as
+fantoccini or chromiumoxide driving Chromium against official Studio
+twice) are **planned**: they land with Level 4, on a `review/*` branch,
+and are the Studio test in GOAL.md section 9. The runner is Rust-only.
 
 ## Accepted design (not all built)
 

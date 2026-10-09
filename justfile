@@ -14,7 +14,7 @@ test:
     cargo test --workspace --locked
 
 lint:
-    cargo clippy --workspace --all-targets -- -D warnings
+    cargo clippy --workspace --all-targets --locked -- -D warnings
 
 fmt:
     cargo fmt --all
