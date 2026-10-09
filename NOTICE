@@ -1,129 +1,80 @@
 Megabase
-Copyright 2024 The Megabase Authors
+Copyright 2026 The Megabase Authors
 
-This product is a port of open-source software. It includes code derived from
-the following projects:
+This product is a port of open-source software. SPDX identifiers and
+copyright lines below are taken from each vendored repository's LICENSE
+file at the pin in vendor.toml (not from package.json / mix.exs). Full
+texts are copied into LICENSES/.
 
-================================================================================
 PostgREST
-================================================================================
+  SPDX-License-Identifier: MIT
+  Copyright (c) 2014-2026 The PostgREST contributors
+  vendor/postgrest  https://github.com/PostgREST/postgrest
+  LICENSES/postgrest.txt
 
-PostgREST is licensed under the MIT License.
-Copyright (c) 2014-2024, PostgREST Contributors
+Supabase Auth
+  SPDX-License-Identifier: MIT
+  Copyright (c) 2021-2025 Supabase <support@supabase.com>
+  vendor/auth  https://github.com/supabase/auth
+  LICENSES/supabase-auth.txt
+  The LICENSE file at this pin is MIT (not Apache-2.0).
 
-Upstream repository: https://github.com/PostgREST/postgrest
-Pinned version: v16.4
-
-Megabase components derived from PostgREST:
-- crates/megabase-rest/ (REST API implementation)
-
-================================================================================
-Supabase Auth (GoTrue)
-================================================================================
-
-Supabase Auth is licensed under the Apache License, Version 2.0.
-Copyright (c) 2020-2024, Supabase Inc.
-
-Upstream repository: https://github.com/supabase/auth
-Pinned version: v2.197.0
-
-Megabase components derived from Supabase Auth:
-- crates/megabase-auth/ (Authentication API implementation)
-
-================================================================================
 Supabase Realtime
-================================================================================
+  SPDX-License-Identifier: Apache-2.0
+  Copyright 2019 Supabase
+  vendor/realtime  https://github.com/supabase/realtime
+  LICENSES/supabase-realtime.txt
 
-Supabase Realtime is licensed under the Apache License, Version 2.0.
-Copyright (c) 2020-2024, Supabase Inc.
-
-Upstream repository: https://github.com/supabase/realtime
-Pinned version: v2.143.3
-
-Megabase components derived from Supabase Realtime:
-- crates/megabase-realtime/ (Realtime API implementation)
-
-================================================================================
 Supabase Storage
-================================================================================
+  SPDX-License-Identifier: Apache-2.0
+  Copyright 2019 Supabase
+  vendor/storage  https://github.com/supabase/storage
+  LICENSES/supabase-storage.txt
 
-Supabase Storage is licensed under the Apache License, Version 2.0.
-Copyright (c) 2020-2024, Supabase Inc.
-
-Upstream repository: https://github.com/supabase/storage
-Pinned version: v1.80.2
-
-Megabase components derived from Supabase Storage:
-- crates/megabase-storage/ (Storage API implementation)
-
-================================================================================
 Supavisor
-================================================================================
+  SPDX-License-Identifier: Apache-2.0
+  Copyright notice in LICENSE is the Apache boilerplate placeholder.
+  vendor/supavisor  https://github.com/supabase/supavisor
+  LICENSES/supavisor.txt
 
-Supavisor is licensed under the Apache License, Version 2.0.
-Copyright (c) 2022-2024, Supabase Inc.
-
-Upstream repository: https://github.com/supabase/supavisor
-Pinned version: v2.9.13
-
-Megabase components derived from Supavisor:
-- crates/megabase-pooler/ (Connection pooler implementation)
-
-================================================================================
 Postgres Meta
-================================================================================
+  SPDX-License-Identifier: Apache-2.0
+  Copyright notice in LICENSE is the Apache boilerplate placeholder.
+  vendor/postgres-meta  https://github.com/supabase/postgres-meta
+  LICENSES/postgres-meta.txt
+  LICENSE (and README) are Apache-2.0; package.json at this pin says MIT.
+  NOTICE follows the LICENSE file.
 
-Postgres Meta is licensed under the Apache License, Version 2.0.
-Copyright (c) 2020-2024, Supabase Inc.
-
-Upstream repository: https://github.com/supabase/postgres-meta
-Pinned version: v0.100.0
-
-Megabase components derived from Postgres Meta:
-- crates/megabase-meta/ (Database introspection API implementation)
-
-================================================================================
 Supabase Edge Runtime
-================================================================================
+  SPDX-License-Identifier: MIT
+  Copyright (c) 2023 Supabase
+  vendor/edge-runtime  https://github.com/supabase/edge-runtime
+  LICENSES/edge-runtime.txt
+  The LICENSE file at this pin is MIT (not Apache-2.0).
 
-Supabase Edge Runtime is licensed under the Apache License, Version 2.0.
-Copyright (c) 2022-2024, Supabase Inc.
+Supabase (Studio / self-hosted stack)
+  SPDX-License-Identifier: Apache-2.0
+  Copyright 2024 Supabase
+  vendor/supabase  https://github.com/supabase/supabase
+  LICENSES/supabase.txt
 
-Upstream repository: https://github.com/supabase/edge-runtime
-Pinned version: v1.77.4
-
-Megabase components derived from Supabase Edge Runtime:
-- crates/megabase-functions/ (Edge Functions runtime implementation)
-
-================================================================================
-Supabase (Monorepo - Studio)
-================================================================================
-
-Supabase Studio is licensed under the Apache License, Version 2.0.
-Copyright (c) 2020-2024, Supabase Inc.
-
-Upstream repository: https://github.com/supabase/supabase
-Pinned version: v1.26.08
-
-Megabase components derived from Supabase Studio:
-- crates/megabase-studio/ (Dashboard API implementation)
-
-================================================================================
 supabase-js
-================================================================================
+  SPDX-License-Identifier: MIT
+  Copyright (c) 2020 Supabase
+  vendor/supabase-js  https://github.com/supabase/supabase-js
+  LICENSES/supabase-js.txt
 
-supabase-js is licensed under the MIT License.
-Copyright (c) 2020-2024, Supabase Inc.
+JetBrains Mono (wordmark and treemap/banner outlines)
+  SPDX-License-Identifier: OFL-1.1
+  Copyright 2020 The JetBrains Mono Project Authors
+  LICENSES/OFL-1.1-JetBrains-Mono.txt
 
-Upstream repository: https://github.com/supabase/supabase-js
-Pinned version: v2.117.3
+Megabase itself is Apache-2.0 (LICENSE). Generic Apache-2.0 and MIT texts
+are in LICENSES/Apache-2.0.txt and LICENSES/MIT.txt.
 
-Used for: API compatibility reference and testing
+When logic is ported from an upstream file, the Rust source names that
+repository, path and license in a header comment.
 
-================================================================================
-
-The full text of each license is available in the LICENSES/ directory.
-
-Megabase is an independent project. It is NOT affiliated with, endorsed by,
-or sponsored by Supabase, Inc. "Supabase" is a trademark of Supabase, Inc.
-and is used here only to describe compatibility.
+Megabase is independent. It is not affiliated with, endorsed by, or
+sponsored by Supabase. "Supabase" is a trademark of its owner and is used
+here only to describe compatibility.

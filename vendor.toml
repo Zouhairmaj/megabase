@@ -1,0 +1,86 @@
+# Pinned upstream sources (GOAL.md section 2). This file is the
+# machine-readable record of every `vendor/` submodule pin: the coverage
+# extractor, the judge and the protected-paths guard all read it, and CI fails
+# if a submodule's recorded commit differs from the one below.
+#
+# Like `vendor/`, this file is protected: agents never change it.
+# `image` is the reference-stack container built from the same tag (judge/).
+
+[[pin]]
+name = "auth"
+path = "vendor/auth"
+repo = "https://github.com/supabase/auth"
+tag = "v2.197.0"
+commit = "4eee58f296d9698a1c2c0ae14d7a0b379c7622d3"
+license = "MIT"
+image = "supabase/gotrue:v2.197.0"
+
+[[pin]]
+name = "postgrest"
+path = "vendor/postgrest"
+repo = "https://github.com/PostgREST/postgrest"
+tag = "v16.4"
+commit = "0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7"
+license = "MIT"
+image = "postgrest/postgrest:v16.4"
+
+[[pin]]
+name = "realtime"
+path = "vendor/realtime"
+repo = "https://github.com/supabase/realtime"
+tag = "v2.143.3"
+commit = "d46540b3a4a79113f40301d5e5cb690f41150b9b"
+license = "Apache-2.0"
+image = "supabase/realtime:v2.143.3"
+
+[[pin]]
+name = "storage"
+path = "vendor/storage"
+repo = "https://github.com/supabase/storage"
+tag = "v1.80.2"
+commit = "db42280506a07a165376219b2d6ac7bc92ccdfcc"
+license = "Apache-2.0"
+image = "supabase/storage-api:v1.80.2"
+
+[[pin]]
+name = "supavisor"
+path = "vendor/supavisor"
+repo = "https://github.com/supabase/supavisor"
+tag = "v2.9.13"
+commit = "5a51fbfadaa6d6286c1fee0a95d4c629e81a2750"
+license = "Apache-2.0"
+image = "supabase/supavisor:2.9.13"
+
+[[pin]]
+name = "postgres-meta"
+path = "vendor/postgres-meta"
+repo = "https://github.com/supabase/postgres-meta"
+tag = "v0.100.0"
+commit = "9a2effd147f2f028fa36553ec2c7eeec80d7f8fc"
+license = "Apache-2.0"
+image = "supabase/postgres-meta:v0.100.0"
+
+[[pin]]
+name = "supabase"
+path = "vendor/supabase"
+repo = "https://github.com/supabase/supabase"
+tag = "v1.26.08"
+commit = "86854671e95be31e24fa0785cded0579fe692fcb"
+license = "Apache-2.0"
+
+[[pin]]
+name = "edge-runtime"
+path = "vendor/edge-runtime"
+repo = "https://github.com/supabase/edge-runtime"
+tag = "v1.77.4"
+commit = "d4a4f606a90e8c66864219c9b1d31ef0e3e3f626"
+license = "MIT"
+image = "supabase/edge-runtime:v1.77.4"
+
+[[pin]]
+name = "supabase-js"
+path = "vendor/supabase-js"
+repo = "https://github.com/supabase/supabase-js"
+tag = "v2.117.3"
+commit = "4d23055805ce2cf853686b704cfaec1a701d29c6"
+license = "MIT"
