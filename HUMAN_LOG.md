@@ -29,6 +29,11 @@ Each entry should include:
 - **Reason**: OpenSSF Scorecard Signed-Releases inspects assets on the last five GitHub Releases. Packaging also wants a public package. `attest-build-provenance` records the run SHA, so the backfill must run on that tag. Agents cannot change package visibility or start that dispatch from this environment.
 - **Files affected**: GitHub Packages and Actions (not in git)
 
+- **Date**: 2026-10-09
+- **Action**: (pending) Update repository secret `RELEASE_PLEASE_TOKEN` (Settings → Secrets and variables → Actions). Do not paste the value. The secret is already set. It must be a fine-grained PAT or GitHub App installation token for `Zouhairmaj/megabase` with **Contents: Read and write**, **Pull requests: Read and write**, and **Workflows: Read and write** (Metadata: Read is included on fine-grained tokens). Classic PAT: `repo` and `workflow`. The earlier pending item on this date listed only contents and pull-requests; that set is not enough. The credential must belong to a user or GitHub App whose pushes start GitHub Actions. After saving, re-run **Release** on `main`.
+- **Reason**: Release runs 37995792678 and 38001235737 (and later pushes to `main`) fail in release-please with `Error adding to tree: <main sha>`. code-suggester throws that string when `POST /repos/{owner}/{repo}/git/trees` fails, and the action prints only `err.message`, so the GitHub status is dropped. The call uses `base_tree` of `main`, which contains `.github/workflows` and the `vendor/*` gitlinks. Run 37991867026 created pull request #144 while `RELEASE_PLEASE_TOKEN` was unset (`GITHUB_TOKEN`, job `contents: write`) and logged `Successfully created a tree`. A probe of the same endpoint against commit `c24c54d` succeeds with a token that can write contents. Branch protection does not apply: the failure is before the release branch ref is updated. Until the secret can create a tree, `.github/workflows/release.yml` falls back to `GITHUB_TOKEN` for the release PR update and warns with the scopes above. Lockfile pushes should keep using the secret so they start workflows.
+- **Files affected**: GitHub Actions repository secrets (not in git)
+
 ---
 
 ## Completed

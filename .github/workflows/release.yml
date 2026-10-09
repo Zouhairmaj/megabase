@@ -33,18 +33,70 @@ jobs:
       # release-please failures; skipping them keeps the log clean. The
       # job still fails on real errors (config, permissions, API).
       #
-      # RELEASE_PLEASE_TOKEN is preferred: a PAT or GitHub App token that
-      # can create PRs and whose pushes start workflows. GITHUB_TOKEN can
-      # create PRs when the Actions setting is enabled, but a GITHUB_TOKEN
-      # push still does not trigger push/pull_request workflows. The
-      # lockfile job then workflow_dispatches required checks onto that
-      # SHA (see sync-lockfile).
+      # RELEASE_PLEASE_TOKEN is preferred when it can create a git tree:
+      # a user PAT or GitHub App whose pushes start workflows.
+      # GITHUB_TOKEN can create PRs when the Actions setting is enabled,
+      # but a GITHUB_TOKEN push still does not trigger push/pull_request
+      # workflows. The lockfile job then workflow_dispatches required
+      # checks onto that SHA (see sync-lockfile).
+      #
+      # release-please (code-suggester createTree) POSTs /git/trees with
+      # base_tree set to main. This repo's tree contains
+      # .github/workflows. A fine-grained PAT or GitHub App token without
+      # Workflows: write gets HTTP 403. The action keeps only err.message,
+      # so the log is "Error adding to tree: <main sha>" (runs
+      # 37995792678 and 38001235737). Run 37991867026 created PR #144
+      # with GITHUB_TOKEN while the secret was unset. Probe the same
+      # call and fall back to GITHUB_TOKEN when the secret cannot.
+      - name: Choose a token that can create a git tree
+        id: tree-token
+        env:
+          RELEASE_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+        run: |
+          set -euo pipefail
+          tree_sha="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}" --jq .commit.tree.sha)"
+          last_probe=""
+          can_create_tree() {
+            local token="$1"
+            local out code
+            set +e
+            out="$(GH_TOKEN="$token" gh api --method POST "repos/${GITHUB_REPOSITORY}/git/trees" \
+              -f "base_tree=${tree_sha}" \
+              -f 'tree[][path]=.release-please-manifest.json' \
+              -f 'tree[][mode]=100644' \
+              -f 'tree[][type]=blob' \
+              -f 'tree[][content]=probe' 2>&1)"
+            code=$?
+            set -e
+            if [ "$code" -eq 0 ]; then
+              last_probe=""
+              return 0
+            fi
+            last_probe="$(printf '%s' "$out" | tr '\n' ' ' | cut -c1-500)"
+            return 1
+          }
+          scopes='Fine-grained PAT or GitHub App installation token for Zouhairmaj/megabase: Contents Read and write, Pull requests Read and write, Workflows Read and write (Metadata Read is included). Classic PAT: repo and workflow. The credential must be a user or GitHub App token whose pushes start GitHub Actions. Branch protection is not this failure: it rejects ref updates, and POST /git/trees fails before the release branch moves. Steps: HUMAN_LOG.md.'
+          if [ -n "${RELEASE_TOKEN}" ] && can_create_tree "${RELEASE_TOKEN}"; then
+            echo "source=release" >> "$GITHUB_OUTPUT"
+            echo "RELEASE_PLEASE_TOKEN can create a git tree."
+            exit 0
+          fi
+          if [ -n "${RELEASE_TOKEN}" ]; then
+            echo "::warning::RELEASE_PLEASE_TOKEN cannot create a git tree (release-please would report Error adding to tree: ${GITHUB_SHA}). ${scopes} GitHub response: ${last_probe} Falling back to GITHUB_TOKEN for the release PR update."
+          fi
+          if can_create_tree "${GITHUB_TOKEN}"; then
+            echo "source=github" >> "$GITHUB_OUTPUT"
+            echo "GITHUB_TOKEN can create a git tree."
+            exit 0
+          fi
+          echo "::error::Neither RELEASE_PLEASE_TOKEN nor GITHUB_TOKEN can create a git tree on ${GITHUB_SHA}. ${scopes} The release-please job needs permissions contents: write. GitHub response: ${last_probe}"
+          exit 1
       - uses: googleapis/release-please-action@5c625bfb5d1ff62eadeeb3772007f7f66fdcf071 # v4.4.0
         id: release
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
-          token: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
+          token: ${{ steps.tree-token.outputs.source == 'release' && secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
 
   sync-lockfile:
     name: Sync Cargo.lock
@@ -178,7 +230,7 @@ jobs:
             fi
             sleep "${SLEEP_SECS}"
           done
-          echo "::error::Required checks did not start for ${SHA} (need Build, Codecov, Bencher, Protected paths, Judge). A GITHUB_TOKEN push does not trigger push/pull_request workflows. The job dispatches CI/Bencher/Judge or Lockfile required checks; if that also failed, set repo secret RELEASE_PLEASE_TOKEN (PAT or GitHub App installation token with contents:write). Exact steps are in HUMAN_LOG.md."
+          echo "::error::Required checks did not start for ${SHA} (need Build, Codecov, Bencher, Protected paths, Judge). A GITHUB_TOKEN push does not trigger push/pull_request workflows. The job dispatches CI/Bencher/Judge or Lockfile required checks; if that also failed, set repo secret RELEASE_PLEASE_TOKEN (fine-grained PAT or GitHub App: Contents, Pull requests, and Workflows, each Read and write; classic PAT: repo and workflow). Workflows write is required for POST /git/trees because the base tree contains .github/workflows. Exact steps are in HUMAN_LOG.md."
           exit 1
 
   annotate-release:

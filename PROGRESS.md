@@ -280,12 +280,16 @@ Physically impossible for the agent (repository settings or credentials):
 - [x] Allow GitHub Actions to create and approve pull requests
       (Settings → Actions → General → Workflow permissions;
       `can_approve_pull_request_reviews=true`. Run 37961663758 predates it.)
-- [ ] Set secret `RELEASE_PLEASE_TOKEN` (PAT or GitHub App) so lockfile
-      pushes on the release branch start required checks natively
-      (`GITHUB_TOKEN` pushes do not trigger `push`/`pull_request`
-      workflows). Preferred even though Release now
-      `workflow_dispatch`es those checks when the secret is unset.
-      Exact steps: `HUMAN_LOG.md` Pending, 2026-10-09.
+- [ ] Give secret `RELEASE_PLEASE_TOKEN` Workflows: Read and write
+      (fine-grained PAT or GitHub App; classic PAT: `workflow` plus
+      `repo`), plus Contents and Pull requests Read and write. The
+      secret is set, but `POST /git/trees` on this repo's base tree
+      returns 403 without Workflows write, and release-please prints
+      `Error adding to tree`. Release probes that call and falls back
+      to `GITHUB_TOKEN` for the release PR until the secret can create
+      a tree. Lockfile pushes still need this user or app token so
+      required checks start natively. Exact steps: `HUMAN_LOG.md`
+      Pending, 2026-10-09.
 - [ ] Allow `github-actions` to publish GitHub Releases / tags on `main`
 - [ ] Enforce CODEOWNERS
 - [x] Coverage commits on `main` are not used. Shields JSON is
