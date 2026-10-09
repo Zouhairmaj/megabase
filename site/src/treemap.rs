@@ -1,7 +1,8 @@
-use crate::metrics::{comma, ComponentBlock, Metrics, UnitStatus};
+use crate::metrics::{comma, ComponentBlock, FeatureGroup, Metrics, UnitStatus};
 
 const BG: &str = "#0B0E12";
-const NOT_STARTED: &str = "#303235";
+const NOT_STARTED: &str = "#2A2C2F";
+const GROUP_STROKE: &str = "#303235";
 const IMPLEMENTED: &str = "#005441";
 const TESTED: &str = "#009366";
 const CONFORMANT: &str = "#00D892";
@@ -77,10 +78,28 @@ pub fn svg_size(metrics: &Metrics, width: f64, height: f64) -> String {
 fn grids_fit(packed: &[(&ComponentBlock, [f64; 4])], cell: f64) -> bool {
     packed.iter().all(|(block, [_, _, w, h])| {
         let (inner_w, inner_h, _) = inner_area(*w, *h);
-        let (cols, rows) = grid_for(block.total(), inner_w, inner_h, cell);
-        let grid_w = cols as f64 * cell + (cols.saturating_sub(1) as f64) * UNIT_GAP;
-        let grid_h = rows as f64 * cell + (rows.saturating_sub(1) as f64) * UNIT_GAP;
-        grid_w <= inner_w + 0.01 && grid_h <= inner_h + 0.01
+        if block.groups.len() > 1 {
+            let weights: Vec<f64> = block.groups.iter().map(|g| g.total() as f64).collect();
+            let cells = squarify(&weights, 0.0, 0.0, inner_w, inner_h);
+            block.groups.iter().zip(cells).all(|(group, rect)| {
+                let (gw, gh) = (rect[2], rect[3]);
+                let pad = 1.0;
+                let (cols, rows) = grid_for(
+                    group.total(),
+                    (gw - pad).max(0.0),
+                    (gh - pad).max(0.0),
+                    cell,
+                );
+                let grid_w = cols as f64 * cell + (cols.saturating_sub(1) as f64) * UNIT_GAP;
+                let grid_h = rows as f64 * cell + (rows.saturating_sub(1) as f64) * UNIT_GAP;
+                grid_w <= gw + 0.05 && grid_h <= gh + 0.05
+            })
+        } else {
+            let (cols, rows) = grid_for(block.total(), inner_w, inner_h, cell);
+            let grid_w = cols as f64 * cell + (cols.saturating_sub(1) as f64) * UNIT_GAP;
+            let grid_h = rows as f64 * cell + (rows.saturating_sub(1) as f64) * UNIT_GAP;
+            grid_w <= inner_w + 0.01 && grid_h <= inner_h + 0.01
+        }
     })
 }
 
@@ -88,7 +107,15 @@ fn global_cell(packed: &[(&ComponentBlock, [f64; 4])]) -> f64 {
     let mut cell = f64::MAX;
     for (block, [_, _, w, h]) in packed {
         let (inner_w, inner_h, _) = inner_area(*w, *h);
-        cell = cell.min(max_cell(block.total(), inner_w, inner_h));
+        if block.groups.len() > 1 {
+            let weights: Vec<f64> = block.groups.iter().map(|g| g.total() as f64).collect();
+            let cells = squarify(&weights, 0.0, 0.0, inner_w, inner_h);
+            for (group, rect) in block.groups.iter().zip(cells) {
+                cell = cell.min(max_cell(group.total(), rect[2].max(1.0), rect[3].max(1.0)));
+            }
+        } else {
+            cell = cell.min(max_cell(block.total(), inner_w, inner_h));
+        }
     }
     if !cell.is_finite() || cell < MIN_CELL {
         MIN_CELL
@@ -165,12 +192,8 @@ fn paint_block(
         return;
     }
     let (inner_w, inner_h, labeled) = inner_area(w, h);
-    let (cols, rows) = grid_for(n, inner_w, inner_h, cell);
-    let grid_w = cols as f64 * cell + (cols.saturating_sub(1) as f64) * UNIT_GAP;
-    let grid_h = rows as f64 * cell + (rows.saturating_sub(1) as f64) * UNIT_GAP;
-    let origin_x = x + BLOCK_PAD + ((inner_w - grid_w) / 2.0).max(0.0);
-    let origin_y =
-        y + BLOCK_PAD + if labeled { LABEL_H } else { 0.0 } + ((inner_h - grid_h) / 2.0).max(0.0);
+    let origin_x = x + BLOCK_PAD;
+    let origin_y = y + BLOCK_PAD + if labeled { LABEL_H } else { 0.0 };
 
     out.push_str(&format!(
         r##"<g data-component="{id}" data-x="{x:.2}" data-y="{y:.2}" data-w="{w:.2}" data-h="{h:.2}">"##,
@@ -186,12 +209,65 @@ fn paint_block(
         ));
     }
 
-    debug_assert!(
-        origin_x + grid_w <= x + w + 0.05 && origin_y + grid_h <= y + h + 0.05,
-        "unit grid must sit wholly inside its component block"
-    );
+    if block.groups.len() > 1 {
+        paint_groups(
+            out,
+            &block.groups,
+            origin_x,
+            origin_y,
+            inner_w,
+            inner_h,
+            cell,
+        );
+    } else {
+        let units = block.unit_statuses();
+        paint_unit_grid(out, &units, origin_x, origin_y, inner_w, inner_h, cell);
+    }
+    out.push_str("</g>");
+}
 
-    let units = block.unit_statuses();
+fn paint_groups(
+    out: &mut String,
+    groups: &[FeatureGroup],
+    x: f64,
+    y: f64,
+    w: f64,
+    h: f64,
+    cell: f64,
+) {
+    let weights: Vec<f64> = groups.iter().map(|g| g.total() as f64).collect();
+    let cells = squarify(&weights, x, y, w, h);
+    for (group, rect) in groups.iter().zip(cells) {
+        let (gx, gy, gw, gh) = inset(rect[0], rect[1], rect[2], rect[3], 0.75);
+        if gw < 1.0 || gh < 1.0 {
+            continue;
+        }
+        out.push_str(&format!(
+            r##"<rect data-group="{id}" x="{gx:.2}" y="{gy:.2}" width="{gw:.2}" height="{gh:.2}" fill="none" stroke="{GROUP_STROKE}" stroke-width="0.5"/>"##,
+            id = xml_esc(&group.id)
+        ));
+        paint_unit_grid(out, &group.units, gx, gy, gw, gh, cell);
+    }
+}
+
+fn paint_unit_grid(
+    out: &mut String,
+    units: &[UnitStatus],
+    x: f64,
+    y: f64,
+    w: f64,
+    h: f64,
+    cell: f64,
+) {
+    let n = units.len();
+    if n == 0 {
+        return;
+    }
+    let (cols, rows) = grid_for(n, w, h, cell);
+    let grid_w = cols as f64 * cell + (cols.saturating_sub(1) as f64) * UNIT_GAP;
+    let grid_h = rows as f64 * cell + (rows.saturating_sub(1) as f64) * UNIT_GAP;
+    let origin_x = x + ((w - grid_w) / 2.0).max(0.0);
+    let origin_y = y + ((h - grid_h) / 2.0).max(0.0);
     for (i, status) in units.iter().enumerate() {
         let c = i % cols;
         let r = i / cols;
@@ -202,7 +278,6 @@ fn paint_block(
             r##"<rect class="unit" x="{sx:.2}" y="{sy:.2}" width="{cell:.2}" height="{cell:.2}" fill="{fill}"/>"##
         ));
     }
-    out.push_str("</g>");
 }
 
 fn status_color(status: UnitStatus) -> &'static str {
@@ -405,7 +480,7 @@ mod tests {
         assert!(svg.contains("data-component=\"rest\""));
         assert!(svg.contains("data-component=\"auth\""));
         assert!(svg.contains("#0B0E12"));
-        assert!(svg.contains("#303235"));
+        assert!(svg.contains("#2A2C2F"));
         assert!(svg.contains("#005441"));
         assert!(svg.contains("#009366"));
         assert!(svg.contains("#00D892"));

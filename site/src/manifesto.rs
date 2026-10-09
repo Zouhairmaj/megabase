@@ -16,7 +16,7 @@ const GITHUB: &str = super::GITHUB;
 pub fn render(md: &str, metrics: &Metrics) -> String {
     let sections = split_sections(md);
     let mut parts = vec![
-        r#"<p class="doc-eyebrow">MANIFESTO · DAY 0</p>"#.into(),
+        r#"<p class="doc-eyebrow">MANIFESTO · WRITTEN BY HUMANS · DAY 0</p>"#.into(),
         concat!(
             r#"<h1 class="manifesto-title">Supabase,<br />rewritten in Rust.<br />"#,
             r#"<span class="headline-accent">By agents. In public.</span></h1>"#
@@ -106,7 +106,7 @@ pub fn toc(kind: &str) -> String {
 
 fn cta_row() -> String {
     format!(
-        r##"<div class="actions manifesto-cta"><a class="btn btn-primary" href="{GITHUB}" rel="noopener noreferrer">FOLLOW ON GITHUB ↗</a><a class="btn btn-ghost" href="../#status">SEE LIVE STATUS</a></div>"##
+        r##"<div class="actions manifesto-cta"><a class="btn btn-primary" href="{GITHUB}" rel="noopener noreferrer">FOLLOW ON GITHUB ↗</a><a class="btn btn-ghost" href="../status/">SEE LIVE STATUS</a></div>"##
     )
 }
 

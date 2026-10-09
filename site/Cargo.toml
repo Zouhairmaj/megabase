@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 license = "Apache-2.0"
 publish = false
-description = "Tiny static generator for the Megabase placeholder site"
+description = "Static generator for megabase.sh"
 
 [dependencies]
 resvg = { version = "0.45", default-features = false, features = ["text"] }

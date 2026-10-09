@@ -1,17 +1,22 @@
-//! Static generator for the Megabase placeholder site.
+//! Static generator for megabase.sh.
 //!
-//! Shared chrome (layout, nav, footer, logo) lives in `templates/`. Page
-//! bodies live in `templates/pages/` or, for the manifesto, are rendered from
-//! `MANIFESTO.md`. Add a future page by appending a `Page` in `PAGES` and
-//! dropping in a template — Status, Roadmap, How it works, Components,
-//! Devlog, Human log, FAQ and Docs are listed as forthcoming.
+//! Shared chrome lives in `chrome.rs`. Page bodies live in `pages.rs` or,
+//! for the manifesto, are rendered from `MANIFESTO.md`. Coverage numbers
+//! and the nested treemap are inlined at build time from `coverage/` when
+//! those files exist; otherwise Day-0 placeholders use an em dash.
 //!
 //! Usage:
 //!   cargo run --manifest-path site/Cargo.toml -- --repo-root . --out _site
 
+mod chrome;
+mod devlog;
+mod html;
+mod human_log;
 mod manifesto;
+mod markdown;
 mod metrics;
 mod og;
+mod pages;
 mod treemap;
 
 use std::collections::BTreeMap;
@@ -19,6 +24,8 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
+use chrome::Paths;
+use html::subst;
 use metrics::Metrics;
 
 pub const GITHUB: &str = "https://github.com/Zouhairmaj/megabase";
@@ -28,29 +35,29 @@ const ORIGIN: &str = "https://megabase.sh";
 enum Kind {
     Home,
     Manifesto,
-    Template(&'static str),
+    HowItWorks,
+    Status,
+    Roadmap,
+    Components,
+    Devlog,
+    HumanLog,
+    Faq,
+    Docs,
+    Cost,
+    NotFound,
 }
 
 #[derive(Clone, Copy)]
 struct Page {
     id: &'static str,
-    /// Directory under the site root. Empty string is `/`.
     dir: &'static str,
     title: &'static str,
     description: &'static str,
     og_type: &'static str,
-    /// Per-page Open Graph card under `static/`, 1200×630 PNG. Designs live in
-    /// the Kite file `megabase-identity`, page "Website / OG images";
-    /// regenerate with `cargo run --manifest-path site/Cargo.toml -- og`
-    /// (see `og.rs`).
     og_image: &'static str,
     og_alt: &'static str,
     kind: Kind,
-    /// Home uses the compact Kite nav (Manifesto only). Inner pages share
-    /// Home / Manifesto / GitHub, which grows as forthcoming pages ship.
-    compact_nav: bool,
     noindex: bool,
-    script: Option<&'static str>,
     extra_preload: ExtraPreload,
 }
 
@@ -58,11 +65,10 @@ struct Page {
 enum ExtraPreload {
     Home,
     Manifesto,
+    Inter,
     None,
 }
 
-/// Built now. Forthcoming Kite pages are documented here so the next agent
-/// only adds `built` content — do not invent their layout ahead of design.
 const PAGES: &[Page] = &[
     Page {
         id: "home",
@@ -73,9 +79,7 @@ const PAGES: &[Page] = &[
         og_image: "og/home.png",
         og_alt: "Megabase: The Supabase API. One Rust binary. Unofficial experiment. Not affiliated with or endorsed by Supabase, Inc.",
         kind: Kind::Home,
-        compact_nav: true,
         noindex: false,
-        script: None,
         extra_preload: ExtraPreload::Home,
     },
     Page {
@@ -87,38 +91,129 @@ const PAGES: &[Page] = &[
         og_image: "og/manifesto.png",
         og_alt: "Megabase manifesto: Supabase, in Rust. By agents. In public. Not affiliated with or endorsed by Supabase, Inc.",
         kind: Kind::Manifesto,
-        compact_nav: false,
         noindex: false,
-        script: Some("toc.js"),
         extra_preload: ExtraPreload::Manifesto,
+    },
+    Page {
+        id: "how-it-works",
+        dir: "how-it-works",
+        title: "How it works — Megabase",
+        description: "How Megabase is built: agents read pinned upstream source, implement one unit, and an external judge compares every response with real Supabase.",
+        og_type: "website",
+        og_image: "og/how-it-works.png",
+        og_alt: "How Megabase works: agents read the source. A judge they cannot touch keeps score.",
+        kind: Kind::HowItWorks,
+        noindex: false,
+        extra_preload: ExtraPreload::Inter,
+    },
+    Page {
+        id: "status",
+        dir: "status",
+        title: "Status — Megabase",
+        description: "Live experiment status: units passing the judge, coverage, conformance, and the nested component treemap, regenerated on every commit.",
+        og_type: "website",
+        og_image: "og/status.png",
+        og_alt: "Megabase status: where the experiment stands. Not affiliated with or endorsed by Supabase, Inc.",
+        kind: Kind::Status,
+        noindex: false,
+        extra_preload: ExtraPreload::Home,
+    },
+    Page {
+        id: "roadmap",
+        dir: "roadmap",
+        title: "Roadmap — Megabase",
+        description: "Five public levels, gated in order: REST and Auth, Storage, Realtime, Functions and the Studio test, then Studio itself.",
+        og_type: "website",
+        og_image: "og/roadmap.png",
+        og_alt: "Megabase roadmap: five levels, gated in order. No skipping.",
+        kind: Kind::Roadmap,
+        noindex: false,
+        extra_preload: ExtraPreload::Inter,
+    },
+    Page {
+        id: "components",
+        dir: "components",
+        title: "Supabase components — Megabase",
+        description: "Every Supabase-authored service in scope, one Rust crate each: REST, Auth, Storage, Realtime, Functions, Pooler, Meta, Studio.",
+        og_type: "website",
+        og_image: "og/components.png",
+        og_alt: "Supabase components in Megabase: every service Supabase wrote. One crate each.",
+        kind: Kind::Components,
+        noindex: false,
+        extra_preload: ExtraPreload::Home,
+    },
+    Page {
+        id: "devlog",
+        dir: "devlog",
+        title: "Devlog — Megabase",
+        description: "One short entry per day: what the agents did, written for humans, from files in devlog/.",
+        og_type: "website",
+        og_image: "og/devlog.png",
+        og_alt: "Megabase devlog: what the agents did today, written for humans.",
+        kind: Kind::Devlog,
+        noindex: false,
+        extra_preload: ExtraPreload::Inter,
+    },
+    Page {
+        id: "human-log",
+        dir: "human-log",
+        title: "Human log — Megabase",
+        description: "Every human intervention on the Megabase experiment, with the reason. The count is part of the result.",
+        og_type: "website",
+        og_image: "og/human-log.png",
+        og_alt: "Megabase human log: every time a human touched the experiment.",
+        kind: Kind::HumanLog,
+        noindex: false,
+        extra_preload: ExtraPreload::Inter,
+    },
+    Page {
+        id: "faq",
+        dir: "faq",
+        title: "FAQ — Megabase",
+        description: "Is this made by Supabase? Can I use it today? How is correctness judged? Answers from the manifesto.",
+        og_type: "website",
+        og_image: "og/faq.png",
+        og_alt: "Megabase FAQ: questions people ask.",
+        kind: Kind::Faq,
+        noindex: false,
+        extra_preload: ExtraPreload::Inter,
+    },
+    Page {
+        id: "docs",
+        dir: "docs",
+        title: "Docs — Getting started — Megabase",
+        description: "Build Megabase from source, configure it, and run the judge. Day 0: every endpoint returns 501.",
+        og_type: "website",
+        og_image: "og/docs.png",
+        og_alt: "Megabase docs: getting started. Day 0, nothing works yet.",
+        kind: Kind::Docs,
+        noindex: false,
+        extra_preload: ExtraPreload::Inter,
+    },
+    Page {
+        id: "cost",
+        dir: "cost",
+        title: "Cost — Megabase",
+        description: "Tokens and money spent on the Megabase experiment, published continuously once tracking starts.",
+        og_type: "website",
+        og_image: "og/cost.png",
+        og_alt: "Megabase cost: tokens and money, published continuously.",
+        kind: Kind::Cost,
+        noindex: false,
+        extra_preload: ExtraPreload::Home,
     },
     Page {
         id: "404",
         dir: "",
         title: "Not found — Megabase",
-        description: "This unit is not implemented.",
+        description: "This page does not exist. Failures are loud.",
         og_type: "website",
         og_image: "og-card.png",
         og_alt: "Megabase: The Supabase API. One Rust binary. Not affiliated with or endorsed by Supabase, Inc.",
-        kind: Kind::Template("pages/not-found.html"),
-        compact_nav: false,
+        kind: Kind::NotFound,
         noindex: true,
-        script: None,
         extra_preload: ExtraPreload::None,
     },
-];
-
-/// Forthcoming routes from the in-progress Kite site. Not built yet.
-#[allow(dead_code)]
-const FORTHCOMING: &[&str] = &[
-    "status",
-    "roadmap",
-    "how-it-works",
-    "components",
-    "devlog",
-    "human-log",
-    "faq",
-    "docs",
 ];
 
 fn main() -> io::Result<()> {
@@ -150,8 +245,15 @@ fn main() -> io::Result<()> {
     let repo_root = repo_root.unwrap_or_else(|| site_root.parent().unwrap().to_path_buf());
     let out = out.unwrap_or_else(|| site_root.join("dist"));
 
-    let metrics = metrics::load(&repo_root);
-    build(&site_root, &repo_root, &out, &metrics)?;
+    let mut metrics = metrics::load(&repo_root);
+    let human_md = fs::read_to_string(repo_root.join("HUMAN_LOG.md")).unwrap_or_default();
+    let human = human_log::load(&human_md);
+    metrics.human_interventions = human.completed;
+    if metrics.spend_label == "—" {
+        metrics.spend_label = "not tracked yet · starts Phase 1".into();
+    }
+
+    build(&site_root, &repo_root, &out, &metrics, &human)?;
     eprintln!(
         "Generated site from {}: {} passing, coverage {}, conformance {} → {}",
         metrics.source,
@@ -160,7 +262,6 @@ fn main() -> io::Result<()> {
         metrics.conformance_label(),
         out.display()
     );
-    let _ = FORTHCOMING;
     Ok(())
 }
 
@@ -179,21 +280,40 @@ fn same_path(a: &Path, b: &Path) -> bool {
     }
 }
 
-fn build(site_root: &Path, repo_root: &Path, out: &Path, metrics: &Metrics) -> io::Result<()> {
-    // Never wipe the generator crate if --out points at site/ itself.
+struct SiteData<'a> {
+    metrics: &'a Metrics,
+    human: &'a human_log::HumanLog,
+    entries: &'a [devlog::Entry],
+    roadmap_md: Option<&'a str>,
+}
+
+fn build(
+    site_root: &Path,
+    repo_root: &Path,
+    out: &Path,
+    metrics: &Metrics,
+    human: &human_log::HumanLog,
+) -> io::Result<()> {
     if out.exists() && !same_path(out, site_root) {
         fs::remove_dir_all(out)?;
     }
     copy_dir(&site_root.join("static"), out)?;
 
-    let templates = site_root.join("templates");
-    let layout = fs::read_to_string(templates.join("layout.html"))?;
+    let layout = fs::read_to_string(site_root.join("templates/layout.html"))?;
     let logo = fs::read_to_string(site_root.join("static/logo.svg"))?
         .trim()
         .to_string();
+    let entries = devlog::load(repo_root)?;
+    let roadmap_md = fs::read_to_string(repo_root.join("docs/ROADMAP.md")).ok();
+    let data = SiteData {
+        metrics,
+        human,
+        entries: &entries,
+        roadmap_md: roadmap_md.as_deref(),
+    };
 
     for page in PAGES {
-        let html = render_page(page, &layout, &logo, &templates, repo_root, metrics)?;
+        let html = render_page(page, &layout, &logo, repo_root, &data, None)?;
         let dest = if page.id == "404" {
             out.join("404.html")
         } else if page.dir.is_empty() {
@@ -209,7 +329,14 @@ fn build(site_root: &Path, repo_root: &Path, out: &Path, metrics: &Metrics) -> i
         fs::write(dest, html)?;
     }
 
-    fs::write(out.join("sitemap.xml"), sitemap())?;
+    for entry in &entries {
+        let article = render_article(entry, &layout, &logo)?;
+        let dir = out.join("devlog").join(&entry.slug);
+        fs::create_dir_all(&dir)?;
+        fs::write(dir.join("index.html"), article)?;
+    }
+
+    fs::write(out.join("sitemap.xml"), sitemap(&entries))?;
     let cname = site_root.join("CNAME");
     let cname_out = out.join("CNAME");
     if cname.is_file() && !same_path(&cname, &cname_out) {
@@ -222,42 +349,93 @@ fn render_page(
     page: &Page,
     layout: &str,
     logo: &str,
-    templates: &Path,
     repo_root: &Path,
-    metrics: &Metrics,
+    data: &SiteData<'_>,
+    loc: Option<&str>,
 ) -> io::Result<String> {
-    // GitHub Pages serves 404.html at any missing path (e.g. /a/b/c), so its
-    // links must be root-absolute; every other page stays relative.
     let is_404 = page.id == "404";
-    let asset = if is_404 {
-        "/"
+    let paths = if is_404 {
+        Paths::home(true)
     } else if page.dir.is_empty() {
-        ""
+        Paths::home(false)
     } else {
-        "../"
+        Paths::nested(page.id, false)
     };
-    let to_home = if is_404 {
-        "/"
-    } else if page.dir.is_empty() {
-        "./"
-    } else {
-        "../"
-    };
-    let to_manifesto: String = if is_404 {
-        "/manifesto/".into()
-    } else if page.id == "manifesto" {
-        "./".into()
-    } else if page.dir.is_empty() {
-        "manifesto/".into()
-    } else {
-        "../manifesto/".into()
-    };
-    let canonical = page_url(page);
+    wrap(page, layout, logo, &paths, loc, |paths| {
+        content(page, paths, repo_root, data)
+    })
+}
 
+fn render_article(entry: &devlog::Entry, layout: &str, logo: &str) -> io::Result<String> {
+    let paths = Paths::article("devlog-article");
+    let title = format!("{} — Megabase", entry.title);
+    let description = if entry.summary.is_empty() {
+        "A daily Megabase agent log.".to_string()
+    } else {
+        entry.summary.clone()
+    };
+    let loc = format!("{ORIGIN}/devlog/{}/", entry.slug);
+    let page = Page {
+        id: "devlog-article",
+        dir: "devlog",
+        title: Box::leak(title.into_boxed_str()),
+        description: Box::leak(description.into_boxed_str()),
+        og_type: "article",
+        og_image: "og/devlog.png",
+        og_alt: "Megabase devlog: what the agents did today, written for humans.",
+        kind: Kind::Devlog,
+        noindex: false,
+        extra_preload: ExtraPreload::Inter,
+    };
+    wrap(&page, layout, logo, &paths, Some(&loc), |paths| {
+        Ok(pages::devlog_article(paths, entry))
+    })
+}
+
+fn content(
+    page: &Page,
+    paths: &Paths,
+    repo_root: &Path,
+    data: &SiteData<'_>,
+) -> io::Result<String> {
+    Ok(match page.kind {
+        Kind::Home => pages::home(paths, data.metrics),
+        Kind::Manifesto => {
+            let md = fs::read_to_string(repo_root.join("MANIFESTO.md"))?;
+            let article = manifesto::render(&md, data.metrics);
+            let toc_desktop = manifesto::toc("desktop");
+            let toc_mobile = manifesto::toc("mobile");
+            format!(
+                "{toc_mobile}\n<div class=\"manifesto-layout\">{toc_desktop}<div id=\"main\" class=\"article\" role=\"main\">\n{article}\n</div></div>"
+            )
+        }
+        Kind::HowItWorks => pages::how_it_works(paths, data.metrics),
+        Kind::Status => pages::status(paths, data.metrics),
+        Kind::Roadmap => pages::roadmap(paths, data.metrics, data.roadmap_md),
+        Kind::Components => pages::components(paths, data.metrics),
+        Kind::Devlog => pages::devlog_index(paths, data.entries),
+        Kind::HumanLog => pages::human_log(paths, data.metrics, &data.human.html),
+        Kind::Faq => pages::faq(paths, data.metrics),
+        Kind::Docs => pages::docs(paths),
+        Kind::Cost => pages::cost(paths, data.metrics),
+        Kind::NotFound => pages::not_found(paths),
+    })
+}
+
+fn wrap(
+    page: &Page,
+    layout: &str,
+    logo: &str,
+    paths: &Paths,
+    loc: Option<&str>,
+    body: impl FnOnce(&Paths) -> io::Result<String>,
+) -> io::Result<String> {
+    let is_404 = page.id == "404";
+    let asset = paths.asset();
+    let canonical = loc.map(str::to_string).unwrap_or_else(|| page_url(page));
     let mut vars = BTreeMap::new();
     vars.insert("title".into(), page.title.into());
     vars.insert("description".into(), page.description.into());
-    // The 404 has no canonical URL: it must not claim to be the home page.
     vars.insert(
         "canonical_tags".into(),
         if is_404 {
@@ -277,8 +455,6 @@ fn render_page(
     vars.insert("asset".into(), asset.into());
     vars.insert("github".into(), GITHUB.into());
     vars.insert("logo".into(), logo.into());
-    vars.insert("to_home".into(), to_home.into());
-    vars.insert("to_manifesto".into(), to_manifesto.clone());
     vars.insert(
         "robots".into(),
         if page.noindex {
@@ -288,101 +464,34 @@ fn render_page(
         },
     );
     vars.insert("preload".into(), preload(page, asset));
-    vars.insert(
-        "body_class".into(),
-        if page.id == "manifesto" {
-            "manifesto-page".into()
-        } else {
-            String::new()
-        },
-    );
+    let body_class = match page.id {
+        "manifesto" => "manifesto-page",
+        "docs" => "docs-page",
+        _ => "",
+    };
+    vars.insert("body_class".into(), body_class.into());
     vars.insert(
         "page_class".into(),
-        if page.id == "manifesto" {
-            "page-manifesto".into()
-        } else {
-            String::new()
-        },
-    );
-    vars.insert("header".into(), header(page, logo, &to_manifesto, to_home));
-    vars.insert("footer".into(), footer(GITHUB));
-    vars.insert(
-        "scripts".into(),
-        page.script
-            .map(|file| format!(r#"<script src="{asset}{file}" defer></script>"#))
-            .unwrap_or_default(),
-    );
-
-    vars.insert("passing_total".into(), metrics.passing_total_label());
-    vars.insert("coverage".into(), metrics.coverage_label());
-    vars.insert("conformance".into(), metrics.conformance_label());
-    vars.insert(
-        "coverage_conformance".into(),
-        metrics.coverage_conformance_label(),
-    );
-    vars.insert("stage".into(), metrics.stage.clone());
-    vars.insert("stage_short".into(), metrics.stage_short.clone());
-    vars.insert("treemap".into(), treemap::svg(metrics));
-
-    let content = match page.kind {
-        Kind::Home => {
-            let tpl = fs::read_to_string(templates.join("pages/home.html"))?;
-            subst(&tpl, &vars)
+        match page.id {
+            "manifesto" => "page-manifesto",
+            "home" => "page-home",
+            _ => "page-inner",
         }
-        Kind::Manifesto => {
-            let md = fs::read_to_string(repo_root.join("MANIFESTO.md"))?;
-            let article = manifesto::render(&md, metrics);
-            let toc_desktop = manifesto::toc("desktop");
-            let toc_mobile = manifesto::toc("mobile");
-            format!(
-                "{toc_mobile}\n<div class=\"manifesto-layout\">{toc_desktop}<main id=\"main\" class=\"article\">\n{article}\n</main></div>"
-            )
-        }
-        Kind::Template(path) => {
-            let tpl = fs::read_to_string(templates.join(path))?;
-            subst(&tpl, &vars)
-        }
-    };
-    vars.insert("content".into(), content);
+        .into(),
+    );
+    vars.insert("header".into(), chrome::header(paths, logo));
+    vars.insert("footer".into(), chrome::footer(paths, logo));
+    let needs_copy = matches!(page.kind, Kind::Docs | Kind::HowItWorks);
+    let mut scripts = String::new();
+    if page.id == "manifesto" {
+        scripts.push_str(&format!(r#"<script src="{asset}toc.js" defer></script>"#));
+    }
+    if needs_copy {
+        scripts.push_str(&format!(r#"<script src="{asset}copy.js" defer></script>"#));
+    }
+    vars.insert("scripts".into(), scripts);
+    vars.insert("content".into(), body(paths)?);
     Ok(subst(layout, &vars))
-}
-
-fn header(page: &Page, logo: &str, manifesto_href: &str, to_home: &str) -> String {
-    let mut links = String::new();
-    if page.compact_nav {
-        links.push_str(&nav_link(
-            "MANIFESTO",
-            manifesto_href,
-            page.id == "manifesto",
-        ));
-    } else {
-        links.push_str(&nav_link("HOME", to_home, page.id == "home"));
-        links.push_str(&nav_link(
-            "MANIFESTO",
-            manifesto_href,
-            page.id == "manifesto",
-        ));
-        links.push_str(&format!(
-            r#"<a class="nav-link" href="{GITHUB}" rel="noopener noreferrer">GITHUB ↗</a>"#
-        ));
-    }
-    format!(
-        r#"<header class="site-header"><a class="brand" href="{to_home}">{logo}<span class="wordmark">MEGABASE</span></a><nav class="nav-links" aria-label="Primary">{links}</nav></header>"#
-    )
-}
-
-fn nav_link(label: &str, href: &str, current: bool) -> String {
-    if current {
-        format!(r#"<a class="nav-link is-current" href="{href}" aria-current="page">{label}</a>"#)
-    } else {
-        format!(r#"<a class="nav-link" href="{href}">{label}</a>"#)
-    }
-}
-
-fn footer(github: &str) -> String {
-    format!(
-        r#"<footer class="site-footer"><p class="footer-split">Independent experiment. Not affiliated with or endorsed by Supabase, Inc.</p><p class="footer-split">Apache-2.0 · <a href="{github}" rel="noopener noreferrer">GitHub</a></p><p class="footer-compact">Independent experiment. Not affiliated with or endorsed by Supabase, Inc. · Apache-2.0</p></footer>"#
-    )
 }
 
 fn preload(page: &Page, asset: &str) -> String {
@@ -393,11 +502,14 @@ fn preload(page: &Page, asset: &str) -> String {
         ExtraPreload::Manifesto => format!(
             r#"<link rel="preload" href="{asset}fonts/JetBrainsMono-Bold.woff2" as="font" type="font/woff2" crossorigin /><link rel="preload" href="{asset}fonts/Inter-Regular.woff2" as="font" type="font/woff2" crossorigin />"#
         ),
+        ExtraPreload::Inter => format!(
+            r#"<link rel="preload" href="{asset}fonts/JetBrainsMono-Regular.woff2" as="font" type="font/woff2" crossorigin /><link rel="preload" href="{asset}fonts/Inter-Regular.woff2" as="font" type="font/woff2" crossorigin />"#
+        ),
         ExtraPreload::None => String::new(),
     }
 }
 
-fn sitemap() -> String {
+fn sitemap(entries: &[devlog::Entry]) -> String {
     let lastmod = build_date();
     let mut urls = String::from(
         r#"<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">"#,
@@ -409,6 +521,12 @@ fn sitemap() -> String {
         let loc = page_url(page);
         urls.push_str(&format!(
             "<url><loc>{loc}</loc><lastmod>{lastmod}</lastmod></url>"
+        ));
+    }
+    for entry in entries {
+        urls.push_str(&format!(
+            "<url><loc>{ORIGIN}/devlog/{}/</loc><lastmod>{}</lastmod></url>",
+            entry.slug, entry.date
         ));
     }
     urls.push_str("</urlset>\n");
@@ -423,8 +541,6 @@ fn page_url(page: &Page) -> String {
     }
 }
 
-/// Build date (UTC, YYYY-MM-DD) for sitemap `lastmod`. Honours
-/// `SOURCE_DATE_EPOCH` for reproducible builds.
 fn build_date() -> String {
     let secs = std::env::var("SOURCE_DATE_EPOCH")
         .ok()
@@ -435,7 +551,6 @@ fn build_date() -> String {
                 .map(|d| d.as_secs() as i64)
                 .unwrap_or(0)
         });
-    // Civil-from-days (Howard Hinnant).
     let z = secs.div_euclid(86_400) + 719_468;
     let era = z.div_euclid(146_097);
     let doe = z - era * 146_097;
@@ -448,8 +563,6 @@ fn build_date() -> String {
     format!("{y:04}-{m:02}-{d:02}")
 }
 
-/// schema.org JSON-LD. Home: Organization + WebSite + SoftwareSourceCode.
-/// Inner pages: an Article/WebPage with a breadcrumb. 404: none.
 fn jsonld(page: &Page, url: &str) -> String {
     use serde_json::json;
 
@@ -531,22 +644,8 @@ fn jsonld(page: &Page, url: &str) -> String {
         }
     };
     let doc = json!({ "@context": "https://schema.org", "@graph": graph });
-    // `<` is escaped so no value can close the <script> element early.
     let body = doc.to_string().replace('<', "\\u003c");
     format!(r#"<script type="application/ld+json">{body}</script>"#)
-}
-
-fn subst(tpl: &str, vars: &BTreeMap<String, String>) -> String {
-    let mut out = tpl.to_string();
-    let mut keys: Vec<_> = vars.keys().collect();
-    keys.sort_by_key(|k| std::cmp::Reverse(k.len()));
-    for key in keys {
-        let needle = format!("{{{{{key}}}}}");
-        if let Some(value) = vars.get(key) {
-            out = out.replace(&needle, value);
-        }
-    }
-    out
 }
 
 fn copy_dir(src: &Path, dst: &Path) -> io::Result<()> {
@@ -563,4 +662,76 @@ fn copy_dir(src: &Path, dst: &Path) -> io::Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn generate_tmp() -> (PathBuf, PathBuf) {
+        let site_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let repo_root = site_root.parent().unwrap().to_path_buf();
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let out = std::env::temp_dir().join(format!("megabase-site-{stamp}"));
+        let mut metrics = metrics::load(&repo_root);
+        let human = human_log::load(
+            &fs::read_to_string(repo_root.join("HUMAN_LOG.md")).unwrap_or_default(),
+        );
+        metrics.human_interventions = human.completed;
+        build(&site_root, &repo_root, &out, &metrics, &human).expect("build");
+        (out, repo_root)
+    }
+
+    #[test]
+    fn day0_does_not_invent_a_unit_total() {
+        let (out, _) = generate_tmp();
+        let home = fs::read_to_string(out.join("index.html")).unwrap();
+        assert!(
+            !home.contains("334"),
+            "placeholder must not hardcode the Kite mock 334"
+        );
+        assert!(!home.contains("1024") || metrics::load(&PathBuf::from(".")).has_data());
+        assert!(home.contains("Not affiliated with or endorsed by Supabase, Inc."));
+        assert!(!home.to_ascii_lowercase().contains("oxide"));
+        let _ = fs::remove_dir_all(&out);
+    }
+
+    #[test]
+    fn every_kite_route_is_written() {
+        let (out, _) = generate_tmp();
+        for rel in [
+            "index.html",
+            "manifesto/index.html",
+            "how-it-works/index.html",
+            "status/index.html",
+            "roadmap/index.html",
+            "components/index.html",
+            "devlog/index.html",
+            "human-log/index.html",
+            "faq/index.html",
+            "docs/index.html",
+            "cost/index.html",
+            "404.html",
+            "sitemap.xml",
+        ] {
+            assert!(out.join(rel).is_file(), "missing {rel}");
+        }
+        let sitemap = fs::read_to_string(out.join("sitemap.xml")).unwrap();
+        assert!(sitemap.contains("https://megabase.sh/status/"));
+        assert!(!sitemap.contains("/404"));
+        let _ = fs::remove_dir_all(&out);
+    }
+
+    #[test]
+    fn four_oh_four_uses_root_absolute_urls() {
+        let (out, _) = generate_tmp();
+        let html = fs::read_to_string(out.join("404.html")).unwrap();
+        assert!(html.contains("href=\"/\""));
+        assert!(html.contains("href=\"/components/\""));
+        assert!(html.contains("MEGABASE_PAGE_NOT_FOUND"));
+        let _ = fs::remove_dir_all(&out);
+    }
 }
