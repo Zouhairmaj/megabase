@@ -130,8 +130,9 @@ units = ["auth:route:GET /auth/v1/admin/users"]
 method = "GET"
 path = "/auth/v1/admin/users"
 
-# Issue #6 first admin batch. These steps finish before a database read so they
-# pass on CI Megabase (JWT_SECRET from .env.example, no DATABASE_URL yet).
+# Issue #6 first admin batch. Anon / validation steps stay before a database
+# read. Service-role list and not-found steps hit Auth tables so a unit
+# cannot become conformant on credential checks alone (judge/AGENTS.md).
 
 [[case]]
 id = "auth.admin.audit.anon"
@@ -160,6 +161,16 @@ path = "/auth/v1/admin/audit?query=bogus:x"
 key = "service_role"
 
 [[case]]
+id = "auth.admin.audit.list"
+description = "Admin audit log lists entries for the service role"
+units = ["auth:route:GET /auth/v1/admin/audit"]
+[[case.step]]
+method = "GET"
+path = "/auth/v1/admin/audit"
+key = "service_role"
+compare_headers = ["x-total-count", "link"]
+
+[[case]]
 id = "auth.admin.custom-providers.anon"
 description = "Admin custom-provider list with the anon key is forbidden"
 units = ["auth:route:GET /auth/v1/admin/custom-providers"]
@@ -176,6 +187,15 @@ method = "GET"
 path = "/auth/v1/admin/custom-providers/custom:missing"
 
 [[case]]
+id = "auth.admin.custom-providers.list"
+description = "Admin custom-provider list is empty for the service role"
+units = ["auth:route:GET /auth/v1/admin/custom-providers"]
+[[case.step]]
+method = "GET"
+path = "/auth/v1/admin/custom-providers"
+key = "service_role"
+
+[[case]]
 id = "auth.admin.custom-providers.get.prefix"
 description = "Admin custom-provider get requires the custom: prefix"
 units = ["auth:route:GET /auth/v1/admin/custom-providers/{identifier}"]
@@ -185,12 +205,30 @@ path = "/auth/v1/admin/custom-providers/example"
 key = "service_role"
 
 [[case]]
+id = "auth.admin.custom-providers.get.missing"
+description = "Admin custom-provider get returns not found"
+units = ["auth:route:GET /auth/v1/admin/custom-providers/{identifier}"]
+[[case.step]]
+method = "GET"
+path = "/auth/v1/admin/custom-providers/custom:missing"
+key = "service_role"
+
+[[case]]
 id = "auth.admin.custom-providers.delete.anon"
 description = "Admin custom-provider delete with the anon key is forbidden"
 units = ["auth:route:DELETE /auth/v1/admin/custom-providers/{identifier}"]
 [[case.step]]
 method = "DELETE"
 path = "/auth/v1/admin/custom-providers/custom:missing"
+
+[[case]]
+id = "auth.admin.custom-providers.delete.missing"
+description = "Admin custom-provider delete returns not found"
+units = ["auth:route:DELETE /auth/v1/admin/custom-providers/{identifier}"]
+[[case.step]]
+method = "DELETE"
+path = "/auth/v1/admin/custom-providers/custom:missing"
+key = "service_role"
 
 [[case]]
 id = "auth.admin.oauth.clients.anon"
@@ -244,6 +282,15 @@ path = "/auth/v1/admin/sso/providers/not-a-uuid"
 key = "service_role"
 
 [[case]]
+id = "auth.admin.sso.providers.delete.missing"
+description = "Admin SSO provider delete returns not found for a missing UUID"
+units = ["auth:route:DELETE /auth/v1/admin/sso/providers/{idp_id}"]
+[[case.step]]
+method = "DELETE"
+path = "/auth/v1/admin/sso/providers/00000000-0000-0000-0000-000000000001"
+key = "service_role"
+
+[[case]]
 id = "auth.admin.users.delete.anon"
 description = "Admin user delete with the anon key is forbidden"
 units = ["auth:route:DELETE /auth/v1/admin/users/{user_id}"]
@@ -258,6 +305,15 @@ units = ["auth:route:DELETE /auth/v1/admin/users/{user_id}"]
 [[case.step]]
 method = "DELETE"
 path = "/auth/v1/admin/users/not-a-uuid"
+key = "service_role"
+
+[[case]]
+id = "auth.admin.users.delete.missing"
+description = "Admin user delete returns not found for a missing UUID"
+units = ["auth:route:DELETE /auth/v1/admin/users/{user_id}"]
+[[case.step]]
+method = "DELETE"
+path = "/auth/v1/admin/users/00000000-0000-0000-0000-000000000001"
 key = "service_role"
 
 [[case]]
@@ -278,6 +334,15 @@ path = "/auth/v1/admin/users/not-a-uuid/factors/00000000-0000-0000-0000-00000000
 key = "service_role"
 
 [[case]]
+id = "auth.admin.users.factors.delete.missing-user"
+description = "Admin factor delete returns not found when the user is missing"
+units = ["auth:route:DELETE /auth/v1/admin/users/{user_id}/factors/{factor_id}"]
+[[case.step]]
+method = "DELETE"
+path = "/auth/v1/admin/users/00000000-0000-0000-0000-000000000001/factors/00000000-0000-0000-0000-000000000002"
+key = "service_role"
+
+[[case]]
 id = "auth.admin.users.passkeys.delete.anon"
 description = "Admin passkey delete with the anon key is forbidden"
 units = ["auth:route:DELETE /auth/v1/admin/users/{user_id}/passkeys/{passkey_id}"]
@@ -292,4 +357,13 @@ units = ["auth:route:DELETE /auth/v1/admin/users/{user_id}/passkeys/{passkey_id}
 [[case.step]]
 method = "DELETE"
 path = "/auth/v1/admin/users/not-a-uuid/passkeys/00000000-0000-0000-0000-000000000002"
+key = "service_role"
+
+[[case]]
+id = "auth.admin.users.passkeys.delete.missing-user"
+description = "Admin passkey delete returns not found when the user is missing"
+units = ["auth:route:DELETE /auth/v1/admin/users/{user_id}/passkeys/{passkey_id}"]
+[[case.step]]
+method = "DELETE"
+path = "/auth/v1/admin/users/00000000-0000-0000-0000-000000000001/passkeys/00000000-0000-0000-0000-000000000002"
 key = "service_role"

@@ -61,7 +61,10 @@ job by itself. New failures of cases that never passed stay grey on the
 treemap.
 
 CI starts only the reference stack in Docker and runs Megabase on the
-runner (no image build). Local `just judge-up` builds the Megabase image.
+runner (no image build) with `JWT_SECRET` and `DATABASE_URL` from
+`vendor/supabase/docker/.env.example`. `DATABASE_URL` uses the compose
+Postgres address, not host `:5432` (that port is Supavisor). Local
+`just judge-up` builds the Megabase image and points it at `db`.
 
 ## Cases
 
