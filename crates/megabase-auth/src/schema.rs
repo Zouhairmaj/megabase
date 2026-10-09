@@ -77,16 +77,20 @@ pub enum SchemaError {
 
 fn sslmode(database_url: &str) -> Option<String> {
     let lower = database_url.to_ascii_lowercase();
-    let rest = lower.split("sslmode=").nth(1)?;
-    let value: String = rest
-        .chars()
-        .take_while(|c| *c != '&' && !c.is_whitespace())
-        .collect();
-    if value.is_empty() {
-        None
+    if lower.contains("://") {
+        let query = lower.split_once('?')?.1;
+        let query = query.split('#').next().unwrap_or(query);
+        named_param(query.split('&'), "sslmode")
     } else {
-        Some(value)
+        named_param(lower.split_whitespace(), "sslmode")
     }
+}
+
+fn named_param<'a>(mut pairs: impl Iterator<Item = &'a str>, key: &str) -> Option<String> {
+    pairs.find_map(|pair| {
+        let (k, v) = pair.split_once('=')?;
+        (k == key && !v.is_empty()).then(|| v.to_string())
+    })
 }
 
 fn require_cleartext_postgres(database_url: &str) -> Result<(), SchemaError> {
@@ -196,7 +200,14 @@ mod tests {
         assert!(require_cleartext_postgres("postgres://u@h/db?sslmode=disable").is_ok());
         assert!(require_cleartext_postgres("postgres://u@h/db?sslmode=prefer").is_ok());
         assert!(require_cleartext_postgres("host=h user=u dbname=db").is_ok());
+        assert!(
+            require_cleartext_postgres("postgres://u@h/db?application_name=sslmode=require")
+                .is_ok()
+        );
+        assert!(require_cleartext_postgres("postgres://u:sslmode=require@h/db").is_ok());
+        assert!(require_cleartext_postgres("application_name=sslmode=require host=h").is_ok());
         assert!(require_cleartext_postgres("postgres://u@h/db?sslmode=require").is_err());
+        assert!(require_cleartext_postgres("postgres://u@h/db?foo=1&sslmode=require").is_err());
         assert!(require_cleartext_postgres("postgres://u@h/db?sslmode=verify-full").is_err());
         assert!(require_cleartext_postgres("host=h sslmode=verify-ca user=u").is_err());
     }
