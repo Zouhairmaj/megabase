@@ -192,7 +192,9 @@ waiting on a human.
     `DOCKERHUB_TOKEN` is set, Judge, the container image job, cargo-deny,
     and the lockfile compose job log in to Docker Hub first
     (`docker/login-action` v4.6.0) and skip login when the secret is
-    empty. The ECR library Kong image has no `/entrypoint.sh`; the
+    empty. A timeout talking to `auth.docker.io` is retried, then
+    ignored, so the digest-pinned mirrors still pull. The ECR library
+    Kong image has no `/entrypoint.sh`; the
     compose override points the vendor script at `/docker-entrypoint.sh`.
 
 ## Tracking
