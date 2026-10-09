@@ -5,6 +5,11 @@ name: Publish coverage badges
 # push or workflow_dispatch trigger and no cache action, so applying
 # the Judge artifact cannot poison that cache. Do not merge it back
 # into pages.yml.
+#
+# Checkout uses the default ref (the default branch). Do not set
+# actions/checkout ref from the triggering run: Scorecard
+# Dangerous-Workflow treats that ref as an untrusted checkout. The
+# Judge file below is data, interpreted by the default-branch tools.
 
 on:
   workflow_run:
@@ -15,9 +20,7 @@ permissions:
   contents: read
 
 concurrency:
-  # Same group as pages.yml so a site deploy cannot finish after this
-  # job and put older homepage metrics back.
-  group: pages
+  group: pages-badges
   cancel-in-progress: false
 
 jobs:
@@ -35,19 +38,42 @@ jobs:
     outputs:
       shields: ${{ steps.site.outputs.shields }}
     steps:
-      - name: Check out Judge commit
+      # No ref. For this trigger the default is the default branch.
+      # A ref taken from the triggering run is an untrusted checkout.
+      - name: Check out default branch
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
           persist-credentials: false
           submodules: recursive
 
+      # Publish only when this checkout is the commit Judge ran. A newer
+      # main is left for the next Judge run. Do not check that commit out.
+      - name: Judge commit matches checkout
+        id: match
+        env:
+          JUDGE_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          checked_out="$(git rev-parse HEAD)"
+          if [[ ! "$JUDGE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "Judge SHA is not a commit id" >&2
+            exit 1
+          fi
+          if [ "$checked_out" = "$JUDGE_SHA" ]; then
+            echo "match=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Judge results are for $JUDGE_SHA; checkout is $checked_out. Skipping publish."
+            echo "match=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Install Rust
+        if: steps.match.outputs.match == 'true'
         uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
         with:
           toolchain: stable
 
       - name: Download judge results
+        if: steps.match.outputs.match == 'true'
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: judge-results
@@ -56,6 +82,7 @@ jobs:
           run-id: ${{ github.event.workflow_run.id }}
 
       - name: Apply live judge results
+        if: steps.match.outputs.match == 'true'
         run: |
           test -f /tmp/judge/judge-results.json
           cp /tmp/judge/judge-results.json coverage/judge-results.json
@@ -63,41 +90,39 @@ jobs:
 
       - name: Generate site
         id: site
+        if: steps.match.outputs.match == 'true'
         run: |
           cargo run --manifest-path site/Cargo.toml --release -- --repo-root . --out _site
           if [ -f _site/coverage/badge-coverage.json ]; then
             echo "shields=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Upload site
+      - name: Upload coverage JSON
+        if: steps.match.outputs.match == 'true'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: pages-site
-          path: _site
+          name: coverage-json
+          path: _site/coverage
           if-no-files-found: error
           retention-days: 1
 
   deploy:
-    name: Publish shields and site
+    name: Publish shields JSON
     needs: build
-    if: needs.build.result == 'success'
+    if: needs.build.result == 'success' && needs.build.outputs.shields == 'true'
     runs-on: ubuntu-latest
+    # Does not check the repository out. The site itself is
+    # deployed only by pages.yml from the event SHA.
     permissions:
       contents: write
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - name: Download site
+      - name: Download coverage JSON
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
-          name: pages-site
-          path: _site
+          name: coverage-json
+          path: _site/coverage
 
       - name: Publish shields JSON to gh-pages
-        if: needs.build.outputs.shields == 'true'
         uses: peaceiris/actions-gh-pages@84c30a85c19949d7eee79c4ff27748b70285e453 # v4.1.0
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
@@ -109,17 +134,3 @@ jobs:
           # This branch is only shields JSON. The site is deployed by
           # actions/deploy-pages, so the orphan commit is the whole branch.
           force_orphan: true
-
-      - name: Configure Pages
-        uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5
-        with:
-          enablement: true
-
-      - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3
-        with:
-          path: _site
-
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5
