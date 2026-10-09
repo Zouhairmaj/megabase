@@ -11,7 +11,11 @@ EXCEPTION
     WHEN duplicate_object THEN NULL;
 END $$;
 
+-- Pin attnum 1 is instance_id (00_init_auth_schema.up.sql). CREATE TABLE
+-- IF NOT EXISTS cannot reorder an existing table; later ADD COLUMN
+-- appends. Keep this stub to the FK key plus that leading column.
 CREATE TABLE IF NOT EXISTS auth.users (
+    instance_id uuid NULL,
     id uuid NOT NULL,
     CONSTRAINT users_pkey PRIMARY KEY (id)
 );

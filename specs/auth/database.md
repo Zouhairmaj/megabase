@@ -14,8 +14,11 @@ the official stack already migrated.
 Parent keys: several tables reference `auth.users(id)` and
 `auth.sessions(id)`. The installer first creates those parent tables with
 only the columns the foreign keys need, then issue #12 upgrades them to
-the final column lists. `auth.aal_level` is created because
-`auth.sessions.aal` uses it.
+the final column lists. The `auth.users` stub starts with `instance_id`
+then `id` so attnum 1 matches
+`migrations/00_init_auth_schema.up.sql`. `CREATE TABLE IF NOT EXISTS`
+cannot reorder an already-created table. `auth.aal_level` is created
+because `auth.sessions.aal` uses it.
 
 ---
 

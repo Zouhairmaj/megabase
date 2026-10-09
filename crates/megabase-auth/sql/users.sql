@@ -55,16 +55,21 @@ CREATE TABLE IF NOT EXISTS auth.users (
     CONSTRAINT users_pkey PRIMARY KEY (id)
 );
 
+-- ADD order matches pin attnums after the stub's instance_id, id.
+-- email_confirmed_at / email_change_token_new / confirmed_at are also
+-- added later for databases that still have the pre-rename names.
 ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS instance_id uuid;
 ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS aud varchar(255);
 ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS role varchar(255);
 ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS email varchar(255);
 ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS encrypted_password varchar(255);
+ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS email_confirmed_at timestamptz;
 ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS invited_at timestamptz;
 ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS confirmation_token varchar(255);
 ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS confirmation_sent_at timestamptz;
 ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS recovery_token varchar(255);
 ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS recovery_sent_at timestamptz;
+ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS email_change_token_new varchar(255);
 ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS email_change varchar(255);
 ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS email_change_sent_at timestamptz;
 ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS last_sign_in_at timestamptz;
@@ -78,6 +83,8 @@ ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS phone_confirmed_at timestamptz;
 ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS phone_change text DEFAULT '';
 ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS phone_change_token varchar(255) DEFAULT '';
 ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS phone_change_sent_at timestamptz;
+ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS confirmed_at timestamptz
+    GENERATED ALWAYS AS (LEAST (users.email_confirmed_at, users.phone_confirmed_at)) STORED;
 ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS email_change_token_current varchar(255) DEFAULT '';
 ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS email_change_confirm_status smallint DEFAULT 0;
 ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS banned_until timestamptz;

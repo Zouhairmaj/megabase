@@ -332,6 +332,39 @@ mod tests {
         assert!(REFRESH_TOKENS.contains("refresh_tokens_session_id_fkey"));
         assert!(REFRESH_TOKENS.contains("parent varchar(255)"));
         assert!(USERS.contains("encrypted_password"));
+        let email_confirmed = USERS
+            .find("ADD COLUMN IF NOT EXISTS email_confirmed_at")
+            .expect("email_confirmed_at");
+        let invited = USERS
+            .find("ADD COLUMN IF NOT EXISTS invited_at")
+            .expect("invited_at");
+        let token_new = USERS
+            .find("ADD COLUMN IF NOT EXISTS email_change_token_new")
+            .expect("email_change_token_new");
+        let email_change = USERS
+            .find("ADD COLUMN IF NOT EXISTS email_change varchar")
+            .expect("email_change");
+        let phone_sent = USERS
+            .find("ADD COLUMN IF NOT EXISTS phone_change_sent_at")
+            .expect("phone_change_sent_at");
+        let confirmed = USERS
+            .find("ADD COLUMN IF NOT EXISTS confirmed_at timestamptz")
+            .expect("confirmed_at");
+        let token_current = USERS
+            .find("ADD COLUMN IF NOT EXISTS email_change_token_current")
+            .expect("email_change_token_current");
+        assert!(
+            email_confirmed < invited,
+            "pin attnum order is email_confirmed_at then invited_at"
+        );
+        assert!(
+            token_new < email_change,
+            "pin attnum order is email_change_token_new then email_change"
+        );
+        assert!(
+            phone_sent < confirmed && confirmed < token_current,
+            "pin attnum order is phone_change_sent_at, confirmed_at, email_change_token_current"
+        );
         assert!(USERS.contains(
             "GENERATED ALWAYS AS (LEAST (users.email_confirmed_at, users.phone_confirmed_at)) STORED"
         ));
@@ -469,6 +502,13 @@ mod tests {
             !SCHEMA.contains("encrypted_password"),
             "do not ship the full auth.users column list as a stub"
         );
+        let create = SCHEMA
+            .find("CREATE TABLE IF NOT EXISTS auth.users")
+            .expect("users stub");
+        let stub = &SCHEMA[create..];
+        let instance_id = stub.find("instance_id").expect("instance_id");
+        let id = stub.find("id uuid").expect("id");
+        assert!(instance_id < id, "pin attnum 1 is instance_id, then id");
     }
 
     #[test]
