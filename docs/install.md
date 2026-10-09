@@ -123,13 +123,14 @@ cargo run --manifest-path site/Cargo.toml -- --repo-root . --out _site
 ## Build the image locally
 
 The root `Dockerfile` builds the release image. Both `FROM` lines are
-pinned by digest so Scorecard Pinned-Dependencies does not flag a
-floating tag (alerts #6 and #7 on `main`):
+official Docker Hub tags pinned by digest (Scorecard Pinned-Dependencies;
+alerts #6 and #7 on `main`) and pulled via Amazon ECR Public so Hub 429s
+do not fail CI:
 
 | Stage | Image |
 | --- | --- |
-| Builder | `rust:1.89-slim-bookworm@sha256:d7fc7de78bb8c1469933aeecbf801314d30d7d6e9f0578bba4cfa285bfa37fe6` |
-| Runtime | `debian:bookworm-slim@sha256:7c7b2c966bc9ee8cedfeef67e0e279108992c77681fa595db4a9d65c06ccc587` |
+| Builder | `public.ecr.aws/docker/library/rust:1.89-slim-bookworm@sha256:d7fc7de78bb8c1469933aeecbf801314d30d7d6e9f0578bba4cfa285bfa37fe6` |
+| Runtime | `public.ecr.aws/docker/library/debian:bookworm-slim@sha256:7c7b2c966bc9ee8cedfeef67e0e279108992c77681fa595db4a9d65c06ccc587` |
 
 The Cloud Agent image in `.cursor/Dockerfile` is pinned the same way:
 `ubuntu:24.04@sha256:534baea6a22c03a63003dbc8dbe78fe34bc0d7e595d9a9dc9834884ff530eb55`
