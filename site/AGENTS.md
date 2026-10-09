@@ -14,7 +14,11 @@ Extends the root `AGENTS.md`; it does not relax it.
   `site/Cargo.lock`. Keep `resvg` on the harfrust/skrifa stack (0.48+);
   do not regress to rustybuzz or ttf-parser (RUSTSEC-2026-0206,
   RUSTSEC-2026-0192).
-- Deployed to GitHub Pages by `.github/workflows/pages.yml` on push to `main`.
+- Deployed to GitHub Pages by `.github/workflows/pages.yml` on push to
+  `main` and after a successful Judge run on `main`. The generator
+  writes shields endpoint JSON to `_site/coverage/` (never treemap
+  SVGs). The workflow publishes that directory to the `gh-pages` branch
+  for README badges; it never pushes to `main`.
 - Root design gate: the PR links the approved Kite frame and its committee
   review.
 - Treemaps are generated in Rust (`src/treemap.rs`) from

@@ -4,6 +4,9 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+  workflow_run:
+    workflows: [Judge]
+    types: [completed]
 
 permissions:
   contents: read
@@ -15,9 +18,15 @@ concurrency:
 jobs:
   deploy:
     name: Generate and publish to GitHub Pages
+    if: >
+      github.event_name != 'workflow_run'
+      || (github.event.workflow_run.event == 'push'
+          && github.event.workflow_run.head_branch == 'main'
+          && github.event.workflow_run.conclusion == 'success')
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      actions: read
+      contents: write
       pages: write
       id-token: write
     environment:
@@ -27,15 +36,54 @@ jobs:
       - name: Check out
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
           persist-credentials: false
+          submodules: recursive
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
         with:
           toolchain: stable
 
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: pages
+
+      - name: Download judge results
+        if: github.event_name == 'workflow_run'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: judge-results
+          path: /tmp/judge
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ github.event.workflow_run.id }}
+
+      - name: Apply live judge results
+        if: github.event_name == 'workflow_run'
+        run: |
+          test -f /tmp/judge/judge-results.json
+          cp /tmp/judge/judge-results.json coverage/judge-results.json
+          cargo run --locked -p megabase-coverage -- update
+
       - name: Generate site
-        run: cargo run --manifest-path site/Cargo.toml --release -- --repo-root . --out _site
+        id: site
+        run: |
+          cargo run --manifest-path site/Cargo.toml --release -- --repo-root . --out _site
+          if [ -f _site/coverage/badge-coverage.json ]; then
+            echo "shields=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publish shields JSON to gh-pages
+        if: steps.site.outputs.shields == 'true'
+        uses: peaceiris/actions-gh-pages@84c30a85c19949d7eee79c4ff27748b70285e453 # v4.1.0
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: _site/coverage
+          destination_dir: coverage
+          user_name: github-actions[bot]
+          user_email: 41898282+github-actions[bot]@users.noreply.github.com
+          commit_message: "ci(coverage): publish shields JSON"
+          force_orphan: true
 
       - name: Configure Pages
         uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5

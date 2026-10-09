@@ -21,3 +21,6 @@ bootstrap exception. Architecture and commands are in
 - A new normalization rule must apply to both stacks equally and be
   documented in `NORMALIZATION.md` in the same PR.
 - Harness tests: `cargo test -p megabase-judge`.
+- `compose.override.yml` must pin every reference-stack `image:` to
+  `public.ecr.aws/…@sha256:…` or `ghcr.io/…@sha256:…`. Do not pull
+  from Docker Hub (anonymous 429s fail CI).

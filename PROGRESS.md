@@ -80,8 +80,12 @@ waiting on a human.
    may append or complete `HUMAN_LOG.md` Pending items (grows must
    start a new `- ` item; shrinks must end at a `- **Date**` item)
    and grow the Completed section.
-6. **README status is generated.** `megabase-coverage update` on `main`;
-   `check` is a required CI job. Agents keep it current. Status is one
+6. **README status is generated.** PRs run `megabase-coverage update`;
+   `check` is a required CI job. Agents keep it current. CI does not
+   commit generated files to `main` (branch protection requires a PR).
+   After Judge on `main`, Pages publishes shields JSON to the `gh-pages`
+   branch. `coverage/judge-results.json` in git is the regression
+   baseline; feature PRs restore it from `origin/main`. Status is one
    full-width nested treemap (`coverage/treemap.svg`, light:
    `coverage/treemap-light.svg`); the website embeds the same files.
    Totals come from `coverage/units.json`.
@@ -132,8 +136,8 @@ waiting on a human.
     `[brand]` commits. The first release is still Phase 0 at `0.1.0`
     (`release-as`). The v0.1.0 release PR must delete `release-as`
     before it merges.
-    Container `FROM` lines are pinned by digest (root image and
-    `.cursor/Dockerfile`). Cloud Agent `rustup-init` and
+    Container `FROM` lines are pinned by digest (root image via
+    `public.ecr.aws/docker/library`, and `.cursor/Dockerfile`). Cloud Agent `rustup-init` and
     `cargo-binstall` downloads in `.cursor/Dockerfile` are pinned by
     SHA-256 and verified before exec (no `curl|sh`). That pin is the
     two bootstrap binaries only; the `stable` toolchain they install and
@@ -174,6 +178,17 @@ waiting on a human.
     (`cosign sign`). `id-token: write` is only on that signing job. Install
     and verify: [`docs/install.md`](docs/install.md). Goal: OpenSSF Scorecard
     Packaging and Signed-Releases.
+20. **No coverage push to `main`; judge images off Docker Hub.** The
+    `Update coverage on main` job only rewrote
+    `coverage/judge-results.json` (PRs already commit regenerated
+    coverage). It is removed. Live badge JSON is published to the
+    `gh-pages` branch and `_site/coverage/` for shields.io. Judge
+    compose pulls digest-pinned images from `public.ecr.aws` / `ghcr.io`
+    so anonymous Docker Hub 429s do not fail CI. Root `Dockerfile`
+    `FROM` lines use `public.ecr.aws/docker/library` at the same
+    digests. `cargo deny` runs on the runner (`taiki-e/install-action`),
+    not via `EmbarkStudios/cargo-deny-action` (that action builds
+    `docker.io/library/rust` and hits the same anonymous 429).
 
 ## Tracking
 
@@ -205,7 +220,7 @@ None.
 - [x] Judge (compose overlay, Rust harness, cases, normalization)
 - [x] `coverage/units.json` extracted from `vendor/` (1024 units, 76 excluded)
 - [x] Treemaps and badges in the Megabase palette
-- [x] CI: build, MSRV, coverage check, protected paths, judge, coverage commit on `main`
+- [x] CI: build, MSRV, coverage check, protected paths, judge, shields JSON on `gh-pages`
 - [x] NOTICE, LICENSES/ (SPDX from each vendored LICENSE)
 - [x] HUMAN_LOG.md present (human-owned; already on `main`, not created empty)
 - [x] CODEOWNERS (`@Zouhairmaj`)
@@ -242,7 +257,9 @@ Physically impossible for the agent (repository settings or credentials):
       Exact steps: `HUMAN_LOG.md` Pending, 2026-10-09.
 - [ ] Allow `github-actions` to publish GitHub Releases / tags on `main`
 - [ ] Enforce CODEOWNERS
-- [ ] Allow `github-actions` to push coverage commits to `main`
+- [x] Coverage commits on `main` are not used. Shields JSON is
+      published to the `gh-pages` branch (no exception to branch
+      protection).
 - [ ] Dedicated bot / GitHub App for agents
 - [ ] Run `just backlog` with a token that can write issues and Projects,
       so **Megabase Backlog** is filled from `coverage/units.json`

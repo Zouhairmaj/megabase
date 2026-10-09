@@ -21,10 +21,11 @@ judge/
   NORMALIZATION.md       rules applied to both responses
 ```
 
-The overlay retags images to the pins, uses named volumes so nothing is
-written into `vendor/`, turns on Auth autoconfirm (the stack has no mail
-server), and can start Megabase on host port 8100 against a dedicated
-`megabase` database.
+The overlay retags images to the pins on `public.ecr.aws` or `ghcr.io`
+(digest-pinned, so CI does not pull from Docker Hub), uses named volumes
+so nothing is written into `vendor/`, turns on Auth autoconfirm (the
+stack has no mail server), and can start Megabase on host port 8100
+against a dedicated `megabase` database.
 
 ## Commands
 
