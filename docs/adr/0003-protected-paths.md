@@ -19,8 +19,8 @@ agreement). CI runs it on every pull request.
 
 ### Always rejected
 
-- Edits to `GOAL.md` (except the lead-approved Design section on the
-  Phase 0 bootstrap branch) or `MANIFESTO.md`.
+- Edits to `GOAL.md` (except the lead-approved Design and Documentation
+  sections on the Phase 0 bootstrap branch) or `MANIFESTO.md`.
 - Edits to `HUMAN_LOG.md` except the bootstrap case below.
 - Edits to `vendor/`, `vendor.toml` or `.gitmodules` after bootstrap.
 - Source files in languages other than Rust (`.py`, `.js`, `.ts`, `.go`,
@@ -47,8 +47,9 @@ The exception is active **only if both** are true:
 Then the PR may add the protected tree, provided:
 
 - `MANIFESTO.md` is unchanged.
-- `GOAL.md` may receive the lead-approved Design (Kite) section only;
-  after this PR merges, `GOAL.md` is human-owned again.
+- `GOAL.md` may receive the lead-approved Design (Kite) and
+  Documentation sections only; after this PR merges, `GOAL.md` is
+  human-owned again.
 - `HUMAN_LOG.md` is **created empty** (zero bytes).
 - Every `vendor/` gitlink matches `vendor.toml`.
 

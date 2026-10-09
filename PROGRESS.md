@@ -115,6 +115,12 @@ waiting on a human.
     on the fly if missing) tracks `main` and PRs (`rust_criterion`, t-test
     upper boundary 0.99, `--error-on-alert`). Fork PRs skip without the
     secret.
+14. **Documentation.** Rule: [GOAL.md Documentation](GOAL.md).
+    `GOAL.md` documentation section added (`docs/` markdown on
+    megabase.sh/docs is a first-class deliverable; same-PR updates when
+    behavior, commands, config, or status change; truthful and clear;
+    reviewers block stale or missing docs). Agent-decided change,
+    approved by the lead.
 
 ## Tracking
 

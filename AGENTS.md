@@ -178,6 +178,7 @@ The board must match reality at all times.
 - Follow [versioning and releases](docs/ROADMAP.md#versioning-and-releases).
   Do not invent a 1.0.0 or a minor bump; level gates use a `Release-As:`
   footer from the orchestrator.
+- Keep docs current. Follow [GOAL.md Documentation](GOAL.md).
 
 **Ask first**
 - New broad-impact dependencies or MSRV changes: open an issue with your

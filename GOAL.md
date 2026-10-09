@@ -95,6 +95,17 @@ pages, badges, and treemap style — is designed first in the Kite project
   LLM committee, with **no human design input**. That is an explicit part
   of the experiment.
 
+## Documentation
+
+Documentation (`docs/` markdown, rendered on
+[megabase.sh/docs](https://megabase.sh/docs)) is a first-class
+deliverable. It must stay up to date with the code and be well written.
+
+- Any PR that changes behavior, commands, config, or status must update
+  the relevant docs in the same PR.
+- Docs must be truthful (never claim unimplemented features) and clear.
+- Reviewers block PRs with stale or missing docs.
+
 ## 9. The Studio test
 
 The official Supabase Studio, pinned and **unmodified**, is part of the judge.

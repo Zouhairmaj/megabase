@@ -72,7 +72,7 @@ pub fn evaluate(changes: &[Change], ctx: &Context) -> Vec<String> {
                 && change.status == Status::Added
                 && ctx.human_log_size == Some(0);
             // Phase 0 only: the lead approved landing the Design (Kite)
-            // section in GOAL.md on the bootstrap branch.
+            // and Documentation sections in GOAL.md on the bootstrap branch.
             let bootstrap_goal = bootstrap && path == "GOAL.md";
             if !creating_empty_log && !bootstrap_goal {
                 violations.push(format!(
