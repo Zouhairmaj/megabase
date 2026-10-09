@@ -34,7 +34,12 @@ pub fn render(md: &str, metrics: &Metrics) -> String {
     for section in sections {
         let title = section.title;
         let level = section.level;
-        if level == 0 || matches!(title.to_ascii_lowercase().as_str(), "megabase" | "status") {
+        if level == 0
+            || matches!(
+                title.to_ascii_lowercase().as_str(),
+                "megabase" | "status" | "cost"
+            )
+        {
             continue;
         }
         if level == 1 {
@@ -191,9 +196,12 @@ fn render_blocks(lines: &[String], metrics: &Metrics) -> String {
             }
             let lis: String = items
                 .iter()
-                .map(|item| format!("<li>{}</li>", inline(item)))
+                .filter_map(|item| site_copy(item))
+                .map(|item| format!("<li>{}</li>", inline(&item)))
                 .collect();
-            blocks.push(format!("<ol>{lis}</ol>"));
+            if !lis.is_empty() {
+                blocks.push(format!("<ol>{lis}</ol>"));
+            }
             continue;
         }
         if bulleted(stripped) {
@@ -204,9 +212,12 @@ fn render_blocks(lines: &[String], metrics: &Metrics) -> String {
             }
             let lis: String = items
                 .iter()
-                .map(|item| format!("<li>{}</li>", inline(item)))
+                .filter_map(|item| site_copy(item))
+                .map(|item| format!("<li>{}</li>", inline(&item)))
                 .collect();
-            blocks.push(format!("<ul>{lis}</ul>"));
+            if !lis.is_empty() {
+                blocks.push(format!("<ul>{lis}</ul>"));
+            }
             continue;
         }
         let mut para = vec![stripped.to_string()];
@@ -225,7 +236,9 @@ fn render_blocks(lines: &[String], metrics: &Metrics) -> String {
             para.push(nxt.to_string());
             i += 1;
         }
-        let text = para.join(" ");
+        let Some(text) = site_copy(&para.join(" ")) else {
+            continue;
+        };
         if text == PULL_QUOTE {
             blocks.push(format!(
                 r#"<blockquote class="pullquote">{}</blockquote>"#,
@@ -254,6 +267,29 @@ fn strip_number(s: &str) -> String {
 
 fn strip_bullet(s: &str) -> String {
     s.trim_start_matches(['-', '*']).trim().to_string()
+}
+
+fn site_copy(text: &str) -> Option<String> {
+    if is_cost_only_item(text) {
+        return None;
+    }
+    Some(scrub_cost_clauses(text))
+}
+
+fn is_cost_only_item(text: &str) -> bool {
+    let lower = text.trim().to_ascii_lowercase();
+    let label = lower.trim_start_matches('*').trim_start();
+    label.starts_with("cost:")
+        || label.starts_with("spend:")
+        || label.starts_with("budget:")
+        || lower.starts_with("how much does it cost")
+}
+
+fn scrub_cost_clauses(text: &str) -> String {
+    text.replace(
+        "the loop, the logs, the token spend and the cost, in real time",
+        "the loop and the logs, in real time",
+    )
 }
 
 fn parse_table(rows: &[String]) -> Vec<Vec<String>> {
@@ -408,4 +444,38 @@ pub fn esc(s: &str) -> String {
         .replace('<', "&lt;")
         .replace('>', "&gt;")
         .replace('"', "&quot;")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::metrics::Metrics;
+
+    #[test]
+    fn public_rule_and_progress_list_omit_cost_copy() {
+        let md = "\
+## Rules of the experiment
+
+7. **Everything is public.** The code, the agent prompts, the loop, the logs, the token spend and the cost, in real time.
+
+## How progress is measured
+
+- **Coverage:** the share of units.
+- **Cost:** tokens and money spent, published continuously.
+- **Treemaps:** one square per unit.
+
+## Cost
+
+Tokens and money spent, published continuously.
+";
+        let html = render(md, &Metrics::placeholder());
+        let lower = html.to_ascii_lowercase();
+        assert!(html.contains("the loop and the logs, in real time"));
+        assert!(html.contains("Coverage"));
+        assert!(html.contains("Treemaps"));
+        assert!(!lower.contains("cost"));
+        assert!(!lower.contains("spend"));
+        assert!(!lower.contains("money"));
+        assert!(!html.contains("id=\"cost\""));
+    }
 }

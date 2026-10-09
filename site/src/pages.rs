@@ -77,7 +77,7 @@ pub fn home(paths: &Paths, metrics: &Metrics) -> String {
     <li><span class="step-num">02</span><h3>Spec one unit</h3><p>Spec first, then Rust. Failures return a structured 501.</p></li>
     <li><span class="step-num">03</span><h3>Diff against real Supabase</h3><p>Official Supabase runs next to Megabase from the same pins.</p></li>
     <li><span class="step-num">04</span><h3>Keep or revert, never regress</h3><p>A commit is kept only if total conformance does not fall.</p></li>
-    <li><span class="step-num">05</span><h3>Record in public</h3><p>Coverage, the treemap, the human log, the spend.</p></li>
+    <li><span class="step-num">05</span><h3>Record in public</h3><p>Coverage, the treemap, the human log.</p></li>
   </ol>
   <p class="hide-mobile"><a class="text-link" href="{how}">How the loop works →</a></p>
 </section>
@@ -284,9 +284,7 @@ fn level_complete(metrics: &Metrics, spec: &LevelSpec) -> bool {
         return false;
     };
     match level_scope_counts(metrics, spec.n) {
-        Some((conformant, total)) if total > 0 => {
-            100.0 * conformant as f64 / total as f64 >= gate
-        }
+        Some((conformant, total)) if total > 0 => 100.0 * conformant as f64 / total as f64 >= gate,
         _ => false,
     }
 }
@@ -550,14 +548,12 @@ pub fn status(paths: &Paths, metrics: &Metrics, coverage_svg: bool) -> String {
     <p class="kicker">LIVE STATUS · DAY 0 · {stage}</p>
     <h1 class="display-sm">Where the experiment stands.</h1>
     <p class="lede">Every number on this page is generated at build time from files in the repository. If a file is missing the cell is an em dash, never a made-up total.</p>
-    <div class="metric-grid metric-grid-5">
+    <div class="metric-grid">
       <div class="metric"><p class="muted">Units done</p><p class="stat-xl">{passing}</p></div>
       <div class="metric"><p class="muted">Coverage</p><p class="stat-xl">{coverage}</p></div>
       <div class="metric"><p class="muted">Conformance</p><p class="stat-xl">{conformance}</p></div>
       <div class="metric"><p class="muted">Human interventions</p><p class="stat-xl">{humans}</p></div>
-      <div class="metric"><p class="muted">Spend</p><p class="stat-xl">{spend}</p></div>
     </div>
-    <p class="note">Spend is not tracked yet. Token and dollar tracking starts after Phase 0.</p>
   </header>
   <section class="band">
     <h2>Component map</h2>
@@ -589,7 +585,6 @@ pub fn status(paths: &Paths, metrics: &Metrics, coverage_svg: bool) -> String {
         coverage = esc(&metrics.coverage_label()),
         conformance = esc(&metrics.conformance_label()),
         humans = esc(&metrics.human_interventions_label()),
-        spend = esc(&metrics.spend_label),
         levels = level_cards(metrics, true),
         roadmap = paths.page("roadmap"),
     )
@@ -716,10 +711,6 @@ pub fn faq(paths: &Paths, metrics: &Metrics) -> String {
             "Self-hosting Supabase means about 12 containers in 6 languages. One Rust binary next to a standard PostgreSQL is simpler to run. The target is under 256 MB of RAM; that is a goal, not a measurement yet.".into(),
         ),
         (
-            "How much does it cost?",
-            "Tokens and money will be published continuously. Tracking starts after the human review of Phase 0, so there is no number yet.".into(),
-        ),
-        (
             "Can I contribute?",
             "Code comes from the agents only. You can help by reporting a real Supabase app to verify (an issue labeled verified-app, from Level 1), by flagging judge mistakes, or by following and sharing.".into(),
         ),
@@ -767,26 +758,6 @@ pub fn human_log(paths: &Paths, metrics: &Metrics, log_html: &str) -> String {
   </section>
 </main>"#,
         n = esc(&metrics.human_interventions_label()),
-    )
-}
-
-pub fn cost(paths: &Paths, metrics: &Metrics) -> String {
-    let _ = paths;
-    format!(
-        r#"<main id="main" class="doc-page">
-  <header class="page-hero">
-    <p class="kicker">COST · TOKENS AND MONEY</p>
-    <h1 class="display-sm">Published continuously. Not started.</h1>
-    <p class="lede">The manifesto requires tokens and money spent to be public in real time. Tracking starts after the human review of Phase 0, so this page has no number yet.</p>
-  </header>
-  <section class="metric-grid band">
-    <div class="metric"><p class="muted">Spend</p><p class="stat-xl">{spend}</p></div>
-    <div class="metric"><p class="muted">Stage</p><p class="stat-xl">{stage}</p></div>
-  </section>
-  <aside class="callout">Until the ledger exists, this page refuses to invent a dollar figure.</aside>
-</main>"#,
-        spend = esc(&metrics.spend_label),
-        stage = esc(&metrics.stage),
     )
 }
 
@@ -867,7 +838,10 @@ mod tests {
         assert!(hero_kicker_desktop(&live).contains("2 UNITS PASS"));
         assert!(!hero_kicker_desktop(&live).contains("NOTHING PASSES YET"));
         assert!(hero_kicker_desktop(&Metrics::placeholder()).contains("NOTHING PASSES YET"));
-        assert_eq!(hero_kicker_mobile(&Metrics::placeholder()), "DAY 0 · PHASE 0");
+        assert_eq!(
+            hero_kicker_mobile(&Metrics::placeholder()),
+            "DAY 0 · PHASE 0"
+        );
     }
 
     #[test]
@@ -888,5 +862,21 @@ mod tests {
         assert!(html.contains("LEVEL 1 · NEXT"));
         assert!(!html.contains("40.0% · not started"));
         assert!(!html.contains("40% · not started"));
+    }
+
+    #[test]
+    fn status_and_faq_omit_spend_rows() {
+        let metrics = Metrics::placeholder();
+        let paths = Paths::nested("status", false);
+        let status = status(&paths, &metrics, false);
+        assert!(status.contains("Human interventions"));
+        assert!(!status.to_ascii_lowercase().contains("spend"));
+        assert!(!status.to_ascii_lowercase().contains("dollar"));
+        let faq = faq(&Paths::nested("faq", false), &metrics);
+        assert!(!faq.to_ascii_lowercase().contains("cost"));
+        assert!(!faq.to_ascii_lowercase().contains("tokens and money"));
+        let home = home(&Paths::home(false), &metrics);
+        assert!(home.contains("the human log."));
+        assert!(!home.to_ascii_lowercase().contains("spend"));
     }
 }
