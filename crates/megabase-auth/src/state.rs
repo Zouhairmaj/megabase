@@ -122,7 +122,6 @@ mod tests {
         assert!(!state.is_admin_role(Some("anon")));
         assert!(state.config.mailer_autoconfirm);
         assert!(state.config.email_enabled);
-        assert_eq!(state.config.admin_roles, ["service_role".to_string()]);
     }
 
     #[test]

@@ -10,15 +10,16 @@
 //! Refresh tokens are the legacy 12-character form (algorithm version 0).
 
 use std::collections::HashMap;
+use std::future::Future;
 use std::sync::Arc;
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
 use serde_json::{json, Map, Value};
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, MutexGuard};
 use tokio_postgres::GenericClient;
 use uuid::Uuid;
 
-use crate::config::{nil_instance_id, BCRYPT_COST};
+use crate::config::BCRYPT_COST;
 use crate::schema::SchemaError;
 
 const EMAIL_PROVIDER: &str = "email";
@@ -29,9 +30,17 @@ pub enum StoreError {
     Unavailable,
     #[error("password hash failed")]
     Hash,
+    #[error("database connection failed: {0}")]
+    Connect(#[source] SchemaError),
+    #[error("database operation timed out")]
+    TimedOut,
     #[error(transparent)]
     Postgres(#[from] tokio_postgres::Error),
 }
+
+/// Same bound the admin routes use for a connect. A stalled query fails
+/// instead of holding the Auth client forever.
+const QUERY_DEADLINE: Duration = Duration::from_secs(30);
 
 enum WriteError {
     Conflict,
@@ -126,7 +135,14 @@ pub struct Backend {
 enum BackendKind {
     None,
     Memory(Arc<Mutex<MemoryDb>>),
-    Postgres(Arc<Mutex<tokio_postgres::Client>>),
+    Postgres(Pg),
+}
+
+/// One Auth connection, replaced when PostgreSQL closes it.
+#[derive(Clone)]
+struct Pg {
+    url: String,
+    client: Arc<Mutex<tokio_postgres::Client>>,
 }
 
 struct MemoryDb {
@@ -151,9 +167,8 @@ impl Backend {
     }
 
     pub async fn connect(database_url: &str) -> Result<Self, SchemaError> {
-        let client = crate::schema::connect(database_url).await?;
         Ok(Self {
-            inner: BackendKind::Postgres(Arc::new(Mutex::new(client))),
+            inner: BackendKind::Postgres(Pg::connect(database_url).await?),
         })
     }
 
@@ -161,7 +176,7 @@ impl Backend {
         match &self.inner {
             BackendKind::None => Err(StoreError::Unavailable),
             BackendKind::Memory(db) => memory_signup(db, cmd).await,
-            BackendKind::Postgres(client) => postgres_signup(client, cmd).await,
+            BackendKind::Postgres(pg) => timed(pg, postgres_signup(pg, cmd)).await,
         }
     }
 
@@ -174,18 +189,22 @@ impl Backend {
                     banned_until: user.banned_until,
                 }))
             }
-            BackendKind::Postgres(client) => {
-                let client = client.lock().await;
-                let row = client
-                    .query_opt(
-                        "SELECT banned_until FROM auth.users
+            BackendKind::Postgres(pg) => {
+                timed(pg, async {
+                    let instance = Uuid::nil();
+                    let client = pg.lock().await?;
+                    let row = client
+                        .query_opt(
+                            "SELECT banned_until FROM auth.users
                          WHERE instance_id = $1::uuid AND id = $2::uuid",
-                        &[&nil_instance_id(), &user_id.to_string()],
-                    )
-                    .await?;
-                Ok(row.map(|row| Subject {
-                    banned_until: row.get(0),
-                }))
+                            &[&instance, &user_id],
+                        )
+                        .await?;
+                    Ok(row.map(|row| Subject {
+                        banned_until: row.get(0),
+                    }))
+                })
+                .await
             }
         }
     }
@@ -194,15 +213,18 @@ impl Backend {
         match &self.inner {
             BackendKind::None => Err(StoreError::Unavailable),
             BackendKind::Memory(db) => Ok(db.lock().await.sessions.contains_key(&session_id)),
-            BackendKind::Postgres(client) => {
-                let client = client.lock().await;
-                let row = client
-                    .query_opt(
-                        "SELECT 1 FROM auth.sessions WHERE id = $1::uuid",
-                        &[&session_id.to_string()],
-                    )
-                    .await?;
-                Ok(row.is_some())
+            BackendKind::Postgres(pg) => {
+                timed(pg, async {
+                    let client = pg.lock().await?;
+                    let row = client
+                        .query_opt(
+                            "SELECT 1 FROM auth.sessions WHERE id = $1::uuid",
+                            &[&session_id],
+                        )
+                        .await?;
+                    Ok(row.is_some())
+                })
+                .await
             }
         }
     }
@@ -223,15 +245,18 @@ impl Backend {
                 apply_logout(&mut db.sessions, user_id, session_id, scope);
                 Ok(())
             }
-            BackendKind::Postgres(client) => {
-                let mut client = client.lock().await;
-                let tx = client.transaction().await?;
-                if let Some(user) = find_user_by_id(&tx, user_id).await? {
-                    insert_audit(&tx, &user, "logout", "account", None).await?;
-                }
-                exec_logout(&tx, user_id, session_id, scope).await?;
-                tx.commit().await?;
-                Ok(())
+            BackendKind::Postgres(pg) => {
+                timed(pg, async {
+                    let mut client = pg.lock().await?;
+                    let tx = client.transaction().await?;
+                    if let Some(user) = find_user_by_id(&tx, user_id).await? {
+                        insert_audit(&tx, &user, "logout", "account", None).await?;
+                    }
+                    exec_logout(&tx, user_id, session_id, scope).await?;
+                    tx.commit().await?;
+                    Ok(())
+                })
+                .await
             }
         }
     }
@@ -448,12 +473,61 @@ fn apply_logout(
     }
 }
 
-async fn postgres_signup(
-    client: &Mutex<tokio_postgres::Client>,
-    cmd: SignupCommand,
-) -> Result<SignupResult, StoreError> {
+impl Pg {
+    async fn connect(url: &str) -> Result<Self, SchemaError> {
+        let client = connect_deadline(url).await?;
+        Ok(Self {
+            url: url.to_string(),
+            client: Arc::new(Mutex::new(client)),
+        })
+    }
+
+    async fn lock(&self) -> Result<MutexGuard<'_, tokio_postgres::Client>, StoreError> {
+        let mut guard = self.client.lock().await;
+        if guard.is_closed() {
+            tracing::warn!("auth postgres connection closed; reconnecting");
+            *guard = connect_deadline(&self.url)
+                .await
+                .map_err(StoreError::Connect)?;
+        }
+        Ok(guard)
+    }
+
+    async fn reconnect(&self) -> Result<(), StoreError> {
+        let client = connect_deadline(&self.url)
+            .await
+            .map_err(StoreError::Connect)?;
+        *self.client.lock().await = client;
+        Ok(())
+    }
+}
+
+async fn connect_deadline(url: &str) -> Result<tokio_postgres::Client, SchemaError> {
+    match tokio::time::timeout(QUERY_DEADLINE, crate::schema::connect(url)).await {
+        Ok(result) => result,
+        Err(_) => Err(SchemaError::TimedOut {
+            timeout: QUERY_DEADLINE,
+        }),
+    }
+}
+
+async fn timed<T>(
+    pg: &Pg,
+    fut: impl Future<Output = Result<T, StoreError>>,
+) -> Result<T, StoreError> {
+    match tokio::time::timeout(QUERY_DEADLINE, fut).await {
+        Ok(result) => result,
+        Err(_) => {
+            tracing::error!("auth database operation timed out");
+            let _ = pg.reconnect().await;
+            Err(StoreError::TimedOut)
+        }
+    }
+}
+
+async fn postgres_signup(pg: &Pg, cmd: SignupCommand) -> Result<SignupResult, StoreError> {
     let preexisting = {
-        let client = client.lock().await;
+        let client = pg.lock().await?;
         find_email(&*client, &cmd.email, &cmd.aud)
             .await?
             .map(|user| user.email_confirmed_at.is_some())
@@ -463,7 +537,7 @@ async fn postgres_signup(
     } else {
         Some(hash_password(cmd.password.clone()).await?)
     };
-    let mut guard = client.lock().await;
+    let mut guard = pg.lock().await?;
     let tx = guard.transaction().await?;
     if let Some(user) = find_email(&tx, &cmd.email, &cmd.aud).await? {
         if user.email_confirmed_at.is_some() {
@@ -493,17 +567,14 @@ async fn postgres_signup(
         Err(WriteError::Conflict) => {
             drop(tx);
             drop(guard);
-            audit_conflict(client, &cmd).await
+            audit_conflict(pg, &cmd).await
         }
         Err(WriteError::Db(error)) => Err(error),
     }
 }
 
-async fn audit_conflict(
-    client: &Mutex<tokio_postgres::Client>,
-    cmd: &SignupCommand,
-) -> Result<SignupResult, StoreError> {
-    let mut client = client.lock().await;
+async fn audit_conflict(pg: &Pg, cmd: &SignupCommand) -> Result<SignupResult, StoreError> {
+    let mut client = pg.lock().await?;
     let tx = client.transaction().await?;
     if let Some(user) = find_email(&tx, &cmd.email, &cmd.aud).await? {
         insert_audit(
@@ -540,8 +611,6 @@ async fn confirm_existing_tx(
             .map_err(write_to_store)?;
         user.identities.push(identity);
     }
-    let stamp = crate::jsonutil::format_ts(now);
-    let meta = user.user_metadata.to_string();
     tx.execute(
         "UPDATE auth.users SET
             email_confirmed_at = $2::timestamptz,
@@ -550,7 +619,7 @@ async fn confirm_existing_tx(
             raw_user_meta_data = $3::jsonb,
             updated_at = $2::timestamptz
          WHERE id = $1::uuid",
-        &[&user.id.to_string(), &stamp, &meta],
+        &[&user.id, &now, &user.user_metadata],
     )
     .await?;
     let issued = grant_session(&mut user, now);
@@ -618,13 +687,9 @@ async fn insert_user(
     tx: &tokio_postgres::Transaction<'_>,
     user: &UserRecord,
 ) -> Result<(), WriteError> {
-    let stamp = crate::jsonutil::format_ts(user.created_at);
-    let confirmed = user
-        .email_confirmed_at
-        .map(crate::jsonutil::format_ts)
-        .unwrap_or(stamp.clone());
-    let app = user.app_metadata.to_string();
-    let meta = user.user_metadata.to_string();
+    let confirmed = user.email_confirmed_at.unwrap_or(user.created_at);
+    let signed_in = user.last_sign_in_at.unwrap_or(user.created_at);
+    let instance = Uuid::nil();
     let result = tx
         .execute(
             "INSERT INTO auth.users (
@@ -645,17 +710,17 @@ async fn insert_user(
                 false, false, $11::timestamptz, $11::timestamptz
             )",
             &[
-                &nil_instance_id(),
-                &user.id.to_string(),
+                &instance,
+                &user.id,
                 &user.aud,
                 &user.role,
                 &user.email,
                 &user.password_hash,
                 &confirmed,
-                &stamp,
-                &app,
-                &meta,
-                &stamp,
+                &signed_in,
+                &user.app_metadata,
+                &user.user_metadata,
+                &user.created_at,
             ],
         )
         .await;
@@ -666,8 +731,6 @@ async fn insert_identity(
     tx: &tokio_postgres::Transaction<'_>,
     identity: &IdentityRecord,
 ) -> Result<(), WriteError> {
-    let stamp = crate::jsonutil::format_ts(identity.created_at);
-    let data = identity.identity_data.to_string();
     let result = tx
         .execute(
             "INSERT INTO auth.identities (
@@ -678,12 +741,12 @@ async fn insert_identity(
                 $6::timestamptz, $6::timestamptz, $6::timestamptz
             )",
             &[
-                &identity.id.to_string(),
+                &identity.id,
                 &identity.provider_id,
-                &identity.user_id.to_string(),
-                &data,
+                &identity.user_id,
+                &identity.identity_data,
                 &identity.provider,
-                &stamp,
+                &identity.created_at,
             ],
         )
         .await;
@@ -694,14 +757,15 @@ async fn insert_session_rows(
     tx: &tokio_postgres::Transaction<'_>,
     issued: &IssuedSession,
 ) -> Result<(), WriteError> {
-    let stamp = crate::jsonutil::format_ts(issued.amr_at);
-    let session_id = issued.session_id.to_string();
+    let instance = Uuid::nil();
+    // `auth.refresh_tokens.user_id` is varchar, not uuid.
     let user_id = issued.user.id.to_string();
+    let amr_id = Uuid::new_v4();
     map_write(
         tx.execute(
             "INSERT INTO auth.sessions (id, user_id, created_at, updated_at, aal)
              VALUES ($1::uuid, $2::uuid, $3::timestamptz, $3::timestamptz, 'aal1')",
-            &[&session_id, &user_id, &stamp],
+            &[&issued.session_id, &issued.user.id, &issued.amr_at],
         )
         .await,
     )?;
@@ -713,16 +777,15 @@ async fn insert_session_rows(
                 $1::uuid, $2, $3, false, $4::timestamptz, $4::timestamptz, $5::uuid
              )",
             &[
-                &nil_instance_id(),
+                &instance,
                 &issued.refresh_token,
                 &user_id,
-                &stamp,
-                &session_id,
+                &issued.amr_at,
+                &issued.session_id,
             ],
         )
         .await,
     )?;
-    let amr_id = Uuid::new_v4().to_string();
     map_write(
         tx.execute(
             "INSERT INTO auth.mfa_amr_claims (
@@ -730,7 +793,7 @@ async fn insert_session_rows(
              ) VALUES (
                 $1::uuid, $2::uuid, $3::timestamptz, $3::timestamptz, 'password'
              )",
-            &[&amr_id, &session_id, &stamp],
+            &[&amr_id, &issued.session_id, &issued.amr_at],
         )
         .await,
     )?;
@@ -744,17 +807,14 @@ async fn insert_audit(
     log_type: &str,
     traits: Option<Value>,
 ) -> Result<(), StoreError> {
-    let payload = audit_payload(user, action, log_type, traits).to_string();
-    let stamp = crate::jsonutil::format_ts(SystemTime::now());
+    let instance = Uuid::nil();
+    let id = Uuid::new_v4();
+    let now = SystemTime::now();
+    let payload = audit_payload(user, action, log_type, traits);
     tx.execute(
         "INSERT INTO auth.audit_log_entries (instance_id, id, payload, created_at, ip_address)
          VALUES ($1::uuid, $2::uuid, $3::json, $4::timestamptz, '')",
-        &[
-            &nil_instance_id(),
-            &Uuid::new_v4().to_string(),
-            &payload,
-            &stamp,
-        ],
+        &[&instance, &id, &payload, &now],
     )
     .await?;
     Ok(())
@@ -766,7 +826,6 @@ async fn exec_logout(
     session_id: Option<Uuid>,
     scope: LogoutScope,
 ) -> Result<(), StoreError> {
-    let user_id = user_id.to_string();
     match (session_id, scope) {
         (None, _) | (_, LogoutScope::Global) => {
             tx.execute(
@@ -778,14 +837,14 @@ async fn exec_logout(
         (Some(session_id), LogoutScope::Local) => {
             tx.execute(
                 "DELETE FROM auth.sessions WHERE id = $1::uuid",
-                &[&session_id.to_string()],
+                &[&session_id],
             )
             .await?;
         }
         (Some(session_id), LogoutScope::Others) => {
             tx.execute(
                 "DELETE FROM auth.sessions WHERE user_id = $1::uuid AND id <> $2::uuid",
-                &[&user_id, &session_id.to_string()],
+                &[&user_id, &session_id],
             )
             .await?;
         }
@@ -798,6 +857,7 @@ async fn find_email<C: GenericClient + Sync>(
     email: &str,
     aud: &str,
 ) -> Result<Option<UserRecord>, StoreError> {
+    let instance = Uuid::nil();
     let by_identity = client
         .query_opt(
             "SELECT u.id::text
@@ -808,7 +868,7 @@ async fn find_email<C: GenericClient + Sync>(
                AND u.instance_id = $3::uuid
                AND u.is_sso_user = false
              LIMIT 1",
-            &[&email, &aud, &nil_instance_id()],
+            &[&email, &aud, &instance],
         )
         .await?;
     if let Some(row) = by_identity {
@@ -823,7 +883,7 @@ async fn find_email<C: GenericClient + Sync>(
                AND aud = $3
                AND is_sso_user = false
              LIMIT 1",
-            &[&nil_instance_id(), &email, &aud],
+            &[&instance, &email, &aud],
         )
         .await?;
     match by_user {
@@ -847,7 +907,7 @@ async fn find_user_by_id<C: GenericClient + Sync>(
                     COALESCE(encrypted_password, '')
              FROM auth.users
              WHERE instance_id = $1::uuid AND id = $2::uuid",
-            &[&nil_instance_id(), &id.to_string()],
+            &[&Uuid::nil(), &id],
         )
         .await?;
     let Some(row) = row else {
@@ -887,7 +947,7 @@ async fn load_identities<C: GenericClient + Sync>(
             "SELECT id::text, provider_id, user_id::text, identity_data::text, provider,
                     COALESCE(email, ''), last_sign_in_at, created_at, updated_at
              FROM auth.identities WHERE user_id = $1::uuid",
-            &[&user_id.to_string()],
+            &[&user_id],
         )
         .await?;
     let mut identities = Vec::with_capacity(rows.len());
@@ -1065,5 +1125,14 @@ mod tests {
     #[test]
     fn base32_matches_rfc4648_lowercase() {
         assert_eq!(base32_lower(b"f"), "my");
+    }
+
+    #[test]
+    fn native_params_match_postgres_types() {
+        use tokio_postgres::types::{ToSql, Type};
+        assert!(<Uuid as ToSql>::accepts(&Type::UUID));
+        assert!(<SystemTime as ToSql>::accepts(&Type::TIMESTAMPTZ));
+        assert!(<Value as ToSql>::accepts(&Type::JSONB));
+        assert!(<Value as ToSql>::accepts(&Type::JSON));
     }
 }

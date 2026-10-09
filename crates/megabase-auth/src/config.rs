@@ -20,13 +20,6 @@ pub const MIN_PASSWORD_LENGTH: usize = 6;
 /// default is 12, so callers pass this explicitly.
 pub const BCRYPT_COST: u32 = 10;
 
-const NIL_INSTANCE: &str = "00000000-0000-0000-0000-000000000000";
-
-/// `auth.users.instance_id` for non-SSO rows. GoTrue stores the nil UUID.
-pub fn nil_instance_id() -> &'static str {
-    NIL_INSTANCE
-}
-
 /// Flags and JWT claim defaults for `/auth/v1`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AuthConfig {
@@ -46,7 +39,6 @@ pub struct AuthConfig {
     pub jwt_exp_seconds: i64,
     pub jwt_issuer: String,
     pub password_min_length: usize,
-    pub admin_roles: Vec<String>,
 }
 
 /// `external` object on `GET /settings`. Email and phone are separate fields
@@ -100,8 +92,6 @@ impl AuthConfig {
             jwt_exp_seconds: 3600,
             jwt_issuer: "http://localhost:8000/auth/v1".into(),
             password_min_length: MIN_PASSWORD_LENGTH,
-            // Docker compose sets `GOTRUE_JWT_ADMIN_ROLES=service_role`.
-            admin_roles: vec!["service_role".into()],
         }
     }
 
@@ -124,21 +114,6 @@ impl AuthConfig {
                 })
             }
             None => defaults.jwt_exp_seconds,
-        };
-        let admin_roles = match lookup("GOTRUE_JWT_ADMIN_ROLES") {
-            Some(raw) => {
-                let roles: Vec<String> = raw
-                    .split(',')
-                    .map(|part| part.trim().to_string())
-                    .filter(|part| !part.is_empty())
-                    .collect();
-                if roles.is_empty() {
-                    vec!["service_role".into(), "supabase_admin".into()]
-                } else {
-                    roles
-                }
-            }
-            None => defaults.admin_roles,
         };
         Ok(Self {
             disable_signup: optional_bool(&lookup, "GOTRUE_DISABLE_SIGNUP")?
@@ -191,7 +166,6 @@ impl AuthConfig {
             jwt_exp_seconds: jwt_exp,
             jwt_issuer: lookup("GOTRUE_JWT_ISSUER").unwrap_or(defaults.jwt_issuer),
             password_min_length: password_min,
-            admin_roles,
         })
     }
 }
@@ -276,8 +250,6 @@ mod tests {
         assert_eq!(config.jwt_exp_seconds, 3600);
         assert_eq!(config.jwt_issuer, "http://localhost:8000/auth/v1");
         assert_eq!(config.password_min_length, 6);
-        assert_eq!(config.admin_roles, vec!["service_role".to_string()]);
-        assert_eq!(nil_instance_id(), "00000000-0000-0000-0000-000000000000");
     }
 
     #[test]
@@ -289,7 +261,6 @@ mod tests {
             "GOTRUE_EXTERNAL_GITHUB_ENABLED" => Some("T".into()),
             "GOTRUE_PASSWORD_MIN_LENGTH" => Some("4".into()),
             "GOTRUE_JWT_EXP" => Some("120".into()),
-            "GOTRUE_JWT_ADMIN_ROLES" => Some("".into()),
             "GOTRUE_SMS_PROVIDER" => Some("twilio".into()),
             "GOTRUE_SAML_CERTIFICATE_NEXT" => Some("cert".into()),
             _ => None,
@@ -301,10 +272,6 @@ mod tests {
         assert!(config.external.github);
         assert_eq!(config.password_min_length, 6);
         assert_eq!(config.jwt_exp_seconds, 120);
-        assert_eq!(
-            config.admin_roles,
-            vec!["service_role".to_string(), "supabase_admin".to_string()]
-        );
         assert_eq!(config.sms_provider, "twilio");
         assert!(config.saml_private_key_next_configured);
     }
