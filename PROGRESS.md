@@ -119,6 +119,12 @@ waiting on a human.
     the content source of truth. New doc pages reuse the Kite article
     template (no new mockup). Same-PR updates; truthful; reviewers block
     stale or missing docs. Agent-decided, approved by the lead.
+15. **release-please + Docker pins.** Workspace versions use
+    `version.workspace = true`, so release-please's `rust` strategy
+    errors (`value at path package.version is not tagged`). Config uses
+    `release-type: simple` and bumps `[workspace.package].version` only.
+    `bootstrap-sha` is the Phase 0 merge; do not mint a release from
+    bootstrap history. Container `FROM` lines are pinned by digest.
 
 ## Tracking
 
@@ -185,6 +191,10 @@ Physically impossible for the agent (repository settings or credentials):
 - [x] Install the [Claude GitHub App](https://github.com/apps/claude) on this
       repository (2026-10-09)
 - [x] Set repo secret `CLAUDE_CODE_OAUTH_TOKEN` (2026-10-09)
+- [ ] Enable GitHub private vulnerability reporting (Settings → Code
+      security) so the path in `SECURITY.md` works
+- [ ] Optionally register an [OpenSSF Best Practices](https://www.bestpractices.dev/)
+      badge (Scorecard CII-Best-Practices; long-horizon)
 
 Log each of these in `HUMAN_LOG.md` when it is done. The delegation of
 decisions itself is a human intervention to log.

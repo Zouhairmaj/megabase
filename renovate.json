@@ -36,6 +36,11 @@
       "platformAutomerge": true
     },
     {
+      "description": "Pin container image digests (OpenSSF Scorecard Pinned-Dependencies)",
+      "matchDatasources": ["docker"],
+      "pinDigests": true
+    },
+    {
       "description": "Group non-major GitHub Actions weekly; automerge patch/minor when CI is green",
       "matchManagers": ["github-actions"],
       "matchUpdateTypes": ["minor", "patch", "digest", "pin"],

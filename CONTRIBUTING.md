@@ -20,6 +20,13 @@ agent or human. This file covers only what AGENTS.md does not.
 | Coverage denominator | `coverage/units.json` (extracted from `vendor/`) |
 | Correctness | `judge/` against the pinned reference stack |
 | Versioning and releases | [`docs/ROADMAP.md`](docs/ROADMAP.md#versioning-and-releases) |
+| Vulnerability reports | [`SECURITY.md`](SECURITY.md) |
+
+## Security
+
+Report vulnerabilities privately as described in [`SECURITY.md`](SECURITY.md)
+(email **agent@megabase.sh**, or GitHub private advisories). Do not open a
+public issue.
 
 ## Releases
 
