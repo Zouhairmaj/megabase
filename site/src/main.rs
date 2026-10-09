@@ -1011,18 +1011,7 @@ mod tests {
         let Some(chrome) = find_chrome() else {
             return;
         };
-        let site_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        let real_root = site_root.parent().unwrap().to_path_buf();
-        let stamp = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let out = std::env::temp_dir().join(format!("megabase-site-chrome-{stamp}"));
-        let metrics = metrics::load(&real_root);
-        let human = human_log::load(
-            &fs::read_to_string(real_root.join("HUMAN_LOG.md")).unwrap_or_default(),
-        );
-        build(&site_root, &real_root, &out, &metrics, &human).expect("build");
+        let out = build_live_site("chrome");
         for (page, width) in [
             ("index.html", 1440u32),
             ("status/index.html", 1440),
@@ -1031,23 +1020,9 @@ mod tests {
         ] {
             let src = out.join(page);
             let wrapper = src.with_file_name(format!("probe-{width}.html"));
-            let html = fs::read_to_string(&src).unwrap();
-            // Drop remote scripts so headless Chrome does not wait on analytics.
-            let mut stripped = String::new();
-            let mut rest = html.as_str();
-            while let Some(start) = rest.find("<script") {
-                stripped.push_str(&rest[..start]);
-                if let Some(end) = rest[start..].find("</script>") {
-                    rest = &rest[start + end + 9..];
-                } else {
-                    rest = "";
-                    break;
-                }
-            }
-            stripped.push_str(rest);
-            let injected = stripped.replace(
-                "</body>",
-                "<script>document.documentElement.setAttribute('data-sw', String(document.documentElement.scrollWidth));document.documentElement.setAttribute('data-cw', String(document.documentElement.clientWidth));</script></body>",
+            let injected = inject_probe(
+                &fs::read_to_string(&src).unwrap(),
+                "document.documentElement.setAttribute('data-sw', String(document.documentElement.scrollWidth));document.documentElement.setAttribute('data-cw', String(document.documentElement.clientWidth));",
             );
             fs::write(&wrapper, injected).unwrap();
             let uri = format!("file://{}", wrapper.display());
@@ -1072,6 +1047,146 @@ mod tests {
             );
         }
         let _ = fs::remove_dir_all(&out);
+    }
+
+    #[test]
+    fn level_card_progress_aligns_on_desktop_if_chrome() {
+        let Some(chrome) = find_chrome() else {
+            return;
+        };
+        let out = build_live_site("chrome-levels");
+        const PROBE: &str = r#"
+(function () {
+  var cards = Array.prototype.slice.call(document.querySelectorAll('.level-row .level-card'));
+  var heights = [];
+  var tops = [];
+  var gaps = [];
+  for (var i = 0; i < cards.length; i++) {
+    var card = cards[i];
+    var foot = card.querySelector('.level-foot') || card.querySelector('.bar');
+    var desc = card.querySelector('h3 + p');
+    var cr = card.getBoundingClientRect();
+    heights.push(Math.round(cr.height));
+    tops.push(foot ? Math.round(foot.getBoundingClientRect().top) : -1);
+    if (desc && foot) {
+      gaps.push(Math.round(foot.getBoundingClientRect().top - desc.getBoundingClientRect().bottom));
+    } else {
+      gaps.push(-1);
+    }
+  }
+  var root = document.documentElement;
+  root.setAttribute('data-level-n', String(cards.length));
+  root.setAttribute('data-level-heights', heights.join(','));
+  root.setAttribute('data-level-bar-tops', tops.join(','));
+  root.setAttribute('data-level-gaps', gaps.join(','));
+})();
+"#;
+        for (page, width, desktop) in [
+            ("index.html", 1440u32, true),
+            ("roadmap/index.html", 1440, true),
+            ("index.html", 390, false),
+            ("roadmap/index.html", 390, false),
+        ] {
+            let src = out.join(page);
+            let slug = page.replace('/', "-");
+            let wrapper = src.with_file_name(format!("levels-{width}-{slug}"));
+            fs::write(
+                &wrapper,
+                inject_probe(&fs::read_to_string(&src).unwrap(), PROBE),
+            )
+            .unwrap();
+            let uri = format!("file://{}", wrapper.display());
+            let profile = out.join(format!("chrome-levels-{width}-{slug}"));
+            fs::create_dir_all(&profile).unwrap();
+            let dom = chrome_dump_dom(
+                &chrome,
+                &uri,
+                width,
+                &profile,
+                std::time::Duration::from_secs(20),
+            );
+            let n = attr_after(&dom, "data-level-n=\"").unwrap_or_else(|| {
+                panic!("{page} at {width}px: missing data-level-n after Chrome dump-dom")
+            });
+            assert_eq!(n, 5, "{page} at {width}px: expected 5 level cards, got {n}");
+            let heights = attr_csv(&dom, "data-level-heights=\"");
+            let tops = attr_csv(&dom, "data-level-bar-tops=\"");
+            let gaps = attr_csv(&dom, "data-level-gaps=\"");
+            assert_eq!(heights.len(), 5, "{page} at {width}px heights={heights:?}");
+            assert_eq!(tops.len(), 5, "{page} at {width}px tops={tops:?}");
+            if desktop {
+                assert!(
+                    spread(&heights) <= 1,
+                    "{page} at {width}px: cards must share a height, got {heights:?}"
+                );
+                assert!(
+                    spread(&tops) <= 1,
+                    "{page} at {width}px: progress footers must share a top edge, got {tops:?}"
+                );
+            } else {
+                assert!(
+                    gaps.iter().all(|&g| (0..=24).contains(&g)),
+                    "{page} at {width}px: stacked cards must keep natural flow (small copy-to-bar gap), got {gaps:?}"
+                );
+            }
+        }
+        let _ = fs::remove_dir_all(&out);
+    }
+
+    fn build_live_site(tag: &str) -> PathBuf {
+        let site_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let real_root = site_root.parent().unwrap().to_path_buf();
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let out = std::env::temp_dir().join(format!("megabase-site-{tag}-{stamp}"));
+        let metrics = metrics::load(&real_root);
+        let human = human_log::load(
+            &fs::read_to_string(real_root.join("HUMAN_LOG.md")).unwrap_or_default(),
+        );
+        build(&site_root, &real_root, &out, &metrics, &human).expect("build");
+        out
+    }
+
+    fn inject_probe(html: &str, script: &str) -> String {
+        // Drop remote scripts so headless Chrome does not wait on analytics.
+        let mut stripped = String::new();
+        let mut rest = html;
+        while let Some(start) = rest.find("<script") {
+            stripped.push_str(&rest[..start]);
+            if let Some(end) = rest[start..].find("</script>") {
+                rest = &rest[start + end + 9..];
+            } else {
+                rest = "";
+                break;
+            }
+        }
+        stripped.push_str(rest);
+        stripped.replace("</body>", &format!("<script>{script}</script></body>"))
+    }
+
+    fn attr_csv(html: &str, key: &str) -> Vec<i32> {
+        attr_str(html, key)
+            .unwrap_or_default()
+            .split(',')
+            .filter(|p| !p.is_empty())
+            .map(|p| p.parse().expect("probe csv"))
+            .collect()
+    }
+
+    fn attr_str(html: &str, key: &str) -> Option<String> {
+        let start = html.find(key)? + key.len();
+        let rest = html.get(start..)?;
+        let end = rest.find('"')?;
+        Some(rest[..end].to_string())
+    }
+
+    fn spread(vals: &[i32]) -> i32 {
+        match (vals.iter().min(), vals.iter().max()) {
+            (Some(lo), Some(hi)) => hi - lo,
+            _ => 0,
+        }
     }
 
     fn find_chrome() -> Option<PathBuf> {

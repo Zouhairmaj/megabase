@@ -549,6 +549,7 @@ a:hover {
 .level-row {
   display: grid;
   grid-template-columns: repeat(5, 1fr);
+  align-items: stretch;
   border: 1px solid var(--border);
 }
 
@@ -582,6 +583,20 @@ a:hover {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  min-height: 260px;
+  height: 100%;
+}
+
+.level-foot {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: auto;
+  flex-shrink: 0;
+}
+
+.level-foot .bar {
+  flex-shrink: 0;
 }
 
 .level-card.is-stretch {
@@ -791,6 +806,7 @@ a:hover {
   padding: 24px;
   color: inherit;
   text-decoration: none;
+  height: 100%;
 }
 
 .comp-card:hover {
@@ -807,6 +823,8 @@ a:hover {
   display: flex;
   justify-content: space-between;
   gap: 8px;
+  margin-top: auto;
+  flex-shrink: 0;
   font-family: var(--font) !important;
   font-size: 12px !important;
 }
@@ -2124,6 +2142,11 @@ body:has(#licensing-and-credits:target) .toc-list a[href="#licensing-and-credits
   .metric {
     border-right: 0;
     border-bottom: 1px solid var(--border);
+  }
+
+  .level-card {
+    min-height: 0;
+    height: auto;
   }
 
   .status-map {
