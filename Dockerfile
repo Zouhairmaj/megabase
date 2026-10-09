@@ -19,4 +19,6 @@ COPY --from=build /src/target/release/megabase-healthcheck /usr/local/bin/megaba
 ENV MEGABASE_HOST=0.0.0.0 MEGABASE_PORT=8000
 EXPOSE 8000
 USER 65534:65534
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+    CMD ["/usr/local/bin/megabase-healthcheck"]
 ENTRYPOINT ["/usr/local/bin/megabase"]

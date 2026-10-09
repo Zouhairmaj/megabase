@@ -1,52 +1,64 @@
 ---
 title: Install
-description: Clone the repository and see what is here today. The megabase binary is Phase 0 work.
+description: Clone the workspace, build the megabase binary, or build the pinned container image.
 section: get-started
 order: 1
-card: Build from source with Rust 1.75+ and PostgreSQL 15+. A Docker image is planned, not shipped.
+card: Build from source with Rust 1.89+ or from the root Dockerfile. PostgreSQL is external.
 ---
 
 # Install
 
-Megabase is one Rust binary next to PostgreSQL. This repository is still in Phase 0: the Cargo workspace that produces that binary is not in the tree yet. What is here today is the experiment record (GOAL.md, MANIFESTO.md) and the public site generator in `site/`.
-
-> [!NOTE]
-> Nothing in this repository is production software. When the binary exists, every endpoint answers HTTP 501 with `{"code":"MEGABASE_NOT_IMPLEMENTED",...}` until a unit passes the judge.
+Megabase is one Rust binary next to PostgreSQL. Unimplemented routes return
+HTTP 501 `{"code":"MEGABASE_NOT_IMPLEMENTED",...}`. Nothing here is
+production software.
 
 ## Clone
 
 ```shell
-git clone https://github.com/Zouhairmaj/megabase
+git clone --recurse-submodules https://github.com/Zouhairmaj/megabase.git
 cd megabase
 ```
 
-## What you can build today
+Vendor pins live in `vendor/` (`vendor.toml`). Coverage and the judge need the submodules.
 
-The only crate in this repository is the website generator:
+## Build from source
+
+MSRV is **1.89**. From the repository root:
+
+```shell
+cargo build --release --locked -p megabase
+./target/release/megabase
+```
+
+The binary listens on `0.0.0.0:8000` (`MEGABASE_HOST` / `MEGABASE_PORT`).
+See [Configuration](configuration.md). `just` lists every recipe that
+works today.
+
+The public site generator is separate:
 
 ```shell
 cargo run --manifest-path site/Cargo.toml -- --repo-root . --out _site
 ```
 
-Rust 1.75 or newer is enough for that crate. PostgreSQL is not required to generate the site.
+## Container image
 
-## The megabase binary
-
-Phase 0 adds a Cargo workspace (`megabase`, plus one crate per Supabase service) whose release build is `./target/release/megabase`. That binary is not here yet, so this command is not runnable:
+The root `Dockerfile` builds the release image. The Rust builder
+(`rust:1.89-slim-bookworm`) and Debian runtime (`debian:bookworm-slim`)
+are pinned by digest (OpenSSF Scorecard Pinned-Dependencies). Renovate
+updates tag and digest together (`docker` datasource, `pinDigests`).
 
 ```shell
-cargo build --release
+docker build -t megabase .
+docker run --rm -p 8000:8000 megabase
 ```
 
-When it lands, you will also need PostgreSQL 15 or newer. The intended default listen port is 8000 (`MEGABASE_PORT`).
+The image includes `megabase-healthcheck`, which probes
+`/_megabase/health`.
 
-> [!PLANNED]
-> A Docker image is planned, not shipped. There is no Dockerfile or compose file in this repository.
-
-## Requirements (once the binary exists)
+## Requirements
 
 | Tool | Why |
 | --- | --- |
-| Rust 1.75+ | Workspace and site generator |
-| PostgreSQL 15+ | External database the binary sits next to |
-| Docker Compose + Python 3 | Judge only, when `judge/` exists |
+| Rust 1.89+ | Workspace MSRV; CI also checks 1.89 |
+| PostgreSQL 15+ | External database (not required just to start the 501 gateway) |
+| Docker | Release image; Compose for the judge |
