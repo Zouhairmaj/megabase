@@ -62,7 +62,12 @@ The Cloud Agent image in `.cursor/Dockerfile` is pinned the same way:
 That Dockerfile does not pipe installers into a shell. `rustup-init` 1.29.1
 and `cargo-binstall` v1.25.2 are downloaded, checked with a hard-coded
 SHA-256, then executed (Scorecard Pinned-Dependencies `downloadThenRun`,
-alerts #17 and #18 on `main`). The Cloud Agent `install` script in
+alerts #17 and #18 on `main`). The pin is those two bootstrap binaries
+only: `rustup-init` then installs the floating `stable` toolchain (the
+checkout's `rust-toolchain.toml` selects the channel after the repo is
+present), and `cargo binstall` installs latest `just`, `cargo-deny`,
+`cargo-audit`, and `cargo-llvm-cov`. Those later fetches are outside
+alerts #17 and #18. The Cloud Agent `install` script in
 `.cursor/environment.json` uses the same hashes when those tools are
 missing. Hashes were re-verified on 2026-10-09 against
 `static.rust-lang.org/rustup/archive/1.29.1` and the GitHub release

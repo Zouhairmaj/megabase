@@ -135,7 +135,9 @@ waiting on a human.
     Container `FROM` lines are pinned by digest (root image and
     `.cursor/Dockerfile`). Cloud Agent `rustup-init` and
     `cargo-binstall` downloads in `.cursor/Dockerfile` are pinned by
-    SHA-256 and verified before exec (no `curl|sh`).
+    SHA-256 and verified before exec (no `curl|sh`). That pin is the
+    two bootstrap binaries only; the `stable` toolchain they install and
+    later `cargo binstall` tool fetches remain unpinned.
 
 ## Tracking
 
