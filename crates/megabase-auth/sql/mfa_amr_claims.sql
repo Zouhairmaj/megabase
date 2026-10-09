@@ -22,6 +22,12 @@ ALTER TABLE auth.mfa_amr_claims ADD COLUMN IF NOT EXISTS updated_at timestamptz;
 ALTER TABLE auth.mfa_amr_claims ADD COLUMN IF NOT EXISTS authentication_method text;
 ALTER TABLE auth.mfa_amr_claims ADD COLUMN IF NOT EXISTS id uuid;
 
+ALTER TABLE auth.mfa_amr_claims ALTER COLUMN session_id SET NOT NULL;
+ALTER TABLE auth.mfa_amr_claims ALTER COLUMN created_at SET NOT NULL;
+ALTER TABLE auth.mfa_amr_claims ALTER COLUMN updated_at SET NOT NULL;
+ALTER TABLE auth.mfa_amr_claims ALTER COLUMN authentication_method SET NOT NULL;
+ALTER TABLE auth.mfa_amr_claims ALTER COLUMN id SET NOT NULL;
+
 DO $$
 BEGIN
     IF NOT EXISTS (

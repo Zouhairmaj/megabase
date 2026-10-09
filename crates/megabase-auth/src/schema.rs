@@ -67,16 +67,45 @@ fn install_sql() -> String {
 /// Failure applying the Auth SQL objects to PostgreSQL.
 #[derive(Debug, thiserror::Error)]
 pub enum SchemaError {
+    #[error(
+        "DATABASE_URL requests TLS (sslmode={mode}); Megabase does not use TLS for PostgreSQL yet"
+    )]
+    TlsRequired { mode: String },
     #[error("installing auth schema: {0}")]
     Postgres(#[from] tokio_postgres::Error),
+}
+
+fn sslmode(database_url: &str) -> Option<String> {
+    let lower = database_url.to_ascii_lowercase();
+    let rest = lower.split("sslmode=").nth(1)?;
+    let value: String = rest
+        .chars()
+        .take_while(|c| *c != '&' && !c.is_whitespace())
+        .collect();
+    if value.is_empty() {
+        None
+    } else {
+        Some(value)
+    }
+}
+
+fn require_cleartext_postgres(database_url: &str) -> Result<(), SchemaError> {
+    if let Some(mode) = sslmode(database_url) {
+        if matches!(mode.as_str(), "require" | "verify-ca" | "verify-full") {
+            return Err(SchemaError::TlsRequired { mode });
+        }
+    }
+    Ok(())
 }
 
 /// Create or replace the Auth SQL objects this crate implements.
 ///
 /// Idempotent. Safe to run against a database the official Auth migrations
 /// already applied. Aborts startup on error so a half-installed schema is
-/// not served as if it were complete.
+/// not served as if it were complete. Connects without TLS; `sslmode=require`
+/// (and verify-*) fail instead of sending credentials in the clear.
 pub async fn install_schema(database_url: &str) -> Result<(), SchemaError> {
+    require_cleartext_postgres(database_url)?;
     let (client, connection) = tokio_postgres::connect(database_url, NoTls).await?;
     tokio::spawn(async move {
         if let Err(error) = connection.await {
@@ -140,7 +169,11 @@ mod tests {
         assert!(FLOW_STATE.contains("code_challenge_method"));
         assert!(FLOW_STATE.contains("authentication_method"));
         assert!(FLOW_STATE.contains("email_optional"));
+        assert!(FLOW_STATE.contains("ALTER COLUMN provider_type SET NOT NULL"));
+        assert!(FLOW_STATE.contains("ALTER COLUMN authentication_method SET NOT NULL"));
         assert!(FLOW_STATE.contains("Stores metadata for all OAuth/SSO login flows"));
+        assert!(IDENTITIES.contains("ALTER COLUMN provider_id SET NOT NULL"));
+        assert!(MFA_AMR_CLAIMS.contains("ALTER COLUMN session_id SET NOT NULL"));
         assert!(MFA_AMR_CLAIMS.contains("amr_id_pk"));
         assert!(MFA_AMR_CLAIMS.contains("REFERENCES auth.sessions(id) ON DELETE CASCADE"));
         assert!(CUSTOM_OAUTH_PROVIDERS.contains("custom_claims_allowlist"));
@@ -155,5 +188,16 @@ mod tests {
             !SCHEMA.contains("encrypted_password"),
             "do not ship the full auth.users column list in this issue"
         );
+    }
+
+    #[test]
+    fn rejects_tls_required_urls() {
+        assert!(require_cleartext_postgres("postgres://u@h/db").is_ok());
+        assert!(require_cleartext_postgres("postgres://u@h/db?sslmode=disable").is_ok());
+        assert!(require_cleartext_postgres("postgres://u@h/db?sslmode=prefer").is_ok());
+        assert!(require_cleartext_postgres("host=h user=u dbname=db").is_ok());
+        assert!(require_cleartext_postgres("postgres://u@h/db?sslmode=require").is_err());
+        assert!(require_cleartext_postgres("postgres://u@h/db?sslmode=verify-full").is_err());
+        assert!(require_cleartext_postgres("host=h sslmode=verify-ca user=u").is_err());
     }
 }

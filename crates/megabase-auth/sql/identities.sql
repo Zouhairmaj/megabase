@@ -30,6 +30,12 @@ ALTER TABLE auth.identities ADD COLUMN IF NOT EXISTS created_at timestamptz;
 ALTER TABLE auth.identities ADD COLUMN IF NOT EXISTS updated_at timestamptz;
 ALTER TABLE auth.identities ADD COLUMN IF NOT EXISTS id uuid DEFAULT gen_random_uuid();
 
+ALTER TABLE auth.identities ALTER COLUMN provider_id SET NOT NULL;
+ALTER TABLE auth.identities ALTER COLUMN user_id SET NOT NULL;
+ALTER TABLE auth.identities ALTER COLUMN identity_data SET NOT NULL;
+ALTER TABLE auth.identities ALTER COLUMN provider SET NOT NULL;
+ALTER TABLE auth.identities ALTER COLUMN id SET NOT NULL;
+
 DO $$
 BEGIN
     IF NOT EXISTS (

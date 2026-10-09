@@ -49,6 +49,9 @@ ALTER TABLE auth.flow_state ADD COLUMN IF NOT EXISTS oauth_client_state_id uuid;
 ALTER TABLE auth.flow_state ADD COLUMN IF NOT EXISTS linking_target_id uuid;
 ALTER TABLE auth.flow_state ADD COLUMN IF NOT EXISTS email_optional boolean NOT NULL DEFAULT FALSE;
 
+ALTER TABLE auth.flow_state ALTER COLUMN provider_type SET NOT NULL;
+ALTER TABLE auth.flow_state ALTER COLUMN authentication_method SET NOT NULL;
+
 ALTER TABLE auth.flow_state ALTER COLUMN code_challenge DROP NOT NULL;
 ALTER TABLE auth.flow_state ALTER COLUMN code_challenge_method DROP NOT NULL;
 ALTER TABLE auth.flow_state ALTER COLUMN auth_code DROP NOT NULL;

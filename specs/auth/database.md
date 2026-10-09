@@ -229,4 +229,7 @@ identifier `^[a-z0-9][a-z0-9:-]{0,48}[a-z0-9]$`).
 
 Install runs at process start when `DATABASE_URL` is set. Failure aborts
 startup (GOAL.md fail loudly). Missing `DATABASE_URL` skips install; HTTP
-still serves. Objects are created in one transaction.
+still serves. Objects are created in one transaction. After `ADD COLUMN IF
+NOT EXISTS`, required columns get `SET NOT NULL` so an older table is not
+left nullable. `sslmode=require` / `verify-*` abort; the connection is
+cleartext.

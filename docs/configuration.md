@@ -13,12 +13,19 @@ in the tree.
 
 | Variable | Description |
 | --- | --- |
-| DATABASE_URL | PostgreSQL connection string. PostgreSQL stays external; Megabase does not bundle it. When set, startup installs the Auth SQL objects this build implements: `auth.uid()`, `auth.role()`, `auth.email()`, `auth.jwt()`, and tables `auth.instances`, `auth.audit_log_entries`, `auth.identities`, `auth.flow_state`, `auth.mfa_amr_claims`, `auth.custom_oauth_providers`. The statements are idempotent. The connection does not use TLS. If install fails, the process exits. |
+| DATABASE_URL | PostgreSQL connection string. PostgreSQL stays external; Megabase does not bundle it. When set, startup installs the Auth SQL objects this build implements: `auth.uid()`, `auth.role()`, `auth.email()`, `auth.jwt()`, and tables `auth.instances`, `auth.audit_log_entries`, `auth.identities`, `auth.flow_state`, `auth.mfa_amr_claims`, `auth.custom_oauth_providers`. The statements are idempotent. If install fails, the process exits. |
 | JWT_SECRET | Secret used to sign and verify JWTs. Auth HTTP is not implemented; the value is still read so a missing secret can fail loudly later instead of minting a default. |
 | MEGABASE_HOST | Bind address. Default `0.0.0.0`. |
 | MEGABASE_PORT | HTTP port. Default 8000. |
 
 Omit `DATABASE_URL` to skip schema install (the HTTP server still starts).
+
+## PostgreSQL TLS
+
+The installer connects **without TLS** (`NoTls`). That is the local judge
+database. `sslmode=require`, `verify-ca`, and `verify-full` abort startup
+instead of sending the password in the clear to a server that expected TLS.
+Use a Unix socket, an internal network, or `sslmode=disable`.
 
 ## Listen address
 
