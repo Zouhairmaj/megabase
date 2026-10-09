@@ -27,21 +27,28 @@ pub fn render(md: &str) -> String {
 }
 
 pub fn headings_h2(md: &str) -> Vec<(String, String)> {
-    md.lines()
-        .filter_map(|line| {
-            let t = line.trim();
-            if t.starts_with("## ") {
-                let title = t[3..].trim().to_string();
-                if title.is_empty() {
-                    None
-                } else {
-                    Some((slugify(&title), title))
-                }
-            } else {
-                None
+    let mut in_fence = false;
+    let mut headings = Vec::new();
+    for line in md.lines() {
+        if !in_fence && is_fence_open(line) {
+            in_fence = true;
+            continue;
+        }
+        if in_fence {
+            if is_fence_close(line) {
+                in_fence = false;
             }
-        })
-        .collect()
+            continue;
+        }
+        let t = line.trim();
+        if let Some(title) = t.strip_prefix("## ") {
+            let title = title.trim();
+            if !title.is_empty() {
+                headings.push((slugify(title), title.to_string()));
+            }
+        }
+    }
+    headings
 }
 
 pub fn split_front_matter(raw: &str) -> (BTreeMap<String, String>, &str) {
@@ -89,11 +96,11 @@ pub fn render_with(md: &str, opts: Options) -> String {
             i += 1;
             continue;
         }
-        if stripped.starts_with("```") {
+        if is_fence_open(lines[i]) {
             let lang = stripped.trim_start_matches('`').trim().to_string();
             i += 1;
             let mut code = String::new();
-            while i < lines.len() && !lines[i].trim_start().starts_with("```") {
+            while i < lines.len() && !is_fence_close(lines[i]) {
                 if !code.is_empty() {
                     code.push('\n');
                 }
@@ -422,6 +429,14 @@ fn is_keyword(word: &str) -> bool {
     )
 }
 
+fn is_fence_open(line: &str) -> bool {
+    line.trim_end().starts_with("```")
+}
+
+fn is_fence_close(line: &str) -> bool {
+    line.trim_start().starts_with("```")
+}
+
 fn parse_heading(line: &str) -> Option<(usize, String)> {
     let trimmed = line.trim_end();
     let hashes = trimmed.chars().take_while(|c| *c == '#').count();
@@ -539,5 +554,22 @@ mod tests {
         assert!(html.contains("callout-note"));
         assert!(html.contains("callout-planned"));
         assert_eq!(headings_h2(body).len(), 0);
+    }
+
+    #[test]
+    fn headings_h2_skips_fenced_regions() {
+        let md = "Intro\n\n```md\n## not a heading\n```\n\n## Real heading\n\n    ```\n## still a heading\n";
+        let headings = headings_h2(md);
+        assert_eq!(
+            headings,
+            vec![
+                ("real-heading".into(), "Real heading".into()),
+                ("still-a-heading".into(), "still a heading".into()),
+            ]
+        );
+        let html = render(md);
+        assert!(html.contains("id=\"real-heading\""));
+        assert!(html.contains("id=\"still-a-heading\""));
+        assert!(!html.contains("id=\"not-a-heading\""));
     }
 }
