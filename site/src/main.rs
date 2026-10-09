@@ -1012,6 +1012,7 @@ mod tests {
                 "cost",
                 "spend",
                 "budget",
+                "money",
                 "dollar",
                 "price",
                 "token usage",
