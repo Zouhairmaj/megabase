@@ -16,22 +16,22 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  deploy:
-    name: Generate and publish to GitHub Pages
+  build:
+    name: Generate site
     if: >
       github.event_name != 'workflow_run'
       || (github.event.workflow_run.event == 'push'
           && github.event.workflow_run.head_branch == 'main'
           && github.event.workflow_run.conclusion == 'success')
     runs-on: ubuntu-latest
+    # workflow_run.head_sha is only trusted after the guard above (push to
+    # main). Keep this job read-only so that checkout is not a privileged
+    # context. Publication is a later job that does not check the repo out.
     permissions:
       actions: read
-      contents: write
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+      contents: read
+    outputs:
+      shields: ${{ steps.site.outputs.shields }}
     steps:
       - name: Check out
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -73,8 +73,37 @@ jobs:
             echo "shields=true" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Upload site
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: pages-site
+          path: _site
+          if-no-files-found: error
+          retention-days: 1
+
+  deploy:
+    name: Publish to GitHub Pages
+    needs: build
+    if: needs.build.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Download site
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: pages-site
+          path: _site
+
       - name: Publish shields JSON to gh-pages
-        if: steps.site.outputs.shields == 'true'
+        # Ordinary pushes keep the site deploy below, but they must not
+        # replace live badge JSON with the git baseline.
+        if: github.event_name == 'workflow_run' && needs.build.outputs.shields == 'true'
         uses: peaceiris/actions-gh-pages@84c30a85c19949d7eee79c4ff27748b70285e453 # v4.1.0
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
@@ -83,6 +112,8 @@ jobs:
           user_name: github-actions[bot]
           user_email: 41898282+github-actions[bot]@users.noreply.github.com
           commit_message: "ci(coverage): publish shields JSON"
+          # This branch is only shields JSON. The site is deployed by
+          # actions/deploy-pages, so the orphan commit is the whole branch.
           force_orphan: true
 
       - name: Configure Pages

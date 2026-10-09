@@ -26,8 +26,11 @@
 #      would otherwise allow).
 # Kong uses the Docker official `kong:3.9.3` library image on ECR (same
 # 3.9.3 as vendor `kong/kong:3.9.3`; `kong/kong` has no public ECR/GHCR
-# mirror). imgproxy is the same digest as `darthsim/imgproxy:v3.30.1`.
-# CI starts Megabase on the runner instead of building this image.
+# mirror). That library image's entrypoint is `/docker-entrypoint.sh`;
+# the vendor script execs `/entrypoint.sh` from `kong/kong`, so the
+# override rewrites that one path. imgproxy is the same digest as
+# `darthsim/imgproxy:v3.30.1`. CI starts Megabase on the runner instead
+# of building this image.
 
 services:
   studio:
@@ -36,6 +39,13 @@ services:
       - judge-snippets:/app/snippets
   kong:
     image: public.ecr.aws/docker/library/kong:3.9.3@sha256:92035d16d7ff86b7bc12fb1d0090d29357d924238b1880f78735f3f2fea6b631
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        set -eu
+        sed 's#/entrypoint.sh#/docker-entrypoint.sh#' /home/kong/kong-entrypoint.sh > /tmp/kong-entrypoint.sh
+        exec /bin/sh /tmp/kong-entrypoint.sh
   auth:
     image: public.ecr.aws/supabase/gotrue:v2.197.0@sha256:1736a63078f5922b198c4cbe50f80ab9a2d3b54fe8b7b6cfb2e9dc5dbbc12c6b
     environment:

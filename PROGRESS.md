@@ -188,7 +188,12 @@ waiting on a human.
     `FROM` lines use `public.ecr.aws/docker/library` at the same
     digests. `cargo deny` runs on the runner (`taiki-e/install-action`),
     not via `EmbarkStudios/cargo-deny-action` (that action builds
-    `docker.io/library/rust` and hits the same anonymous 429).
+    `docker.io/library/rust` and hits the same anonymous 429). When
+    `DOCKERHUB_TOKEN` is set, Judge, the container image job, cargo-deny,
+    and the lockfile compose job log in to Docker Hub first
+    (`docker/login-action` v4.6.0) and skip login when the secret is
+    empty. The ECR library Kong image has no `/entrypoint.sh`; the
+    compose override points the vendor script at `/docker-entrypoint.sh`.
 
 ## Tracking
 
@@ -273,6 +278,10 @@ Physically impossible for the agent (repository settings or credentials):
       Administration / Contents / Metadata / Pull requests) so OpenSSF
       Scorecard's Branch-Protection check can read classic branch
       protection rules (2026-10-09)
+- [x] Set repo secrets `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN`
+      (Docker Hub account and read-only PAT, Zouhair, 2026-10-09) so CI
+      can log in before image pulls. Mirrors stay. Fork PRs skip login
+      when the token is empty.
 - [ ] Set repo secret `MEGABASE_AGENT_GH_TOKEN` (PAT for
       `megabase-agent` with repo and pull-request scope) so Claude-opened
       PRs run CI without approval (`GITHUB_TOKEN` `pull_request` runs
@@ -287,11 +296,6 @@ Physically impossible for the agent (repository settings or credentials):
       `v0.1.0`) so that release gains signed assets (it shipped without
       binaries). Scorecard Signed-Releases looks at the last five
       GitHub Releases.
-- [ ] Set repo secrets `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN`
-      (read-only) so Judge can log in to Docker Hub. GitHub-hosted
-      runners 429 on unauthenticated pulls of the reference stack
-      (`supabase/*`, `postgrest/*`, `kong/*`). Exact steps:
-      `HUMAN_LOG.md` Pending, 2026-10-09.
 
 Log each of these in `HUMAN_LOG.md` when it is done. The delegation of
 decisions itself is a human intervention to log.

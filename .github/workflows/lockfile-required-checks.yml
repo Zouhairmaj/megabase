@@ -341,13 +341,51 @@ jobs:
           key: lockfile-judge
       - name: Build harness and binary
         run: cargo build --release --locked -p megabase -p megabase-judge --bin megabase --bin megabase-judge
+      - name: Docker Hub credentials present
+        id: dockerhub
+        env:
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          if [ -n "${DOCKERHUB_TOKEN}" ]; then
+            echo "login=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "login=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Log in to Docker Hub
+        if: steps.dockerhub.outputs.login == 'true'
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Pull reference images
+        run: |
+          set -euo pipefail
+          # public.ecr.aws rejects a parallel burst with "toomanyrequests:
+          # Rate exceeded". Pull one image at a time and retry.
+          mapfile -t images < <(docker compose -p megabase-judge \
+            -f vendor/supabase/docker/docker-compose.yml \
+            -f judge/compose.override.yml \
+            --env-file vendor/supabase/docker/.env.example \
+            config --images)
+          for image in "${images[@]}"; do
+            [ -n "$image" ] || continue
+            attempt=1
+            until docker pull "$image"; do
+              if [ "$attempt" -ge 8 ]; then
+                echo "failed to pull $image" >&2
+                exit 1
+              fi
+              sleep $((attempt * 5))
+              attempt=$((attempt + 1))
+            done
+          done
       - name: Reference stack
         run: |
           docker compose -p megabase-judge \
             -f vendor/supabase/docker/docker-compose.yml \
             -f judge/compose.override.yml \
             --env-file vendor/supabase/docker/.env.example \
-            up -d --wait --wait-timeout 300
+            up -d --pull never --wait --wait-timeout 300
       - name: Megabase on :8100
         run: |
           MEGABASE_PORT=8100 MEGABASE_HOST=0.0.0.0 \

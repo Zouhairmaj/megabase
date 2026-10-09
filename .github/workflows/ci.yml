@@ -117,9 +117,26 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
+      - name: Docker Hub credentials present
+        id: dockerhub
+        env:
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          if [ -n "${DOCKERHUB_TOKEN}" ]; then
+            echo "login=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "login=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Log in to Docker Hub
+        if: steps.dockerhub.outputs.login == 'true'
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
       # Binary install, not cargo-deny-action: that action's image is
       # rust:1.85.0-alpine from Docker Hub and 429s on unauthenticated pulls.
-      # --all-features matches that action's default arguments.
+      # --all-features matches that action's default arguments. This job
+      # does not build an image; login still runs when the token is set.
       - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
         with:
           toolchain: stable
@@ -190,6 +207,22 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
+      - name: Docker Hub credentials present
+        id: dockerhub
+        env:
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          if [ -n "${DOCKERHUB_TOKEN}" ]; then
+            echo "login=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "login=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Log in to Docker Hub
+        if: steps.dockerhub.outputs.login == 'true'
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
       - run: docker build -t megabase:ci .
       - run: |
           docker run -d --name megabase-ci -p 8000:8000 megabase:ci
