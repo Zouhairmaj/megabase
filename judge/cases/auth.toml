@@ -129,3 +129,200 @@ units = ["auth:route:GET /auth/v1/admin/users"]
 [[case.step]]
 method = "GET"
 path = "/auth/v1/admin/users"
+
+[[case]]
+id = "auth.admin.audit.anon"
+description = "Admin audit log with the anon key is forbidden"
+units = ["auth:route:GET /auth/v1/admin/audit"]
+[[case.step]]
+method = "GET"
+path = "/auth/v1/admin/audit"
+
+[[case]]
+id = "auth.admin.audit.bad-page"
+description = "Admin audit log rejects a non-integer page"
+units = ["auth:route:GET /auth/v1/admin/audit"]
+[[case.step]]
+method = "GET"
+path = "/auth/v1/admin/audit?page=nope"
+key = "service_role"
+
+[[case]]
+id = "auth.admin.audit.bad-query"
+description = "Admin audit log rejects an unknown query scope"
+units = ["auth:route:GET /auth/v1/admin/audit"]
+[[case.step]]
+method = "GET"
+path = "/auth/v1/admin/audit?query=bogus:x"
+key = "service_role"
+
+[[case]]
+id = "auth.admin.custom-providers.anon"
+description = "Admin custom-provider list with the anon key is forbidden"
+units = ["auth:route:GET /auth/v1/admin/custom-providers"]
+[[case.step]]
+method = "GET"
+path = "/auth/v1/admin/custom-providers"
+
+[[case]]
+id = "auth.admin.custom-providers.list"
+description = "Admin custom-provider list is empty when none are registered"
+units = ["auth:route:GET /auth/v1/admin/custom-providers"]
+[[case.step]]
+method = "GET"
+path = "/auth/v1/admin/custom-providers"
+key = "service_role"
+
+[[case]]
+id = "auth.admin.custom-providers.get.anon"
+description = "Admin custom-provider get with the anon key is forbidden"
+units = ["auth:route:GET /auth/v1/admin/custom-providers/{identifier}"]
+[[case.step]]
+method = "GET"
+path = "/auth/v1/admin/custom-providers/custom:missing"
+
+[[case]]
+id = "auth.admin.custom-providers.get.prefix"
+description = "Admin custom-provider get requires the custom: prefix"
+units = ["auth:route:GET /auth/v1/admin/custom-providers/{identifier}"]
+[[case.step]]
+method = "GET"
+path = "/auth/v1/admin/custom-providers/example"
+key = "service_role"
+
+[[case]]
+id = "auth.admin.custom-providers.get.missing"
+description = "Admin custom-provider get returns not found for an unused identifier"
+units = ["auth:route:GET /auth/v1/admin/custom-providers/{identifier}"]
+[[case.step]]
+method = "GET"
+path = "/auth/v1/admin/custom-providers/custom:missing"
+key = "service_role"
+
+[[case]]
+id = "auth.admin.custom-providers.delete.anon"
+description = "Admin custom-provider delete with the anon key is forbidden"
+units = ["auth:route:DELETE /auth/v1/admin/custom-providers/{identifier}"]
+[[case.step]]
+method = "DELETE"
+path = "/auth/v1/admin/custom-providers/custom:missing"
+
+[[case]]
+id = "auth.admin.custom-providers.delete.missing"
+description = "Admin custom-provider delete returns not found for an unused identifier"
+units = ["auth:route:DELETE /auth/v1/admin/custom-providers/{identifier}"]
+[[case.step]]
+method = "DELETE"
+path = "/auth/v1/admin/custom-providers/custom:missing"
+key = "service_role"
+
+[[case]]
+id = "auth.admin.oauth.clients.anon"
+description = "Admin OAuth client list with the anon key is forbidden"
+units = ["auth:route:GET /auth/v1/admin/oauth/clients"]
+[[case.step]]
+method = "GET"
+path = "/auth/v1/admin/oauth/clients"
+
+[[case]]
+id = "auth.admin.oauth.clients.disabled"
+description = "Admin OAuth client list is feature-disabled on the self-hosted default"
+units = ["auth:route:GET /auth/v1/admin/oauth/clients"]
+[[case.step]]
+method = "GET"
+path = "/auth/v1/admin/oauth/clients"
+key = "service_role"
+
+[[case]]
+id = "auth.admin.oauth.clients.delete.anon"
+description = "Admin OAuth client delete with the anon key is forbidden"
+units = ["auth:route:DELETE /auth/v1/admin/oauth/clients/{client_id}"]
+[[case.step]]
+method = "DELETE"
+path = "/auth/v1/admin/oauth/clients/00000000-0000-0000-0000-000000000001"
+
+[[case]]
+id = "auth.admin.oauth.clients.delete.disabled"
+description = "Admin OAuth client delete is feature-disabled on the self-hosted default"
+units = ["auth:route:DELETE /auth/v1/admin/oauth/clients/{client_id}"]
+[[case.step]]
+method = "DELETE"
+path = "/auth/v1/admin/oauth/clients/00000000-0000-0000-0000-000000000001"
+key = "service_role"
+
+[[case]]
+id = "auth.admin.sso.providers.delete.anon"
+description = "Admin SSO provider delete with the anon key is forbidden"
+units = ["auth:route:DELETE /auth/v1/admin/sso/providers/{idp_id}"]
+[[case.step]]
+method = "DELETE"
+path = "/auth/v1/admin/sso/providers/00000000-0000-0000-0000-000000000001"
+
+[[case]]
+id = "auth.admin.sso.providers.delete.missing"
+description = "Admin SSO provider delete returns not found for an unused id"
+units = ["auth:route:DELETE /auth/v1/admin/sso/providers/{idp_id}"]
+[[case.step]]
+method = "DELETE"
+path = "/auth/v1/admin/sso/providers/00000000-0000-0000-0000-000000000001"
+key = "service_role"
+
+[[case]]
+id = "auth.admin.users.delete.anon"
+description = "Admin user delete with the anon key is forbidden"
+units = ["auth:route:DELETE /auth/v1/admin/users/{user_id}"]
+[[case.step]]
+method = "DELETE"
+path = "/auth/v1/admin/users/00000000-0000-0000-0000-000000000001"
+
+[[case]]
+id = "auth.admin.users.delete.missing"
+description = "Admin user delete returns not found for an unused id"
+units = ["auth:route:DELETE /auth/v1/admin/users/{user_id}"]
+[[case.step]]
+method = "DELETE"
+path = "/auth/v1/admin/users/00000000-0000-0000-0000-000000000001"
+key = "service_role"
+
+[[case]]
+id = "auth.admin.users.delete.bad-id"
+description = "Admin user delete requires a UUID user_id"
+units = ["auth:route:DELETE /auth/v1/admin/users/{user_id}"]
+[[case.step]]
+method = "DELETE"
+path = "/auth/v1/admin/users/not-a-uuid"
+key = "service_role"
+
+[[case]]
+id = "auth.admin.users.factors.delete.anon"
+description = "Admin factor delete with the anon key is forbidden"
+units = ["auth:route:DELETE /auth/v1/admin/users/{user_id}/factors/{factor_id}"]
+[[case.step]]
+method = "DELETE"
+path = "/auth/v1/admin/users/00000000-0000-0000-0000-000000000001/factors/00000000-0000-0000-0000-000000000002"
+
+[[case]]
+id = "auth.admin.users.factors.delete.missing-user"
+description = "Admin factor delete loads the user first and returns user_not_found"
+units = ["auth:route:DELETE /auth/v1/admin/users/{user_id}/factors/{factor_id}"]
+[[case.step]]
+method = "DELETE"
+path = "/auth/v1/admin/users/00000000-0000-0000-0000-000000000001/factors/00000000-0000-0000-0000-000000000002"
+key = "service_role"
+
+[[case]]
+id = "auth.admin.users.passkeys.delete.anon"
+description = "Admin passkey delete with the anon key is forbidden"
+units = ["auth:route:DELETE /auth/v1/admin/users/{user_id}/passkeys/{passkey_id}"]
+[[case.step]]
+method = "DELETE"
+path = "/auth/v1/admin/users/00000000-0000-0000-0000-000000000001/passkeys/00000000-0000-0000-0000-000000000002"
+
+[[case]]
+id = "auth.admin.users.passkeys.delete.missing-user"
+description = "Admin passkey delete loads the user first and returns user_not_found"
+units = ["auth:route:DELETE /auth/v1/admin/users/{user_id}/passkeys/{passkey_id}"]
+[[case.step]]
+method = "DELETE"
+path = "/auth/v1/admin/users/00000000-0000-0000-0000-000000000001/passkeys/00000000-0000-0000-0000-000000000002"
+key = "service_role"
