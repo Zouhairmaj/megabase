@@ -266,9 +266,10 @@ Physically impossible for the agent (repository settings or credentials):
       badge (Scorecard CII-Best-Practices; long-horizon)
 - [ ] After the first GHCR push, confirm
       `ghcr.io/zouhairmaj/megabase` is public (Settings → Packages).
-      Then dispatch **Release** with tag `v0.1.0` so that release gains
-      signed assets (it shipped without binaries). Scorecard
-      Signed-Releases looks at the last five GitHub Releases.
+      Then dispatch **Release** from tag `v0.1.0` (Use workflow from =
+      `v0.1.0`) so that release gains signed assets (it shipped without
+      binaries). Scorecard Signed-Releases looks at the last five
+      GitHub Releases.
 
 Log each of these in `HUMAN_LOG.md` when it is done. The delegation of
 decisions itself is a human intervention to log.

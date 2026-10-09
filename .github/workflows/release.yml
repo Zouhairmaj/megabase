@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing GitHub Release tag to sign and publish (for example v0.1.0)
+        description: Existing GitHub Release tag to sign and publish. Use workflow from must be this same tag (attest-build-provenance records the run SHA).
         required: true
         type: string
 
@@ -17,6 +17,7 @@ permissions:
 jobs:
   release-please:
     name: release-please
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -48,7 +49,7 @@ jobs:
   sync-lockfile:
     name: Sync Cargo.lock
     needs: release-please
-    if: ${{ always() && !cancelled() }}
+    if: ${{ github.event_name == 'push' && always() && !cancelled() }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -232,7 +233,7 @@ jobs:
   build-binaries:
     name: Build ${{ matrix.target }}
     needs: release-please
-    if: needs.release-please.outputs.release_created == 'true' || github.event_name == 'workflow_dispatch'
+    if: always() && !cancelled() && (github.event_name == 'workflow_dispatch' || needs.release-please.outputs.release_created == 'true')
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
     permissions:
@@ -252,6 +253,19 @@ jobs:
         with:
           ref: ${{ env.TAG }}
           persist-credentials: false
+      - name: Require run SHA matches the release tag
+        run: |
+          set -euo pipefail
+          EXPECTED="$(git rev-parse "${TAG}^{commit}")"
+          HEAD_SHA="$(git rev-parse HEAD)"
+          if [ "${HEAD_SHA}" != "${EXPECTED}" ]; then
+            echo "::error::Checked-out HEAD ${HEAD_SHA} is not tag ${TAG} (${EXPECTED})"
+            exit 1
+          fi
+          if [ "${GITHUB_SHA}" != "${EXPECTED}" ]; then
+            echo "::error::Dispatch Release from tag ${TAG} (Use workflow from = ${TAG}). attest-build-provenance records the run SHA (${GITHUB_SHA}), not the checkout ref (${EXPECTED})."
+            exit 1
+          fi
       - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
         with:
           toolchain: stable
@@ -296,7 +310,7 @@ jobs:
   sign-and-publish:
     name: Sign and publish
     needs: [release-please, build-binaries]
-    if: needs.release-please.outputs.release_created == 'true' || github.event_name == 'workflow_dispatch'
+    if: always() && !cancelled() && needs.build-binaries.result == 'success' && (github.event_name == 'workflow_dispatch' || needs.release-please.outputs.release_created == 'true')
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:
@@ -312,6 +326,19 @@ jobs:
         with:
           ref: ${{ env.TAG }}
           persist-credentials: false
+      - name: Require run SHA matches the release tag
+        run: |
+          set -euo pipefail
+          EXPECTED="$(git rev-parse "${TAG}^{commit}")"
+          HEAD_SHA="$(git rev-parse HEAD)"
+          if [ "${HEAD_SHA}" != "${EXPECTED}" ]; then
+            echo "::error::Checked-out HEAD ${HEAD_SHA} is not tag ${TAG} (${EXPECTED})"
+            exit 1
+          fi
+          if [ "${GITHUB_SHA}" != "${EXPECTED}" ]; then
+            echo "::error::Dispatch Release from tag ${TAG} (Use workflow from = ${TAG}). attest-build-provenance records the run SHA (${GITHUB_SHA}), not the checkout ref (${EXPECTED})."
+            exit 1
+          fi
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: megabase-binary-*
