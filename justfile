@@ -52,6 +52,10 @@ judge:
 backlog:
     cargo run --locked -p megabase-backlog -- sync
 
+# Gateway smoke benches (Criterion). CI tracks them with Bencher.
+bench:
+    cargo bench --locked --bench health
+
 ci: fmt-check lint test coverage-check
 
 clean:

@@ -63,3 +63,7 @@ cargo run -p megabase-backlog -- sync
 The command is idempotent: it upserts milestones, labels, Project fields,
 epics and task issues from `coverage/units.json` plus the infra / judge /
 spec / website epics. GitHub write access is required (issues, project).
+
+Board **Status** is kept in sync with branches, PRs and the `blocked` label
+by `.github/workflows/board-sync.yml` (secret `PROJECT_TOKEN`). Agents still
+claim the issue themselves before starting work; see `CONTRIBUTING.md`.

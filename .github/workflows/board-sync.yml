@@ -1,0 +1,416 @@
+# Keep GitHub Project "Megabase Backlog" Status aligned with reality.
+# Requires repo secret PROJECT_TOKEN: a classic PAT with the `project` scope
+# (the default GITHUB_TOKEN cannot set Project v2 field values).
+name: Board sync
+
+on:
+  create:
+  issues:
+    types: [assigned, unassigned, labeled, unlabeled, closed, reopened]
+  pull_request:
+    types: [opened, reopened, ready_for_review, converted_to_draft, closed]
+  schedule:
+    - cron: "0 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
+
+concurrency:
+  group: board-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Sync Status
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    env:
+      PROJECT_TOKEN: ${{ secrets.PROJECT_TOKEN }}
+      PROJECT_TITLE: Megabase Backlog
+    steps:
+      - name: Skip without PROJECT_TOKEN
+        if: env.PROJECT_TOKEN == ''
+        run: |
+          echo "PROJECT_TOKEN is not set; skipping board sync."
+          echo "Add a classic PAT with the project scope as the PROJECT_TOKEN repo secret."
+
+      - name: Update project Status
+        if: env.PROJECT_TOKEN != ''
+        uses: actions/github-script@v7
+        env:
+          EVENT_ACTION: ${{ github.event.action }}
+          REF_TYPE: ${{ github.event.ref_type }}
+          REF_NAME: ${{ github.event.ref }}
+        with:
+          github-token: ${{ secrets.PROJECT_TOKEN }}
+          script: |
+            const PROJECT_TITLE = process.env.PROJECT_TITLE;
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const canonical = [
+              "Backlog",
+              "Ready",
+              "In progress",
+              "In review",
+              "Blocked",
+              "Done",
+            ];
+            const closeRe =
+              /\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(\d+)/gi;
+
+            function issueFromBranch(name) {
+              const m = String(name || "").match(/(?:^|\/)issue-(\d+)(?=-|$)/);
+              return m ? Number(m[1]) : null;
+            }
+
+            function issuesFromText(text) {
+              const out = [];
+              if (!text) return out;
+              closeRe.lastIndex = 0;
+              let m;
+              while ((m = closeRe.exec(text))) out.push(Number(m[1]));
+              return out;
+            }
+
+            function norm(name) {
+              return String(name || "").toLowerCase().replace(/\s+/g, " ").trim();
+            }
+
+            async function findProject() {
+              const data = await github.graphql(
+                `query($login: String!) {
+                  user(login: $login) {
+                    projectsV2(first: 50) {
+                      nodes { id number title }
+                    }
+                  }
+                  organization(login: $login) {
+                    projectsV2(first: 50) {
+                      nodes { id number title }
+                    }
+                  }
+                }`,
+                { login: owner }
+              );
+              const nodes = [
+                ...(data.user?.projectsV2?.nodes || []),
+                ...(data.organization?.projectsV2?.nodes || []),
+              ];
+              const project = nodes.find((p) => p.title === PROJECT_TITLE);
+              if (!project) {
+                throw new Error(
+                  `Project "${PROJECT_TITLE}" not found for ${owner}. Create it (just backlog) and set PROJECT_TOKEN.`
+                );
+              }
+              const fieldData = await github.graphql(
+                `query($id: ID!) {
+                  node(id: $id) {
+                    ... on ProjectV2 {
+                      field(name: "Status") {
+                        ... on ProjectV2SingleSelectField {
+                          id
+                          options { id name }
+                        }
+                      }
+                    }
+                  }
+                }`,
+                { id: project.id }
+              );
+              const field = fieldData.node?.field;
+              if (!field?.id || !field.options) {
+                throw new Error(
+                  `Project "${PROJECT_TITLE}" has no Status single-select field.`
+                );
+              }
+              const options = {};
+              for (const name of canonical) {
+                const opt = field.options.find((o) => norm(o.name) === norm(name));
+                if (!opt) {
+                  const have = field.options.map((o) => o.name).join(", ");
+                  throw new Error(
+                    `Status option "${name}" missing on "${PROJECT_TITLE}". Have: ${have}`
+                  );
+                }
+                options[name] = opt;
+              }
+              return { ...project, fieldId: field.id, options };
+            }
+
+            async function loadIssue(number) {
+              const data = await github.graphql(
+                `query($owner: String!, $name: String!, $number: Int!) {
+                  repository(owner: $owner, name: $name) {
+                    issue(number: $number) {
+                      id
+                      number
+                      state
+                      assignees(first: 10) { nodes { login } }
+                      labels(first: 40) { nodes { name } }
+                      projectItems(first: 30) {
+                        nodes {
+                          id
+                          project { id title }
+                          fieldValueByName(name: "Status") {
+                            ... on ProjectV2ItemFieldSingleSelectValue { name }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }`,
+                { owner, name: repo, number }
+              );
+              return data.repository.issue;
+            }
+
+            async function loadOpenPulls() {
+              const pulls = [];
+              let cursor = null;
+              for (;;) {
+                const data = await github.graphql(
+                  `query($owner: String!, $name: String!, $cursor: String) {
+                    repository(owner: $owner, name: $name) {
+                      pullRequests(states: OPEN, first: 50, after: $cursor) {
+                        pageInfo { hasNextPage endCursor }
+                        nodes {
+                          number
+                          isDraft
+                          body
+                          headRefName
+                          closingIssuesReferences(first: 20) {
+                            nodes { number }
+                          }
+                        }
+                      }
+                    }
+                  }`,
+                  { owner, name: repo, cursor }
+                );
+                const conn = data.repository.pullRequests;
+                pulls.push(...conn.nodes);
+                if (!conn.pageInfo.hasNextPage) break;
+                cursor = conn.pageInfo.endCursor;
+              }
+              return pulls;
+            }
+
+            async function branchesForIssue(n) {
+              const found = [];
+              for (const ref of [`heads/issue-${n}`, `heads/cursor/issue-${n}`]) {
+                try {
+                  const { data } = await github.rest.git.listMatchingRefs({
+                    owner,
+                    repo,
+                    ref,
+                  });
+                  for (const row of data) {
+                    const name = row.ref.replace(/^refs\/heads\//, "");
+                    if (issueFromBranch(name) === n) found.push(name);
+                  }
+                } catch (err) {
+                  if (err.status !== 404) throw err;
+                }
+              }
+              return found;
+            }
+
+            function pullsForIssue(pulls, n) {
+              return pulls.filter((pr) => {
+                if (issueFromBranch(pr.headRefName) === n) return true;
+                if ((pr.closingIssuesReferences?.nodes || []).some((i) => i.number === n)) {
+                  return true;
+                }
+                return issuesFromText(pr.body).includes(n);
+              });
+            }
+
+            function desiredStatus({ closed, blocked, readyPr, claimed }) {
+              if (closed) return "Done";
+              if (blocked) return "Blocked";
+              if (readyPr) return "In review";
+              if (claimed) return "In progress";
+              return "Ready";
+            }
+
+            async function ensureItem(project, issue) {
+              let item = (issue.projectItems?.nodes || []).find(
+                (n) => n.project && n.project.id === project.id
+              );
+              if (item) return item;
+              const added = await github.graphql(
+                `mutation($projectId: ID!, $contentId: ID!) {
+                  addProjectV2ItemById(input: { projectId: $projectId, contentId: $contentId }) {
+                    item { id }
+                  }
+                }`,
+                { projectId: project.id, contentId: issue.id }
+              );
+              return { id: added.addProjectV2ItemById.item.id, fieldValueByName: null };
+            }
+
+            async function setStatus(project, item, status, issueNumber, current) {
+              if (current && norm(current) === norm(status)) {
+                core.info(`#${issueNumber} already ${status}`);
+                return false;
+              }
+              await github.graphql(
+                `mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $optionId: String!) {
+                  updateProjectV2ItemFieldValue(input: {
+                    projectId: $projectId
+                    itemId: $itemId
+                    fieldId: $fieldId
+                    value: { singleSelectOptionId: $optionId }
+                  }) { projectV2Item { id } }
+                }`,
+                {
+                  projectId: project.id,
+                  itemId: item.id,
+                  fieldId: project.fieldId,
+                  optionId: project.options[status].id,
+                }
+              );
+              core.info(`#${issueNumber}: ${current || "(none)"} → ${status}`);
+              return true;
+            }
+
+            async function applyIssue(project, number, openPulls) {
+              const issue = await loadIssue(number);
+              if (!issue) {
+                core.warning(`Issue #${number} not found`);
+                return;
+              }
+              const closed = issue.state === "CLOSED";
+              const blocked = (issue.labels?.nodes || []).some(
+                (l) => l.name === "blocked"
+              );
+              const assigned = (issue.assignees?.nodes || []).length > 0;
+              const linked = pullsForIssue(openPulls, number);
+              const readyPr = linked.some((pr) => !pr.isDraft);
+              const draftPr = linked.some((pr) => pr.isDraft);
+              const branches = await branchesForIssue(number);
+              const claimed = assigned || draftPr || branches.length > 0;
+              const current =
+                (issue.projectItems?.nodes || []).find(
+                  (n) => n.project && n.project.id === project.id
+                )?.fieldValueByName?.name || null;
+              let desired = desiredStatus({ closed, blocked, readyPr, claimed });
+              // Orchestrator fills Ready. Do not promote unclaimed Backlog items.
+              if (desired === "Ready" && (!current || norm(current) === "backlog")) {
+                desired = "Backlog";
+              }
+              const item = await ensureItem(project, issue);
+              await setStatus(project, item, desired, number, current);
+            }
+
+            async function issueNumbersFromEvent(openPulls) {
+              const nums = new Set();
+              const p = context.payload;
+              if (context.eventName === "create") {
+                if (process.env.REF_TYPE !== "branch") return nums;
+                const n = issueFromBranch(process.env.REF_NAME);
+                if (n) nums.add(n);
+                return nums;
+              }
+              if (context.eventName === "issues") {
+                const action = process.env.EVENT_ACTION;
+                if (action === "labeled" || action === "unlabeled") {
+                  const label = p.label?.name;
+                  if (label !== "blocked") return nums;
+                }
+                if (p.issue?.number) nums.add(p.issue.number);
+                return nums;
+              }
+              if (context.eventName === "pull_request") {
+                const pr = p.pull_request;
+                const n = issueFromBranch(pr.head.ref);
+                if (n) nums.add(n);
+                for (const x of issuesFromText(pr.body)) nums.add(x);
+                const data = await github.graphql(
+                  `query($owner: String!, $name: String!, $number: Int!) {
+                    repository(owner: $owner, name: $name) {
+                      pullRequest(number: $number) {
+                        closingIssuesReferences(first: 20) { nodes { number } }
+                      }
+                    }
+                  }`,
+                  { owner, name: repo, number: pr.number }
+                );
+                for (const i of data.repository.pullRequest.closingIssuesReferences.nodes) {
+                  nums.add(i.number);
+                }
+                return nums;
+              }
+              return nums;
+            }
+
+            async function projectIssueNumbers(project) {
+              const nums = new Set();
+              let cursor = null;
+              for (;;) {
+                const data = await github.graphql(
+                  `query($id: ID!, $cursor: String) {
+                    node(id: $id) {
+                      ... on ProjectV2 {
+                        items(first: 50, after: $cursor) {
+                          pageInfo { hasNextPage endCursor }
+                          nodes {
+                            content {
+                              ... on Issue { number }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }`,
+                  { id: project.id, cursor }
+                );
+                const conn = data.node.items;
+                for (const n of conn.nodes) {
+                  if (n.content?.number) nums.add(n.content.number);
+                }
+                if (!conn.pageInfo.hasNextPage) break;
+                cursor = conn.pageInfo.endCursor;
+              }
+              return nums;
+            }
+
+            const project = await findProject();
+            const openPulls = await loadOpenPulls();
+            const reconcile =
+              context.eventName === "schedule" ||
+              context.eventName === "workflow_dispatch";
+
+            let numbers;
+            if (reconcile) {
+              numbers = await projectIssueNumbers(project);
+              core.info(`Reconcile: ${numbers.size} project issues`);
+            } else {
+              numbers = await issueNumbersFromEvent(openPulls);
+              core.info(`Event ${context.eventName}: issues ${[...numbers].join(", ") || "(none)"}`);
+            }
+
+            // Merged PR with Closes #n: GitHub may not have closed the issue yet.
+            if (
+              context.eventName === "pull_request" &&
+              context.payload.pull_request?.merged
+            ) {
+              for (const n of numbers) {
+                const issue = await loadIssue(n);
+                if (!issue) continue;
+                const item = await ensureItem(project, issue);
+                const current =
+                  (issue.projectItems?.nodes || []).find(
+                    (x) => x.project && x.project.id === project.id
+                  )?.fieldValueByName?.name || null;
+                await setStatus(project, item, "Done", n, current);
+              }
+              return;
+            }
+
+            for (const n of numbers) {
+              await applyIssue(project, n, openPulls);
+            }

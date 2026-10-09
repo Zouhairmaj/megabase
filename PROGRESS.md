@@ -104,6 +104,16 @@ waiting on a human.
     `bump-minor-pre-major`). Changelog sections: Features, Bug Fixes,
     Performance, Conformance/judge, Documentation. `chore` / `ci` / `test`
     are hidden. Release bodies include coverage and conformance deltas.
+12. **Board Status reflects reality.** Agents claim an issue (assign +
+    **In progress**, branch `issue-<n>-<slug>`, PR `Closes #<n>`) before
+    coding. `.github/workflows/board-sync.yml` mirrors Status from those
+    signals plus `blocked`. GOAL.md is unchanged (human-owned); the
+    contract is in `CONTRIBUTING.md`.
+13. **Continuous benchmarking.** Criterion benches start with a trivial
+    gateway health/route measurement. Bencher project `megabase` (created
+    on the fly if missing) tracks `main` and PRs (`rust_criterion`, t-test
+    upper boundary 0.99, `--error-on-alert`). Fork PRs skip without the
+    secret.
 
 ## Tracking
 
@@ -141,6 +151,11 @@ None.
 - [x] Brand (Kite-aligned SVGs, palette, design-first rule)
 - [x] Supply chain: CodeRabbit, cargo-deny, cargo-audit, Renovate,
       OpenSSF Scorecard, Codecov (`cargo llvm-cov`)
+- [x] Continuous benchmarking: Criterion `health` bench, Bencher
+      (`rust_criterion`, project `megabase`, t-test 0.99 on PRs)
+- [x] Board sync: `.github/workflows/board-sync.yml` keeps **Megabase
+      Backlog** Status aligned with `issue-<n>-*` branches, PRs and
+      `blocked` (needs repo secret `PROJECT_TOKEN`)
 
 **Not claimed complete until this PR is green and ready for review.**
 
@@ -158,6 +173,8 @@ Physically impossible for the agent (repository settings or credentials):
 - [ ] Dedicated bot / GitHub App for agents
 - [ ] Run `just backlog` with a token that can write issues and Projects,
       so **Megabase Backlog** is filled from `coverage/units.json`
+- [ ] Set repo secret `PROJECT_TOKEN` (classic PAT, `project` scope) so
+      board-sync can write the Status field
 - [ ] Confirm the Kite file is readable by agents who implement UI
 
 Log each of these in `HUMAN_LOG.md` when it is done. The delegation of
