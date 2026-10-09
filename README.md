@@ -90,6 +90,7 @@ See [`docs/brand/README.md`](docs/brand/README.md).
 
 Humans: [CONTRIBUTING.md](CONTRIBUTING.md). Agents: [AGENTS.md](AGENTS.md).
 [Issues](https://github.com/Zouhairmaj/megabase/issues).
+Security reports: [SECURITY.md](SECURITY.md).
 
 ## License
 
