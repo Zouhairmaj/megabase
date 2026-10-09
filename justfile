@@ -1,4 +1,5 @@
 # Megabase commands. Only recipes that actually work are listed.
+# Canonical names AGENTS.md will reference: build, test, lint, judge, coverage.
 
 default:
     @just --list
@@ -48,9 +49,13 @@ judge:
     cargo run --locked -p megabase-judge -- run --cases judge/cases --out coverage/judge-results.json --baseline coverage/judge-results.json --summary /tmp/judge-summary.md
     @cat /tmp/judge-summary.md
 
-# Upsert GitHub milestones, labels, Project, epics (needs issues+project write).
+# Upsert GitHub milestones, labels, Project fields (needs issues+project write).
+# Matches existing issues by <!-- megabase-id -->; never recreates them.
 backlog:
     cargo run --locked -p megabase-backlog -- sync
+
+backlog-dry:
+    cargo run --locked -p megabase-backlog -- sync --dry-run
 
 # Gateway smoke benches (Criterion). CI tracks them with Bencher.
 bench:

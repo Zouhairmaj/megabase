@@ -1,8 +1,9 @@
 //! Generate a PM-quality backlog from `coverage/units.json` and optionally
 //! sync it to GitHub (milestones, labels, Project "Megabase Backlog").
 //!
-//!   cargo run -p megabase-backlog -- plan    # write docs/backlog/PLAN.md
-//!   cargo run -p megabase-backlog -- sync    # plan + GitHub (needs write)
+//!   cargo run -p megabase-backlog -- plan
+//!   cargo run -p megabase-backlog -- sync
+//!   cargo run -p megabase-backlog -- sync --dry-run
 
 mod github;
 mod plan;
@@ -12,6 +13,7 @@ use std::process::ExitCode;
 
 use anyhow::{bail, Context, Result};
 
+use github::Sync;
 use plan::{build, render_markdown, UnitsFile};
 
 fn repo_root() -> Result<PathBuf> {
@@ -39,7 +41,7 @@ fn write_plan(root: &Path, markdown: &str) -> Result<()> {
     Ok(())
 }
 
-fn sync(root: &Path) -> Result<()> {
+fn sync(root: &Path, dry_run: bool) -> Result<()> {
     let units = load_units(root)?;
     let items = build(&units.units);
     write_plan(root, &render_markdown(&items))?;
@@ -49,21 +51,30 @@ fn sync(root: &Path) -> Result<()> {
         bail!("backlog has {total} items; split fewer child issues (cap 150)");
     }
 
-    github::ensure_labels().context("labels")?;
-    let milestones = github::ensure_milestones().context("milestones")?;
-    let (project_id, project_number) = github::find_or_create_project().context("project")?;
-    github::ensure_project_fields(project_number).ok();
-    github::ensure_views(&project_id).ok();
-    let issues = github::ensure_issues(&items, &milestones).context("issues")?;
-    github::add_to_project(project_number, &issues, &items).ok();
-    github::set_fields_and_status(&project_id, project_number, &issues, &items).ok();
+    let sync = Sync { dry_run };
+    if dry_run {
+        eprintln!("dry-run: no GitHub writes");
+    }
+
+    github::ensure_labels(&sync).context("labels")?;
+    let milestones = github::ensure_milestones(&sync).context("milestones")?;
+    let (project_id, project_number) = github::find_project().context("project")?;
+    let mut existing = github::load_issues_by_id().context("list issues")?;
+    github::ensure_issues(&sync, &items, &mut existing, &milestones).context("issues")?;
+    github::apply_project(&sync, &project_id, &items, &existing).context("project fields")?;
     eprintln!("synced {total} items to GitHub project {project_number}");
     Ok(())
 }
 
 fn main() -> ExitCode {
-    let cmd = std::env::args().nth(1).unwrap_or_else(|| "plan".into());
-    let result = repo_root().and_then(|root| match cmd.as_str() {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let dry_run = args.iter().any(|a| a == "--dry-run");
+    let cmd = args
+        .iter()
+        .find(|a| !a.starts_with('-'))
+        .map(String::as_str)
+        .unwrap_or("plan");
+    let result = repo_root().and_then(|root| match cmd {
         "plan" => {
             let units = load_units(&root)?;
             let items = build(&units.units);
@@ -71,8 +82,8 @@ fn main() -> ExitCode {
             eprintln!("{epics} epics, {tasks} sub-issues, {total} total");
             write_plan(&root, &render_markdown(&items))
         }
-        "sync" => sync(&root),
-        other => bail!("unknown command `{other}` (plan | sync)"),
+        "sync" => sync(&root, dry_run),
+        other => bail!("unknown command `{other}` (plan | sync [--dry-run])"),
     });
     match result {
         Ok(()) => ExitCode::SUCCESS,

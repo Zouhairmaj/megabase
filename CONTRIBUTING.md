@@ -131,18 +131,21 @@ CodeRabbit enforces the same GOAL.md rules as this file: `vendor/` and
 return 501 `MEGABASE_NOT_IMPLEMENTED`, tests are not weakened to pass CI,
 and upstream files are credited.
 
-## Commands that exist today
+## Commands
 
-```bash
-cargo test --workspace
-cargo clippy --workspace --all-targets -- -D warnings
-cargo fmt --all -- --check
-cargo bench --locked --bench health
-cargo run -p megabase-coverage -- check
-cargo run -p megabase-guard -- --base origin/main --head HEAD --head-ref "$BRANCH"
-```
+`just` is the command index (`just --list`). These recipe names are the ones
+a forthcoming root `AGENTS.md` will reference:
 
-The judge and the backlog sync are documented in `justfile`.
+| Recipe | What it runs |
+|---|---|
+| `just build` | `cargo build --release --locked -p megabase` |
+| `just test` | `cargo test --workspace --locked` |
+| `just lint` | `cargo clippy --workspace --all-targets -- -D warnings` |
+| `just judge` | Compare Megabase to the pinned reference stack (needs `just judge-up`) |
+| `just coverage` | Regenerate units, treemaps and README status from `vendor/` |
+
+Related recipes: `just fmt` / `just fmt-check`, `just coverage-check`,
+`just guard`, `just bench`, `just backlog` / `just backlog-dry`.
 
 ## Rust only
 

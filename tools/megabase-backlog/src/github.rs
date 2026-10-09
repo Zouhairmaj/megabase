@@ -1,11 +1,13 @@
-//! Talk to GitHub through `gh`. Every write is idempotent.
+//! Talk to GitHub through `gh`. Writes are idempotent: existing issues are
+//! matched by `<!-- megabase-id: … -->` and never recreated.
 
-use std::collections::BTreeMap;
-use std::process::Command;
+use std::collections::{BTreeMap, BTreeSet};
+use std::io::Write;
+use std::process::{Command, Stdio};
 
 use anyhow::{bail, Context, Result};
 use serde::Deserialize;
-use serde_json::Value;
+use serde_json::{json, Value};
 
 use crate::plan::Item;
 
@@ -24,6 +26,7 @@ const LABELS: &[(&str, &str, &str)] = &[
     ("component:studio", "009366", "Studio"),
     ("component:core", "303235", "Shared core"),
     ("component:judge", "005441", "Judge"),
+    ("component:website", "303235", "Public website"),
     ("level:1", "00D892", "Level 1 — REST + email/password Auth"),
     ("level:2", "009366", "Level 2 — OAuth, magic links, Storage"),
     ("level:3", "005441", "Level 3 — Realtime"),
@@ -66,6 +69,10 @@ const MILESTONES: &[(&str, &str)] = &[
     ),
 ];
 
+/// Status values the generator may assign. Live columns (In progress, In
+/// review, Blocked, Done) are left alone so board-sync can reflect reality.
+const GENERATOR_STATUSES: &[&str] = &["Backlog", "Ready"];
+
 fn gh(args: &[&str]) -> Result<String> {
     let out = Command::new("gh")
         .args(args)
@@ -87,8 +94,140 @@ fn gh_json(args: &[&str]) -> Result<Value> {
     serde_json::from_str(&text).context("parsing gh json")
 }
 
-pub fn ensure_labels() -> Result<()> {
+fn graphql(query: &str, variables: Value) -> Result<Value> {
+    let payload = json!({ "query": query, "variables": variables });
+    let mut child = Command::new("gh")
+        .args(["api", "graphql", "--input", "-"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .context("spawn gh api graphql")?;
+    child
+        .stdin
+        .take()
+        .context("graphql stdin")?
+        .write_all(payload.to_string().as_bytes())?;
+    let out = child.wait_with_output().context("gh api graphql")?;
+    let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
+    if !out.status.success() {
+        let err = String::from_utf8_lossy(&out.stderr);
+        bail!("graphql failed: {err}{stdout}");
+    }
+    let v: Value = serde_json::from_str(&stdout).context("parsing graphql json")?;
+    if let Some(errors) = v.get("errors").and_then(|e| e.as_array()) {
+        if !errors.is_empty() {
+            bail!("graphql errors: {errors:?}");
+        }
+    }
+    Ok(v["data"].clone())
+}
+
+fn graphql_ok(query: &str, variables: Value) -> Result<Value> {
+    match graphql(query, variables) {
+        Ok(v) => Ok(v),
+        Err(err) => {
+            let msg = format!("{err:#}");
+            if already_linked(&msg) {
+                Ok(Value::Null)
+            } else {
+                Err(err)
+            }
+        }
+    }
+}
+
+fn already_linked(msg: &str) -> bool {
+    let m = msg.to_lowercase();
+    m.contains("already")
+        || m.contains("duplicate")
+        || m.contains("sub-issue") && m.contains("exist")
+}
+
+pub fn parse_megabase_id(body: &str) -> Option<String> {
+    for line in body.lines() {
+        let line = line.trim();
+        let rest = line.strip_prefix("<!-- megabase-id:")?;
+        let id = rest.strip_suffix("-->")?.trim();
+        if !id.is_empty() {
+            return Some(id.to_string());
+        }
+    }
+    None
+}
+
+pub fn counts(items: &[Item]) -> (usize, usize, usize) {
+    let epics = items.iter().filter(|i| i.parent.is_none()).count();
+    let tasks = items.iter().filter(|i| i.parent.is_some()).count();
+    (epics, tasks, items.len())
+}
+
+pub fn priority_option(item: &Item) -> &'static str {
+    if item.status == "Ready" && item.priority >= 1000 {
+        "P0"
+    } else if item.status == "Ready" {
+        "P1"
+    } else if item.level == Some(2) {
+        "P2"
+    } else {
+        "P3"
+    }
+}
+
+pub fn level_option(item: &Item) -> &'static str {
+    match item.level {
+        Some(1) => "Level 1",
+        Some(2) => "Level 2",
+        Some(3) => "Level 3",
+        Some(4) => "Level 4",
+        Some(5) => "Level 5",
+        _ => "No level",
+    }
+}
+
+/// Whether the generator may write `desired` over `current` Status.
+pub fn may_set_status(current: Option<&str>, desired: &str) -> bool {
+    if !GENERATOR_STATUSES.contains(&desired) {
+        return false;
+    }
+    match current {
+        None => true,
+        Some(s) => GENERATOR_STATUSES.iter().any(|g| eq_ignore_space(g, s)),
+    }
+}
+
+fn eq_ignore_space(a: &str, b: &str) -> bool {
+    a.eq_ignore_ascii_case(b.trim())
+}
+
+pub struct Sync {
+    pub dry_run: bool,
+}
+
+impl Sync {
+    fn note(&self, msg: &str) {
+        if self.dry_run {
+            eprintln!("dry-run: {msg}");
+        } else {
+            eprintln!("{msg}");
+        }
+    }
+
+    fn mutate(&self, desc: &str, query: &str, variables: Value) -> Result<Value> {
+        if self.dry_run {
+            eprintln!("dry-run: {desc}");
+            return Ok(Value::Null);
+        }
+        graphql_ok(query, variables)
+    }
+}
+
+pub fn ensure_labels(sync: &Sync) -> Result<()> {
     for (name, color, desc) in LABELS {
+        if sync.dry_run {
+            sync.note(&format!("ensure label {name}"));
+            continue;
+        }
         let created = Command::new("gh")
             .args([
                 "label",
@@ -126,7 +265,7 @@ struct Milestone {
     number: u64,
 }
 
-pub fn ensure_milestones() -> Result<BTreeMap<String, u64>> {
+pub fn ensure_milestones(sync: &Sync) -> Result<BTreeMap<String, u64>> {
     let existing: Vec<Milestone> = serde_json::from_str(&gh(&[
         "api",
         &format!("repos/{REPO}/milestones?state=all&per_page=100"),
@@ -135,18 +274,11 @@ pub fn ensure_milestones() -> Result<BTreeMap<String, u64>> {
         existing.into_iter().map(|m| (m.title, m.number)).collect();
     for (title, description) in MILESTONES {
         if let Some(n) = map.get(*title) {
-            let body = serde_json::json!({ "title": title, "description": description });
-            gh(&[
-                "api",
-                "-X",
-                "PATCH",
-                &format!("repos/{REPO}/milestones/{n}"),
-                "-f",
-                &format!("description={description}"),
-            ])
-            .ok();
-            let _ = body;
-            eprintln!("milestone {title} #{n}");
+            sync.note(&format!("milestone {title} #{n}"));
+            continue;
+        }
+        if sync.dry_run {
+            sync.note(&format!("would create milestone {title}"));
             continue;
         }
         let created = gh_json(&[
@@ -166,7 +298,7 @@ pub fn ensure_milestones() -> Result<BTreeMap<String, u64>> {
     Ok(map)
 }
 
-pub fn find_or_create_project() -> Result<(String, u64)> {
+pub fn find_project() -> Result<(String, u64)> {
     let list = gh_json(&[
         "project", "list", "--owner", OWNER, "--limit", "50", "--format", "json",
     ])?;
@@ -180,14 +312,7 @@ pub fn find_or_create_project() -> Result<(String, u64)> {
             }
         }
     }
-    let created = gh_json(&[
-        "project", "create", "--owner", OWNER, "--title", PROJECT, "--format", "json",
-    ])?;
-    eprintln!("created project {PROJECT}");
-    Ok((
-        created["id"].as_str().unwrap_or("").into(),
-        created["number"].as_u64().unwrap_or(0),
-    ))
+    bail!("GitHub Project `{PROJECT}` not found for {OWNER}")
 }
 
 fn issue_labels(item: &Item) -> Vec<String> {
@@ -201,21 +326,25 @@ fn issue_labels(item: &Item) -> Vec<String> {
     labels
 }
 
-#[derive(Deserialize)]
-struct Issue {
-    number: u64,
-    body: Option<String>,
-    html_url: String,
+#[derive(Debug, Clone)]
+pub struct ExistingIssue {
+    pub number: u64,
+    pub node_id: String,
 }
 
-pub fn ensure_issues(
-    items: &[Item],
-    milestones: &BTreeMap<String, u64>,
-) -> Result<BTreeMap<String, u64>> {
+#[derive(Deserialize)]
+struct IssueRow {
+    number: u64,
+    node_id: String,
+    body: Option<String>,
+    pull_request: Option<Value>,
+}
+
+pub fn load_issues_by_id() -> Result<BTreeMap<String, ExistingIssue>> {
     let mut by_key = BTreeMap::new();
     let mut page = 1u32;
     loop {
-        let batch: Vec<Issue> = serde_json::from_str(&gh(&[
+        let batch: Vec<IssueRow> = serde_json::from_str(&gh(&[
             "api",
             &format!("repos/{REPO}/issues?state=all&per_page=100&page={page}"),
         ])?)?;
@@ -224,227 +353,471 @@ pub fn ensure_issues(
         }
         let n = batch.len();
         for issue in batch {
+            if issue.pull_request.is_some() {
+                continue;
+            }
             if let Some(body) = &issue.body {
-                if let Some(key) = body.lines().find_map(|l| {
-                    l.strip_prefix("<!-- megabase-id: ")
-                        .and_then(|s| s.strip_suffix(" -->"))
-                }) {
-                    by_key.insert(key.to_string(), issue.number);
+                if let Some(key) = parse_megabase_id(body) {
+                    by_key.insert(
+                        key,
+                        ExistingIssue {
+                            number: issue.number,
+                            node_id: issue.node_id,
+                        },
+                    );
                 }
             }
-            let _ = issue.html_url;
         }
         if n < 100 {
             break;
         }
         page += 1;
     }
-
-    for item in items {
-        let labels = issue_labels(item).join(",");
-        let milestone = item.milestone.and_then(|t| milestones.get(t).copied());
-        if let Some(&number) = by_key.get(&item.key) {
-            let mut args = vec![
-                "issue".into(),
-                "edit".into(),
-                number.to_string(),
-                "-R".into(),
-                REPO.into(),
-                "--title".into(),
-                item.title.clone(),
-                "--body".into(),
-                item.body.clone(),
-                "--add-label".into(),
-                labels,
-            ];
-            if let Some(m) = milestone {
-                args.extend(["--milestone".into(), m.to_string()]);
-            }
-            let strs: Vec<&str> = args.iter().map(String::as_str).collect();
-            gh(&strs)?;
-            eprintln!("issue #{number} {}", item.key);
-        } else {
-            let mut args = vec![
-                "issue".into(),
-                "create".into(),
-                "-R".into(),
-                REPO.into(),
-                "--title".into(),
-                item.title.clone(),
-                "--body".into(),
-                item.body.clone(),
-                "--label".into(),
-                labels,
-            ];
-            if let Some(m) = milestone {
-                args.extend(["--milestone".into(), m.to_string()]);
-            }
-            let strs: Vec<&str> = args.iter().map(String::as_str).collect();
-            let url = gh(&strs)?;
-            let number = url
-                .trim()
-                .rsplit('/')
-                .next()
-                .and_then(|s| s.parse().ok())
-                .context("issue number from url")?;
-            by_key.insert(item.key.clone(), number);
-            eprintln!("issue #{number} {} (created)", item.key);
-        }
-    }
+    eprintln!("matched {} existing issues by megabase-id", by_key.len());
     Ok(by_key)
 }
 
-pub fn ensure_project_fields(project_number: u64) -> Result<()> {
-    let _ = project_number;
-    // Best-effort: GitHub Projects v2 field APIs differ by `gh` version.
-    for args in [
-        vec![
-            "project",
-            "field-create",
-            &project_number.to_string(),
-            "--owner",
-            OWNER,
-            "--name",
-            "component",
-            "--data-type",
-            "SINGLE_SELECT",
-            "--single-select-options",
-            "rest,auth,realtime,storage,functions,pooler,meta,studio,core,judge",
-        ],
-        vec![
-            "project",
-            "field-create",
-            &project_number.to_string(),
-            "--owner",
-            OWNER,
-            "--name",
-            "level",
-            "--data-type",
-            "NUMBER",
-        ],
-        vec![
-            "project",
-            "field-create",
-            &project_number.to_string(),
-            "--owner",
-            OWNER,
-            "--name",
-            "coverage delta",
-            "--data-type",
-            "NUMBER",
-        ],
-        vec![
-            "project",
-            "field-create",
-            &project_number.to_string(),
-            "--owner",
-            OWNER,
-            "--name",
-            "conformance delta",
-            "--data-type",
-            "NUMBER",
-        ],
-        vec![
-            "project",
-            "field-create",
-            &project_number.to_string(),
-            "--owner",
-            OWNER,
-            "--name",
-            "estimated effort",
-            "--data-type",
-            "SINGLE_SELECT",
-            "--single-select-options",
-            "S,M,L,XL",
-        ],
-    ] {
-        let _ = gh(&args);
+/// Create only issues whose megabase-id is not already on GitHub.
+pub fn ensure_issues(
+    sync: &Sync,
+    items: &[Item],
+    existing: &mut BTreeMap<String, ExistingIssue>,
+    milestones: &BTreeMap<String, u64>,
+) -> Result<()> {
+    let mut created = 0usize;
+    for item in items {
+        if existing.contains_key(&item.key) {
+            continue;
+        }
+        let labels = issue_labels(item).join(",");
+        let milestone = item.milestone.and_then(|t| milestones.get(t).copied());
+        if sync.dry_run {
+            sync.note(&format!("would create {} ({})", item.title, item.key));
+            created += 1;
+            continue;
+        }
+        let mut args = vec![
+            "issue".into(),
+            "create".into(),
+            "-R".into(),
+            REPO.into(),
+            "--title".into(),
+            item.title.clone(),
+            "--body".into(),
+            item.body.clone(),
+            "--label".into(),
+            labels,
+        ];
+        if let Some(m) = milestone {
+            args.extend(["--milestone".into(), m.to_string()]);
+        }
+        let strs: Vec<&str> = args.iter().map(String::as_str).collect();
+        let url = gh(&strs)?;
+        let number = url
+            .trim()
+            .rsplit('/')
+            .next()
+            .and_then(|s| s.parse().ok())
+            .context("issue number from url")?;
+        let row: Value =
+            serde_json::from_str(&gh(&["api", &format!("repos/{REPO}/issues/{number}")])?)?;
+        let node_id = row["node_id"]
+            .as_str()
+            .context("issue node_id")?
+            .to_string();
+        existing.insert(item.key.clone(), ExistingIssue { number, node_id });
+        created += 1;
+        eprintln!("issue #{number} {} (created)", item.key);
+    }
+    if created == 0 {
+        eprintln!("no issues to create (all megabase-id keys matched)");
+    } else {
+        eprintln!("{created} issues created");
     }
     Ok(())
 }
 
-pub fn add_to_project(
-    project_number: u64,
-    issues: &BTreeMap<String, u64>,
-    items: &[Item],
-) -> Result<()> {
-    for item in items {
-        let Some(&number) = issues.get(&item.key) else {
+struct SelectField {
+    id: String,
+    options: BTreeMap<String, String>,
+}
+
+impl SelectField {
+    fn option(&self, name: &str) -> Result<&str> {
+        self.options
+            .get(&name.to_ascii_lowercase())
+            .map(String::as_str)
+            .with_context(|| {
+                format!(
+                    "option `{name}` missing (have {})",
+                    self.options.keys().cloned().collect::<Vec<_>>().join(", ")
+                )
+            })
+    }
+}
+
+struct Schema {
+    status: SelectField,
+    level: SelectField,
+    component: SelectField,
+    size: SelectField,
+    priority: SelectField,
+}
+
+fn as_select(node: &Value) -> Option<SelectField> {
+    let id = node["id"].as_str()?.to_string();
+    let mut options = BTreeMap::new();
+    for opt in node["options"].as_array()? {
+        let name = opt["name"].as_str()?.to_string();
+        let oid = opt["id"].as_str()?.to_string();
+        options.insert(name.to_ascii_lowercase(), oid);
+    }
+    Some(SelectField { id, options })
+}
+
+fn load_schema(project_id: &str) -> Result<Schema> {
+    let data = graphql(
+        r#"query($id: ID!) {
+          node(id: $id) {
+            ... on ProjectV2 {
+              fields(first: 40) {
+                nodes {
+                  ... on ProjectV2SingleSelectField {
+                    id
+                    name
+                    options { id name }
+                  }
+                }
+              }
+            }
+          }
+        }"#,
+        json!({ "id": project_id }),
+    )?;
+    let mut status = None;
+    let mut level = None;
+    let mut component = None;
+    let mut size = None;
+    let mut priority = None;
+    for node in data["node"]["fields"]["nodes"]
+        .as_array()
+        .context("project fields")?
+    {
+        let name = node["name"].as_str().unwrap_or("");
+        let Some(field) = as_select(node) else {
             continue;
         };
-        let url = format!("https://github.com/{REPO}/issues/{number}");
-        let _ = gh(&[
-            "project",
-            "item-add",
-            &project_number.to_string(),
-            "--owner",
-            OWNER,
-            "--url",
-            &url,
-        ]);
+        match name {
+            "Status" => status = Some(field),
+            "Level" => level = Some(field),
+            "Component" => component = Some(field),
+            "Size" => size = Some(field),
+            "Priority" => priority = Some(field),
+            _ => {}
+        }
     }
-    Ok(())
+    let status = status.context("Status field")?;
+    status
+        .option("Blocked")
+        .context("Status must include Blocked")?;
+    for required in ["Backlog", "Ready", "In progress", "In review", "Done"] {
+        status.option(required)?;
+    }
+    Ok(Schema {
+        status,
+        level: level.context("Level field")?,
+        component: component.context("Component field")?,
+        size: size.context("Size field")?,
+        priority: priority.context("Priority field")?,
+    })
 }
 
-pub fn set_fields_and_status(
+struct ProjectItem {
+    id: String,
+    status: Option<String>,
+}
+
+fn load_project_items(project_id: &str) -> Result<BTreeMap<u64, ProjectItem>> {
+    let mut map = BTreeMap::new();
+    let mut cursor: Option<String> = None;
+    loop {
+        let data = graphql(
+            r#"query($id: ID!, $cursor: String) {
+              node(id: $id) {
+                ... on ProjectV2 {
+                  items(first: 50, after: $cursor) {
+                    pageInfo { hasNextPage endCursor }
+                    nodes {
+                      id
+                      fieldValueByName(name: "Status") {
+                        ... on ProjectV2ItemFieldSingleSelectValue { name }
+                      }
+                      content { ... on Issue { number } }
+                    }
+                  }
+                }
+              }
+            }"#,
+            json!({ "id": project_id, "cursor": cursor }),
+        )?;
+        let conn = &data["node"]["items"];
+        for node in conn["nodes"].as_array().context("project items")? {
+            let Some(number) = node["content"]["number"].as_u64() else {
+                continue;
+            };
+            map.insert(
+                number,
+                ProjectItem {
+                    id: node["id"].as_str().unwrap_or("").to_string(),
+                    status: node["fieldValueByName"]["name"]
+                        .as_str()
+                        .map(str::to_string),
+                },
+            );
+        }
+        if conn["pageInfo"]["hasNextPage"].as_bool() != Some(true) {
+            break;
+        }
+        cursor = conn["pageInfo"]["endCursor"].as_str().map(str::to_string);
+    }
+    Ok(map)
+}
+
+const SET_SELECT: &str = r#"
+mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $optionId: String!) {
+  updateProjectV2ItemFieldValue(input: {
+    projectId: $projectId
+    itemId: $itemId
+    fieldId: $fieldId
+    value: { singleSelectOptionId: $optionId }
+  }) { projectV2Item { id } }
+}"#;
+
+const ADD_ITEM: &str = r#"
+mutation($projectId: ID!, $contentId: ID!) {
+  addProjectV2ItemById(input: { projectId: $projectId, contentId: $contentId }) {
+    item { id }
+  }
+}"#;
+
+const ADD_SUB: &str = r#"
+mutation($issueId: ID!, $subIssueId: ID!) {
+  addSubIssue(input: { issueId: $issueId, subIssueId: $subIssueId }) {
+    subIssue { number }
+  }
+}"#;
+
+const ADD_BLOCKED: &str = r#"
+mutation($issueId: ID!, $blockingIssueId: ID!) {
+  addBlockedBy(input: { issueId: $issueId, blockingIssueId: $blockingIssueId }) {
+    issue { number }
+  }
+}"#;
+
+fn set_select(
+    sync: &Sync,
     project_id: &str,
-    project_number: u64,
-    issues: &BTreeMap<String, u64>,
-    items: &[Item],
+    item_id: &str,
+    field: &SelectField,
+    option: &str,
+    desc: &str,
 ) -> Result<()> {
-    let fields = gh_json(&[
-        "project",
-        "field-list",
-        &project_number.to_string(),
-        "--owner",
-        OWNER,
-        "--format",
-        "json",
-    ])
-    .unwrap_or(Value::Null);
-    let _ = (project_id, fields, issues, items);
-    // Status (Ready/Backlog) is set via the built-in Status field when the
-    // maintainer runs this with a write token. The PLAN.md documents the
-    // intended column. `gh project item-edit` flag names vary; we try common ones.
+    let option_id = field.option(option)?;
+    sync.mutate(
+        desc,
+        SET_SELECT,
+        json!({
+            "projectId": project_id,
+            "itemId": item_id,
+            "fieldId": field.id,
+            "optionId": option_id,
+        }),
+    )?;
+    Ok(())
+}
+
+pub fn apply_project(
+    sync: &Sync,
+    project_id: &str,
+    items: &[Item],
+    existing: &BTreeMap<String, ExistingIssue>,
+) -> Result<()> {
+    let schema = load_schema(project_id)?;
+    let mut on_board = if sync.dry_run {
+        load_project_items(project_id).unwrap_or_default()
+    } else {
+        load_project_items(project_id)?
+    };
+
     for item in items {
-        let Some(&number) = issues.get(&item.key) else {
+        let Some(issue) = existing.get(&item.key) else {
             continue;
         };
-        let url = format!("https://github.com/{REPO}/issues/{number}");
-        let _ = gh(&[
-            "project",
-            "item-edit",
-            "--id",
-            &url,
-            "--project-id",
+        if let std::collections::btree_map::Entry::Vacant(slot) = on_board.entry(issue.number) {
+            let data = sync.mutate(
+                &format!("add #{} to project", issue.number),
+                ADD_ITEM,
+                json!({ "projectId": project_id, "contentId": issue.node_id }),
+            )?;
+            if let Some(id) = data["addProjectV2ItemById"]["item"]["id"].as_str() {
+                slot.insert(ProjectItem {
+                    id: id.to_string(),
+                    status: None,
+                });
+            }
+        }
+    }
+    if !sync.dry_run {
+        on_board = load_project_items(project_id)?;
+    }
+
+    for item in items {
+        let Some(issue) = existing.get(&item.key) else {
+            continue;
+        };
+        let Some(row) = on_board.get(&issue.number) else {
+            if sync.dry_run {
+                sync.note(&format!(
+                    "would set fields on #{} ({})",
+                    issue.number, item.key
+                ));
+            }
+            continue;
+        };
+        let current = row.status.as_deref();
+        if may_set_status(current, item.status) {
+            set_select(
+                sync,
+                project_id,
+                &row.id,
+                &schema.status,
+                item.status,
+                &format!("#{} Status → {}", issue.number, item.status),
+            )?;
+        } else {
+            sync.note(&format!(
+                "#{} Status {} left unchanged (not Backlog/Ready)",
+                issue.number,
+                current.unwrap_or("(none)")
+            ));
+        }
+        set_select(
+            sync,
             project_id,
-            "--text",
-            item.status,
-        ]);
+            &row.id,
+            &schema.level,
+            level_option(item),
+            &format!("#{} Level", issue.number),
+        )?;
+        set_select(
+            sync,
+            project_id,
+            &row.id,
+            &schema.component,
+            item.component,
+            &format!("#{} Component", issue.number),
+        )?;
+        set_select(
+            sync,
+            project_id,
+            &row.id,
+            &schema.size,
+            item.effort,
+            &format!("#{} Size", issue.number),
+        )?;
+        set_select(
+            sync,
+            project_id,
+            &row.id,
+            &schema.priority,
+            priority_option(item),
+            &format!("#{} Priority", issue.number),
+        )?;
+    }
+
+    let mut linked = BTreeSet::new();
+    for item in items {
+        let Some(parent_key) = &item.parent else {
+            continue;
+        };
+        let Some(child) = existing.get(&item.key) else {
+            continue;
+        };
+        let Some(parent) = existing.get(parent_key) else {
+            continue;
+        };
+        let pair = (parent.number, child.number);
+        if !linked.insert(pair) {
+            continue;
+        }
+        if let Err(err) = sync.mutate(
+            &format!("sub-issue #{} ← #{}", parent.number, child.number),
+            ADD_SUB,
+            json!({
+                "issueId": parent.node_id,
+                "subIssueId": child.node_id,
+            }),
+        ) {
+            eprintln!("sub-issue #{} ← #{}: {err:#}", parent.number, child.number);
+        }
+    }
+
+    for item in items {
+        let Some(blocked) = existing.get(&item.key) else {
+            continue;
+        };
+        for blocker_key in &item.blocked_by {
+            let Some(blocker) = existing.get(blocker_key) else {
+                continue;
+            };
+            if let Err(err) = sync.mutate(
+                &format!("#{} blocked-by #{}", blocked.number, blocker.number),
+                ADD_BLOCKED,
+                json!({
+                    "issueId": blocked.node_id,
+                    "blockingIssueId": blocker.node_id,
+                }),
+            ) {
+                eprintln!(
+                    "blocked-by #{} ← #{}: {err:#}",
+                    blocked.number, blocker.number
+                );
+            }
+        }
     }
     Ok(())
 }
 
-pub fn ensure_views(project_id: &str) -> Result<()> {
-    let query = r#"mutation($project:ID!){
-      board: createProjectV2View(input:{projectId:$project, name:"Board", layout:BOARD_LAYOUT}) { projectV2View { id } }
-      road: createProjectV2View(input:{projectId:$project, name:"Roadmap", layout:ROADMAP_LAYOUT}) { projectV2View { id } }
-    }"#;
-    let _ = Command::new("gh")
-        .args([
-            "api",
-            "graphql",
-            "-f",
-            &format!("query={query}"),
-            "-f",
-            &format!("project={project_id}"),
-        ])
-        .output()?;
-    Ok(())
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-pub fn counts(items: &[Item]) -> (usize, usize, usize) {
-    let epics = items.iter().filter(|i| i.parent.is_none()).count();
-    let tasks = items.iter().filter(|i| i.parent.is_some()).count();
-    (epics, tasks, items.len())
+    #[test]
+    fn megabase_id_from_html_comment() {
+        let body = "<!-- megabase-id: epic:auth:admin:1 -->\n\nPort **Auth**.";
+        assert_eq!(
+            parse_megabase_id(body).as_deref(),
+            Some("epic:auth:admin:1")
+        );
+    }
+
+    #[test]
+    fn megabase_id_tolerates_spaces() {
+        let body = "  <!-- megabase-id: task:rest:resources:1:1 -->  ";
+        assert_eq!(
+            parse_megabase_id(body).as_deref(),
+            Some("task:rest:resources:1:1")
+        );
+    }
+
+    #[test]
+    fn generator_does_not_clobber_live_status() {
+        assert!(may_set_status(None, "Ready"));
+        assert!(may_set_status(Some("Backlog"), "Ready"));
+        assert!(may_set_status(Some("Ready"), "Backlog"));
+        assert!(!may_set_status(Some("In progress"), "Ready"));
+        assert!(!may_set_status(Some("Blocked"), "Backlog"));
+        assert!(!may_set_status(Some("Done"), "Ready"));
+        assert!(!may_set_status(Some("In review"), "Ready"));
+    }
 }

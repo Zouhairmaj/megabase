@@ -41,7 +41,22 @@ pub struct Item {
     pub effort: &'static str,
     pub status: &'static str,
     pub parent: Option<String>,
+    /// megabase-id keys of issues that block this one.
+    pub blocked_by: Vec<String>,
     pub priority: i32,
+}
+
+fn blocked_by_keys(component: &str, group: &str) -> Vec<String> {
+    match (component, group) {
+        ("rest", "filtering") | ("rest", "query-params") | ("rest", "prefer") | ("rest", "rpc") => {
+            vec!["epic:rest:resources:1".into()]
+        }
+        ("auth", "endpoints") | ("auth", "token") | ("auth", "user") => {
+            vec!["epic:auth:database:1".into()]
+        }
+        ("auth", "database") | ("rest", "resources") => vec!["epic:core:jwt:1".into()],
+        _ => vec![],
+    }
 }
 
 pub fn component_label(c: &str) -> &'static str {
@@ -56,6 +71,7 @@ pub fn component_label(c: &str) -> &'static str {
         "studio" => "Studio",
         "core" => "Core",
         "judge" => "Judge",
+        "website" => "Website",
         _ => "Megabase",
     }
 }
@@ -72,6 +88,7 @@ fn component_static(c: &str) -> &'static str {
         "studio" => "studio",
         "core" => "core",
         "judge" => "judge",
+        "website" => "website",
         _ => "core",
     }
 }
@@ -271,6 +288,7 @@ pub fn build(units: &[Unit]) -> Vec<Item> {
         );
 
         let status = if *level == 1 { "Ready" } else { "Backlog" };
+        let blocked_by = blocked_by_keys(component, group);
         items.push(Item {
             key: epic_key.clone(),
             title: format!("{label}: {group}"),
@@ -282,6 +300,7 @@ pub fn build(units: &[Unit]) -> Vec<Item> {
             effort: effort(members.len()),
             status,
             parent: None,
+            blocked_by: blocked_by.clone(),
             priority: usage(component, group) * 10,
         });
 
@@ -314,6 +333,7 @@ pub fn build(units: &[Unit]) -> Vec<Item> {
                     effort: effort(part.len()),
                     status: "Ready",
                     parent: Some(epic_key.clone()),
+                    blocked_by: blocked_by.clone(),
                     priority: usage(component, group) * 10 - i as i32,
                 });
             }
@@ -345,6 +365,7 @@ fn infra() -> Vec<Item> {
             effort: "M",
             status: "Ready",
             parent: None,
+            blocked_by: vec![],
             priority: 1100,
         },
         Item {
@@ -365,6 +386,7 @@ fn infra() -> Vec<Item> {
             effort: "L",
             status: "Backlog",
             parent: None,
+            blocked_by: vec![],
             priority: 0,
         },
         Item {
@@ -384,6 +406,7 @@ fn infra() -> Vec<Item> {
             effort: "XL",
             status: "Backlog",
             parent: None,
+            blocked_by: vec![],
             priority: 0,
         },
         Item {
@@ -404,6 +427,7 @@ fn infra() -> Vec<Item> {
             effort: "XL",
             status: "Backlog",
             parent: None,
+            blocked_by: vec![],
             priority: 0,
         },
         Item {
@@ -422,6 +446,7 @@ fn infra() -> Vec<Item> {
             effort: "S",
             status: "Ready",
             parent: None,
+            blocked_by: vec![],
             priority: 1080,
         },
         Item {
@@ -441,6 +466,7 @@ fn infra() -> Vec<Item> {
             effort: "M",
             status: "Backlog",
             parent: None,
+            blocked_by: vec![],
             priority: 0,
         },
     ]
@@ -465,20 +491,21 @@ fn website() -> Vec<Item> {
         .into(),
         labels: vec!["type:feature"],
         milestone: None,
-        component: "studio",
+        component: "website",
         level: None,
         effort: "XL",
         status: "Backlog",
         parent: None,
+        blocked_by: vec![],
         priority: 0,
     }];
     let steps = [
-        ("task:website:design:later", "Website: design in Kite", "Add website frames to https://kite.new/p/megabase-identity (home, status, docs). Palette and logo from the identity file. Stop when a reviewer can click through the Kite file."),
-        ("task:website:committee:later", "Website: LLM committee review", "Send the Kite frames to several external LLMs. Collect written review. Blocked by design."),
-        ("task:website:revisions:later", "Website: apply committee revisions in Kite", "Update the Kite file. Do not start implementation. Blocked by committee review."),
-        ("task:website:implement:later", "Website: implement matching Kite", "Implement only what is in Kite after revisions. Repo assets must match. The Status page embeds `coverage/treemap.svg` / `coverage/treemap-light.svg`. Blocked by revisions."),
+        ("task:website:design:later", "Website: design in Kite", "Add website frames to https://kite.new/p/megabase-identity (home, status, docs). Palette and logo from the identity file. Stop when a reviewer can click through the Kite file.", Vec::<String>::new()),
+        ("task:website:committee:later", "Website: LLM committee review", "Send the Kite frames to several external LLMs. Collect written review. Blocked by design.", vec!["task:website:design:later".into()]),
+        ("task:website:revisions:later", "Website: apply committee revisions in Kite", "Update the Kite file. Do not start implementation. Blocked by committee review.", vec!["task:website:committee:later".into()]),
+        ("task:website:implement:later", "Website: implement matching Kite", "Implement only what is in Kite after revisions. Repo assets must match. The Status page embeds `coverage/treemap.svg` / `coverage/treemap-light.svg`. Blocked by revisions.", vec!["task:website:revisions:later".into()]),
     ];
-    for (i, (key, title, scope)) in steps.iter().enumerate() {
+    for (i, (key, title, scope, blocked_by)) in steps.iter().enumerate() {
         items.push(Item {
             key: (*key).into(),
             title: (*title).into(),
@@ -488,11 +515,12 @@ fn website() -> Vec<Item> {
             ),
             labels: vec!["type:feature"],
             milestone: None,
-            component: "studio",
+            component: "website",
             level: None,
             effort: "M",
             status: "Backlog",
             parent: Some(parent.clone()),
+            blocked_by: blocked_by.clone(),
             priority: 0,
         });
     }
@@ -565,5 +593,38 @@ mod tests {
         assert!(items.len() < 150, "{}", items.len());
         assert!(items.iter().any(|i| i.key == "epic:website:site:later"));
         assert!(items.iter().any(|i| i.title == "Website: design in Kite"));
+    }
+
+    #[test]
+    fn subissues_and_blocked_by_keys() {
+        let mk = |id: &str, group: &str| Unit {
+            id: id.into(),
+            component: "rest".into(),
+            group: group.into(),
+            name: "n".into(),
+            level: 1,
+            source: Source {
+                repo: "postgrest".into(),
+                file: "a".into(),
+                line: 1,
+            },
+        };
+        let items = build(&[mk("rest:r", "resources"), mk("rest:f", "filtering")]);
+        let filtering = items
+            .iter()
+            .find(|i| i.key == "epic:rest:filtering:1")
+            .expect("filtering epic");
+        assert_eq!(filtering.blocked_by, ["epic:rest:resources:1"]);
+        let child = items
+            .iter()
+            .find(|i| i.parent.as_deref() == Some("epic:rest:filtering:1"))
+            .expect("filtering child");
+        assert_eq!(child.blocked_by, ["epic:rest:resources:1"]);
+        let committee = items
+            .iter()
+            .find(|i| i.key == "task:website:committee:later")
+            .expect("committee task");
+        assert_eq!(committee.parent.as_deref(), Some("epic:website:site:later"));
+        assert_eq!(committee.blocked_by, ["task:website:design:later"]);
     }
 }

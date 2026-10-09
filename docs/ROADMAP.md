@@ -57,12 +57,16 @@ style as the README).
 ## Regenerating the board
 
 ```bash
-cargo run -p megabase-backlog -- sync
+just backlog-dry    # print GitHub writes without applying them
+just backlog        # cargo run -p megabase-backlog -- sync
 ```
 
-The command is idempotent: it upserts milestones, labels, Project fields,
-epics and task issues from `coverage/units.json` plus the infra / judge /
-spec / website epics. GitHub write access is required (issues, project).
+The command is idempotent: it matches existing issues by the
+`<!-- megabase-id: … -->` body marker and never recreates them. It sets
+Project **Status** / Level / Component / Size / Priority via GraphQL
+single-select option ids (not `--text`), links sub-issues and blocked-by,
+and leaves live Status values (`In progress`, `In review`, `Blocked`,
+`Done`) alone. GitHub write access is required (issues, project).
 
 Board **Status** is kept in sync with branches, PRs and the `blocked` label
 by `.github/workflows/board-sync.yml` (secret `PROJECT_TOKEN`). Agents still
