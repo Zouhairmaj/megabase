@@ -173,7 +173,7 @@ pub fn index(paths: &Paths, docs: &[Doc], metrics: &Metrics, sha: &str, date: &s
 </main>"#,
         stage = esc(&metrics.stage_short.to_ascii_uppercase()),
         status = paths.page("status"),
-        edit = format!("{GITHUB}/tree/main/docs"),
+        edit = format_args!("{GITHUB}/tree/main/docs"),
     )
 }
 

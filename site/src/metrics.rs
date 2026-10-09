@@ -78,10 +78,6 @@ impl ComponentBlock {
         }
     }
 
-    pub fn from_units(id: impl Into<String>, label: &'static str, units: Vec<UnitStatus>) -> Self {
-        Self::from_groups(id, label, Vec::new(), units)
-    }
-
     pub fn from_groups(
         id: impl Into<String>,
         label: &'static str,
@@ -128,29 +124,10 @@ impl ComponentBlock {
             self.units.len()
         }
     }
-
-    pub fn unit_statuses(&self) -> Vec<UnitStatus> {
-        if !self.units.is_empty() {
-            return self.units.clone();
-        }
-        let mut units = Vec::with_capacity(self.total());
-        units.extend(std::iter::repeat_n(
-            UnitStatus::NotStarted,
-            self.not_started,
-        ));
-        units.extend(std::iter::repeat_n(
-            UnitStatus::Implemented,
-            self.implemented,
-        ));
-        units.extend(std::iter::repeat_n(UnitStatus::Tested, self.tested));
-        units.extend(std::iter::repeat_n(UnitStatus::Conformant, self.conformant));
-        units
-    }
 }
 
 #[derive(Clone, Debug)]
 pub struct VendorPin {
-    pub name: String,
     pub tag: String,
 }
 
@@ -167,7 +144,6 @@ pub struct Metrics {
     pub stage: String,
     pub stage_short: String,
     pub human_interventions: usize,
-    pub next_milestone: String,
 }
 
 impl Metrics {
@@ -184,7 +160,6 @@ impl Metrics {
             stage: FALLBACK_STAGE.into(),
             stage_short: FALLBACK_STAGE_SHORT.into(),
             human_interventions: 0,
-            next_milestone: "Level 1 · REST + Auth".into(),
         }
     }
 
@@ -243,6 +218,28 @@ impl Metrics {
 
     pub fn human_interventions_label(&self) -> String {
         comma(self.human_interventions)
+    }
+
+    pub fn group_count(&self) -> usize {
+        self.components
+            .iter()
+            .map(|c| {
+                if c.groups.is_empty() {
+                    usize::from(c.total() > 0)
+                } else {
+                    c.groups.iter().filter(|g| g.total() > 0).count()
+                }
+            })
+            .sum()
+    }
+
+    pub fn live_component_count(&self) -> usize {
+        let n = self.components.iter().filter(|c| c.total() > 0).count();
+        if n == 0 {
+            CATALOG.len()
+        } else {
+            n
+        }
     }
 }
 
@@ -306,7 +303,7 @@ fn apply_vendor(metrics: &mut Metrics, value: &Value) {
             .and_then(Value::as_str)
             .unwrap_or("")
             .to_string();
-        metrics.vendor.insert(name.clone(), VendorPin { name, tag });
+        metrics.vendor.insert(name, VendorPin { tag });
     }
 }
 
@@ -652,7 +649,7 @@ pub fn component_label(id: &str) -> &'static str {
 }
 
 pub fn group_label(id: &str) -> String {
-    id.replace('-', " ").replace('_', " ")
+    id.replace(['-', '_'], " ")
 }
 
 pub struct CatalogRow {

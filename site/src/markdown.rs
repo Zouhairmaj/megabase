@@ -5,21 +5,11 @@ use std::collections::BTreeMap;
 
 use crate::html::esc;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 pub struct Options {
     pub copy_buttons: bool,
     pub highlight: bool,
     pub skip_h1: bool,
-}
-
-impl Default for Options {
-    fn default() -> Self {
-        Self {
-            copy_buttons: false,
-            highlight: false,
-            skip_h1: false,
-        }
-    }
 }
 
 pub fn render(md: &str) -> String {

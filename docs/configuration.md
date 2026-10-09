@@ -3,7 +3,7 @@ title: Configuration
 description: MEGABASE_HOST, MEGABASE_PORT, DATABASE_URL, JWT_SECRET — what each variable does.
 section: get-started
 order: 3
-card: Listen address and secrets the binary reads at startup. Auth does not use JWT_SECRET yet.
+card: Listen address and JWT_SECRET for HS256 verification. Auth and REST routes are still 501.
 ---
 
 # Configuration
@@ -16,10 +16,25 @@ other names. There is no `.env.example` in this tree; the judge uses
 | --- | --- |
 | MEGABASE_HOST | Bind address. Default `0.0.0.0`. |
 | MEGABASE_PORT | HTTP port. Default `8000`. |
-| DATABASE_URL | PostgreSQL connection string. PostgreSQL stays external; Megabase does not bundle it. When set, startup installs the Auth SQL objects listed in [`specs/auth/database.md`](../specs/auth/database.md). The statements are idempotent. Connect plus SQL must finish within 30 seconds or the process exits. If install fails, the process exits. |
-| JWT_SECRET | Secret used to sign and verify JWTs. Auth HTTP is not implemented; the value is still read so a missing secret can fail loudly later instead of minting a default. |
+| DATABASE_URL | PostgreSQL connection string. PostgreSQL stays external; Megabase does not bundle it. When set, startup installs the Auth SQL objects listed in [`specs/auth/database.md`](../specs/auth/database.md). The statements are idempotent. Connect plus SQL must finish within 30 seconds or the process exits. If install fails, the process exits. Omit it to skip schema install (the HTTP server still starts). |
+| JWT_SECRET | HS256 secret used to verify JWTs (same name as the self-hosted demo stack). Raw UTF-8, not base64. There is no default: a missing or empty value is an error when verifying, so Megabase never mints a key. The process still starts without it so `/_megabase/health` works. |
 
-Omit `DATABASE_URL` to skip schema install (the HTTP server still starts).
+## JWT verification
+
+`megabase-core` verifies compact HS256 tokens the way GoTrue and PostgREST
+do for the demo secret. Spec: [`specs/core/jwt.md`](../specs/core/jwt.md).
+
+Accepted: tokens signed with this `JWT_SECRET`, including the demo
+`ANON_KEY` and `SERVICE_ROLE_KEY` in `vendor/supabase/docker/.env.example`.
+Claims exposed to Auth and REST: `role`, `sub` (optional on the demo keys),
+`exp` (30-second skew, as PostgREST).
+
+Rejected: forged signatures, expired `exp`, and `alg=none` (or any
+algorithm other than `HS256`). Asymmetric keys and JWKS rotation are not
+implemented.
+
+Auth `/auth/v1` and REST `/rest/v1` still answer 501 until those units are
+ported; they will call this verifier instead of copying JWT logic.
 
 ## PostgreSQL TLS
 

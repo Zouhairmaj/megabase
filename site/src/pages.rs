@@ -9,7 +9,7 @@ use crate::treemap;
 use crate::GITHUB;
 
 pub fn home(paths: &Paths, metrics: &Metrics) -> String {
-    let treemap = treemap::svg_size(metrics, 1248.0, 280.0);
+    let treemap = treemap_block(metrics);
     let status_panel = status_panel(metrics);
     let components = component_cards(paths, metrics);
     let faq = home_faq(paths, metrics);
@@ -83,12 +83,15 @@ pub fn home(paths: &Paths, metrics: &Metrics) -> String {
 </section>
 
 <section class="band home-live" id="status">
-  <p class="kicker hide-mobile">03 · LIVE STATUS</p>
-  <h2 class="section-title hide-mobile">Each cell is one unit.<br />Grey until the judge says green.</h2>
+  <div class="band-head hide-mobile">
+    <div>
+      <p class="kicker">03 · LIVE STATUS</p>
+      <h2 class="section-title">Each cell is one unit.<br />Grey until the judge says green.</h2>
+    </div>
+    <a class="text-link" href="{status}">Full status →</a>
+  </div>
   <p class="lede hide-mobile">Nested squarified treemap: component, then feature group, then one whole square per unit. Regenerated at build time from coverage/units.json. Grey is not started. Green is conformant.</p>
-  <div class="treemap treemap-wide">{treemap}</div>
-  <p class="legend">■ not started · <span class="swatch implemented"></span> implemented · <span class="swatch tested"></span> tested · <span class="swatch conformant"></span> conformant</p>
-  <p class="hide-mobile"><a class="text-link" href="{status}">Full status →</a></p>
+  {treemap}
 </section>
 
 <section class="band home-levels">
@@ -140,20 +143,59 @@ pub fn home(paths: &Paths, metrics: &Metrics) -> String {
     )
 }
 
-fn coverage_map(paths: &Paths, generated: &str, coverage_svg: bool) -> String {
-    if !coverage_svg {
-        return generated.to_string();
-    }
-    let dark = format!("{}coverage/treemap.svg", paths.asset());
-    let light = format!("{}coverage/treemap-light.svg", paths.asset());
+fn treemap_block(metrics: &Metrics) -> String {
+    let desktop = treemap::render(metrics, treemap::HOME_DESKTOP);
+    let mobile = treemap::render(metrics, treemap::HOME_MOBILE);
+    let total = metrics
+        .total
+        .map(metrics::comma)
+        .unwrap_or_else(|| "—".into());
+    let passing = metrics
+        .passing
+        .map(metrics::comma)
+        .unwrap_or_else(|| "—".into());
+    let pct = metrics.conformance_label();
+    let head = if metrics.has_data() {
+        format!("SUPABASE COMPONENTS: {pct} CONFORMANT ({passing}/{total})")
+    } else {
+        "SUPABASE COMPONENTS".into()
+    };
+    let foot_left = if metrics.has_data() {
+        format!("{total} units extracted from pinned upstream source · {passing} conformant")
+    } else {
+        "Units extracted from pinned upstream source. Counts arrive with coverage/.".into()
+    };
     format!(
-        r#"<picture><source srcset="{light}" media="(prefers-color-scheme: light)" /><img src="{dark}" alt="Component coverage treemap. Each cell is one unit." width="1248" height="360" /></picture>"#
+        r#"<div class="treemap-block">
+  <div class="treemap-block-head">
+    <span>{head}</span>
+    <span class="legend-inline hide-mobile">
+      <span class="swatch-row"><i class="swatch not-started"></i> not started</span>
+      <span class="swatch-row"><i class="swatch implemented"></i> implemented</span>
+      <span class="swatch-row"><i class="swatch tested"></i> tested</span>
+      <span class="swatch-row"><i class="swatch conformant"></i> conformant (matches real Supabase)</span>
+    </span>
+  </div>
+  <div class="treemap treemap-wide">
+    <div class="hide-mobile">{desktop}</div>
+    <div class="hide-desktop">{mobile}</div>
+  </div>
+  <div class="treemap-block-foot">
+    <span>{foot_left}</span>
+    <span class="hide-mobile">Generated at build from coverage/summary.json · <a href="{github}" rel="noopener noreferrer">commit ↗</a></span>
+  </div>
+</div>"#,
+        head = esc(&head),
+        foot_left = esc(&foot_left),
+        github = GITHUB,
+        desktop = desktop,
+        mobile = mobile,
     )
 }
 
 fn status_panel(metrics: &Metrics) -> String {
-    let desktop = treemap::panel(metrics, 442.0, 220.0);
-    let mobile = treemap::panel(metrics, 308.0, 290.0);
+    let desktop = treemap::render(metrics, treemap::HERO_DESKTOP);
+    let mobile = treemap::render(metrics, treemap::HERO_MOBILE);
     format!(
         r#"<aside class="status-panel" aria-labelledby="status-title">
   <div class="status-head">
@@ -516,9 +558,21 @@ fn day0_strip(metrics: &Metrics) -> String {
     )
 }
 
-pub fn status(paths: &Paths, metrics: &Metrics, coverage_svg: bool) -> String {
-    let generated = treemap::svg_size(metrics, 1248.0, 360.0);
-    let treemap = coverage_map(paths, &generated, coverage_svg);
+pub fn status(paths: &Paths, metrics: &Metrics) -> String {
+    let desktop = treemap::render(metrics, treemap::STATUS_DESKTOP);
+    let mobile = treemap::render(metrics, treemap::STATUS_MOBILE);
+    let units_headline = metrics.passing_total_label();
+    let units_sub = match metrics.total {
+        Some(_) => format!(
+            "units conformant · {} components · {} groups",
+            metrics.live_component_count(),
+            metrics.group_count()
+        ),
+        None => format!(
+            "units conformant · {} components · — groups",
+            metrics.live_component_count()
+        ),
+    };
     let mut rows = String::from(
         r#"<div class="data-table status-table" role="table" aria-label="By component">
 <div class="data-row head" role="row"><span>Component</span><span>Path</span><span>Level</span><span>Units</span><span>Status</span></div>"#,
@@ -555,11 +609,25 @@ pub fn status(paths: &Paths, metrics: &Metrics, coverage_svg: bool) -> String {
       <div class="metric"><p class="muted">Human interventions</p><p class="stat-xl">{humans}</p></div>
     </div>
   </header>
-  <section class="band">
-    <h2>Component map</h2>
-    <p class="note">Each block is a Supabase component. When coverage/units.json is present, cells are one unit each. Until then the tiles are the known crates, unfilled — never a made-up count.</p>
-    <div class="treemap treemap-wide treemap-status">{treemap}</div>
-    <p class="legend">■ not started · <span class="swatch implemented"></span> implemented · <span class="swatch tested"></span> tested · <span class="swatch conformant"></span> conformant</p>
+  <section class="band status-map">
+    <div class="status-map-copy">
+      <p class="kicker">COMPONENT MAP</p>
+      <h2>Component map</h2>
+      <p>Each block is one Supabase component, split into its feature groups. Each square is one unit extracted from the pinned upstream source. Grey until the judge says green.</p>
+      <p class="stat-xl status-map-count">{units_headline}</p>
+      <p class="status-map-sub">{units_sub}</p>
+      <ul class="status-legend">
+        <li><i class="swatch not-started"></i> not started</li>
+        <li><i class="swatch implemented"></i> implemented</li>
+        <li><i class="swatch tested"></i> tested</li>
+        <li><i class="swatch conformant"></i> conformant (matches real Supabase)</li>
+      </ul>
+      <p class="status-map-source">Generated at build time from coverage/units.json and coverage/summary.json. One whole square per unit, never cut.</p>
+    </div>
+    <div class="status-map-svg treemap">
+      <div class="hide-mobile">{desktop}</div>
+      <div class="hide-desktop">{mobile}</div>
+    </div>
   </section>
   <section class="band">
     <h2>By component</h2>
@@ -585,6 +653,10 @@ pub fn status(paths: &Paths, metrics: &Metrics, coverage_svg: bool) -> String {
         coverage = esc(&metrics.coverage_label()),
         conformance = esc(&metrics.conformance_label()),
         humans = esc(&metrics.human_interventions_label()),
+        units_headline = esc(&units_headline),
+        units_sub = esc(&units_sub),
+        desktop = desktop,
+        mobile = mobile,
         levels = level_cards(metrics, true),
         roadmap = paths.page("roadmap"),
     )
@@ -809,7 +881,7 @@ pub fn devlog_article(paths: &Paths, entry: &devlog::Entry) -> String {
         index = paths.page("devlog"),
         date = esc(&entry.date),
         title = esc(&entry.title),
-        body = &entry.body_html,
+        body = entry.body_html,
     )
 }
 
@@ -868,7 +940,7 @@ mod tests {
     fn status_and_faq_omit_spend_rows() {
         let metrics = Metrics::placeholder();
         let paths = Paths::nested("status", false);
-        let status = status(&paths, &metrics, false);
+        let status = status(&paths, &metrics);
         assert!(status.contains("Human interventions"));
         assert!(!status.to_ascii_lowercase().contains("spend"));
         assert!(!status.to_ascii_lowercase().contains("dollar"));
@@ -878,5 +950,9 @@ mod tests {
         let home = home(&Paths::home(false), &metrics);
         assert!(home.contains("the human log."));
         assert!(!home.to_ascii_lowercase().contains("spend"));
+        assert!(!home.contains("<picture"));
+        assert!(!home.contains("coverage/treemap.svg"));
+        assert!(!status.contains("coverage/treemap.svg"));
+        assert!(!status.contains("coverage/treemap-light.svg"));
     }
 }

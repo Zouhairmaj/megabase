@@ -16,7 +16,11 @@ The goal is that an existing supabase-js app can point at Megabase without chang
 
 ## Point the client
 
-ANON_KEY is a JWT signed with your `JWT_SECRET`. The base URL is the Megabase listen address (default `http://localhost:8000`).
+`ANON_KEY` is an HS256 JWT signed with `JWT_SECRET` (the demo pair is in
+`vendor/supabase/docker/.env.example`). Megabase verifies that signature
+in `megabase-core`; Auth and REST still return 501 until those units are
+ported. The base URL is the Megabase listen address (default
+`http://localhost:8000`).
 
 ```javascript
 import { createClient } from '@supabase/supabase-js'
