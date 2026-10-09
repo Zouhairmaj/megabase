@@ -59,6 +59,21 @@ The Cloud Agent image in `.cursor/Dockerfile` is pinned the same way:
 `ubuntu:24.04@sha256:534baea6a22c03a63003dbc8dbe78fe34bc0d7e595d9a9dc9834884ff530eb55`
 (index digest for that tag, verified 2026-10-09).
 
+That Dockerfile does not pipe installers into a shell. `rustup-init` 1.29.1
+and `cargo-binstall` v1.25.2 are downloaded, checked with a hard-coded
+SHA-256, then executed (Scorecard Pinned-Dependencies `downloadThenRun`,
+alerts #17 and #18 on `main`). The pin is those two bootstrap binaries
+only: `rustup-init` then installs the floating `stable` toolchain (the
+checkout's `rust-toolchain.toml` selects the channel after the repo is
+present), and `cargo binstall` installs latest `just`, `cargo-deny`,
+`cargo-audit`, and `cargo-llvm-cov`. Those later fetches are outside
+alerts #17 and #18. The Cloud Agent `install` script in
+`.cursor/environment.json` uses the same hashes when those tools are
+missing. Hashes were re-verified on 2026-10-09 against
+`static.rust-lang.org/rustup/archive/1.29.1` and the GitHub release
+asset digests. Renovate does not bump these archive hashes; bump the
+version comment, URL, and digest together.
+
 Renovate's `docker` datasource has `pinDigests: true`, so a tag bump and
 its digest move in the same PR. Do not un-pin these images to a bare tag.
 
