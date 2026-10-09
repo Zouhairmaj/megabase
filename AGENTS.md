@@ -163,7 +163,7 @@ The board must match reality at all times.
 - Force-push `main`, rewrite another agent's branch, or merge your own PR.
 - Build UI before it is designed. Follow
   [GOAL.md Design (design-first, Kite)](GOAL.md). Link the Kite design in
-  the PR.
+  the PR when adding or changing a layout or component.
 - Describe the visual identity in any terms other than those in
   `docs/brand/README.md`, or attribute it to another brand or product.
 

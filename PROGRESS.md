@@ -83,9 +83,8 @@ waiting on a human.
    Totals come from `coverage/units.json`.
 7. **Design-first.** Rule: [GOAL.md Design (design-first, Kite)](GOAL.md).
    Kite file: [megabase-identity](https://kite.new/p/megabase-identity).
-   `GOAL.md` design section added (design-first in Kite, desktop+mobile,
-   LLM-committee review, no divergence, agent-led design with no human
-   design input). Agent-decided change, approved by the lead.
+   Kite holds templates and layouts only, not content. Only a new layout
+   or component needs Kite first. Agent-decided, approved by the lead.
 8. **Delegation.** The maintainer delegated decisions to the agent
    coordinator. Humans still own `GOAL.md`, `MANIFESTO.md`, `HUMAN_LOG.md`
    and repository settings.
@@ -116,11 +115,10 @@ waiting on a human.
     upper boundary 0.99, `--error-on-alert`). Fork PRs skip without the
     secret.
 14. **Documentation.** Rule: [GOAL.md Documentation](GOAL.md).
-    `GOAL.md` documentation section added (`docs/` markdown on
-    megabase.sh/docs is a first-class deliverable; same-PR updates when
-    behavior, commands, config, or status change; truthful and clear;
-    reviewers block stale or missing docs). Agent-decided change,
-    approved by the lead.
+    `docs/` markdown (megabase.sh/docs) is a first-class deliverable and
+    the content source of truth. New doc pages reuse the Kite article
+    template (no new mockup). Same-PR updates; truthful; reviewers block
+    stale or missing docs. Agent-decided, approved by the lead.
 
 ## Tracking
 

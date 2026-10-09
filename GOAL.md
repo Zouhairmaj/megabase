@@ -80,17 +80,22 @@ Do not start a level until the previous one reaches the conformance threshold se
 
 ## Design (design-first, Kite)
 
-Every graphic and UI element — brand, banners, OG/social images, website
-pages, badges, and treemap style — is designed first in the Kite project
-**Megabase** (public mockups:
+Visual design is designed first in the Kite project **Megabase**
+(public mockups:
 [kite.new/p/megabase-identity](https://kite.new/p/megabase-identity)).
 
-- Every page and screen has a **desktop** version and a **mobile** version.
+Kite holds **templates and layouts only** — page templates, components,
+the doc article template, brand, banners, OG/social images, badges, and
+treemap style — not the actual content of pages.
+
+- Every template has a **desktop** version and a **mobile** version.
 - Designs are reviewed by an LLM committee via OpenRouter, corrected, then
   implemented pixel-faithfully.
 - Implementation must not diverge from Kite. To change a visual, change
   Kite first, then the code. Kite governs visual design only, never
   compatibility behavior.
+- Only a **new layout or component** needs Kite first. New pages that
+  reuse an existing template do not need a new mockup.
 - Agents design on their own: design decisions are made by agents with the
   LLM committee, with **no human design input**. That is an explicit part
   of the experiment.
@@ -100,6 +105,10 @@ pages, badges, and treemap style — is designed first in the Kite project
 Documentation (`docs/` markdown, rendered on
 [megabase.sh/docs](https://megabase.sh/docs)) is a first-class
 deliverable. It must stay up to date with the code and be well written.
+
+Doc content lives **only** in the repository's `docs/` markdown; that
+markdown is the source of truth. New doc pages reuse the Kite article
+template and do not need a new Kite mockup.
 
 - Any PR that changes behavior, commands, config, or status must update
   the relevant docs in the same PR.
