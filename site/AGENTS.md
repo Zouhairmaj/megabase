@@ -20,11 +20,13 @@ Extends the root `AGENTS.md`; it does not relax it.
   default-branch Rust cache on pushes to `main`. After a successful
   Judge run on `main`, `.github/workflows/pages-badges.yml`
   (`workflow_run` only, no cache action) checks out the default branch
-  and applies the Judge JSON as data only when that commit is the Judge
-  commit, then publishes shields JSON to `gh-pages`. It does not set
+  and applies the Judge JSON as data when that commit is the checkout
+  or an ancestor of it, then publishes shields JSON and the README
+  treemap PNGs to `gh-pages` and redeploys the site. It does not set
   `actions/checkout` `ref` from the triggering run. The generator
-  writes that JSON to `_site/coverage/` (never treemap SVGs). Neither
-  workflow pushes to `main`.
+  writes the JSON and those PNGs to `_site/coverage/` (never treemap
+  SVGs). Both workflows share the `pages` concurrency group. Neither
+  pushes to `main`.
 - Root design gate: the PR links the approved Kite frame and its committee
   review.
 - Treemaps are generated in Rust (`src/treemap.rs`) from
