@@ -272,7 +272,6 @@ struct SiteData<'a> {
     entries: &'a [devlog::Entry],
     docs: &'a [docs::Doc],
     roadmap_md: Option<&'a str>,
-    coverage_svg: bool,
     sha: &'a str,
     date: &'a str,
 }
@@ -288,7 +287,6 @@ fn build(
         fs::remove_dir_all(out)?;
     }
     copy_dir(&site_root.join("static"), out)?;
-    let coverage_svg = copy_coverage_svgs(repo_root, out)?;
 
     let layout = fs::read_to_string(site_root.join("templates/layout.html"))?;
     let logo = fs::read_to_string(site_root.join("static/logo.svg"))?
@@ -305,7 +303,6 @@ fn build(
         entries: &entries,
         docs: &site_docs,
         roadmap_md: roadmap_md.as_deref(),
-        coverage_svg,
         sha: &sha,
         date: &date,
     };
@@ -449,7 +446,7 @@ fn content(
             )
         }
         Kind::HowItWorks => pages::how_it_works(paths, data.metrics),
-        Kind::Status => pages::status(paths, data.metrics, data.coverage_svg),
+        Kind::Status => pages::status(paths, data.metrics),
         Kind::Roadmap => pages::roadmap(paths, data.metrics, data.roadmap_md),
         Kind::Components => pages::components(paths, data.metrics),
         Kind::Devlog => pages::devlog_index(paths, data.entries),
@@ -747,19 +744,6 @@ fn jsonld(page: &Page, url: &str) -> String {
     format!(r#"<script type="application/ld+json">{body}</script>"#)
 }
 
-fn copy_coverage_svgs(repo_root: &Path, out: &Path) -> io::Result<bool> {
-    let dark = repo_root.join("coverage/treemap.svg");
-    let light = repo_root.join("coverage/treemap-light.svg");
-    if !dark.is_file() || !light.is_file() {
-        return Ok(false);
-    }
-    let dest = out.join("coverage");
-    fs::create_dir_all(&dest)?;
-    fs::copy(&dark, dest.join("treemap.svg"))?;
-    fs::copy(&light, dest.join("treemap-light.svg"))?;
-    Ok(true)
-}
-
 fn copy_dir(src: &Path, dst: &Path) -> io::Result<()> {
     fs::create_dir_all(dst)?;
     for entry in fs::read_dir(src)? {
@@ -847,12 +831,15 @@ mod tests {
             !home.contains("334"),
             "placeholder must not hardcode the Kite mock 334"
         );
-        assert!(!home.contains("1024"));
+        assert!(
+            home.contains("—"),
+            "day-0 pages must use an em dash, not an invented unit total"
+        );
         assert!(home.contains("Not affiliated with or endorsed by Supabase, Inc."));
         assert!(!home.to_ascii_lowercase().contains("oxide"));
         assert!(home.contains("EXPERIMENT STATUS"));
         assert!(home.contains("updated on every commit"));
-        assert!(home.contains("panel-treemap"));
+        assert!(home.contains("treemap-svg"));
         assert!(home.contains("visually-hidden"));
         assert!(home.contains("Coverage · Conformance"));
         assert!(home.contains("Units passing the judge"));
@@ -901,24 +888,26 @@ mod tests {
         assert!(quick.contains("TechArticle"));
         assert!(quick.contains("Built from commit"));
         assert!(quick.contains("callout-note"));
-        assert!(quick.contains("callout-planned"));
         assert!(quick.contains("data-copy"));
         assert!(!quick.contains("334"));
         let _ = fs::remove_dir_all(&out);
     }
 
     #[test]
-    fn status_uses_generated_treemap_until_coverage_svgs_exist() {
+    fn status_inlines_generated_treemap_never_coverage_svgs() {
         let out = generate_tmp();
         let html = fs::read_to_string(out.join("status/index.html")).unwrap();
         assert!(html.contains("data-component=\"rest\""));
+        assert!(html.contains("treemap-svg"));
         assert!(!html.contains("coverage/treemap.svg"));
+        assert!(!html.contains("coverage/treemap-light.svg"));
+        assert!(!html.contains("<picture"));
         assert!(!out.join("coverage/treemap.svg").exists());
         let _ = fs::remove_dir_all(&out);
     }
 
     #[test]
-    fn status_embeds_coverage_svgs_when_present() {
+    fn coverage_treemap_files_are_never_copied_or_linked() {
         let out = generate_tmp_with(|root| {
             let cov = root.join("coverage");
             fs::create_dir_all(&cov).expect("coverage dir");
@@ -934,29 +923,298 @@ mod tests {
             .expect("light svg");
         });
         let html = fs::read_to_string(out.join("status/index.html")).unwrap();
-        assert!(html.contains("coverage/treemap.svg"));
-        assert!(html.contains("coverage/treemap-light.svg"));
-        assert!(out.join("coverage/treemap.svg").is_file());
-        assert!(!html.contains("data-component=\"rest\""));
+        assert!(!html.contains("coverage/treemap.svg"));
+        assert!(!html.contains("coverage/treemap-light.svg"));
+        assert!(!out.join("coverage/treemap.svg").exists());
+        assert!(html.contains("data-component=\"rest\""));
+        let _ = fs::remove_dir_all(&out);
+    }
+
+    fn assert_treemap_svgs_are_fluid(html: &str) {
+        let mut rest = html;
+        while let Some(at) = rest.find("<svg") {
+            let tag_end = rest[at..].find('>').expect("svg tag");
+            let tag = &rest[at..at + tag_end];
+            if tag.contains("treemap-svg") {
+                assert!(
+                    tag.contains("width=\"100%\""),
+                    "treemap svg must use width=100%: {tag}"
+                );
+                assert!(
+                    tag.contains("height=\"auto\""),
+                    "treemap svg must use height=auto: {tag}"
+                );
+                for attr in tag.split_whitespace() {
+                    if let Some(val) = attr
+                        .strip_prefix("width=\"")
+                        .and_then(|s| s.strip_suffix('"'))
+                    {
+                        assert_eq!(val, "100%", "fixed treemap width {val}");
+                    }
+                }
+            }
+            rest = &rest[at + 4..];
+        }
+    }
+
+    #[test]
+    fn treemap_svgs_have_no_fixed_width_wider_than_container() {
+        let out = generate_tmp();
+        for rel in ["index.html", "status/index.html"] {
+            let html = fs::read_to_string(out.join(rel)).unwrap();
+            assert_treemap_svgs_are_fluid(&html);
+        }
         let _ = fs::remove_dir_all(&out);
     }
 
     #[test]
-    fn coverage_svg_mode_requires_both_assets() {
-        let out = generate_tmp_with(|root| {
-            let cov = root.join("coverage");
-            fs::create_dir_all(&cov).expect("coverage dir");
-            fs::write(
-                cov.join("treemap.svg"),
-                "<svg xmlns=\"http://www.w3.org/2000/svg\"/>",
-            )
-            .expect("dark svg");
-        });
-        let html = fs::read_to_string(out.join("status/index.html")).unwrap();
-        assert!(!html.contains("coverage/treemap.svg"));
-        assert!(!out.join("coverage/treemap.svg").exists());
-        assert!(html.contains("data-component=\"rest\""));
+    fn live_coverage_pages_use_comma_grouped_unit_total() {
+        let site_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let real_root = site_root.parent().unwrap().to_path_buf();
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let out = std::env::temp_dir().join(format!("megabase-site-live-{stamp}"));
+        let metrics = metrics::load(&real_root);
+        let human = human_log::load(
+            &fs::read_to_string(real_root.join("HUMAN_LOG.md")).unwrap_or_default(),
+        );
+        build(&site_root, &real_root, &out, &metrics, &human).expect("build live");
+        let home = fs::read_to_string(out.join("index.html")).unwrap();
+        let status = fs::read_to_string(out.join("status/index.html")).unwrap();
+        let total = metrics
+            .total
+            .expect("live coverage must include totals.units");
+        assert!(total > 0, "live coverage must have units");
+        let shown = metrics::comma(total);
+        assert!(
+            home.contains(&shown),
+            "home must show summary.totals.units ({shown})"
+        );
+        assert!(
+            status.contains(&shown),
+            "status must show summary.totals.units ({shown})"
+        );
+        assert!(!home.contains(">334<") && !status.contains(">334<"));
+        assert_treemap_svgs_are_fluid(&home);
+        assert_treemap_svgs_are_fluid(&status);
+        assert!(!home.contains("coverage/treemap.svg"));
+        assert!(!status.contains("coverage/treemap-light.svg"));
+        assert!(!status.to_ascii_lowercase().contains("oxide"));
+        assert!(!home.to_ascii_lowercase().contains("the spend"));
         let _ = fs::remove_dir_all(&out);
+    }
+
+    #[test]
+    fn no_horizontal_overflow_if_chrome() {
+        let Some(chrome) = find_chrome() else {
+            return;
+        };
+        let site_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let real_root = site_root.parent().unwrap().to_path_buf();
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let out = std::env::temp_dir().join(format!("megabase-site-chrome-{stamp}"));
+        let metrics = metrics::load(&real_root);
+        let human = human_log::load(
+            &fs::read_to_string(real_root.join("HUMAN_LOG.md")).unwrap_or_default(),
+        );
+        build(&site_root, &real_root, &out, &metrics, &human).expect("build");
+        for (page, width) in [
+            ("index.html", 1440u32),
+            ("status/index.html", 1440),
+            ("index.html", 390),
+            ("status/index.html", 390),
+        ] {
+            let src = out.join(page);
+            let wrapper = src.with_file_name(format!("probe-{width}.html"));
+            let html = fs::read_to_string(&src).unwrap();
+            // Drop remote scripts so headless Chrome does not wait on analytics.
+            let mut stripped = String::new();
+            let mut rest = html.as_str();
+            while let Some(start) = rest.find("<script") {
+                stripped.push_str(&rest[..start]);
+                if let Some(end) = rest[start..].find("</script>") {
+                    rest = &rest[start + end + 9..];
+                } else {
+                    rest = "";
+                    break;
+                }
+            }
+            stripped.push_str(rest);
+            let injected = stripped.replace(
+                "</body>",
+                "<script>document.documentElement.setAttribute('data-sw', String(document.documentElement.scrollWidth));document.documentElement.setAttribute('data-cw', String(document.documentElement.clientWidth));</script></body>",
+            );
+            fs::write(&wrapper, injected).unwrap();
+            let uri = format!("file://{}", wrapper.display());
+            let profile = out.join(format!("chrome-profile-{width}-{}", page.replace('/', "-")));
+            fs::create_dir_all(&profile).unwrap();
+            let dom = chrome_dump_dom(
+                &chrome,
+                &uri,
+                width,
+                &profile,
+                std::time::Duration::from_secs(20),
+            );
+            let sw = attr_after(&dom, "data-sw=\"").unwrap_or_else(|| {
+                panic!("{page} at {width}px: missing data-sw on <html> after Chrome dump-dom")
+            });
+            let cw = attr_after(&dom, "data-cw=\"").unwrap_or_else(|| {
+                panic!("{page} at {width}px: missing data-cw on <html> after Chrome dump-dom")
+            });
+            assert!(
+                sw <= cw,
+                "{page} at {width}px overflowed: scrollWidth={sw} clientWidth={cw}"
+            );
+        }
+        let _ = fs::remove_dir_all(&out);
+    }
+
+    fn find_chrome() -> Option<PathBuf> {
+        const CANDIDATES: &[&str] = &[
+            "/opt/google/chrome/chrome",
+            "/opt/google/chrome/google-chrome",
+            "/usr/bin/google-chrome-stable",
+            "/usr/bin/google-chrome",
+            "/usr/bin/chromium-browser",
+            "/usr/bin/chromium",
+            "google-chrome-stable",
+            "google-chrome",
+            "chromium-browser",
+            "chromium",
+        ];
+        CANDIDATES.iter().find_map(|name| {
+            let path = unwrap_chrome_launcher(&resolve_chrome(name)?);
+            if injects_remote_debugging(&path) {
+                return None;
+            }
+            Command::new(&path)
+                .arg("--version")
+                .output()
+                .ok()
+                .filter(|o| o.status.success())
+                .map(|_| path)
+        })
+    }
+
+    fn resolve_chrome(name: &str) -> Option<PathBuf> {
+        let path = PathBuf::from(name);
+        if name.contains('/') {
+            return path.is_file().then_some(path);
+        }
+        let search = std::env::var_os("PATH")?;
+        std::env::split_paths(&search)
+            .map(|dir| dir.join(name))
+            .find(|candidate| candidate.is_file())
+    }
+
+    fn unwrap_chrome_launcher(path: &Path) -> PathBuf {
+        if !is_shell_script(path) {
+            return path.to_path_buf();
+        }
+        if let Some(sibling) = path.parent().map(|dir| dir.join("chrome")) {
+            if sibling.is_file() && !is_shell_script(&sibling) {
+                return sibling;
+            }
+        }
+        path.to_path_buf()
+    }
+
+    fn injects_remote_debugging(path: &Path) -> bool {
+        is_shell_script(path)
+            && fs::read_to_string(path)
+                .map(|text| text.contains("remote-debugging-port"))
+                .unwrap_or(false)
+    }
+
+    fn is_shell_script(path: &Path) -> bool {
+        use std::io::Read;
+        let Ok(mut file) = fs::File::open(path) else {
+            return false;
+        };
+        let mut magic = [0u8; 2];
+        file.read_exact(&mut magic).is_ok() && magic == *b"#!"
+    }
+
+    fn chrome_dump_dom(
+        chrome: &Path,
+        uri: &str,
+        width: u32,
+        profile: &Path,
+        timeout: std::time::Duration,
+    ) -> String {
+        use std::io::Read;
+        use std::process::Stdio;
+        use std::time::Instant;
+
+        let mut child = Command::new(chrome)
+            .args([
+                "--headless=new",
+                "--disable-gpu",
+                "--no-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-extensions",
+                "--no-first-run",
+                "--timeout=15000",
+                "--virtual-time-budget=2000",
+                &format!("--user-data-dir={}", profile.display()),
+                &format!("--window-size={width},900"),
+                "--dump-dom",
+                uri,
+            ])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("chrome");
+        let stdout = child.stdout.take().expect("chrome stdout");
+        let stderr = child.stderr.take().expect("chrome stderr");
+        let reader = std::thread::spawn(move || {
+            let mut buf = Vec::new();
+            let mut r = stdout;
+            let _ = r.read_to_end(&mut buf);
+            buf
+        });
+        let err_reader = std::thread::spawn(move || {
+            let mut buf = Vec::new();
+            let mut r = stderr;
+            let _ = r.read_to_end(&mut buf);
+            buf
+        });
+        let start = Instant::now();
+        let status = loop {
+            match child.try_wait() {
+                Ok(Some(status)) => break status,
+                Ok(None) if start.elapsed() >= timeout => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    panic!(
+                        "chrome timed out after {}s for {uri} at {width}px",
+                        timeout.as_secs()
+                    );
+                }
+                Ok(None) => std::thread::sleep(std::time::Duration::from_millis(50)),
+                Err(e) => panic!("wait chrome: {e}"),
+            }
+        };
+        let dumped = reader.join().expect("chrome stdout thread");
+        let err = err_reader.join().unwrap_or_default();
+        assert!(
+            status.success(),
+            "chrome failed for {uri} at {width}px: {status}\n{}",
+            String::from_utf8_lossy(&err)
+        );
+        String::from_utf8_lossy(&dumped).into_owned()
+    }
+
+    fn attr_after(html: &str, key: &str) -> Option<i32> {
+        let start = html.find(key)? + key.len();
+        let rest = html.get(start..)?;
+        let end = rest.find('"')?;
+        rest[..end].parse().ok()
     }
 
     #[test]
