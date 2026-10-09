@@ -13,6 +13,66 @@ const INSTALL_DEADLINE: Duration = Duration::from_secs(30);
 
 const SCHEMA: &str = include_str!("../sql/00_schema.sql");
 
+// megabase:unit auth:sql-function:auth.uid()
+const AUTH_UID: &str = include_str!("../sql/auth.uid.sql");
+
+// megabase:unit auth:sql-function:auth.role()
+const AUTH_ROLE: &str = include_str!("../sql/auth.role.sql");
+
+// megabase:unit auth:sql-function:auth.email()
+const AUTH_EMAIL: &str = include_str!("../sql/auth.email.sql");
+
+// megabase:unit auth:sql-function:auth.jwt()
+const AUTH_JWT: &str = include_str!("../sql/auth.jwt.sql");
+
+// megabase:unit auth:sql-table:auth.instances
+const INSTANCES: &str = include_str!("../sql/instances.sql");
+
+// megabase:unit auth:sql-table:auth.audit_log_entries
+const AUDIT_LOG_ENTRIES: &str = include_str!("../sql/audit_log_entries.sql");
+
+// megabase:unit auth:sql-table:auth.identities
+const IDENTITIES: &str = include_str!("../sql/identities.sql");
+
+// megabase:unit auth:sql-table:auth.flow_state
+const FLOW_STATE: &str = include_str!("../sql/flow_state.sql");
+
+// megabase:unit auth:sql-table:auth.mfa_amr_claims
+const MFA_AMR_CLAIMS: &str = include_str!("../sql/mfa_amr_claims.sql");
+
+// megabase:unit auth:sql-table:auth.custom_oauth_providers
+const CUSTOM_OAUTH_PROVIDERS: &str = include_str!("../sql/custom_oauth_providers.sql");
+
+// megabase:unit auth:sql-table:auth.mfa_factors
+const MFA_FACTORS: &str = include_str!("../sql/mfa_factors.sql");
+
+// megabase:unit auth:sql-table:auth.mfa_challenges
+const MFA_CHALLENGES: &str = include_str!("../sql/mfa_challenges.sql");
+
+// megabase:unit auth:sql-table:auth.mfa_recovery_code_sets
+const MFA_RECOVERY_CODE_SETS: &str = include_str!("../sql/mfa_recovery_code_sets.sql");
+
+// megabase:unit auth:sql-table:auth.mfa_recovery_codes
+const MFA_RECOVERY_CODES: &str = include_str!("../sql/mfa_recovery_codes.sql");
+
+// megabase:unit auth:sql-table:auth.oauth_clients
+const OAUTH_CLIENTS: &str = include_str!("../sql/oauth_clients.sql");
+
+// megabase:unit auth:sql-table:auth.oauth_client_states
+const OAUTH_CLIENT_STATES: &str = include_str!("../sql/oauth_client_states.sql");
+
+// megabase:unit auth:sql-table:auth.oauth_authorizations
+const OAUTH_AUTHORIZATIONS: &str = include_str!("../sql/oauth_authorizations.sql");
+
+// megabase:unit auth:sql-table:auth.oauth_consents
+const OAUTH_CONSENTS: &str = include_str!("../sql/oauth_consents.sql");
+
+// megabase:unit auth:sql-table:auth.one_time_tokens
+const ONE_TIME_TOKENS: &str = include_str!("../sql/one_time_tokens.sql");
+
+// megabase:unit auth:sql-table:auth.refresh_tokens
+const REFRESH_TOKENS: &str = include_str!("../sql/refresh_tokens.sql");
+
 // megabase:unit auth:sql-table:auth.users
 const USERS: &str = include_str!("../sql/users.sql");
 
@@ -45,6 +105,26 @@ const SCIM_TOKENS: &str = include_str!("../sql/scim_tokens.sql");
 
 const OBJECTS: &[&str] = &[
     SCHEMA,
+    INSTANCES,
+    AUDIT_LOG_ENTRIES,
+    IDENTITIES,
+    FLOW_STATE,
+    MFA_AMR_CLAIMS,
+    CUSTOM_OAUTH_PROVIDERS,
+    MFA_FACTORS,
+    MFA_CHALLENGES,
+    MFA_RECOVERY_CODE_SETS,
+    MFA_RECOVERY_CODES,
+    OAUTH_CLIENTS,
+    OAUTH_CLIENT_STATES,
+    OAUTH_AUTHORIZATIONS,
+    OAUTH_CONSENTS,
+    ONE_TIME_TOKENS,
+    REFRESH_TOKENS,
+    AUTH_UID,
+    AUTH_ROLE,
+    AUTH_EMAIL,
+    AUTH_JWT,
     USERS,
     SESSIONS,
     SCHEMA_MIGRATIONS,
@@ -154,29 +234,106 @@ mod tests {
     }
 
     #[test]
-    fn issue_12_tables_are_installed() {
-        let sql = install_sql();
-        for name in [
-            "auth.users",
-            "auth.sessions",
-            "auth.schema_migrations",
-            "auth.sso_providers",
-            "auth.sso_domains",
-            "auth.saml_providers",
-            "auth.saml_relay_states",
-            "auth.sso_sessions",
-            "auth.scim_users",
-            "auth.scim_tokens",
-        ] {
-            assert!(
-                sql.contains(&format!("CREATE TABLE IF NOT EXISTS {name}")),
-                "missing {name}"
-            );
-        }
+    fn function_bodies_match_upstream_gucs() {
+        assert!(AUTH_UID.contains("request.jwt.claim.sub"));
+        assert!(AUTH_UID.contains("request.jwt.claims"));
+        assert!(AUTH_UID.contains("language sql stable"));
+        assert!(AUTH_ROLE.contains("request.jwt.claim.role"));
+        assert!(AUTH_EMAIL.contains("request.jwt.claim.email"));
+        assert!(AUTH_JWT.contains("current_setting('request.jwt.claim', true)"));
+        assert!(AUTH_JWT.contains("current_setting('request.jwt.claims', true)"));
+        assert!(
+            !AUTH_JWT.contains("request.jwt.claim.sub"),
+            "auth.jwt() reads the whole claim document, not .sub"
+        );
+    }
+
+    #[test]
+    fn identities_does_not_rename_id() {
+        let lower = IDENTITIES.to_ascii_lowercase();
+        assert!(
+            !lower.contains("rename column"),
+            "renaming id breaks an already-migrated UUID primary key"
+        );
+        assert!(IDENTITIES.contains("provider_id"));
+        assert!(IDENTITIES.contains("GENERATED ALWAYS AS (lower(identity_data->>'email')) STORED"));
+        assert!(IDENTITIES.contains("REFERENCES auth.users(id) ON DELETE CASCADE"));
     }
 
     #[test]
     fn tables_declare_final_columns() {
+        assert!(INSTANCES.contains("raw_base_config"));
+        assert!(AUDIT_LOG_ENTRIES.contains("ip_address"));
+        assert!(FLOW_STATE.contains("code_challenge_method"));
+        assert!(FLOW_STATE.contains("authentication_method"));
+        assert!(FLOW_STATE.contains("email_optional"));
+        assert!(FLOW_STATE.contains("ALTER COLUMN provider_type SET NOT NULL"));
+        assert!(FLOW_STATE.contains("ALTER COLUMN authentication_method SET NOT NULL"));
+        assert!(FLOW_STATE.contains("Stores metadata for all OAuth/SSO login flows"));
+        assert!(IDENTITIES.contains("ALTER COLUMN provider_id SET NOT NULL"));
+        assert!(MFA_AMR_CLAIMS.contains("ALTER COLUMN session_id SET NOT NULL"));
+        assert!(MFA_AMR_CLAIMS.contains("amr_id_pk"));
+        assert!(MFA_AMR_CLAIMS.contains("REFERENCES auth.sessions(id) ON DELETE CASCADE"));
+        assert!(CUSTOM_OAUTH_PROVIDERS.contains("custom_claims_allowlist"));
+        assert!(CUSTOM_OAUTH_PROVIDERS.contains("provider_type IN ('oauth2', 'oidc')"));
+        assert!(MFA_FACTORS.contains("last_webauthn_challenge_data"));
+        assert!(MFA_FACTORS.contains("'recovery_code'"));
+        assert!(MFA_FACTORS.contains("unique_phone_factor_per_user"));
+        assert!(MFA_FACTORS.contains("DROP CONSTRAINT IF EXISTS mfa_factors_phone_key"));
+        assert!(MFA_FACTORS.contains("ALTER COLUMN factor_type SET NOT NULL"));
+        assert!(MFA_CHALLENGES.contains("otp_code"));
+        assert!(MFA_CHALLENGES.contains("web_authn_session_data"));
+        assert!(MFA_CHALLENGES.contains("mfa_challenge_created_at_idx"));
+        assert!(MFA_CHALLENGES.contains("REFERENCES auth.mfa_factors(id) ON DELETE CASCADE"));
+        assert!(MFA_RECOVERY_CODE_SETS.contains("failed_verification_count"));
+        assert!(
+            MFA_RECOVERY_CODE_SETS.contains("REFERENCES auth.mfa_factors (id) ON DELETE CASCADE")
+        );
+        assert!(MFA_RECOVERY_CODES.contains("code_hash"));
+        assert!(MFA_RECOVERY_CODES.contains("mfa_recovery_codes_set_id_idx"));
+        assert!(OAUTH_CLIENTS.contains("token_endpoint_auth_method"));
+        assert!(OAUTH_CLIENTS.contains("DROP COLUMN IF EXISTS client_id"));
+        assert!(!OAUTH_CLIENTS.contains("constraint oauth_clients_client_id_key unique"));
+        assert!(OAUTH_CLIENTS.contains("ALTER COLUMN client_secret_hash DROP NOT NULL"));
+        assert!(OAUTH_CLIENT_STATES.contains("provider_type"));
+        assert!(OAUTH_CLIENT_STATES.contains(
+            "Stores OAuth states for third-party provider authentication flows where Supabase acts as the OAuth client."
+        ));
+        assert!(OAUTH_AUTHORIZATIONS.contains("oauth_auth_pending_exp_idx"));
+        assert!(OAUTH_AUTHORIZATIONS.contains("nonce"));
+        assert!(OAUTH_AUTHORIZATIONS.contains("code_challenge_method"));
+        assert!(OAUTH_CONSENTS.contains("oauth_consents_user_client_unique"));
+        assert!(OAUTH_CONSENTS.contains("revoked_at IS NULL OR revoked_at >= granted_at"));
+        assert!(ONE_TIME_TOKENS.contains("timestamp WITHOUT TIME ZONE"));
+        assert!(ONE_TIME_TOKENS.contains("expires_at"));
+        assert!(ONE_TIME_TOKENS.contains("USING hash (token_hash)"));
+        assert!(ONE_TIME_TOKENS.contains("WHEN undefined_object OR feature_not_supported"));
+        assert!(
+            !ONE_TIME_TOKENS.contains("WHEN OTHERS"),
+            "hash fallback must not swallow lock/permission errors"
+        );
+        let add_user_id = ONE_TIME_TOKENS
+            .find("ADD COLUMN IF NOT EXISTS user_id")
+            .expect("user_id repair");
+        let unique_idx = ONE_TIME_TOKENS
+            .find("one_time_tokens_user_id_token_type_key")
+            .expect("unique index");
+        let hash_idx = ONE_TIME_TOKENS
+            .find("USING hash (token_hash)")
+            .expect("hash index");
+        assert!(
+            add_user_id < unique_idx,
+            "unique index must follow column repairs"
+        );
+        assert!(
+            add_user_id < hash_idx,
+            "hash indexes must follow column repairs"
+        );
+        assert!(REFRESH_TOKENS.contains("user_id varchar(255)"));
+        assert!(REFRESH_TOKENS.contains("DROP CONSTRAINT IF EXISTS refresh_tokens_parent_fkey"));
+        assert!(REFRESH_TOKENS.contains("DROP INDEX IF EXISTS auth.refresh_tokens_token_idx"));
+        assert!(REFRESH_TOKENS.contains("refresh_tokens_session_id_fkey"));
+        assert!(REFRESH_TOKENS.contains("parent varchar(255)"));
         assert!(USERS.contains("encrypted_password"));
         assert!(USERS.contains(
             "GENERATED ALWAYS AS (LEAST (users.email_confirmed_at, users.phone_confirmed_at)) STORED"
@@ -207,6 +364,50 @@ mod tests {
     }
 
     #[test]
+    fn issue_11_tables_are_installed() {
+        let sql = install_sql();
+        for name in [
+            "auth.mfa_factors",
+            "auth.mfa_challenges",
+            "auth.mfa_recovery_code_sets",
+            "auth.mfa_recovery_codes",
+            "auth.oauth_clients",
+            "auth.oauth_client_states",
+            "auth.oauth_authorizations",
+            "auth.oauth_consents",
+            "auth.one_time_tokens",
+            "auth.refresh_tokens",
+        ] {
+            assert!(
+                sql.contains(&format!("CREATE TABLE IF NOT EXISTS {name}")),
+                "missing {name}"
+            );
+        }
+    }
+
+    #[test]
+    fn issue_12_tables_are_installed() {
+        let sql = install_sql();
+        for name in [
+            "auth.users",
+            "auth.sessions",
+            "auth.schema_migrations",
+            "auth.sso_providers",
+            "auth.sso_domains",
+            "auth.saml_providers",
+            "auth.saml_relay_states",
+            "auth.sso_sessions",
+            "auth.scim_users",
+            "auth.scim_tokens",
+        ] {
+            assert!(
+                sql.contains(&format!("CREATE TABLE IF NOT EXISTS {name}")),
+                "missing {name}"
+            );
+        }
+    }
+
+    #[test]
     fn sso_sessions_is_dropped_after_create() {
         let create = SSO_SESSIONS
             .find("CREATE TABLE IF NOT EXISTS auth.sso_sessions")
@@ -222,36 +423,11 @@ mod tests {
 
     #[test]
     fn parent_keys_are_stubs_not_claimed_units() {
-        assert!(SCHEMA.contains("CREATE TABLE IF NOT EXISTS auth.flow_state"));
-        assert!(SCHEMA.contains("CREATE TABLE IF NOT EXISTS auth.oauth_clients"));
+        assert!(SCHEMA.contains("CREATE TABLE IF NOT EXISTS auth.users"));
+        assert!(SCHEMA.contains("CREATE TABLE IF NOT EXISTS auth.sessions"));
         assert!(
             !SCHEMA.contains("encrypted_password"),
             "do not ship the full auth.users column list as a stub"
-        );
-        assert!(
-            !SCHEMA.contains("provider_type"),
-            "do not ship the full auth.flow_state column list in this issue"
-        );
-    }
-
-    #[test]
-    fn does_not_claim_sibling_units() {
-        let sql = install_sql();
-        assert!(
-            !sql.contains("CREATE OR REPLACE FUNCTION auth.uid"),
-            "auth.uid() is issue 10"
-        );
-        assert!(
-            !sql.contains("CREATE TABLE IF NOT EXISTS auth.instances"),
-            "auth.instances is issue 10"
-        );
-        assert!(
-            !sql.contains("CREATE TABLE IF NOT EXISTS auth.mfa_factors"),
-            "auth.mfa_factors is issue 11"
-        );
-        assert!(
-            !sql.contains("CREATE TABLE IF NOT EXISTS auth.refresh_tokens"),
-            "auth.refresh_tokens is issue 11"
         );
     }
 

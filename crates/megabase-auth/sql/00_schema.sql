@@ -1,7 +1,6 @@
 -- Ported from supabase/auth migrations (MIT), pin v2.197.0.
--- Schema plus parent keys this issue's foreign keys need.
--- Full auth.flow_state / auth.oauth_clients definitions are other units;
--- do not mark them implemented here.
+-- Schema plus parent stubs. Full auth.users / auth.sessions column
+-- lists are later units; do not mark the stubs as those units.
 
 CREATE SCHEMA IF NOT EXISTS auth;
 GRANT USAGE ON SCHEMA auth TO PUBLIC;
@@ -12,12 +11,14 @@ EXCEPTION
     WHEN duplicate_object THEN NULL;
 END $$;
 
-CREATE TABLE IF NOT EXISTS auth.flow_state (
+CREATE TABLE IF NOT EXISTS auth.users (
     id uuid NOT NULL,
-    CONSTRAINT flow_state_pkey PRIMARY KEY (id)
+    CONSTRAINT users_pkey PRIMARY KEY (id)
 );
 
-CREATE TABLE IF NOT EXISTS auth.oauth_clients (
+CREATE TABLE IF NOT EXISTS auth.sessions (
     id uuid NOT NULL,
-    CONSTRAINT oauth_clients_pkey PRIMARY KEY (id)
+    user_id uuid NOT NULL,
+    CONSTRAINT sessions_pkey PRIMARY KEY (id),
+    CONSTRAINT sessions_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE
 );

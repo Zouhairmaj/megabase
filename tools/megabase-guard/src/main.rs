@@ -55,6 +55,8 @@ fn changes(base: &str, head: &str) -> Result<Vec<Change>> {
             Ok(Change {
                 status,
                 path: path.to_string(),
+                before: None,
+                after: None,
             })
         })
         .collect()
@@ -151,8 +153,20 @@ fn run() -> Result<bool> {
             policy::BOOTSTRAP_BRANCH
         );
     }
+    if policy::is_release_please(&ctx) {
+        eprintln!(
+            "release-please exception active: branch `{}` may change CHANGELOG.md, .release-please-manifest.json, Cargo.toml, Cargo.lock, and delete release-as from release-please-config.json",
+            ctx.head_ref
+        );
+    }
 
-    let changes = changes(&base, &head)?;
+    let mut changes = changes(&base, &head)?;
+    for change in &mut changes {
+        if change.path == policy::RELEASE_PLEASE_CONFIG || change.path == "HUMAN_LOG.md" {
+            change.before = git(&["show", &format!("{}:{}", base, change.path)]).ok();
+            change.after = git(&["show", &format!("{}:{}", head, change.path)]).ok();
+        }
+    }
     let violations = policy::evaluate(&changes, &ctx);
     eprintln!(
         "checked {} changed paths against base {base}",

@@ -3,7 +3,7 @@ title: Configuration
 description: MEGABASE_HOST, MEGABASE_PORT, DATABASE_URL, JWT_SECRET — what each variable does.
 section: get-started
 order: 3
-card: Listen address, JWT_SECRET for HS256, and DATABASE_URL for Auth SQL install.
+card: Listen address and JWT_SECRET for HS256 verification. Auth and REST routes are still 501.
 ---
 
 # Configuration
@@ -16,20 +16,8 @@ other names. There is no `.env.example` in this tree; the judge uses
 | --- | --- |
 | MEGABASE_HOST | Bind address. Default `0.0.0.0`. |
 | MEGABASE_PORT | HTTP port. Default `8000`. |
-| DATABASE_URL | PostgreSQL connection string. PostgreSQL stays external; Megabase does not bundle it. When set, startup installs the Auth SQL tables this build implements: `auth.users`, `auth.sessions`, `auth.schema_migrations`, `auth.sso_providers`, `auth.sso_domains`, `auth.saml_providers`, `auth.saml_relay_states`, `auth.sso_sessions` (created then dropped; final pin has no table), `auth.scim_users`, `auth.scim_tokens`. The statements are idempotent. If install fails, the process exits. |
+| DATABASE_URL | PostgreSQL connection string. PostgreSQL stays external; Megabase does not bundle it. When set, startup installs the Auth SQL objects listed in [`specs/auth/database.md`](../specs/auth/database.md). The statements are idempotent. Connect plus SQL must finish within 30 seconds or the process exits. If install fails, the process exits. Omit it to skip schema install (the HTTP server still starts). |
 | JWT_SECRET | HS256 secret used to verify JWTs (same name as the self-hosted demo stack). Raw UTF-8, not base64. There is no default: a missing or empty value is an error when verifying, so Megabase never mints a key. The process still starts without it so `/_megabase/health` works. |
-
-Omit `DATABASE_URL` to skip schema install (the HTTP server still starts).
-
-## PostgreSQL TLS
-
-The installer connects **without TLS** (`NoTls`). That is the local judge
-database. `sslmode=require` aborts startup instead of sending the password
-in the clear. `verify-ca` and `verify-full` are not accepted by this client
-and also abort. `sslmode=disable`, and the default `prefer` when this client
-cannot offer TLS, still send credentials in the clear. Use a Unix socket or
-loopback. A remote `DATABASE_URL` needs a separate encrypted transport until
-Megabase speaks TLS to PostgreSQL.
 
 ## JWT verification
 
@@ -47,6 +35,16 @@ implemented.
 
 Auth `/auth/v1` and REST `/rest/v1` still answer 501 until those units are
 ported; they will call this verifier instead of copying JWT logic.
+
+## PostgreSQL TLS
+
+The installer connects **without TLS** (`NoTls`). That is the local judge
+database. `sslmode=require` aborts startup instead of sending the password
+in the clear. `verify-ca` and `verify-full` are not accepted by this client
+and also abort. `sslmode=disable`, and the default `prefer` when this client
+cannot offer TLS, still send credentials in the clear. Use a Unix socket or
+loopback. A remote `DATABASE_URL` needs a separate encrypted transport until
+Megabase speaks TLS to PostgreSQL.
 
 ## Listen address
 

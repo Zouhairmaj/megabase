@@ -1,6 +1,6 @@
 ---
 title: Quickstart
-description: Build the binary, start it and confirm it answers. No Supabase account needed.
+description: Build the binary, start it and confirm it answers. No hosted account needed.
 section: get-started
 order: 2
 card: Start the binary, call /_megabase/health, then hit a 501 on an unimplemented route.
