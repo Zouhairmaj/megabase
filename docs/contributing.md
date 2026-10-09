@@ -23,7 +23,8 @@ One Cargo workspace, one final binary: `megabase`. One crate per Supabase-author
 5. Run the judge (`just judge`). Mutating cases also compare database
    side-effects; judge harness changes stay on `review/*`.
 6. Keep the commit only if total conformance does not fall.
-7. Record: PR, coverage, PROGRESS.md for decisions that outlive one issue.
+7. Record: PR, coverage, and a new `docs/decisions/NNNN-slug.md` when the
+   decision outlives one issue. `PROGRESS.md` stays current state only.
 
 Failures return HTTP 501 with `{"code":"MEGABASE_NOT_IMPLEMENTED",...}`. Never a plausible but unverified answer.
 

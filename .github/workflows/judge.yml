@@ -15,32 +15,89 @@ permissions:
   contents: read
 
 # Cancel superseded PR runs. Keep main and workflow_dispatch to completion.
+# The matrix below is inside one run, so cancelling the run does not cancel
+# one service while another continues.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  judge:
-    name: Judge
+  build:
+    name: Judge build
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
       contents: read
-      pull-requests: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+        with:
+          toolchain: stable
+      - uses: ./.github/actions/rust-cache
+        with:
+          key: mold
+      - uses: ./.github/actions/linux-mold
+      - name: Build harness and binary
+        run: cargo build --release --locked -p megabase -p megabase-judge --bin megabase --bin megabase-judge
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: judge-binaries
+          retention-days: 1
+          path: |
+            target/release/megabase
+            target/release/megabase-judge
+
+  services:
+    name: Judge services
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      services: ${{ steps.list.outputs.services }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          sparse-checkout: judge/cases
+      - id: list
+        name: List judge/cases services
+        run: |
+          set -euo pipefail
+          json=$(find judge/cases -maxdepth 1 -name '*.toml' -printf '%f\n' | sed 's/\.toml$//' | sort | jq -R . | jq -sc .)
+          if [ "$json" = "[]" ]; then
+            echo "::error::judge/cases has no toml files"
+            exit 1
+          fi
+          echo "services=${json}" >> "$GITHUB_OUTPUT"
+          echo "services: ${json}"
+
+  service:
+    name: Judge (${{ matrix.service }})
+    needs: [build, services]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        service: ${{ fromJson(needs.services.outputs.services) }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           submodules: recursive
           fetch-depth: 1
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
-          toolchain: stable
-      - uses: ./.github/actions/rust-cache
-      - name: Build harness and binary
-        run: cargo build --release --locked -p megabase -p megabase-judge --bin megabase --bin megabase-judge
+          name: judge-binaries
+          path: target/release
+      - name: Mark binaries executable
+        run: chmod +x target/release/megabase target/release/megabase-judge
       # Do not use `secrets.*` in `if:` — that context is unavailable when
-      # GitHub evaluates the workflow graph and skips the Judge job on PRs.
+      # GitHub evaluates the workflow graph and skips jobs on pull_request.
       - name: Docker Hub login
         env:
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -89,11 +146,31 @@ jobs:
       - name: Wait
         run: ./target/release/megabase-judge wait --timeout 240
       - name: Run cases
+        env:
+          SERVICE: ${{ matrix.service }}
         run: |
+          set -euo pipefail
+          mkdir -p /tmp/cases
+          cp "judge/cases/${SERVICE}.toml" /tmp/cases/
+          ids_json=$(grep -E '^id = "' "judge/cases/${SERVICE}.toml" | sed -E 's/^id = "([^"]*)"/\1/' | jq -R . | jq -sc .)
+          if [ "$ids_json" = "[]" ]; then
+            echo "::error::${SERVICE}.toml has no case ids"
+            exit 1
+          fi
+          # A partial run must not see other services' baseline passes as
+          # regressions. Keep only ids from this file.
+          if [ -f coverage/judge-results.json ]; then
+            jq --argjson ids "$ids_json" \
+              '.cases |= map(select(.id as $id | $ids | index($id) != null))' \
+              coverage/judge-results.json > /tmp/baseline.json
+            baseline=(--baseline /tmp/baseline.json)
+          else
+            baseline=()
+          fi
           ./target/release/megabase-judge run \
-            --cases judge/cases \
+            --cases /tmp/cases \
+            "${baseline[@]}" \
             --out /tmp/judge-results.json \
-            --baseline coverage/judge-results.json \
             --summary /tmp/judge-summary.md
           cat /tmp/judge-summary.md >> "$GITHUB_STEP_SUMMARY"
       - name: vendor/ stayed clean
@@ -103,7 +180,9 @@ jobs:
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
-          name: judge-results
+          name: judge-results-${{ matrix.service }}
+          retention-days: 1
+          if-no-files-found: warn
           path: |
             /tmp/judge-results.json
             /tmp/judge-summary.md
@@ -117,6 +196,66 @@ jobs:
             --env-file vendor/supabase/docker/.env.example logs --tail 80
           docker inspect --format '{{.State.Status}} {{json .State.Health}}' supabase-pooler || true
           cat /tmp/megabase.log || true
+
+  # Required check name stays `Judge` so branch protection does not change.
+  aggregate:
+    name: Judge
+    needs: [services, service]
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        continue-on-error: true
+        with:
+          pattern: judge-results-*
+          path: /tmp/parts
+      - name: Merge service results
+        id: merge
+        run: |
+          set -euo pipefail
+          discover="${{ needs.services.result }}"
+          service="${{ needs.service.result }}"
+          echo "discover=${discover} service=${service}"
+          shopt -s nullglob
+          parts=(/tmp/parts/*/judge-results.json)
+          if [ ${#parts[@]} -gt 0 ]; then
+            jq -s '{schema: 1, cases: (map(.cases[]) | sort_by(.id))}' "${parts[@]}" > /tmp/judge-results.json
+            dup=$(jq -r '[.cases | group_by(.id)[] | select(length > 1) | .[0].id] | .[]' /tmp/judge-results.json)
+            if [ -n "$dup" ]; then
+              echo "::error::duplicate case ids in merged judge results"
+              echo "$dup"
+              echo "ok=false" >> "$GITHUB_OUTPUT"
+              exit 1
+            fi
+          fi
+          {
+            echo "## Judge"
+            echo
+            echo "discover=\`${discover}\` service=\`${service}\`"
+            echo
+            for f in /tmp/parts/*/judge-summary.md; do
+              [ -f "$f" ] || continue
+              echo "### $(basename "$(dirname "$f")")"
+              echo
+              cat "$f"
+              echo
+            done
+          } > /tmp/judge-summary.md
+          cat /tmp/judge-summary.md >> "$GITHUB_STEP_SUMMARY"
+          if [ "$discover" != "success" ] || [ "$service" != "success" ]; then
+            echo "::error::One or more judge services failed (discover=${discover}, service=${service})"
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+          if [ ! -f /tmp/judge-results.json ]; then
+            echo "::error::no service produced judge-results.json"
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+          echo "ok=true" >> "$GITHUB_OUTPUT"
       - name: Comment on the PR
         if: github.event_name == 'pull_request' && always()
         continue-on-error: true
@@ -126,7 +265,7 @@ jobs:
             const fs = require('fs');
             let body = '## Judge\n\n_(no summary)_';
             try {
-              body = '## Judge\n\n' + fs.readFileSync('/tmp/judge-summary.md', 'utf8');
+              body = fs.readFileSync('/tmp/judge-summary.md', 'utf8');
             } catch {
               body += '\n\nCases did not run (reference stack or harness failed first).';
             }
@@ -136,10 +275,18 @@ jobs:
               repo: context.repo.repo,
               body,
             });
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: steps.merge.outputs.ok == 'true'
+        with:
+          name: judge-results
+          retention-days: 1
+          path: |
+            /tmp/judge-results.json
+            /tmp/judge-summary.md
 
   coverage-on-main:
     name: Update coverage on main
-    needs: judge
+    needs: aggregate
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     concurrency:
@@ -161,6 +308,9 @@ jobs:
         with:
           toolchain: stable
       - uses: ./.github/actions/rust-cache
+        with:
+          key: mold
+      - uses: ./.github/actions/linux-mold
       - run: cargo run --locked -p megabase-coverage -- update
       - name: Commit generated status
         run: |

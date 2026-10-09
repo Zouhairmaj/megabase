@@ -1,0 +1,9 @@
+# Realtime smoke cases.
+
+[[case]]
+id = "realtime.ping"
+description = "Realtime HTTP API ping"
+units = ["realtime:route:GET /realtime/v1/api/ping"]
+[[case.step]]
+method = "GET"
+path = "/realtime/v1/api/ping"

@@ -1,7 +1,9 @@
 # Megabase progress
 
 GitHub is the source of truth for **what is being worked on**. This file is
-the source of truth for **decisions and overall state**.
+the source of truth for **current state** (phase, pins, status, level gates,
+tracking). Decisions are one file each under
+[`docs/decisions/`](docs/decisions/).
 
 ## Current phase
 
@@ -56,124 +58,9 @@ Do not start a level until the previous threshold holds.
 
 ## Decisions
 
-All of the following were **approved by the agent coordinator**. None are
-waiting on a human.
-
-1. **Vendor pins** (2026-10-09). Latest stable tags of the nine upstream
-   repositories, recorded in `vendor.toml` and the table above.
-2. **Proposal 0001** (Accepted). Bounded compatibility contract
-   (`docs/COMPATIBILITY.md`); stronger judge (hidden tests, DB
-   side-effects, concurrency, fault injection, adversarial cases — design
-   in `judge/README.md`); level gates in the table above. Level 5 deferred.
-3. **Rust tooling** ([ADR 0001](docs/adr/0001-rust-tooling.md)). Coverage,
-   guard, backlog and judge are Rust. No Python.
-4. **Gateway layout** ([ADR 0002](docs/adr/0002-gateway-layout.md)). Kong
-   prefix matching; Studio fallback; `/_megabase/health`.
-5. **Protected paths** ([ADR 0003](docs/adr/0003-protected-paths.md)).
-   Human-owned files always rejected; frozen spec always rejected after
-   bootstrap; `judge/`, CI and the guard only on `review/*`. The Phase 0
-   bootstrap exception applies solely to branch
-   `cursor/phase-0-bootstrap-121c` while `main` still has no `vendor.toml`.
-   `release-please--branches--*` may change only `CHANGELOG.md`,
-   `.release-please-manifest.json`, `Cargo.toml`, `Cargo.lock`, and
-   delete `release-as` from `release-please-config.json`. `review/*`
-   may append or complete `HUMAN_LOG.md` Pending items (grows must
-   start a new `- ` item; shrinks must end at a `- **Date**` item)
-   and grow the Completed section.
-6. **README status is generated.** `megabase-coverage update` on `main`;
-   `check` is a required CI job. Agents keep it current. Status is one
-   full-width nested treemap (`coverage/treemap.svg`, light:
-   `coverage/treemap-light.svg`); the website embeds the same files.
-   Totals come from `coverage/units.json`.
-7. **Design-first.** Rule: [GOAL.md Design (design-first, Kite)](GOAL.md).
-   Kite file: [megabase-identity](https://kite.new/p/megabase-identity).
-   Kite holds templates and layouts only, not content. Only a new layout
-   or component needs Kite first. Agent-decided, approved by the lead.
-8. **Delegation.** The maintainer delegated decisions to the agent
-   coordinator. Humans still own `GOAL.md`, `MANIFESTO.md`, `HUMAN_LOG.md`
-   and repository settings.
-9. **Repository URL.** GitHub is `Zouhairmaj/megabase`. README badges and
-   links (CI, clone, issues, verified-app submissions) use that owner, not
-   a previous placeholder.
-10. **NOTICE follows LICENSE files.** SPDX in `NOTICE` / `vendor.toml` is
-    taken from each pin's `LICENSE` file. Auth (`vendor/auth`) and Edge
-    Runtime (`vendor/edge-runtime`) are MIT. Postgres Meta's LICENSE is
-    Apache-2.0 (its `package.json` at this pin says MIT; NOTICE follows
-    LICENSE).
-11. **Versioning.** Policy lives only in
-    [`docs/ROADMAP.md`](docs/ROADMAP.md#versioning-and-releases)
-    (Phase 0 = `0.1.0`, each Level a minor, `1.0.0` at Level 5,
-    patch between gates, weekly Monday release PR). Changelog sections:
-    Features, Bug Fixes, Performance, Conformance/judge, Documentation.
-    `chore` / `ci` / `test` are hidden.
-12. **Board Status reflects reality.** Agents claim an issue (assign +
-    **In progress**, branch `issue-<n>-<slug>`, PR `Closes #<n>`) before
-    coding. `.github/workflows/board-sync.yml` mirrors Status from those
-    signals plus `blocked`. `GOAL.md` is human-owned after this PR; the
-    contract is in `AGENTS.md`. `tools/megabase-backlog` is the
-    idempotent SoT for the board: match `<!-- megabase-id -->`, GraphQL
-    Status option ids (including Blocked), sub-issues and blocked-by.
-13. **Continuous benchmarking.** Criterion benches start with a trivial
-    gateway health/route measurement. Bencher project `megabase` (created
-    on the fly if missing) tracks `main` and PRs (`rust_criterion`, t-test
-    upper boundary 0.99, `--error-on-alert`). Fork PRs skip without the
-    secret.
-14. **Documentation.** Rule: [GOAL.md Documentation](GOAL.md).
-    `docs/` markdown (megabase.sh/docs) is a first-class deliverable and
-    the content source of truth. New doc pages reuse the Kite article
-    template (no new mockup). Same-PR updates; truthful; reviewers block
-    stale or missing docs. Agent-decided, approved by the lead.
-15. **release-please + Docker pins.** Workspace versions use
-    `version.workspace = true`, so release-please's `rust` strategy
-    errors (`value at path package.version is not tagged`). Config uses
-    `release-type: simple` and bumps `[workspace.package].version` only.
-    `bootstrap-sha` is the Phase 0 merge (`7aa41e8`, exclusive) so
-    changelog collection skips non-conventional `Day 0` / `[phase0]` /
-    `[brand]` commits. The first release is still Phase 0 at `0.1.0`
-    (`release-as`). The v0.1.0 release PR must delete `release-as`
-    before it merges.
-    Container `FROM` lines are pinned by digest (root image and
-    `.cursor/Dockerfile`). Cloud Agent `rustup-init` and
-    `cargo-binstall` downloads in `.cursor/Dockerfile` are pinned by
-    SHA-256 and verified before exec (no `curl|sh`). That pin is the
-    two bootstrap binaries only; the `stable` toolchain they install and
-    later `cargo binstall` tool fetches remain unpinned.
-16. **README coverage/conformance badge colors.** Owner-specified
-    traffic-light steps for the shields.io endpoint JSON only:
-    `#e05d44` below 50%, `#fe7d37` from 50% to under 90%, `#00D892` at
-    90% and above (`flat-square`). Treemap chips and generated SVG
-    badges stay on the brand greens in `docs/brand/README.md`.
-17. **Owned lockfiles.** Scorecard/OSV flagged RUSTSEC-2026-0206
-    (`rustybuzz` unmaintained) and RUSTSEC-2026-0192 (`ttf-parser`
-    unmaintained) in `site/Cargo.lock`, not the workspace lockfile and
-    not `vendor/`. `site/` is excluded from the workspace, so root
-    `cargo audit` missed them. Fix: `resvg` 0.45 → 0.48 (harfrust +
-    skrifa). `just audit` and the CI `cargo-audit` matrix (#157) each
-    pass `--file` for every owned lockfile (`Cargo.lock`,
-    `site/Cargo.lock`); a workspace-only run misses `site/`. `vendor/**`
-    lockfiles stay frozen; do not add an OSV ignore unless a finding
-    exists only there.
-18. **Judge databases are separate** (2026-10-09, issue #113). Side-effect
-    checks compare the official cluster's `postgres` database with a
-    dedicated `megabase` database on the same instance (`megabase-judge
-    prepare` on host port 54322, then `DATABASE_URL=…/megabase`). Sharing
-    one database would make catalog and row comparisons vacuous or
-    inverted. Level 1
-    snapshots `auth.users` and `public.todos` after mutating HTTP cases
-    (per-case row delta) and compares `auth` table/function catalogs
-    including `pg_get_constraintdef`. A required catalog object missing
-    on both databases fails; `auth.sso_sessions` is required absent
-    (`absent = true`). A missing fixture snapshot table on the reference
-    still aborts. `storage.objects` stays Level 2.
-19. **Signed releases.** When release-please creates a GitHub Release (or
-    a human dispatches Release with an existing tag), CI builds musl-static
-    linux `x86_64` and `aarch64` `megabase` binaries, writes `SHA256SUMS`,
-    signs blobs keylessly with Sigstore (`cosign sign-blob`), attaches SLSA
-    provenance (`.intoto.jsonl` via `actions/attest-build-provenance`), and
-    publishes `ghcr.io/zouhairmaj/megabase` tagged with the version
-    (`cosign sign`). `id-token: write` is only on that signing job. Install
-    and verify: [`docs/install.md`](docs/install.md). Goal: OpenSSF Scorecard
-    Packaging and Signed-Releases.
+One file per decision in [`docs/decisions/`](docs/decisions/). Add
+`NNNN-slug.md` with the next free number. Do not append to a list in this
+file.
 
 ## Tracking
 

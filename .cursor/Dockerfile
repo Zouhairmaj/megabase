@@ -9,7 +9,9 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PATH=/home/ubuntu/.cargo/bin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
     CARGO_TERM_COLOR=always \
     RUST_BACKTRACE=1 \
-    CARGO_INCREMENTAL=0
+    CARGO_INCREMENTAL=0 \
+    CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS="-C link-arg=-fuse-ld=mold" \
+    CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS="-C link-arg=-fuse-ld=mold"
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
@@ -23,6 +25,7 @@ RUN apt-get update \
         build-essential \
         pkg-config \
         libssl-dev \
+        mold \
         iptables \
         fuse-overlayfs \
         sysvinit-utils \

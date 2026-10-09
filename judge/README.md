@@ -66,7 +66,10 @@ job by itself. New failures of cases that never passed stay grey on the
 treemap.
 
 CI starts only the reference stack in Docker and runs Megabase on the
-runner (no image build). It reads `JWT_SECRET` and `POSTGRES_PASSWORD`
+runner (no image build). One job runs per `judge/cases/*.toml` file
+(`Judge (auth)`, `Judge (rest)`, …) so a failure names that service file.
+A final job named `Judge` merges the JSON results and is the required
+status check. Each service job reads `JWT_SECRET` and `POSTGRES_PASSWORD`
 from `vendor/supabase/docker/.env.example` and sets
 `DATABASE_URL=postgres://supabase_admin:<password>@127.0.0.1:54322/megabase`
 after `prepare` creates that database. Host `:5432` is Supavisor; the
