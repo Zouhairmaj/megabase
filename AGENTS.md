@@ -202,6 +202,7 @@ The board must match reality at all times.
 - **CodeRabbit** reviews every PR (including drafts). **CodeQL** / GitHub
   Advanced Security does too. Fix each finding or dismiss it with a reason.
   Leave no unresolved CodeRabbit threads and no open CodeQL alerts.
+- **Claude Code.** `@claude` mentions from `megabase-agent` run via `.github/workflows/claude.yml`.
 - **Orchestrator.** It alone merges (`gh pr merge <n> --squash`), and only
   when three things hold: the approval covers the current head SHA
   (`gh pr view <n> --json headRefOid`), no change request is open, and every

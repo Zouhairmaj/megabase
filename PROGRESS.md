@@ -182,6 +182,9 @@ Physically impossible for the agent (repository settings or credentials):
 - [ ] Set repo secret `PROJECT_TOKEN` (classic PAT, `project` scope) so
       board-sync can write the Status field
 - [ ] Confirm the Kite file is readable by agents who implement UI
+- [x] Install the [Claude GitHub App](https://github.com/apps/claude) on this
+      repository (2026-10-09)
+- [x] Set repo secret `CLAUDE_CODE_OAUTH_TOKEN` (2026-10-09)
 
 Log each of these in `HUMAN_LOG.md` when it is done. The delegation of
 decisions itself is a human intervention to log.
