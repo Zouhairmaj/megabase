@@ -38,6 +38,7 @@ cadence and who may merge a release PR are in
 [`docs/ROADMAP.md`](docs/ROADMAP.md#versioning-and-releases) (do not restate
 them here). The Release workflow keeps `Cargo.lock` in sync; if a release
 PR's lockfile is still stale, run `cargo update -w` on that branch.
+Signed binaries and the GHCR image: [`docs/install.md`](docs/install.md).
 
 ## Questions
 

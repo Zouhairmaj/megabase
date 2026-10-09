@@ -24,6 +24,16 @@ Each entry should include:
 - **Reason**: Preferred path so release-please and `cargo update -w` lockfile commits trigger required checks natively. Release.yml now `workflow_dispatch`es CI when the secret is unset (GITHUB_TOKEN can start `workflow_dispatch`), but pull_request-only checks (for example Conventional Commits title) and a release branch that does not yet contain those `workflow_dispatch` triggers still need this token. Run 37980727582 failed on Sync Cargo.lock waiting for Build, Codecov, Bencher, Protected paths, and Judge on SHA `b8c1e454…`.
 - **Files affected**: GitHub Actions repository secrets (not in git)
 
+- **Date**: 2026-10-09
+- **Action**: (pending) After the Release workflow publishes `ghcr.io/zouhairmaj/megabase`, set that package to public if GitHub created it private. Then dispatch **Release** from tag `v0.1.0` (Use workflow from = `v0.1.0`, input tag `v0.1.0`) so the first GitHub Release gains signed binaries (it shipped without assets).
+- **Reason**: OpenSSF Scorecard Signed-Releases inspects assets on the last five GitHub Releases. Packaging also wants a public package. `attest-build-provenance` records the run SHA, so the backfill must run on that tag. Agents cannot change package visibility or start that dispatch from this environment.
+- **Files affected**: GitHub Packages and Actions (not in git)
+
+- **Date**: 2026-10-09
+- **Action**: (pending) Add repo secrets `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` (read-only Hub token) so Judge can `docker login` before pulling `supabase/*`, `postgrest/*`, and `kong/*`. GitHub-hosted runners hit Hub 429 unauthenticated.
+- **Reason**: Those images are not official Docker Hub library images, so `public.ecr.aws/docker/library` cannot serve them. The root Dockerfile already pulls rust/debian via ECR Public. Agents cannot create Hub credentials.
+- **Files affected**: GitHub Actions secrets (not in git)
+
 ---
 
 ## Completed

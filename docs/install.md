@@ -1,9 +1,9 @@
 ---
 title: Install
-description: Clone the workspace, build the megabase binary, or build the pinned container image.
+description: Download a signed GitHub Release binary, pull the GHCR image, or build from source.
 section: get-started
 order: 1
-card: Build from source with Rust 1.89+ or from the root Dockerfile. PostgreSQL is external.
+card: Signed linux binaries from a GitHub Release, the image on GHCR, or build from source.
 ---
 
 # Install
@@ -11,6 +11,83 @@ card: Build from source with Rust 1.89+ or from the root Dockerfile. PostgreSQL 
 Megabase is one Rust binary next to PostgreSQL. Unimplemented routes return
 HTTP 501 `{"code":"MEGABASE_NOT_IMPLEMENTED",...}`. Nothing here is
 production software.
+
+The Release workflow attaches musl-static linux `x86_64` and `aarch64`
+binaries, `SHA256SUMS`, Sigstore signatures, and SLSA provenance, and
+publishes `ghcr.io/zouhairmaj/megabase` tagged with that version. `v0.1.0`
+shipped without those assets; use a later tag, or a `v0.1.0` backfill
+dispatched from that tag, that lists `megabase-*-unknown-linux-musl` on
+[Releases](https://github.com/Zouhairmaj/megabase/releases). Commands for
+download and verification live only on this page.
+
+## Release binary
+
+Install [cosign](https://docs.sigstore.dev/cosign/system_config/installation/).
+Set `TAG` to a release that includes the musl assets, then authenticate
+`SHA256SUMS` before trusting the checksum or running the binary.
+
+```shell
+TAG=vX.Y.Z
+case "$(uname -m)" in
+  x86_64) ARCH=x86_64-unknown-linux-musl ;;
+  aarch64|arm64) ARCH=aarch64-unknown-linux-musl ;;
+  *) echo "Unsupported architecture: $(uname -m)" >&2; exit 1 ;;
+esac
+BASE=https://github.com/Zouhairmaj/megabase/releases/download/${TAG}
+ASSET=megabase-${TAG}-${ARCH}
+curl -fsSL -O "${BASE}/${ASSET}"
+curl -fsSL -O "${BASE}/SHA256SUMS"
+curl -fsSL -O "${BASE}/SHA256SUMS.sig"
+curl -fsSL -O "${BASE}/SHA256SUMS.pem"
+cosign verify-blob \
+  --certificate SHA256SUMS.pem \
+  --signature SHA256SUMS.sig \
+  --certificate-identity-regexp '^https://github.com/Zouhairmaj/megabase/\.github/workflows/release\.yml@refs/' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  SHA256SUMS
+sha256sum -c SHA256SUMS --ignore-missing
+chmod +x "${ASSET}"
+./"${ASSET}"
+```
+
+The binary listens on `0.0.0.0:8000` (`MEGABASE_HOST` / `MEGABASE_PORT`).
+See [Configuration](configuration.md).
+
+## Verify signatures
+
+Release blobs are signed keylessly with Sigstore (`cosign sign-blob` in
+`.github/workflows/release.yml`). The signing identity is this
+repository's Release workflow; the OIDC issuer is GitHub Actions. The
+install sequence above already authenticates `SHA256SUMS` before the
+checksum check.
+
+To verify a binary instead of the checksum file, use that asset's `.pem`
+and `.sig` (same identity flags). SLSA provenance is
+`megabase-${TAG}.intoto.jsonl` on the Release and in GitHub attestations:
+
+```shell
+gh attestation verify "${ASSET}" --repo Zouhairmaj/megabase
+```
+
+## Container image
+
+After the Release workflow publishes an image, it is
+`ghcr.io/zouhairmaj/megabase:<tag>` (also tagged without the leading `v`)
+and signed with `cosign sign` in the same job. `v0.1.0` has no image until
+that job is dispatched for the tag.
+
+```shell
+docker pull ghcr.io/zouhairmaj/megabase:vX.Y.Z
+cosign verify \
+  --certificate-identity-regexp '^https://github.com/Zouhairmaj/megabase/\.github/workflows/release\.yml@refs/' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  ghcr.io/zouhairmaj/megabase:vX.Y.Z
+docker run --rm -p 8000:8000 ghcr.io/zouhairmaj/megabase:vX.Y.Z
+```
+
+Pass `-e DATABASE_URL=...` if the process should install Auth SQL objects.
+The image includes `megabase-healthcheck`, which probes
+`/_megabase/health`.
 
 ## Clone
 
@@ -30,9 +107,8 @@ cargo build --release --locked -p megabase
 ./target/release/megabase
 ```
 
-The binary listens on `0.0.0.0:8000` (`MEGABASE_HOST` / `MEGABASE_PORT`).
-See [Configuration](configuration.md). `just` lists every recipe that
-works today.
+Environment variables are in [Configuration](configuration.md). `just` lists
+every recipe that works today.
 
 When `DATABASE_URL` is set, startup creates the Auth schema objects Megabase
 currently implements. The install is idempotent. Without `DATABASE_URL` the
@@ -44,16 +120,17 @@ The public site generator is separate:
 cargo run --manifest-path site/Cargo.toml -- --repo-root . --out _site
 ```
 
-## Container image
+## Build the image locally
 
 The root `Dockerfile` builds the release image. Both `FROM` lines are
-pinned by digest so Scorecard Pinned-Dependencies does not flag a
-floating tag (alerts #6 and #7 on `main`):
+official Docker Hub tags pinned by digest (Scorecard Pinned-Dependencies;
+alerts #6 and #7 on `main`) and pulled via Amazon ECR Public so Hub 429s
+do not fail CI:
 
 | Stage | Image |
 | --- | --- |
-| Builder | `rust:1.89-slim-bookworm@sha256:d7fc7de78bb8c1469933aeecbf801314d30d7d6e9f0578bba4cfa285bfa37fe6` |
-| Runtime | `debian:bookworm-slim@sha256:7c7b2c966bc9ee8cedfeef67e0e279108992c77681fa595db4a9d65c06ccc587` |
+| Builder | `public.ecr.aws/docker/library/rust:1.89-slim-bookworm@sha256:d7fc7de78bb8c1469933aeecbf801314d30d7d6e9f0578bba4cfa285bfa37fe6` |
+| Runtime | `public.ecr.aws/docker/library/debian:bookworm-slim@sha256:7c7b2c966bc9ee8cedfeef67e0e279108992c77681fa595db4a9d65c06ccc587` |
 
 The Cloud Agent image in `.cursor/Dockerfile` is pinned the same way:
 `ubuntu:24.04@sha256:534baea6a22c03a63003dbc8dbe78fe34bc0d7e595d9a9dc9834884ff530eb55`
@@ -82,10 +159,6 @@ docker build -t megabase .
 docker run --rm -p 8000:8000 megabase
 ```
 
-Pass `-e DATABASE_URL=...` if the process should install Auth SQL objects.
-The image includes `megabase-healthcheck`, which probes
-`/_megabase/health`.
-
 ## Requirements
 
 | Tool | Why |
@@ -93,3 +166,4 @@ The image includes `megabase-healthcheck`, which probes
 | Rust 1.89+ | Workspace MSRV; CI also checks 1.89 |
 | PostgreSQL 15+ | External database (not required just to start the 501 gateway) |
 | Docker | Release image; Compose for the judge |
+| cosign (optional) | Verify Sigstore signatures on Release assets and GHCR |

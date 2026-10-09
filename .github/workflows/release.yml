@@ -3,6 +3,13 @@ name: Release
 on:
   push:
     branches: [main]
+  # Backfill artifacts on an existing tag (v0.1.0 shipped without binaries).
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing GitHub Release tag to sign and publish. Use workflow from must be this same tag (attest-build-provenance records the run SHA).
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -10,6 +17,7 @@ permissions:
 jobs:
   release-please:
     name: release-please
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -41,7 +49,7 @@ jobs:
   sync-lockfile:
     name: Sync Cargo.lock
     needs: release-please
-    if: ${{ always() && !cancelled() }}
+    if: ${{ github.event_name == 'push' && always() && !cancelled() }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -217,3 +225,198 @@ jobs:
           gh release view "$TAG" --json body --jq .body > /tmp/release-body.md
           cat /tmp/delta.md >> /tmp/release-body.md
           gh release edit "$TAG" --notes-file /tmp/release-body.md
+
+  # OpenSSF Scorecard Packaging + Signed-Releases: attach musl-static linux
+  # binaries, SHA256SUMS, cosign keyless .sig/.pem, SLSA .intoto.jsonl, and
+  # publish a version-tagged image to ghcr.io/zouhairmaj/megabase (cosign).
+  # id-token: write stays on sign-and-publish only.
+  build-binaries:
+    name: Build ${{ matrix.target }}
+    needs: release-please
+    if: always() && !cancelled() && (github.event_name == 'workflow_dispatch' || needs.release-please.outputs.release_created == 'true')
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    env:
+      TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || needs.release-please.outputs.tag_name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+            runner: ubuntu-24.04
+          - target: aarch64-unknown-linux-musl
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ env.TAG }}
+          persist-credentials: false
+      - name: Require run SHA matches the release tag
+        run: |
+          set -euo pipefail
+          EXPECTED="$(git rev-parse "${TAG}^{commit}")"
+          HEAD_SHA="$(git rev-parse HEAD)"
+          if [ "${HEAD_SHA}" != "${EXPECTED}" ]; then
+            echo "::error::Checked-out HEAD ${HEAD_SHA} is not tag ${TAG} (${EXPECTED})"
+            exit 1
+          fi
+          if [ "${GITHUB_SHA}" != "${EXPECTED}" ]; then
+            echo "::error::Dispatch Release from tag ${TAG} (Use workflow from = ${TAG}). attest-build-provenance records the run SHA (${GITHUB_SHA}), not the checkout ref (${EXPECTED})."
+            exit 1
+          fi
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+        with:
+          toolchain: stable
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: release-${{ matrix.target }}
+      - name: Install musl
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends musl-tools file
+      - name: Build static megabase
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          cargo build --release --locked --target "${TARGET}" -p megabase --bin megabase
+          BIN="target/${TARGET}/release/megabase"
+          info="$(file "${BIN}")"
+          echo "${info}"
+          if echo "${info}" | grep -qi 'dynamically linked'; then
+            echo "::error::${BIN} is dynamically linked; expected musl-static"
+            ldd "${BIN}" || true
+            exit 1
+          fi
+          if ! echo "${info}" | grep -qiE 'static'; then
+            echo "::error::${BIN} is not statically linked (musl static required)"
+            exit 1
+          fi
+          strip "${BIN}" || true
+          mkdir -p dist
+          ASSET="megabase-${TAG}-${TARGET}"
+          cp "${BIN}" "dist/${ASSET}"
+          echo "ASSET=${ASSET}" >> "${GITHUB_ENV}"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: megabase-binary-${{ matrix.target }}
+          path: dist/${{ env.ASSET }}
+          if-no-files-found: error
+          retention-days: 5
+
+  sign-and-publish:
+    name: Sign and publish
+    needs: [release-please, build-binaries]
+    if: always() && !cancelled() && needs.build-binaries.result == 'success' && (github.event_name == 'workflow_dispatch' || needs.release-please.outputs.release_created == 'true')
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+      packages: write
+    env:
+      TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || needs.release-please.outputs.tag_name }}
+      IMAGE: ghcr.io/zouhairmaj/megabase
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ env.TAG }}
+          persist-credentials: false
+      - name: Require run SHA matches the release tag
+        run: |
+          set -euo pipefail
+          EXPECTED="$(git rev-parse "${TAG}^{commit}")"
+          HEAD_SHA="$(git rev-parse HEAD)"
+          if [ "${HEAD_SHA}" != "${EXPECTED}" ]; then
+            echo "::error::Checked-out HEAD ${HEAD_SHA} is not tag ${TAG} (${EXPECTED})"
+            exit 1
+          fi
+          if [ "${GITHUB_SHA}" != "${EXPECTED}" ]; then
+            echo "::error::Dispatch Release from tag ${TAG} (Use workflow from = ${TAG}). attest-build-provenance records the run SHA (${GITHUB_SHA}), not the checkout ref (${EXPECTED})."
+            exit 1
+          fi
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: megabase-binary-*
+          path: dist
+          merge-multiple: true
+      - name: SHA256SUMS
+        run: |
+          set -euo pipefail
+          cd dist
+          sha256sum megabase-* > SHA256SUMS
+          cat SHA256SUMS
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: v2.6.5
+      - name: Sign blobs (Sigstore keyless)
+        run: |
+          set -euo pipefail
+          cd dist
+          for f in megabase-* SHA256SUMS; do
+            cosign sign-blob --yes \
+              --output-signature "${f}.sig" \
+              --output-certificate "${f}.pem" \
+              "${f}"
+          done
+      - name: SLSA provenance
+        id: attest
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-checksums: dist/SHA256SUMS
+      - name: Attach provenance as .intoto.jsonl
+        env:
+          BUNDLE: ${{ steps.attest.outputs.bundle-path }}
+        run: |
+          set -euo pipefail
+          cp "${BUNDLE}" "dist/megabase-${TAG}.intoto.jsonl"
+      - name: Upload release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh release upload "${TAG}" dist/* --clobber
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Version without v prefix
+        id: version
+        run: |
+          set -euo pipefail
+          echo "version=${TAG#v}" >> "${GITHUB_OUTPUT}"
+      - name: Image metadata
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=raw,value=${{ env.TAG }}
+            type=raw,value=${{ steps.version.outputs.version }}
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        id: image
+        with:
+          context: .
+          push: true
+          provenance: true
+          sbom: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+      - name: Sign image (Sigstore keyless)
+        env:
+          DIGEST: ${{ steps.image.outputs.digest }}
+        run: |
+          set -euo pipefail
+          cosign sign --yes "${IMAGE}@${DIGEST}"
+      - name: Attest image
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.image.outputs.digest }}
+          push-to-registry: true
