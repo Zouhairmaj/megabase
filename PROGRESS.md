@@ -138,7 +138,12 @@ waiting on a human.
     SHA-256 and verified before exec (no `curl|sh`). That pin is the
     two bootstrap binaries only; the `stable` toolchain they install and
     later `cargo binstall` tool fetches remain unpinned.
-16. **Owned lockfiles.** Scorecard/OSV flagged RUSTSEC-2026-0206
+16. **README coverage/conformance badge colors.** Owner-specified
+    traffic-light steps for the shields.io endpoint JSON only:
+    `#e05d44` below 50%, `#fe7d37` from 50% to under 90%, `#00D892` at
+    90% and above (`flat-square`). Treemap chips and generated SVG
+    badges stay on the brand greens in `docs/brand/README.md`.
+17. **Owned lockfiles.** Scorecard/OSV flagged RUSTSEC-2026-0206
     (`rustybuzz` unmaintained) and RUSTSEC-2026-0192 (`ttf-parser`
     unmaintained) in `site/Cargo.lock`, not the workspace lockfile and
     not `vendor/`. `site/` is excluded from the workspace, so root
@@ -227,6 +232,10 @@ Physically impossible for the agent (repository settings or credentials):
       Administration / Contents / Metadata / Pull requests) so OpenSSF
       Scorecard's Branch-Protection check can read classic branch
       protection rules (2026-10-09)
+- [ ] Set repo secret `MEGABASE_AGENT_GH_TOKEN` (PAT for
+      `megabase-agent` with repo and pull-request scope) so Claude-opened
+      PRs run CI without approval (`GITHUB_TOKEN` `pull_request` runs
+      require approval)
 - [ ] Enable GitHub private vulnerability reporting (Settings → Code
       security) so the path in `SECURITY.md` works
 - [ ] Optionally register an [OpenSSF Best Practices](https://www.bestpractices.dev/)

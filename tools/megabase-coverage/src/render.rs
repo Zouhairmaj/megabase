@@ -36,6 +36,32 @@ fn badge_color(percent: f64) -> &'static str {
     }
 }
 
+/// README shields.io coverage/conformance colors (hex without `#`).
+/// Red below 50%, orange from 50% to under 90%, green at 90% and above.
+/// Owner-specified; distinct from the SVG/treemap `badge_color` greens.
+fn shields_color(percent: f64) -> &'static str {
+    if percent >= 90.0 {
+        "00D892"
+    } else if percent >= 50.0 {
+        "fe7d37"
+    } else {
+        "e05d44"
+    }
+}
+
+/// Shields.io endpoint payload (`schemaVersion` + `color`) so badge color
+/// tracks the live percentage without a hardcoded URL color.
+fn shields_endpoint(label: &str, message: &str, percent: f64) -> Result<String> {
+    let mut json = serde_json::to_string_pretty(&serde_json::json!({
+        "schemaVersion": 1,
+        "label": label,
+        "message": message,
+        "color": shields_color(percent),
+    }))?;
+    json.push('\n');
+    Ok(json)
+}
+
 fn badge_text(fill: &str) -> &'static str {
     if fill == "#00D892" {
         "#0B0E12"
@@ -200,6 +226,22 @@ pub fn render(units: &UnitsFile, status: &Status, summary: &Summary) -> Result<O
         out.files
             .insert(cov.join(file), badge(label, &value, badge_color(p)));
     }
+    out.files.insert(
+        cov.join("badge-coverage.json"),
+        shields_endpoint(
+            "coverage",
+            &format!("{}%", summary.percent.coverage),
+            summary.percent.coverage,
+        )?,
+    );
+    out.files.insert(
+        cov.join("badge-conformance.json"),
+        shields_endpoint(
+            "conformance",
+            &format!("{}%", summary.percent.conformance),
+            summary.percent.conformance,
+        )?,
+    );
     out.files.insert(
         cov.join("badge-units.svg"),
         badge("units", &t.units.to_string(), "#303235"),
@@ -506,5 +548,34 @@ mod tests {
             "a\n<!-- x:begin -->\nnew\n<!-- x:end -->\nb\n"
         );
         assert!(splice("no markers", "x", "").is_err());
+    }
+
+    #[test]
+    fn shields_color_uses_traffic_light_hex() {
+        assert_eq!(shields_color(0.0), "e05d44");
+        assert_eq!(shields_color(49.9), "e05d44");
+        assert_eq!(shields_color(50.0), "fe7d37");
+        assert_eq!(shields_color(89.9), "fe7d37");
+        assert_eq!(shields_color(90.0), "00D892");
+        assert_eq!(shields_color(100.0), "00D892");
+    }
+
+    #[test]
+    fn shields_endpoint_writes_schema_and_traffic_light_color() {
+        let json = shields_endpoint("coverage", "3.1%", 3.1).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(value["schemaVersion"], 1);
+        assert_eq!(value["label"], "coverage");
+        assert_eq!(value["message"], "3.1%");
+        assert_eq!(value["color"], "e05d44");
+        let empty = shields_endpoint("conformance", "0%", 0.0).unwrap();
+        let empty_value: serde_json::Value = serde_json::from_str(&empty).unwrap();
+        assert_eq!(empty_value["color"], "e05d44");
+        let mid = shields_endpoint("coverage", "50%", 50.0).unwrap();
+        let mid_value: serde_json::Value = serde_json::from_str(&mid).unwrap();
+        assert_eq!(mid_value["color"], "fe7d37");
+        let high = shields_endpoint("conformance", "91%", 91.0).unwrap();
+        let high_value: serde_json::Value = serde_json::from_str(&high).unwrap();
+        assert_eq!(high_value["color"], "00D892");
     }
 }
