@@ -46,20 +46,6 @@ jobs:
       - uses: bencherdev/bencher@b4cfdddf418fc547e694b8fa6cc7c846a9c77435 # main
         if: env.BENCHER_API_TOKEN != ''
 
-      - name: Ensure Bencher project megabase
-        if: env.BENCHER_API_TOKEN != ''
-        run: |
-          set +e
-          auth=()
-          case "$BENCHER_API_TOKEN" in
-            bencher_*) auth=(--key "$BENCHER_API_TOKEN") ;;
-            *) auth=(--token "$BENCHER_API_TOKEN") ;;
-          esac
-          bencher project view "${auth[@]}" megabase >/dev/null 2>&1
-          if [ $? -ne 0 ]; then
-            bencher project create "${auth[@]}" Megabase --slug megabase
-          fi
-
       - name: Track benchmarks (main)
         if: env.BENCHER_API_TOKEN != '' && github.event_name == 'push'
         run: |
