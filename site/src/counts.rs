@@ -5,9 +5,12 @@
 //! yields `None`, which the page renders as an em dash. The generator
 //! never invents a count.
 
+#[cfg(not(test))]
 use std::io::Write;
 use std::path::Path;
-use std::process::{Command, Stdio};
+use std::process::Command;
+#[cfg(not(test))]
+use std::process::Stdio;
 
 /// Commit and pull-request totals for the home stats band.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
