@@ -4,6 +4,15 @@ All notable changes to Megabase are documented in this file.
 The format is produced by [release-please](https://github.com/googleapis/release-please).
 Sections: Features, Bug Fixes, Performance, Conformance/judge, Documentation.
 
+## [0.1.17](https://github.com/Zouhairmaj/megabase/compare/v0.1.16...v0.1.17) (2026-10-10)
+
+
+### Features
+
+* **rest:** add !left and !inner resource embedding ([#256](https://github.com/Zouhairmaj/megabase/issues/256)) ([680ea6e](https://github.com/Zouhairmaj/megabase/commit/680ea6e9de039d2819104f1330ffae628af90670))
+* **rest:** add prefer count, handling, max-affected, missing, resolution ([#267](https://github.com/Zouhairmaj/megabase/issues/267)) ([3fb0b37](https://github.com/Zouhairmaj/megabase/commit/3fb0b3794392c85dc21d667a3243994af6f20fb8))
+* **rest:** serve object+json and nulls=stripped media types ([#265](https://github.com/Zouhairmaj/megabase/issues/265)) ([8730496](https://github.com/Zouhairmaj/megabase/commit/8730496ebae74b3f5ea492c953b1b134623df9be))
+
 ## [0.1.16](https://github.com/Zouhairmaj/megabase/compare/v0.1.15...v0.1.16) (2026-10-10)
 
 
