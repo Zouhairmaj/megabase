@@ -771,6 +771,22 @@ async fn load_relationship(
     target: &str,
     anon: bool,
 ) -> Result<Relationship, Box<Response>> {
+    // Views, materialized views and foreign tables carry no foreign keys here.
+    let kinds: Vec<String> = sqlx::query_scalar(
+        "SELECT c.relkind::text FROM pg_class AS c
+         JOIN pg_namespace AS n ON n.oid = c.relnamespace
+         WHERE n.nspname = $1 AND c.relname = ANY($2)",
+    )
+    .bind(schema)
+    .bind(vec![relation.to_string(), target.to_string()])
+    .fetch_all(&mut **tx)
+    .await
+    .map_err(|error| Box::new(query_failure(&error, anon)))?;
+    if kinds.iter().any(|kind| kind != "r" && kind != "p") {
+        return Err(Box::new(
+            MegabaseNotImplemented::new(crate::COMPONENT, "rest:embed-join:left").into_response(),
+        ));
+    }
     let rows: Vec<(bool, Vec<String>, Vec<String>)> = sqlx::query_as(RELATIONSHIPS_SQL)
         .bind(schema)
         .bind(relation)

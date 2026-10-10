@@ -402,7 +402,15 @@ pub(crate) fn parse_get_query(query: &str) -> Result<ReadQuery, QueryFail> {
     });
     let resource = order_embed.or(page.embed).or(logic_embed).or(related);
     if let Some(resource) = resource {
-        return Err(QueryFail::NotEmbedded { resource });
+        // An embedded resource's own order/limit/logic is not served: 501.
+        let embedded = matches!(&select, SelectList::Mixed(entries) if entries.iter().any(|entry|
+            matches!(entry, SelectEntry::Embed(embed)
+                if embed.name == resource || embed.alias.as_deref() == Some(resource.as_str()))));
+        return Err(if embedded {
+            QueryFail::Route
+        } else {
+            QueryFail::NotEmbedded { resource }
+        });
     }
     Ok(ReadQuery {
         select,
@@ -2505,6 +2513,12 @@ mod tests {
             parse_get_query("select=id.count()x").unwrap_err(),
             QueryFail::Parse { .. }
         ));
+    }
+
+    #[test]
+    fn embedded_resource_order_is_deferred() {
+        let err = parse_get_query("select=id,notes(body)&notes.order=body").unwrap_err();
+        assert_eq!(err, QueryFail::Route);
     }
 
     #[test]
