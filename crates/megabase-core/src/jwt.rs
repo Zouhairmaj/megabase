@@ -17,7 +17,7 @@ use hmac::{Hmac, Mac};
 use serde_json::{Map, Value};
 use sha2::Sha256;
 
-type HmacSha256 = Hmac<Sha256>;
+pub(crate) type HmacSha256 = Hmac<Sha256>;
 
 /// PostgREST `allowedSkewSeconds` in `PostgREST.Auth.Jwt`.
 pub const EXP_LEEWAY_SECS: i64 = 30;
@@ -105,6 +105,10 @@ impl Hs256 {
             return Err(JwtError::SecretTooShort { got: secret.len() });
         }
         Ok(Self { secret })
+    }
+
+    pub(crate) fn secret(&self) -> &[u8] {
+        &self.secret
     }
 
     /// Sign `payload` as a compact HS256 JWT (`typ` `JWT`).
@@ -234,7 +238,7 @@ fn decode_segment(segment: &str) -> Result<Vec<u8>, ()> {
     URL_SAFE_NO_PAD.decode(segment).map_err(|_| ())
 }
 
-fn unix_now() -> i64 {
+pub(crate) fn unix_now() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)

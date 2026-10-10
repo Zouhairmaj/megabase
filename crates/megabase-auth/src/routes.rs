@@ -19,7 +19,7 @@ use axum::http::{header::AUTHORIZATION, HeaderMap, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post};
 use axum::Router;
-use megabase_core::{bearer_token, JwtClaims, JwtError, MegabaseNotImplemented};
+use megabase_core::{bearer_token, GoTrueJwtError, JwtClaims, MegabaseNotImplemented};
 use regex::Regex;
 use serde::Deserialize;
 use serde_json::{json, Map, Value};
@@ -291,7 +291,7 @@ async fn logout(State(state): State<AuthState>, headers: HeaderMap, uri: Uri) ->
     let Some(jwt) = state.jwt.as_ref() else {
         return unexpected("Server lacks JWT secret").into_response();
     };
-    let claims = match jwt.verify(token) {
+    let claims = match jwt.verify_gotrue(token) {
         Ok(claims) => claims,
         Err(error) => return jwt_failure(&error),
     };
@@ -573,7 +573,7 @@ pub(crate) fn banned(until: Option<SystemTime>) -> bool {
     until.is_some_and(|until| SystemTime::now() < until)
 }
 
-pub(crate) fn jwt_failure(error: &JwtError) -> Response {
+pub(crate) fn jwt_failure(error: &GoTrueJwtError) -> Response {
     GoTrueError::new(
         StatusCode::FORBIDDEN,
         "bad_jwt",

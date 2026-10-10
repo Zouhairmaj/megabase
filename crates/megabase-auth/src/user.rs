@@ -477,7 +477,7 @@ async fn require_user(state: &AuthState, headers: &HeaderMap) -> Result<Authed, 
     let Some(jwt) = state.jwt.as_ref() else {
         return reject(unexpected("Server lacks JWT secret").into_response());
     };
-    let claims = match jwt.verify(token) {
+    let claims = match jwt.verify_gotrue(token) {
         Ok(claims) => claims,
         Err(error) => return reject(jwt_failure(&error)),
     };
@@ -764,6 +764,55 @@ mod tests {
 
     fn bearer(token: &str) -> String {
         format!("Bearer {token}")
+    }
+
+    #[tokio::test]
+    async fn forged_tokens_report_golang_jwt_errors() {
+        use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+        use base64::Engine;
+        let payload =
+            URL_SAFE_NO_PAD.encode(br#"{"role":"service_role","sub":"abcdefghij012345"}"#);
+        let cases = [
+            (
+                "none",
+                "",
+                "token signature is invalid: signing method none is invalid",
+            ),
+            (
+                "None",
+                "",
+                "token is unverifiable: signing method (alg) is unavailable",
+            ),
+            (
+                "NONE",
+                "",
+                "token is unverifiable: signing method (alg) is unavailable",
+            ),
+            (
+                "HS256",
+                "AAECAwQFBgcICQoLDA0ODw",
+                "token signature is invalid: signature is invalid",
+            ),
+        ];
+        for (alg, signature, detail) in cases {
+            let header = URL_SAFE_NO_PAD.encode(format!(r#"{{"alg":"{alg}","typ":"JWT"}}"#));
+            let auth = bearer(&format!("{header}.{payload}.{signature}"));
+            let (app, _) = app(|_| {});
+            let (status, body) = call(
+                app,
+                "GET",
+                "/auth/v1/user",
+                None,
+                &[("authorization", &auth)],
+            )
+            .await;
+            assert_eq!(status, StatusCode::FORBIDDEN, "{alg}");
+            assert_eq!(body["error_code"], "bad_jwt");
+            assert_eq!(
+                body["msg"],
+                format!("invalid JWT: unable to parse or verify signature, {detail}")
+            );
+        }
     }
 
     #[tokio::test]

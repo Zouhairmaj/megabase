@@ -64,6 +64,13 @@ supabase-js
   vendor/supabase-js  https://github.com/supabase/supabase-js
   LICENSES/supabase-js.txt
 
+golang-jwt (Auth JWT parse and validation errors)
+  SPDX-License-Identifier: MIT
+  Copyright (c) 2012 Dave Grijalva
+  Copyright (c) 2021 golang-jwt maintainers
+  https://github.com/golang-jwt/jwt  v5.3.1, as pinned in vendor/auth/go.mod
+  LICENSES/golang-jwt.txt
+
 JetBrains Mono (wordmark and treemap/banner outlines)
   SPDX-License-Identifier: OFL-1.1
   Copyright 2020 The JetBrains Mono Project Authors
