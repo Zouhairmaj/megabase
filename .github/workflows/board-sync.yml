@@ -88,7 +88,7 @@ jobs:
 
             function negatedClose(text, index) {
               const prefix = text.slice(Math.max(0, index - 40), index);
-              return /(?:(?:\b(?:do|does|can)n['\u2019]t|\bwon['\u2019]t|\bcannot|\bnot)\s+)$/i.test(
+              return /(?:(?:\b(?:do|does)n['\u2019]t|\b(?:can|won)['\u2019]t|\bcannot|\bnot)\s+)$/i.test(
                 prefix
               );
             }
