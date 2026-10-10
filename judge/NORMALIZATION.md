@@ -21,7 +21,7 @@ Headers the gateway invents (`date`, `server`, `via`, `x-kong-*`,
 
 | Kind | Rule |
 |---|---|
-| Compact JWT (`eyJ….….…`) | `<jwt>` |
+| Compact JWT (`eyJ….….…`) | replaced by its decoded payload as sorted JSON, `<jwt:{…}>`, without `iat`, `exp`, `jti` and the `timestamp` of each `amr` entry (the method stays compared); the rules below then apply inside it (UUID claims such as `session_id` become `<uuid>`). `role`, `aud`, `sub`, `aal`, `amr` and every other claim must match. The header and signature are not compared and no signature check is added. A payload that is not a JSON object becomes `<jwt>` |
 | bcrypt hash (`$2a$10$…`) | `<bcrypt>` |
 | ISO-8601 / RFC 3339 timestamp | `<timestamp>` |
 | UUID | `<uuid>` |
