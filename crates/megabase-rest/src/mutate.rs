@@ -67,6 +67,10 @@ pub(crate) async fn mutate(
             );
         }
     };
+    // Embeds in a write response are not served; the select would be ignored.
+    if !query.embed_names().is_empty() {
+        return unimplemented_unit(method, &format!("/rest/v1/{relation}"), "");
+    }
     if matches!(kind, Kind::Upsert) && query.limits_rows() {
         return pgrst(
             StatusCode::BAD_REQUEST,
