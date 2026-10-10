@@ -67,6 +67,11 @@ Accepted with [proposal 0001](docs/proposals/0001-external-review.md).
 
 Do not start a level until the previous threshold holds.
 
+### Level 1 validation
+
+Requirements: [decision 0036](docs/decisions/0036-level-1-validation-requirements.md).
+Level 1 is not yet validated.
+
 ## Decisions
 
 One file per decision in [`docs/decisions/`](docs/decisions/). Add
