@@ -17,6 +17,9 @@ COPY .sqlx .sqlx
 COPY crates crates
 COPY tools tools
 COPY judge/harness judge/harness
+# `[patch.crates-io]` replaces sqlx-mysql with this path. Cargo reads the
+# manifest while resolving the lockfile, including a postgres-only build.
+COPY third_party third_party
 # mold speeds the link. The package is installed in this stage, so the flag
 # is only set where the linker exists.
 RUN apt-get update \

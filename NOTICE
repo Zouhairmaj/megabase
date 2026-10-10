@@ -73,11 +73,12 @@ golang-jwt (Auth JWT parse and validation errors)
 
 sqlx-mysql (patched copy, not a Supabase pin)
   SPDX-License-Identifier: MIT OR Apache-2.0
-  Copyright (c) SQLx contributors (see third_party/sqlx-mysql/LICENSE-MIT
-  and LICENSE-APACHE)
+  Copyright (c) 2020 LaunchBadge, LLC
   crates.io sqlx-mysql 0.8.6, with the `rsa` feature made optional
   third_party/sqlx-mysql
   https://github.com/launchbadge/sqlx  v0.8.6
+  third_party/sqlx-mysql/LICENSE-MIT
+  third_party/sqlx-mysql/LICENSE-APACHE
 
 JetBrains Mono (wordmark and treemap/banner outlines)
   SPDX-License-Identifier: OFL-1.1

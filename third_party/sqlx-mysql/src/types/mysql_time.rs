@@ -213,7 +213,9 @@ impl MySqlTime {
 
     /// Returns `true` if `self` is negative, `false` if positive or zero.
     pub fn is_negative(&self) -> bool {
-        self.sign.is_positive()
+        // Upstream sqlx-mysql 0.8.6 calls `is_positive()` here, which inverts
+        // the result. Use the sign's own negative check.
+        self.sign.is_negative()
     }
 
     /// Returns `true` if this interval is a valid time-of-day.
@@ -632,6 +634,16 @@ mod tests {
     use crate::types::MySqlTimeSign;
 
     use super::parse_microseconds;
+
+    #[test]
+    fn test_sign_queries() {
+        assert!(MySqlTime::ZERO.is_positive());
+        assert!(!MySqlTime::ZERO.is_negative());
+        assert!(MySqlTime::MAX.is_positive());
+        assert!(!MySqlTime::MAX.is_negative());
+        assert!(MySqlTime::MIN.is_negative());
+        assert!(!MySqlTime::MIN.is_positive());
+    }
 
     #[test]
     fn test_display() {
