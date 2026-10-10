@@ -2,17 +2,17 @@
   "schema": 1,
   "totals": {
     "units": 1024,
-    "implemented": 91,
+    "implemented": 99,
     "tested": 65,
     "conformant": 0
   },
   "percent": {
-    "coverage": 8.9,
+    "coverage": 9.7,
     "conformance": 0.0,
     "done": 0.0
   },
   "judge": {
-    "cases": 160,
+    "cases": 168,
     "passing": 0
   },
   "components": {
@@ -316,7 +316,7 @@
     },
     "rest": {
       "units": 93,
-      "implemented": 20,
+      "implemented": 28,
       "tested": 5,
       "conformant": 0,
       "groups": {
@@ -334,7 +334,7 @@
         },
         "filtering": {
           "units": 28,
-          "implemented": 20,
+          "implemented": 28,
           "tested": 5,
           "conformant": 0
         },
@@ -646,6 +646,14 @@
     "rest:filter-operator:lte": "implemented",
     "rest:filter-operator:match": "implemented",
     "rest:filter-operator:neq": "implemented",
-    "rest:filter-operator:not": "tested"
+    "rest:filter-operator:not": "tested",
+    "rest:filter-operator:nxl": "implemented",
+    "rest:filter-operator:nxr": "implemented",
+    "rest:filter-operator:ov": "implemented",
+    "rest:filter-operator:phfts": "implemented",
+    "rest:filter-operator:plfts": "implemented",
+    "rest:filter-operator:sl": "implemented",
+    "rest:filter-operator:sr": "implemented",
+    "rest:filter-operator:wfts": "implemented"
   }
 }

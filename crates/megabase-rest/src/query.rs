@@ -125,7 +125,6 @@ fn decode_component(raw: &str, plus_is_space: bool) -> String {
 
 fn filter_name(parsed: &ParsedFilter) -> &'static str {
     let (negated, name) = match parsed {
-        ParsedFilter::Unsupported { unit } => return unit,
         ParsedFilter::Served {
             negated, op, quant, ..
         } => {
@@ -143,8 +142,16 @@ fn filter_name(parsed: &ParsedFilter) -> &'static str {
                 (crate::filter::ServedOp::Match, None) => "match",
                 (crate::filter::ServedOp::Imatch, None) => "imatch",
                 (crate::filter::ServedOp::Fts, None) => "fts",
+                (crate::filter::ServedOp::Plfts, None) => "plfts",
+                (crate::filter::ServedOp::Phfts, None) => "phfts",
+                (crate::filter::ServedOp::Wfts, None) => "wfts",
                 (crate::filter::ServedOp::Cs, None) => "cs",
                 (crate::filter::ServedOp::Cd, None) => "cd",
+                (crate::filter::ServedOp::Ov, None) => "ov",
+                (crate::filter::ServedOp::Sl, None) => "sl",
+                (crate::filter::ServedOp::Sr, None) => "sr",
+                (crate::filter::ServedOp::Nxr, None) => "nxr",
+                (crate::filter::ServedOp::Nxl, None) => "nxl",
                 (crate::filter::ServedOp::Adj, None) => "adj",
             };
             (*negated, name)
@@ -237,8 +244,8 @@ mod tests {
     #[test]
     fn interpret_query_names_served_operators() {
         assert_eq!(
-            interpret_query("id=eq(any).{1,2}&title=ilike.*a*&id=nope.1&id=not.lt.3&id=in.(1,2)"),
-            vec!["any", "ilike", "invalid", "not", "in"]
+            interpret_query("id=eq(any).{1,2}&title=ilike.*a*&id=nope.1&id=not.lt.3&id=in.(1,2)&during=ov.[1,4)&title=plfts(english).spec&during=nxl.[4,7)"),
+            vec!["any", "ilike", "invalid", "not", "in", "ov", "plfts", "nxl"]
         );
     }
 }
