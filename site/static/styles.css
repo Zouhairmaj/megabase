@@ -178,6 +178,7 @@ a:hover {
 }
 
 .version-badge-label {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2339,5 +2340,6 @@ body:has(#licensing-and-credits:target) .toc-list a[href="#licensing-and-credits
     padding: 2px 4px;
     letter-spacing: 0;
     max-width: 72px;
+    overflow: hidden;
   }
 }

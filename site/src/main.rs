@@ -1617,8 +1617,19 @@ mod tests {
         if after.starts_with("hash") || after.starts_with("bcrypt") {
             return true;
         }
-        let start = idx.saturating_sub(1200);
+        let start = floor_char_boundary(text, idx.saturating_sub(1200));
         text[start..idx].to_ascii_lowercase().contains("bcrypt")
+    }
+
+    /// Largest index at or before `index` that is a UTF-8 character boundary.
+    fn floor_char_boundary(text: &str, mut index: usize) -> usize {
+        if index > text.len() {
+            index = text.len();
+        }
+        while index > 0 && !text.is_char_boundary(index) {
+            index -= 1;
+        }
+        index
     }
 
     #[test]
@@ -1630,6 +1641,11 @@ mod tests {
         assert!(is_bcrypt_work_factor(hash, hash.find("cost").unwrap()));
         let spaced = "bcrypt hash (cost 10) and does not log the password";
         assert!(is_bcrypt_work_factor(spaced, spaced.find("cost").unwrap()));
+        // A multibyte character on the lookbehind edge must not panic, and
+        // spend copy past that edge is still spend copy.
+        let prefix = format!("é{}", "x".repeat(1198));
+        let edged = format!("{prefix} cost-10 tokens per query");
+        assert!(!is_bcrypt_work_factor(&edged, edged.find("cost").unwrap()));
     }
 
     fn find_term(haystack: &str, needle: &str) -> Option<usize> {
