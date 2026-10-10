@@ -651,7 +651,17 @@ async fn read_relation(
     headers_only: bool,
 ) -> Response {
     let http_method = if headers_only { "HEAD" } else { "GET" };
-    match read_rows(pool, schema, relation, session, read, aggregates, http_method).await {
+    match read_rows(
+        pool,
+        schema,
+        relation,
+        session,
+        read,
+        aggregates,
+        http_method,
+    )
+    .await
+    {
         Ok((count, body, offset)) => {
             let mut response = json_rows(offset, count, if headers_only { "" } else { &body });
             profile_header(&mut response, schema);

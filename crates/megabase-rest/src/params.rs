@@ -2137,7 +2137,9 @@ mod tests {
             parse_get_query("select=notes!inner(body)").unwrap_err(),
             QueryFail::Unimplemented("rest:embed-join:inner")
         ));
-        assert!(parse_get_query("select=id.count()").unwrap().has_aggregate());
+        assert!(parse_get_query("select=id.count()")
+            .unwrap()
+            .has_aggregate());
         let err = parse_get_query("select=notes(body)&id=nope").unwrap_err();
         assert!(matches!(err, QueryFail::Parse { .. }));
     }
@@ -2245,7 +2247,8 @@ mod tests {
 
     #[test]
     fn aggregates_build_functions_casts_and_group_by() {
-        let query = parse_get_query("select=count(),n:amount.sum()::text,kind&amount=gt.1").unwrap();
+        let query =
+            parse_get_query("select=count(),n:amount.sum()::text,kind&amount=gt.1").unwrap();
         assert!(query.has_aggregate());
         let sql = build_read_sql("public", "t", &query, &[("amount", "integer")]).unwrap();
         assert!(sql.sql.contains(
@@ -2254,7 +2257,8 @@ mod tests {
         ));
         assert!(sql.sql.contains(" GROUP BY \"t\".\"kind\""));
 
-        let query = parse_get_query("select=a.avg(),b.max(),c.min(),k:d::int.sum()::bigint").unwrap();
+        let query =
+            parse_get_query("select=a.avg(),b.max(),c.min(),k:d::int.sum()::bigint").unwrap();
         let sql = build_read_sql("public", "t", &query, &[]).unwrap();
         assert!(sql.sql.contains(
             "AVG(\"t\".\"a\"), MAX(\"t\".\"b\"), MIN(\"t\".\"c\"), \
@@ -2263,7 +2267,8 @@ mod tests {
         assert!(!sql.sql.contains("GROUP BY"));
 
         let query = parse_get_query("select=*,id.count()").unwrap();
-        let sql = build_read_sql("public", "t", &query, &[("id", "integer"), ("v", "text")]).unwrap();
+        let sql =
+            build_read_sql("public", "t", &query, &[("id", "integer"), ("v", "text")]).unwrap();
         assert!(sql.sql.contains("GROUP BY \"t\".\"id\", \"t\".\"v\""));
         assert!(matches!(
             parse_get_query("select=id.count()x").unwrap_err(),
