@@ -1368,6 +1368,13 @@ version = "0.1.3"
 dependencies = [
  "axum",
  "megabase-core",
+ "serde_json",
+ "sqlx",
+ "thiserror",
+ "tokio",
+ "tokio-postgres",
+ "tower",
+ "tracing",
 ]
 
 [[package]]

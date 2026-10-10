@@ -1,23 +1,67 @@
 //! PostgREST-compatible REST API (`/rest/v1`) for Megabase.
 //!
 //! Target behavior: PostgREST, vendor/postgrest (MIT), pinned in `vendor/`.
-//! No unit is implemented yet; every request returns the structured
-//! `MEGABASE_NOT_IMPLEMENTED` 501. When logic is ported, each file gets a
-//! header naming the upstream repository, path and license.
+//! `GET /rest/v1/{relation}` runs when every query filter is one of the
+//! operators in [`specs/rest/filtering.md`](../../../specs/rest/filtering.md).
+//! Every other REST request returns `MEGABASE_NOT_IMPLEMENTED`.
+
+mod db;
+mod filter;
+mod query;
+mod read;
+
+use std::sync::Arc;
 
 use axum::Router;
+use megabase_core::{Config, Hs256};
+
+pub use db::connect;
+pub use query::interpret_query;
 
 pub const COMPONENT: &str = "rest";
 
-pub fn router() -> Router {
-    megabase_core::not_implemented_router(COMPONENT)
+/// Pool and JWT verifier for REST reads.
+#[derive(Clone)]
+pub struct RestState {
+    pool: Option<sqlx::PgPool>,
+    jwt: Option<Arc<Hs256>>,
+}
+
+impl RestState {
+    /// Verifier from `config`, with no pool.
+    ///
+    /// A missing `JWT_SECRET` leaves the verifier empty. Anonymous reads then
+    /// use the `anon` role. A bearer token in that process is `PGRST300`.
+    #[must_use]
+    pub fn from_config(config: &Config) -> Self {
+        let jwt = config.jwt_hs256().ok().map(Arc::new);
+        Self { pool: None, jwt }
+    }
+
+    /// Attach a pool opened by [`connect`].
+    #[must_use]
+    pub fn with_pool(mut self, pool: sqlx::PgPool) -> Self {
+        self.pool = Some(pool);
+        self
+    }
+
+    /// Close the pool. A state with no pool returns immediately.
+    pub async fn close(&self) {
+        if let Some(pool) = &self.pool {
+            pool.close().await;
+        }
+    }
+}
+
+/// REST router. `state` carries the pool and the HS256 verifier.
+pub fn router(state: RestState) -> Router {
+    read::router(state)
 }
 
 /// Walk a PostgREST-style query string without interpreting operators.
 ///
-/// Filter and query-param parsing is not implemented yet (Level 1 REST).
-/// This walker exists so the `rest_query` cargo-fuzz target can hit the crate
-/// without inventing operator semantics. Replace it when those units land.
+/// Splits on `&` and `=` and does not percent-decode. The `rest_query` fuzzer
+/// calls this together with [`interpret_query`].
 #[must_use]
 pub fn walk_query_string(query: &str) -> Vec<(&str, Option<&str>)> {
     if query.is_empty() {
