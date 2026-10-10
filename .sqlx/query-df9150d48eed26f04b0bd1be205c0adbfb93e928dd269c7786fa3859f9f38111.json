@@ -1,0 +1,52 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT c.id,\n                                COALESCE(c.client_name, '') AS \"name!\",\n                                COALESCE(c.client_uri, '') AS \"uri!\",\n                                COALESCE(c.logo_uri, '') AS \"logo_uri!\",\n                                s.scopes,\n                                s.granted_at\n                         FROM auth.oauth_consents s\n                         JOIN auth.oauth_clients c\n                           ON c.id = s.client_id AND c.deleted_at IS NULL\n                         WHERE s.user_id = $1 AND s.revoked_at IS NULL\n                         ORDER BY s.granted_at DESC",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "name!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "uri!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "logo_uri!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "scopes",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "granted_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      null,
+      null,
+      null,
+      false,
+      false
+    ]
+  },
+  "hash": "df9150d48eed26f04b0bd1be205c0adbfb93e928dd269c7786fa3859f9f38111"
+}
