@@ -1,12 +1,12 @@
 ---
 source: crates/megabase-server/tests/http_snapshots.rs
-expression: "observe(\"GET\", \"/_megabase/health\", None).await"
+expression: health
 ---
 {
   "body": {
     "name": "megabase",
     "status": "ok",
-    "version": "0.1.1"
+    "version": "[version]"
   },
   "content_type": "application/json",
   "status": 200
