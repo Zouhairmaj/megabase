@@ -88,7 +88,7 @@ Implemented and tested counts come from markers and `judge/cases/`. Live conform
 
 | Component | Group | Level | Units | Implemented | Tested |
 |---|---|---|---:|---:|---:|
-| REST | aggregates | 1 | 5 | 0 | 0 |
+| REST | aggregates | 1 | 5 | 5 | 0 |
 | REST | embedding | 1 | 2 | 0 | 0 |
 | REST | filtering | 1 | 28 | 28 | 13 |
 | REST | logic | 1 | 3 | 0 | 0 |
@@ -98,7 +98,7 @@ Implemented and tested counts come from markers and `judge/cases/`. Live conform
 | REST | query-params | 1 | 8 | 8 | 8 |
 | REST | resources | 1 | 10 | 10 | 4 |
 | REST | rpc | 1 | 4 | 4 | 2 |
-| Auth | admin | 1–2 | 28 | 28 | 11 |
+| Auth | admin | 1–2 | 28 | 20 | 11 |
 | Auth | database | 1 | 32 | 32 | 30 |
 | Auth | endpoints | 1–2 | 13 | 4 | 4 |
 | Auth | factors | 2 | 9 | 0 | 0 |
