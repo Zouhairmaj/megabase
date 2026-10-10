@@ -46,3 +46,6 @@ and `report --doctests` need nightly (`-Z persist-doctests`), so the job
 installs nightly and runs nextest, `--doc`, and the report with
 `cargo +nightly llvm-cov`. One nightly llvm-profdata merges both.
 The Build job still executes doctests with `cargo test --doc`.
+Nightly rustc does not share the stable sccache entries, so the first
+Codecov run that uses `cargo +nightly` misses. A later run of the same
+commands is the warm measurement.
