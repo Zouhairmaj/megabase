@@ -2079,15 +2079,14 @@ fn audit_payload(user: &UserRecord, action: &str, log_type: &str, traits: Option
     Value::Object(payload)
 }
 
-fn remember_audit(user: &UserRecord, action: &str, log_type: &str, traits: Option<Value>) {
-    let traits = traits.unwrap_or(Value::Null);
-    tracing::debug!(
-        user_id = %user.id,
-        action,
-        log_type,
-        %traits,
-        "auth audit"
-    );
+/// Memory-store stand-in for `insert_audit`.
+///
+/// The database row keeps the actor id and traits. The process log names the
+/// action only, so user ids, identity ids, emails, and phones are not written
+/// here.
+fn remember_audit(_user: &UserRecord, action: &str, log_type: &str, traits: Option<Value>) {
+    drop(traits);
+    tracing::debug!(action, log_type, "auth audit");
 }
 
 pub(crate) async fn password_matches(password: &str, hash: &str) -> Result<bool, StoreError> {

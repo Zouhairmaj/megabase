@@ -4,7 +4,7 @@
 
 use megabase_core::jwt::Hs256;
 
-use crate::config::AuthConfig;
+use crate::config::{optional_bool, AuthConfig};
 use crate::error::ConfigError;
 use crate::store::Backend;
 
@@ -53,18 +53,18 @@ impl AuthState {
             database_url: lookup("DATABASE_URL").filter(|url| !url.is_empty()),
             oauth_server_enabled: env_bool(lookup("GOTRUE_OAUTH_SERVER_ENABLED").as_deref(), false),
             custom_oauth_enabled: env_bool(lookup("GOTRUE_CUSTOM_OAUTH_ENABLED").as_deref(), true),
-            manual_linking_enabled: env_bool(
-                lookup("GOTRUE_SECURITY_MANUAL_LINKING_ENABLED").as_deref(),
-                false,
-            ),
-            password_require_reauthentication: env_bool(
-                lookup("GOTRUE_SECURITY_UPDATE_PASSWORD_REQUIRE_REAUTHENTICATION").as_deref(),
-                false,
-            ),
-            password_require_current: env_bool(
-                lookup("GOTRUE_SECURITY_UPDATE_PASSWORD_REQUIRE_CURRENT_PASSWORD").as_deref(),
-                false,
-            ),
+            manual_linking_enabled: security_flag(
+                &lookup,
+                "GOTRUE_SECURITY_MANUAL_LINKING_ENABLED",
+            )?,
+            password_require_reauthentication: security_flag(
+                &lookup,
+                "GOTRUE_SECURITY_UPDATE_PASSWORD_REQUIRE_REAUTHENTICATION",
+            )?,
+            password_require_current: security_flag(
+                &lookup,
+                "GOTRUE_SECURITY_UPDATE_PASSWORD_REQUIRE_CURRENT_PASSWORD",
+            )?,
             admin_group_name: admin_group_name(&lookup),
             admin_roles: admin_roles(&lookup),
             config,
@@ -99,6 +99,10 @@ impl AuthState {
     pub fn is_admin_role(&self, role: Option<&str>) -> bool {
         role.is_some_and(|role| self.admin_roles.iter().any(|allowed| allowed == role))
     }
+}
+
+fn security_flag(lookup: &impl Fn(&str) -> Option<String>, key: &str) -> Result<bool, ConfigError> {
+    Ok(optional_bool(lookup, key)?.unwrap_or(false))
 }
 
 fn admin_group_name(lookup: &impl Fn(&str) -> Option<String>) -> String {
@@ -170,5 +174,30 @@ mod tests {
         assert!(state.oauth_server_enabled);
         assert!(!state.custom_oauth_enabled);
         assert_eq!(state.admin_roles.len(), 2);
+    }
+
+    #[test]
+    fn security_flags_follow_go_bool_rules() {
+        let state = AuthState::try_from_lookup(|key| match key {
+            "GOTRUE_SECURITY_MANUAL_LINKING_ENABLED" => Some("t".into()),
+            "GOTRUE_SECURITY_UPDATE_PASSWORD_REQUIRE_REAUTHENTICATION" => Some("T".into()),
+            "GOTRUE_SECURITY_UPDATE_PASSWORD_REQUIRE_CURRENT_PASSWORD" => Some("F".into()),
+            _ => None,
+        })
+        .expect("t/T/F");
+        assert!(state.manual_linking_enabled);
+        assert!(state.password_require_reauthentication);
+        assert!(!state.password_require_current);
+
+        let Err(error) = AuthState::try_from_lookup(|key| {
+            (key == "GOTRUE_SECURITY_UPDATE_PASSWORD_REQUIRE_REAUTHENTICATION")
+                .then(|| "yes".into())
+        }) else {
+            panic!("yes must be rejected");
+        };
+        assert_eq!(
+            error.to_string(),
+            "GOTRUE_SECURITY_UPDATE_PASSWORD_REQUIRE_REAUTHENTICATION is not a valid value: yes"
+        );
     }
 }

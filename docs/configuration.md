@@ -22,9 +22,9 @@ other names. There is no `.env.example` in this tree; the judge uses
 | GOTRUE_JWT_ADMIN_GROUP_NAME | GoTrue `JWT.AdminGroupName`. Default `admin`. `PUT /auth/v1/user` accepts `app_metadata` only when the user's `role` equals this value and the user's `aud` equals `GOTRUE_JWT_AUD`. This is not the admin-route allow-list. |
 | GOTRUE_OAUTH_SERVER_ENABLED | GoTrue flag. Default `false`. Accepted values are `true`, `1`, `false`, and `0`. When false, admin OAuth client routes and `GET`/`DELETE /auth/v1/user/oauth/grants` return 404 `feature_disabled`. |
 | GOTRUE_CUSTOM_OAUTH_ENABLED | GoTrue flag. Default `true`. Accepted values are `true`, `1`, `false`, and `0`. When false, admin custom-provider routes return 404 `feature_disabled`, and `GET /auth/v1/user/identities/authorize?provider=custom:…` returns 400 `validation_failed`. |
-| GOTRUE_SECURITY_MANUAL_LINKING_ENABLED | GoTrue flag. Default `false`. Accepted values are `true`, `1`, `false`, and `0`. When false, `GET /auth/v1/user/identities/authorize` and `DELETE /auth/v1/user/identities/{identity_id}` return 404 `manual_linking_disabled` after the bearer check. |
-| GOTRUE_SECURITY_UPDATE_PASSWORD_REQUIRE_REAUTHENTICATION | GoTrue flag. Default `false`. Accepted values are `true`, `1`, `false`, and `0`. When true, `PUT /auth/v1/user` with `password` returns 501. |
-| GOTRUE_SECURITY_UPDATE_PASSWORD_REQUIRE_CURRENT_PASSWORD | GoTrue flag. Default `false`. Accepted values are `true`, `1`, `false`, and `0`. When true, `PUT /auth/v1/user` with `password` returns 501. |
+| GOTRUE_SECURITY_MANUAL_LINKING_ENABLED | GoTrue flag. Default `false`. Accepted values match Go's bool parser (`1`, `t`, `T`, `true`, `0`, `f`, `F`, `false`, any case). Any other value aborts startup. When false, `GET /auth/v1/user/identities/authorize` and `DELETE /auth/v1/user/identities/{identity_id}` return 404 `manual_linking_disabled` after the bearer check. |
+| GOTRUE_SECURITY_UPDATE_PASSWORD_REQUIRE_REAUTHENTICATION | GoTrue flag. Default `false`. Accepted values match Go's bool parser (`1`, `t`, `T`, `true`, `0`, `f`, `F`, `false`, any case). Any other value aborts startup. When true, `PUT /auth/v1/user` with `password` returns 501. |
+| GOTRUE_SECURITY_UPDATE_PASSWORD_REQUIRE_CURRENT_PASSWORD | GoTrue flag. Default `false`. Accepted values match Go's bool parser (`1`, `t`, `T`, `true`, `0`, `f`, `F`, `false`, any case). Any other value aborts startup. When true, `PUT /auth/v1/user` with `password` returns 501. |
 
 ## JWT verification
 
@@ -51,8 +51,9 @@ Spec: [`specs/auth/endpoints.md`](../specs/auth/endpoints.md).
 
 Served on `/auth/v1`: `GET /health`, `GET /settings`, autoconfirm email
 `POST /signup`, `POST /logout`, `POST /token` (password and refresh-token
-grants), `GET /user`, and `PUT /user`. Identity unlink and the OAuth grant
-list are served when their flags in the table above are on. Spec:
+grants), `GET /user`, and `PUT /user`. Identity authorize and unlink, and
+the OAuth grant list and revoke, are served when their flags in the table
+above are on. Spec:
 [`specs/auth/user.md`](../specs/auth/user.md) and
 [`specs/auth/token.md`](../specs/auth/token.md). Invite, recover, resend,
 and reauthenticate return 501 with their unit id. `PUT /user` returns 501
