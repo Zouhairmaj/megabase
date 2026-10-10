@@ -1,10 +1,11 @@
 name: Deploy placeholder site
 
 # Push and workflow_dispatch only. Both can write the default-branch
-# Actions cache, so this file must not check out
-# github.event.workflow_run.head_sha or download a workflow_run artifact.
-# Live Judge badges are published by pages-badges.yml, which is
-# workflow_run-only and does not save a cache.
+# Actions cache, so this file must not check out a workflow_run ref or
+# download a workflow_run artifact. Live Judge results are applied by
+# pages-badges.yml (workflow_run only, no cache action), which then
+# republishes shields JSON, the README treemap, and this site. Both
+# workflows share the `pages` concurrency group.
 
 on:
   push:
@@ -41,7 +42,8 @@ jobs:
 
       # Trusted event SHA only. Do not download gh-pages or a
       # workflow_run artifact here: this job saves the default-branch
-      # Rust cache. Live badges are published by pages-badges.yml.
+      # Rust cache. Live badges and the Judge-aware site are published
+      # by pages-badges.yml.
       - name: Cache site workspace
         uses: ./.github/actions/rust-cache
         with:

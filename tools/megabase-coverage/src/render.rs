@@ -251,7 +251,7 @@ pub fn render(units: &UnitsFile, status: &Status, summary: &Summary) -> Result<O
     // on visual design (GOAL.md).
 
     out.blocks
-        .push(("README.md".into(), "status", readme_status(units, summary)));
+        .push(("README.md".into(), "status", readme_status(units)));
     out.blocks
         .push(("docs/COMPATIBILITY.md".into(), "pins", pins_table(units)));
     out.blocks.push((
@@ -272,15 +272,20 @@ pub fn render(units: &UnitsFile, status: &Status, summary: &Summary) -> Result<O
     Ok(out)
 }
 
-fn readme_status(units: &UnitsFile, summary: &Summary) -> String {
+/// README `<picture>` sources. GitHub does not render an SVG fetched from
+/// another branch, so these are PNG rasters of the treemap SVGs that
+/// `pages-badges.yml` publishes after Judge on `main`.
+const README_TREEMAP_PNG: &str =
+    "https://raw.githubusercontent.com/Zouhairmaj/megabase/gh-pages/coverage/treemap.png";
+const README_TREEMAP_PNG_LIGHT: &str =
+    "https://raw.githubusercontent.com/Zouhairmaj/megabase/gh-pages/coverage/treemap-light.png";
+
+fn readme_status(units: &UnitsFile) -> String {
     let mut s = String::new();
     let _ = writeln!(s, "{GENERATED_NOTE}\n");
     let _ = writeln!(
         s,
-        "<picture>\n  <source media=\"(prefers-color-scheme: light)\" srcset=\"coverage/treemap-light.svg\">\n  <img src=\"coverage/treemap.svg\" alt=\"Supabase components: {:.1}% conformant ({}/{})\" width=\"100%\">\n</picture>\n",
-        summary.percent.done,
-        summary.totals.conformant,
-        summary.totals.units
+        "<picture>\n  <source media=\"(prefers-color-scheme: light)\" srcset=\"{README_TREEMAP_PNG_LIGHT}\">\n  <img src=\"{README_TREEMAP_PNG}\" alt=\"Supabase components conformance treemap\" width=\"100%\">\n</picture>\n"
     );
     let _ = writeln!(
         s,
@@ -292,8 +297,9 @@ Postgres Meta endpoint, Edge Runtime op, Supavisor endpoint and pool mode, Studi
 with a recorded reason (blocked or unexposed by the gateway, hosted-platform pages, documentation UIs); see \
 [`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md). A unit is *implemented* when Megabase code claims it, *tested* when a \
 judge case covers it, and *conformant* when every such case matches the reference stack. Coverage = implemented ÷ units; \
-conformance = identical judge cases ÷ judge cases; component percentages count conformant units. The website Status page \
-embeds the same generated treemap (`coverage/treemap.svg`, light: `coverage/treemap-light.svg`).</sup>\n",
+conformance = identical judge cases ÷ judge cases; component percentages count conformant units. The README picture is the \
+treemap PNG published to the `gh-pages` branch after Judge on `main`. The website Status page is rebuilt from those same \
+results.</sup>\n",
         units.total,
         units.excluded.len()
     );
@@ -649,6 +655,9 @@ mod tests {
         assert!(tree.root.join("coverage/units.json").exists());
         let readme = std::fs::read_to_string(tree.root.join("README.md")).unwrap();
         assert!(readme.contains("How the denominator is computed"));
+        assert!(readme.contains(README_TREEMAP_PNG));
+        assert!(readme.contains(README_TREEMAP_PNG_LIGHT));
+        assert!(!readme.contains("src=\"coverage/treemap.svg\""));
     }
 
     #[test]
