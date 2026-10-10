@@ -1,0 +1,130 @@
+name: Hidden judge
+
+# Weekly held-out suite. Concrete cases are not in git and must not appear
+# in logs or artifacts. The job publishes pass/fail counts only.
+# Secrets live on the `judge-hidden` environment (main only), not as
+# repository secrets. See judge/README.md and docs/decisions/0029-judge-hidden-suite.md.
+
+on:
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+permissions:
+  contents: read
+
+concurrency:
+  group: judge-hidden
+  cancel-in-progress: false
+
+jobs:
+  hidden:
+    name: Hidden judge
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: judge-hidden
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          submodules: recursive
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Hidden seed is configured
+        env:
+          MEGABASE_JUDGE_HIDDEN_SEED: ${{ secrets.MEGABASE_JUDGE_HIDDEN_SEED }}
+        run: |
+          set -euo pipefail
+          if [ -z "${MEGABASE_JUDGE_HIDDEN_SEED}" ]; then
+            echo "::error::MEGABASE_JUDGE_HIDDEN_SEED is not set on environment judge-hidden"
+            exit 1
+          fi
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+        with:
+          toolchain: stable
+      - uses: ./.github/actions/rust-cache
+        with:
+          key: mold
+      - uses: ./.github/actions/linux-mold
+      - name: Build harness and binary
+        run: cargo build --release --locked -p megabase -p megabase-judge --bin megabase --bin megabase-judge
+      - uses: ./.github/actions/dockerhub-login
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Pull reference images
+        run: |
+          set -euo pipefail
+          # public.ecr.aws rejects a parallel burst with "toomanyrequests:
+          # Rate exceeded". Pull one image at a time and retry.
+          mapfile -t images < <(docker compose -p megabase-judge \
+            -f vendor/supabase/docker/docker-compose.yml \
+            -f judge/compose.override.yml \
+            --env-file vendor/supabase/docker/.env.example \
+            config --images)
+          for image in "${images[@]}"; do
+            [ -n "$image" ] || continue
+            attempt=1
+            until docker pull "$image"; do
+              if [ "$attempt" -ge 8 ]; then
+                echo "failed to pull $image" >&2
+                exit 1
+              fi
+              sleep $((attempt * 5))
+              attempt=$((attempt + 1))
+            done
+          done
+      - name: Reference stack
+        run: |
+          docker compose -p megabase-judge \
+            -f vendor/supabase/docker/docker-compose.yml \
+            -f judge/compose.override.yml \
+            --env-file vendor/supabase/docker/.env.example \
+            up -d --pull never --wait --wait-timeout 300
+      - name: Prepare Megabase database
+        run: ./target/release/megabase-judge prepare
+      - name: Megabase on :8100
+        run: |
+          set -euo pipefail
+          JWT_SECRET=$(grep '^JWT_SECRET=' vendor/supabase/docker/.env.example | cut -d= -f2-)
+          POSTGRES_PASSWORD=$(grep '^POSTGRES_PASSWORD=' vendor/supabase/docker/.env.example | cut -d= -f2-)
+          DATABASE_URL="postgres://supabase_admin:${POSTGRES_PASSWORD}@127.0.0.1:54322/megabase"
+          # Discard server logs. Request paths would reveal held-out cases.
+          MEGABASE_PORT=8100 MEGABASE_HOST=0.0.0.0 \
+            JWT_SECRET="$JWT_SECRET" DATABASE_URL="$DATABASE_URL" \
+            ./target/release/megabase >/dev/null 2>&1 &
+      - name: Wait
+        run: ./target/release/megabase-judge wait --timeout 240
+      - name: Run hidden suite
+        env:
+          MEGABASE_JUDGE_HIDDEN_SEED: ${{ secrets.MEGABASE_JUDGE_HIDDEN_SEED }}
+          MEGABASE_JUDGE_HIDDEN_CASES: ${{ secrets.MEGABASE_JUDGE_HIDDEN_CASES }}
+        run: |
+          set -euo pipefail
+          set +e
+          ./target/release/megabase-judge hidden \
+            --out /tmp/hidden-summary.json \
+            --summary /tmp/hidden-summary.md
+          code=$?
+          if [ -f /tmp/hidden-summary.md ]; then
+            cat /tmp/hidden-summary.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+          exit "$code"
+      - name: vendor/ stayed clean
+        if: always()
+        run: |
+          git -C vendor/supabase status --short
+          test -z "$(git -C vendor/supabase status --porcelain)"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: judge-hidden-summary
+          retention-days: 30
+          if-no-files-found: ignore
+          path: /tmp/hidden-summary.json

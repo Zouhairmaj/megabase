@@ -34,6 +34,11 @@ Each entry should include:
 - **Reason**: Run 38007606007 Sync Cargo.lock failed with HTTP 403 `Permission to Zouhairmaj/megabase.git denied to megabase-agent`. GitHub's personal access token documentation says only a classic PAT has write access for a public repository you do not own. Granting Contents write on the fine-grained token does not fix that. `workflow` is included so the token can push workflow-file changes; the failed commit changed only `Cargo.lock`.
 - **Files affected**: GitHub Actions repository secrets (not in git)
 
+- **Date**: 2026-10-10
+- **Action**: (pending) Create the GitHub Actions environment `judge-hidden` (Settings → Environments), restrict deployment branches to `main`, and add environment secret `MEGABASE_JUDGE_HIDDEN_SEED` from `openssl rand -base64 48`. Optionally add `MEGABASE_JUDGE_HIDDEN_CASES` (ciphertext from `megabase-judge hidden-seal`). Do not store either value as a repository secret, and do not require reviewers on the environment. Do not add **Hidden judge** to required pull-request checks.
+- **Reason**: Issue #114. The held-out suite reads those secrets at runtime. A repository secret would be available to `workflow_dispatch` on any branch. The weekly workflow fails closed until the seed exists. The procedure is in `judge/README.md` (Held-out suite) and decision 0029.
+- **Files affected**: GitHub Actions environment `judge-hidden` (not in git)
+
 ---
 
 ## Completed
