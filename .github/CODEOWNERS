@@ -1,5 +1,6 @@
-# Fallback. GitHub uses `.github/CODEOWNERS` when that file exists.
-# Keep these owners identical to that file.
+# Human code owner for protected paths. GitHub reads this file before a
+# repository-root CODEOWNERS. @Zouhairmaj reviews the paths below.
+# Agents do not change branch protection.
 # docs/decisions/0029-codeowners-protected-paths.md
 
 # These paths require @Zouhairmaj's human code-owner review.
@@ -12,7 +13,7 @@
 /CODEOWNERS             @Zouhairmaj
 
 # Already owned on the root file. Kept so GitHub still requests them
-# once `.github/CODEOWNERS` takes precedence.
+# once this file takes precedence.
 /vendor.toml            @Zouhairmaj
 /.gitmodules            @Zouhairmaj
 /tools/megabase-guard/  @Zouhairmaj

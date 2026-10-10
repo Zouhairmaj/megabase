@@ -23,6 +23,16 @@ agent or human. This file covers only what AGENTS.md does not.
 | Versioning and releases | [`docs/ROADMAP.md`](docs/ROADMAP.md#versioning-and-releases) |
 | Vulnerability reports | [`SECURITY.md`](SECURITY.md) |
 
+## Code owners
+
+`.github/CODEOWNERS` assigns `@Zouhairmaj` as owner of `GOAL.md`,
+`MANIFESTO.md`, `HUMAN_LOG.md`, `judge/`, `vendor/`, `.github/`, and
+`CODEOWNERS`. A change to any of those paths requires that owner's human
+code-owner review. Agents do not change branch protection settings.
+[Decision 0029](docs/decisions/0029-codeowners-protected-paths.md) records
+why GitHub reads that file. The branch rule for the same paths stays in
+[`AGENTS.md`](AGENTS.md).
+
 ## Security
 
 Report vulnerabilities privately as described in [`SECURITY.md`](SECURITY.md)

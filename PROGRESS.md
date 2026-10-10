@@ -101,7 +101,7 @@ None.
 - [x] CI: build, MSRV, coverage check, protected paths, judge, shields JSON on `gh-pages`
 - [x] NOTICE, LICENSES/ (SPDX from each vendored LICENSE)
 - [x] HUMAN_LOG.md present (human-owned; already on `main`, not created empty)
-- [x] CODEOWNERS (`@Zouhairmaj`)
+- [x] CODEOWNERS (`@Zouhairmaj` in `.github/CODEOWNERS`)
 - [x] Versioning: policy in `docs/ROADMAP.md` (Phase 0 = `0.1.0`)
 - [x] `AGENTS.md` (committee-reviewed) plus nested guides
 - [x] Backlog *generator* (`tools/megabase-backlog`); GitHub write is a
@@ -157,7 +157,10 @@ Physically impossible for the agent (repository settings or credentials):
       are `0.1.2` (`54594f0`); the denied workflow push had left them
       at `0.1.1`.
 - [ ] Allow `github-actions` to publish GitHub Releases / tags on `main`
-- [ ] Enforce CODEOWNERS
+- [ ] Enforce CODEOWNERS on `main` ("Require review from Code Owners").
+      `.github/CODEOWNERS` already assigns `@Zouhairmaj`. Agents do not
+      change this branch protection setting
+      ([0029](docs/decisions/0029-codeowners-protected-paths.md)).
 - [x] Coverage commits on `main` are not used. Shields JSON is
       published to the `gh-pages` branch (no exception to branch
       protection).

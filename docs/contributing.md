@@ -32,6 +32,7 @@ Failures return HTTP 501 with `{"code":"MEGABASE_NOT_IMPLEMENTED",...}`. Never a
 
 - Rust only, with the exceptions in GOAL.md (configuration, compatibility SQL, Studio assets).
 - Never modify `vendor/` or `judge/` on a feature branch.
+- `GOAL.md`, `MANIFESTO.md`, `HUMAN_LOG.md`, `judge/`, `vendor/`, `.github/`, and `CODEOWNERS` require `@Zouhairmaj`'s human code-owner review (`.github/CODEOWNERS`).
 - Never disable a test to make a score go up.
 - Credit upstream in a header comment; keep NOTICE current.
 - Conventional Commits for the site and docs; component unit commits follow GOAL.md.

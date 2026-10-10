@@ -128,10 +128,13 @@ Two references, not a second style guide:
 
 ⛔ marks paths the `Protected paths` check rejects. The only exception is the
 self-expiring Phase 0 bootstrap case in
-[ADR 0003](docs/adr/0003-protected-paths.md). CODEOWNERS also requests the
-maintainer's review. Branch protection does not require that review today,
-so reviewer-agent approval plus green checks allow the merge. If GitHub
-starts requiring it, add `needs-human` and wait. Never route around it.
+[ADR 0003](docs/adr/0003-protected-paths.md). `.github/CODEOWNERS` assigns
+`@Zouhairmaj` as owner of `GOAL.md`, `MANIFESTO.md`, `HUMAN_LOG.md`,
+`judge/`, `vendor/`, `.github/`, and `CODEOWNERS`. Those paths require that
+owner's human code-owner review
+([0029](docs/decisions/0029-codeowners-protected-paths.md)). Agents do not
+change branch protection to turn the requirement on. When GitHub requests
+the owner, add `needs-human` and wait. Never route around it.
 
 ## Task workflow
 
