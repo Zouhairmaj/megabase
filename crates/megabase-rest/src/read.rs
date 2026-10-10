@@ -579,13 +579,21 @@ fn negotiate_read(value: Option<&axum::http::HeaderValue>) -> ReadAccept {
     let Some(text) = header_str(value) else {
         return ReadAccept::Json;
     };
-    let mut entries: Vec<(f32, &str)> = text
+    let listed: Vec<(f32, &str)> = text
         .split(',')
         .map(str::trim)
         .filter(|part| !part.is_empty())
         .map(|part| (quality(part), part))
-        .filter(|(q, _)| *q > 0.0)
         .collect();
+    let mut entries: Vec<(f32, &str)> = listed.iter().copied().filter(|(q, _)| *q > 0.0).collect();
+    // A header whose every type has `q=0` accepts nothing: 406, not JSON.
+    if entries.is_empty() && !listed.is_empty() {
+        let types: Vec<&str> = listed
+            .iter()
+            .map(|(_, part)| part.split(';').next().unwrap_or("").trim())
+            .collect();
+        return ReadAccept::NotAcceptable(types.join(", ").to_ascii_lowercase());
+    }
     entries.sort_by(|a, b| b.0.total_cmp(&a.0));
     let mut skipped: Vec<String> = Vec::new();
     for (_, part) in entries {
@@ -670,6 +678,8 @@ fn accept_unit(first: &str) -> Option<&'static str> {
         "application/vnd.pgrst.array+json" if nulls_stripped => {
             Some("rest:media-type:application/vnd.pgrst.array+json;nulls=stripped")
         }
+        // Plain alias of `application/json` upstream.
+        "application/vnd.pgrst.array+json" => None,
         "application/geo+json" => Some("rest:media-type:application/geo+json"),
         "application/octet-stream" => Some("rest:media-type:application/octet-stream"),
         "application/openapi+json" => Some("rest:media-type:application/openapi+json"),
@@ -1429,6 +1439,14 @@ mod tests {
         ));
         assert!(matches!(
             pick("text/csv;q=0, application/json"),
+            ReadAccept::Json
+        ));
+        assert!(matches!(
+            pick("text/csv;q=0"),
+            ReadAccept::NotAcceptable(types) if types == "text/csv"
+        ));
+        assert!(matches!(
+            pick("application/vnd.pgrst.array+json"),
             ReadAccept::Json
         ));
         assert!(matches!(negotiate_read(None), ReadAccept::Json));
