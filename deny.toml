@@ -45,10 +45,11 @@ ignore = true
 
 [bans]
 multiple-versions = "warn"
-# Wildcard version requirements are denied.
+# Wildcard version requirements are denied. Internal crates carry explicit
+# versions in [workspace.dependencies]; product crates stay publishable.
 wildcards = "deny"
-# Path and workspace dependencies without explicit version requirements are
-# treated as wildcards by cargo-deny; allow them so internal crate references pass.
+# Still needed for the unpublished tools/ and judge/ crates, which reference
+# workspace members by path only.
 allow-wildcard-paths = true
 allow-workspace = true
 allow = [
