@@ -7,6 +7,8 @@
 //! then `on_conflict`. The first failure wins. `columns` and `on_conflict` are
 //! accepted on a read and do not change the row shape.
 
+use std::collections::HashMap;
+
 use crate::filter::{
     append_predicate, parse_filter_value, quote_ident, BoundFilter, FilterBody, FilterParseError,
     ParsedFilter, ServedOp, UnsafeType,
@@ -20,8 +22,6 @@ pub(crate) enum QueryFail {
     Parse { message: String, details: String },
     /// `PGRST108` for an `order`, `limit`, `offset`, `and`, or `or` on a resource that is not embedded.
     NotEmbedded { resource: String },
-    /// A select unit that is not served yet.
-    Unimplemented(&'static str),
     /// An embed, spread, or JSON-path filter. The route unit stays 501.
     Route,
 }
@@ -53,12 +53,30 @@ impl ReadQuery {
         }
     }
 
+    /// Names of the embedded resources the select list asks for.
+    #[must_use]
+    pub(crate) fn embed_names(&self) -> Vec<&str> {
+        match &self.select {
+            SelectList::Mixed(entries) => entries
+                .iter()
+                .filter_map(|entry| match entry {
+                    SelectEntry::Embed(embed) => Some(embed.name.as_str()),
+                    SelectEntry::Field(_) => None,
+                })
+                .collect(),
+            _ => Vec::new(),
+        }
+    }
+
     /// `true` when `select` applies an aggregate function.
     #[must_use]
     pub(crate) fn has_aggregate(&self) -> bool {
         match &self.select {
             SelectList::Star => false,
             SelectList::Fields(fields) => fields.iter().any(|field| field.agg.is_some()),
+            SelectList::Mixed(entries) => entries
+                .iter()
+                .any(|entry| matches!(entry, SelectEntry::Field(field) if field.agg.is_some())),
         }
     }
 
@@ -120,6 +138,23 @@ pub(crate) struct ReadSql {
 enum SelectList {
     Star,
     Fields(Vec<SelectField>),
+    /// A select list that carries at least one embedded resource.
+    Mixed(Vec<SelectEntry>),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum SelectEntry {
+    Field(SelectField),
+    Embed(Embed),
+}
+
+/// One `name(...)`, `name!inner(...)` or `name!left(...)` select item.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Embed {
+    alias: Option<String>,
+    name: String,
+    inner: bool,
+    select: SelectList,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -367,7 +402,15 @@ pub(crate) fn parse_get_query(query: &str) -> Result<ReadQuery, QueryFail> {
     });
     let resource = order_embed.or(page.embed).or(logic_embed).or(related);
     if let Some(resource) = resource {
-        return Err(QueryFail::NotEmbedded { resource });
+        // An embedded resource's own order/limit/logic is not served: 501.
+        let embedded = matches!(&select, SelectList::Mixed(entries) if entries.iter().any(|entry|
+            matches!(entry, SelectEntry::Embed(embed)
+                if embed.name == resource || embed.alias.as_deref() == Some(resource.as_str()))));
+        return Err(if embedded {
+            QueryFail::Route
+        } else {
+            QueryFail::NotEmbedded { resource }
+        });
     }
     Ok(ReadQuery {
         select,
@@ -641,6 +684,8 @@ fn parse_select(input: &str) -> Result<ParsedSelect, PErr> {
     }
     let mut at = At::start(input);
     let mut fields = Vec::new();
+    let mut entries = Vec::new();
+    let mut has_embed = false;
     let mut deferred: Option<QueryFail> = None;
     loop {
         at = skip_ws(&at);
@@ -652,7 +697,14 @@ fn parse_select(input: &str) -> Result<ParsedSelect, PErr> {
         }
         let start = at.clone();
         match parse_select_item(&mut at)? {
-            SelectItem::Field(field) => fields.push(field),
+            SelectItem::Field(field) => {
+                entries.push(SelectEntry::Field(field.clone()));
+                fields.push(field);
+            }
+            SelectItem::Embed(embed) => {
+                has_embed = true;
+                entries.push(SelectEntry::Embed(embed));
+            }
             SelectItem::Defer(fail) => {
                 if deferred.is_none() {
                     deferred = Some(fail);
@@ -675,6 +727,9 @@ fn parse_select(input: &str) -> Result<ParsedSelect, PErr> {
     if let Some(fail) = deferred {
         return Ok(ParsedSelect::Deferred(fail));
     }
+    if has_embed {
+        return Ok(ParsedSelect::Ready(SelectList::Mixed(entries)));
+    }
     if fields.is_empty() {
         return Ok(ParsedSelect::Ready(SelectList::Star));
     }
@@ -692,6 +747,7 @@ fn parse_select(input: &str) -> Result<ParsedSelect, PErr> {
 
 enum SelectItem {
     Field(SelectField),
+    Embed(Embed),
     Defer(QueryFail),
 }
 
@@ -711,12 +767,12 @@ fn parse_spread<'a>(at: &mut At<'a>) -> Result<SelectItem, PErr> {
     *at = bump_str(at, "...");
     let (_name, next) = parse_field_name(at)?;
     *at = next;
-    let join = parse_embed_params(at)?;
+    let (_join, _hinted) = parse_embed_params(at)?;
     if at.peek() != Some('(') {
         return Err(char_err(at, "\"(\""));
     }
     skip_balanced(at)?;
-    Ok(SelectItem::Defer(join_fail(join)))
+    Ok(SelectItem::Defer(QueryFail::Route))
 }
 
 fn try_relation<'a>(at: &mut At<'a>) -> Result<Option<SelectItem>, PErr> {
@@ -734,8 +790,8 @@ fn try_relation<'a>(at: &mut At<'a>) -> Result<Option<SelectItem>, PErr> {
         return Ok(None);
     }
     *at = next;
-    let join = match parse_embed_params(at) {
-        Ok(join) => join,
+    let (join, hinted) = match parse_embed_params(at) {
+        Ok(parsed) => parsed,
         Err(_) => {
             *at = alias_saved;
             return Ok(None);
@@ -745,17 +801,27 @@ fn try_relation<'a>(at: &mut At<'a>) -> Result<Option<SelectItem>, PErr> {
         *at = alias_saved;
         return Ok(None);
     }
+    let open = at.byte + 1;
     skip_balanced(at)?;
-    let _ = alias;
-    Ok(Some(SelectItem::Defer(join_fail(join))))
-}
-
-fn join_fail(join: Option<JoinKind>) -> QueryFail {
-    match join {
-        Some(JoinKind::Inner) => QueryFail::Unimplemented("rest:embed-join:inner"),
-        Some(JoinKind::Left) => QueryFail::Unimplemented("rest:embed-join:left"),
-        None => QueryFail::Route,
+    if hinted {
+        return Ok(Some(SelectItem::Defer(QueryFail::Route)));
     }
+    let inner_text = &at.input[open..at.byte - 1];
+    // An empty embed (`notes()`) means "filter only" upstream; not served yet.
+    if inner_text.trim().is_empty() {
+        return Ok(Some(SelectItem::Defer(QueryFail::Route)));
+    }
+    let select = match parse_select(inner_text)? {
+        ParsedSelect::Ready(select) if !matches!(select, SelectList::Mixed(_)) => select,
+        ParsedSelect::Ready(_) => return Ok(Some(SelectItem::Defer(QueryFail::Route))),
+        ParsedSelect::Deferred(fail) => return Ok(Some(SelectItem::Defer(fail))),
+    };
+    Ok(Some(SelectItem::Embed(Embed {
+        alias,
+        name,
+        inner: matches!(join, Some(JoinKind::Inner)),
+        select,
+    })))
 }
 
 #[derive(Clone, Copy)]
@@ -764,8 +830,9 @@ enum JoinKind {
     Left,
 }
 
-fn parse_embed_params<'a>(at: &mut At<'a>) -> Result<Option<JoinKind>, PErr> {
+fn parse_embed_params<'a>(at: &mut At<'a>) -> Result<(Option<JoinKind>, bool), PErr> {
     let mut join = None;
+    let mut hinted = false;
     for _ in 0..2 {
         if at.peek() != Some('!') {
             break;
@@ -780,9 +847,10 @@ fn parse_embed_params<'a>(at: &mut At<'a>) -> Result<Option<JoinKind>, PErr> {
         } else {
             let (_hint, next) = parse_field_name(at)?;
             *at = next;
+            hinted = true;
         }
     }
-    Ok(join)
+    Ok((join, hinted))
 }
 
 fn parse_field_select<'a>(at: &mut At<'a>) -> Result<SelectItem, PErr> {
@@ -1627,16 +1695,52 @@ pub(crate) fn build_read_sql(
     relation: &str,
     query: &ReadQuery,
     column_types: &[(&str, &str)],
+    rels: &HashMap<String, Relationship>,
 ) -> Result<ReadSql, UnsafeType> {
     let mut params = Vec::new();
     let relation_ident = quote_ident(relation);
-    let schema = quote_ident(schema);
+    let schema_ident = quote_ident(schema);
     let mut select_sql = String::new();
     // megabase:unit rest:query-param:select
     let select = expand_star(&query.select, column_types);
     push_select(&mut select_sql, &mut params, &relation_ident, &select);
-    let mut inner = format!("SELECT {select_sql} FROM {schema}.{relation_ident}");
-    if !query.filters.is_empty() || !query.logic.is_empty() {
+    let mut inner = format!("SELECT {select_sql} FROM {schema_ident}.{relation_ident}");
+    let mut exists = Vec::new();
+    if let SelectList::Mixed(entries) = &query.select {
+        let mut select_sql = String::new();
+        for (index, entry) in entries.iter().enumerate() {
+            if index > 0 {
+                select_sql.push_str(", ");
+            }
+            match entry {
+                SelectEntry::Field(field) => {
+                    push_select_field(&mut select_sql, &mut params, &relation_ident, field);
+                }
+                SelectEntry::Embed(embed) => {
+                    let Some(rel) = rels.get(&embed.name) else {
+                        continue;
+                    };
+                    let target = quote_ident(&embed.name);
+                    let cond = join_condition(rel, &relation_ident, &target);
+                    push_embed(
+                        &mut select_sql,
+                        &mut params,
+                        &schema_ident,
+                        embed,
+                        rel,
+                        &cond,
+                    );
+                    if embed.inner {
+                        exists.push(format!(
+                            "EXISTS (SELECT 1 FROM {schema_ident}.{target} WHERE {cond})"
+                        ));
+                    }
+                }
+            }
+        }
+        inner = format!("SELECT {select_sql} FROM {schema_ident}.{relation_ident}");
+    }
+    if !query.filters.is_empty() || !query.logic.is_empty() || !exists.is_empty() {
         inner.push_str(" WHERE ");
         push_where(
             &mut inner,
@@ -1646,6 +1750,12 @@ pub(crate) fn build_read_sql(
             &query.logic,
             column_types,
         )?;
+        if !exists.is_empty() {
+            if !query.filters.is_empty() || !query.logic.is_empty() {
+                inner.push_str(" AND ");
+            }
+            inner.push_str(&exists.join(" AND "));
+        }
     }
     push_group(&mut inner, &mut params, &relation_ident, &select);
     if !query.orders.is_empty() {
@@ -1673,6 +1783,50 @@ pub(crate) fn build_read_sql(
         params,
         offset,
     })
+}
+
+/// Foreign-key link between the requested table and an embedded one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Relationship {
+    /// `true` when the embedded table holds the foreign key (an array result).
+    pub to_many: bool,
+    /// Columns on the requested table, in key order.
+    pub root_columns: Vec<String>,
+    /// Columns on the embedded table, in key order.
+    pub target_columns: Vec<String>,
+}
+
+fn join_condition(rel: &Relationship, root: &str, target: &str) -> String {
+    rel.root_columns
+        .iter()
+        .zip(&rel.target_columns)
+        .map(|(r, t)| format!("{target}.{} = {root}.{}", quote_ident(t), quote_ident(r)))
+        .collect::<Vec<_>>()
+        .join(" AND ")
+}
+
+/// Correlated subquery for one embed: an array for a to-many link, an object or `null` otherwise.
+fn push_embed(
+    sql: &mut String,
+    params: &mut Vec<String>,
+    schema: &str,
+    embed: &Embed,
+    rel: &Relationship,
+    cond: &str,
+) {
+    let target = quote_ident(&embed.name);
+    let mut cols = String::new();
+    push_select(&mut cols, params, &target, &embed.select);
+    let sub = format!("SELECT {cols} FROM {schema}.{target} WHERE {cond}");
+    if rel.to_many {
+        sql.push_str(&format!(
+            "COALESCE((SELECT json_agg(_t) FROM ({sub}) _t), '[]'::json)"
+        ));
+    } else {
+        sql.push_str(&format!("(SELECT to_json(_t) FROM ({sub}) _t)"));
+    }
+    sql.push_str(" AS ");
+    sql.push_str(&quote_ident(embed.alias.as_deref().unwrap_or(&embed.name)));
 }
 
 /// `*` next to an aggregate becomes the table's columns, so `GROUP BY` can
@@ -1730,6 +1884,8 @@ fn push_group(sql: &mut String, params: &mut Vec<String>, relation: &str, select
 
 fn push_select(sql: &mut String, params: &mut Vec<String>, relation: &str, select: &SelectList) {
     match select {
+        // Embeds are rendered by `build_read_sql`.
+        SelectList::Mixed(_) => {}
         SelectList::Star => {
             sql.push_str(relation);
             sql.push_str(".*");
@@ -2155,19 +2311,58 @@ mod tests {
             }
             _ => panic!("fields"),
         }
+        let query = parse_get_query("select=id,notes(body)").unwrap();
+        assert_eq!(query.embed_names(), vec!["notes"]);
+        let query = parse_get_query("select=notes!inner(body)").unwrap();
+        assert_eq!(query.embed_names(), vec!["notes"]);
         assert!(matches!(
-            parse_get_query("select=notes(body)").unwrap_err(),
+            parse_get_query("select=notes!fk(body)").unwrap_err(),
             QueryFail::Route
         ));
+        for empty in [
+            "select=id,notes()",
+            "select=notes!inner()",
+            "select=notes( )",
+        ] {
+            assert!(matches!(
+                parse_get_query(empty).unwrap_err(),
+                QueryFail::Route
+            ));
+        }
         assert!(matches!(
-            parse_get_query("select=notes!inner(body)").unwrap_err(),
-            QueryFail::Unimplemented("rest:embed-join:inner")
+            parse_get_query("select=notes(a(b))").unwrap_err(),
+            QueryFail::Route
         ));
         assert!(parse_get_query("select=id.count()")
             .unwrap()
             .has_aggregate());
         let err = parse_get_query("select=notes(body)&id=nope").unwrap_err();
         assert!(matches!(err, QueryFail::Parse { .. }));
+    }
+
+    #[test]
+    fn embed_sql_joins_on_the_foreign_key() {
+        let query = parse_get_query("select=name,notes!inner(body)").unwrap();
+        let rels = HashMap::from([(
+            "notes".to_string(),
+            Relationship {
+                to_many: true,
+                root_columns: vec!["id".into()],
+                target_columns: vec!["user_id".into()],
+            },
+        )]);
+        let sql = build_read_sql("public", "profiles", &query, &[], &rels)
+            .unwrap()
+            .sql;
+        assert!(sql.contains("json_agg(_t)"), "{sql}");
+        assert!(
+            sql.contains("\"notes\".\"user_id\" = \"profiles\".\"id\""),
+            "{sql}"
+        );
+        assert!(
+            sql.contains("AND EXISTS") || sql.contains("WHERE EXISTS"),
+            "{sql}"
+        );
     }
 
     #[test]
@@ -2248,7 +2443,7 @@ mod tests {
     fn logic_nested_trees_bind_values_in_order() {
         let query =
             parse_get_query("or=(id.eq.1,and(done.eq.true,not.or(id.eq.2,id.eq.3)))").unwrap();
-        let sql = build_read_sql("public", "todos", &query, &[]).unwrap();
+        let sql = build_read_sql("public", "todos", &query, &[], &HashMap::new()).unwrap();
         // No catalog types are passed, so leaves are bare `col = $n`.
         assert!(sql.sql.contains(concat!(
             r#" WHERE ("todos"."id" = $1 OR ("todos"."done" = $2 "#,
@@ -2268,7 +2463,7 @@ mod tests {
     #[test]
     fn sql_orders_limits_and_binds_filter_values() {
         let query = parse_get_query("select=id,title&order=id.desc&limit=1&offset=2").unwrap();
-        let sql = build_read_sql("public", "todos", &query, &[]).unwrap();
+        let sql = build_read_sql("public", "todos", &query, &[], &HashMap::new()).unwrap();
         assert!(sql.sql.contains("\"todos\".\"id\", \"todos\".\"title\""));
         assert!(sql.sql.contains("ORDER BY \"todos\".\"id\" DESC"));
         assert!(sql.sql.contains("LIMIT ($1::bigint) OFFSET ($2::bigint)"));
@@ -2276,18 +2471,25 @@ mod tests {
         assert_eq!(sql.offset, 2);
 
         let query = parse_get_query("or=(id.eq.1,id.eq.3)&order=id").unwrap();
-        let sql = build_read_sql("public", "todos", &query, &[]).unwrap();
+        let sql = build_read_sql("public", "todos", &query, &[], &HashMap::new()).unwrap();
         assert!(sql.sql.contains(" OR "));
         assert_eq!(sql.params, vec!["1", "3"]);
         assert!(!sql.sql.contains("drop"));
 
         let query = parse_get_query("columns=id,title&order=id").unwrap();
-        let sql = build_read_sql("public", "todos", &query, &[]).unwrap();
+        let sql = build_read_sql("public", "todos", &query, &[], &HashMap::new()).unwrap();
         assert!(sql.sql.contains("\"todos\".*"));
         assert!(!sql.sql.contains("\"todos\".\"id\","));
 
         let query = parse_get_query("body=eq.victim-secret') or true--&select=body").unwrap();
-        let sql = build_read_sql("public", "notes", &query, &[("body", "text")]).unwrap();
+        let sql = build_read_sql(
+            "public",
+            "notes",
+            &query,
+            &[("body", "text")],
+            &HashMap::new(),
+        )
+        .unwrap();
         assert_eq!(sql.params, vec!["victim-secret') or true--"]);
         assert!(!sql.sql.contains("victim-secret"));
     }
@@ -2297,7 +2499,14 @@ mod tests {
         let query =
             parse_get_query("select=count(),n:amount.sum()::text,kind&amount=gt.1").unwrap();
         assert!(query.has_aggregate());
-        let sql = build_read_sql("public", "t", &query, &[("amount", "integer")]).unwrap();
+        let sql = build_read_sql(
+            "public",
+            "t",
+            &query,
+            &[("amount", "integer")],
+            &HashMap::new(),
+        )
+        .unwrap();
         assert!(sql.sql.contains(
             "SELECT COUNT(\"t\".*), CAST( SUM(\"t\".\"amount\") AS text ) AS \"n\", \"t\".\"kind\" \
              FROM \"public\".\"t\" WHERE"
@@ -2306,7 +2515,7 @@ mod tests {
 
         let query =
             parse_get_query("select=a.avg(),b.max(),c.min(),k:d::int.sum()::bigint").unwrap();
-        let sql = build_read_sql("public", "t", &query, &[]).unwrap();
+        let sql = build_read_sql("public", "t", &query, &[], &HashMap::new()).unwrap();
         assert!(sql.sql.contains(
             "AVG(\"t\".\"a\"), MAX(\"t\".\"b\"), MIN(\"t\".\"c\"), \
              CAST( SUM(CAST( \"t\".\"d\" AS int )) AS bigint ) AS \"k\""
@@ -2314,13 +2523,25 @@ mod tests {
         assert!(!sql.sql.contains("GROUP BY"));
 
         let query = parse_get_query("select=*,id.count()").unwrap();
-        let sql =
-            build_read_sql("public", "t", &query, &[("id", "integer"), ("v", "text")]).unwrap();
+        let sql = build_read_sql(
+            "public",
+            "t",
+            &query,
+            &[("id", "integer"), ("v", "text")],
+            &HashMap::new(),
+        )
+        .unwrap();
         assert!(sql.sql.contains("GROUP BY \"t\".\"id\", \"t\".\"v\""));
         assert!(matches!(
             parse_get_query("select=id.count()x").unwrap_err(),
             QueryFail::Parse { .. }
         ));
+    }
+
+    #[test]
+    fn embedded_resource_order_is_deferred() {
+        let err = parse_get_query("select=id,notes(body)&notes.order=body").unwrap_err();
+        assert_eq!(err, QueryFail::Route);
     }
 
     #[test]
@@ -2350,7 +2571,7 @@ mod tests {
     fn json_select_uses_the_last_key_as_the_alias() {
         let query =
             parse_get_query("select=data->a,data->>b::text,data->1,data->1->mycol->>2").unwrap();
-        let sql = build_read_sql("public", "todos", &query, &[]).unwrap();
+        let sql = build_read_sql("public", "todos", &query, &[], &HashMap::new()).unwrap();
         assert!(sql.sql.contains("\"todos\".\"data\"->$1 AS \"a\""));
         assert!(sql
             .sql
