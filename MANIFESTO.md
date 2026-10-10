@@ -28,7 +28,7 @@ The experiment is the real product. The binary is its proof.
 4. **The judge is external.** Agents do not grade themselves. Correctness is decided by comparing Megabase's responses with those of the **real Supabase stack**, run side by side from pinned upstream versions, plus upstream test suites where they can target an HTTP server. Agents may build the comparison harness, but they may never change what it compares against, and every change to the harness goes through an independent reviewer agent.
 5. **Everything is in Rust.** Every component in scope is reimplemented in Rust. No wrappers around the original services, no embedded runtimes of other languages, except where the upstream component itself embeds one (the Deno-based Edge Runtime).
 6. **Failures are loud.** Anything not yet implemented returns an explicit, structured "not implemented" error. Megabase never returns a silently wrong answer.
-7. **Everything is public.** The code, the agent prompts, the loop, the logs, the token spend and the cost, in real time.
+7. **Everything is public.** The code, the agent prompts, the loop and the logs, in real time.
 
 ## Scope
 
@@ -73,7 +73,6 @@ Supabase Studio is the most demanding client of the whole stack: it calls dozens
 - A unit counts as done only when it is both implemented **and** conformant.
 - **Treemaps:** one square per unit, grey to green, regenerated on every commit.
 - **Verified apps:** a public list of real Supabase apps confirmed to run unmodified.
-- **Cost:** tokens and money spent, published continuously.
 
 ## Licensing and credits
 

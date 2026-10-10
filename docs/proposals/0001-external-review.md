@@ -107,7 +107,6 @@ These require reviewer agent approval per GOAL.md rule 2. The judge README shoul
 
 GOAL.md defines levels but doesn't specify:
 - Exact conformance percentage required to advance
-- How to handle cost tracking
 - What happens on regressions
 - Whether Level 5 is realistic given scope
 
@@ -124,9 +123,10 @@ GOAL.md defines levels but doesn't specify:
 ### Tracking Requirements
 
 Add to PROGRESS.md:
-- **Cost tracking**: Cumulative token spend and dollar cost
 - **Regression log**: Any conformance decrease with date, commit, recovery
 - **Human intervention count**: Running total from HUMAN_LOG.md
+
+Token spend and dollar cost are not a tracking requirement. The 2026-10-10 owner decision removed that publication from the manifesto and from weekly reports.
 
 ### Level 5 Deferral Rationale
 

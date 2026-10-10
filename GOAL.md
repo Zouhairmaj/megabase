@@ -146,7 +146,7 @@ The orchestrator runs Megabase like a project manager, in public, with GitHub's 
 6. Blocked work is labeled `blocked` with the reason. Questions only a human can answer are labeled `needs-human`; they are the only legitimate way for agents to ask for human input, and every human answer is recorded in `HUMAN_LOG.md`.
 
 **Rituals**
-- **Weekly report:** every week the orchestrator publishes a GitHub Discussion (category "Weekly reports"): what was merged, coverage and conformance trends, blocked items, cost, priorities for next week.
+- **Weekly report:** every week the orchestrator publishes a GitHub Discussion (category "Weekly reports"): what was merged, coverage and conformance trends, blocked items, priorities for next week.
 - **Milestone retrospective:** when a level's threshold is reached, the orchestrator writes a retrospective (what worked, what failed, what to change in the process) and proposes changes to this file as a pull request for human approval.
 
 **Enforcement (set up by humans in Phase 0)**

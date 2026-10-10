@@ -182,6 +182,40 @@ fn is_empty_completed(body: &str) -> bool {
     trimmed.is_empty() || trimmed == "*No completed human interventions recorded yet.*"
 }
 
+/// Suffix added to the Completed section, when that section grew.
+fn completed_suffix<'a>(before: &str, after: &'a str) -> Option<&'a str> {
+    let old_at = before.find("## Pending")?;
+    let new_at = after.find("## Pending")?;
+    let (_, old_rest) = split_pending_body(&before[old_at..])?;
+    let (_, new_rest) = split_pending_body(&after[new_at..])?;
+    let old_body = completed_body(old_rest)?;
+    let new_body = completed_body(new_rest)?;
+    if old_body == new_body {
+        return None;
+    }
+    if is_empty_completed(old_body) {
+        return Some(new_body);
+    }
+    let old_trim = old_body.trim_end();
+    let suffix = new_body.strip_prefix(old_trim)?;
+    (!suffix.is_empty()).then_some(suffix)
+}
+
+/// A `review/*` mission edit is logged when Completed grew and names `path`.
+fn mission_edit_is_logged(path: &str, changes: &[Change]) -> bool {
+    let Some(log) = changes.iter().find(|change| change.path == "HUMAN_LOG.md") else {
+        return false;
+    };
+    if log.status != Status::Modified {
+        return false;
+    }
+    let Some((before, after)) = log.before.as_deref().zip(log.after.as_deref()) else {
+        return false;
+    };
+    is_human_log_review_ok(before, after)
+        && completed_suffix(before, after).is_some_and(|added| added.contains(path))
+}
+
 fn split_pending_body(from_heading: &str) -> Option<(&str, &str)> {
     let nl = from_heading.find('\n')?;
     let after_heading = &from_heading[nl + 1..];
@@ -232,7 +266,11 @@ pub fn evaluate(changes: &[Change], ctx: &Context) -> Vec<String> {
                     .as_deref()
                     .zip(change.after.as_deref())
                     .is_some_and(|(before, after)| is_human_log_review_ok(before, after));
-            if !creating_empty_log && !bootstrap_goal && !human_log_review {
+            let mission_logged = review
+                && change.status == Status::Modified
+                && (path == "GOAL.md" || path == "MANIFESTO.md")
+                && mission_edit_is_logged(path, changes);
+            if !creating_empty_log && !bootstrap_goal && !human_log_review && !mission_logged {
                 violations.push(format!(
                     "{path}: human-owned file; only maintainers edit it"
                 ));
@@ -636,5 +674,65 @@ mod tests {
         assert!(!is_human_log_review_ok(same, same));
         let prefix_changed = "# other\n\n## Pending\n\n- x\n\n---\n\n*No completed human interventions recorded yet.*\n";
         assert!(!is_human_log_review_ok(same, prefix_changed));
+    }
+
+    fn log_with_completed(completed: &str) -> String {
+        format!(
+            "# Human Intervention Log\n\n## Pending\n\n- **Date**: 2026-10-09\n- **Action**: keep\n\n---\n\n## Completed\n\n{completed}"
+        )
+    }
+
+    #[test]
+    fn review_branch_may_edit_mission_when_human_log_names_the_file() {
+        let before = log_with_completed("- **Date**: 2026-10-09\n- **Action**: earlier\n");
+        let after = log_with_completed(
+            "- **Date**: 2026-10-09\n- **Action**: earlier\n\n- **Date**: 2026-10-10\n- **Action**: Owner decision. `MANIFESTO.md` and `GOAL.md`.\n",
+        );
+        let log = modified("HUMAN_LOG.md", &before, &after);
+        let c = ctx("review/remove-manifesto-cost", false);
+        assert!(evaluate(
+            &[
+                log.clone(),
+                modified("MANIFESTO.md", "old rule", "new rule"),
+                modified("GOAL.md", "old goal", "new goal"),
+            ],
+            &c
+        )
+        .is_empty());
+        assert_eq!(
+            evaluate(
+                &[
+                    log.clone(),
+                    modified("MANIFESTO.md", "old rule", "new rule"),
+                    modified("GOAL.md", "old goal", "new goal"),
+                ],
+                &ctx("issue-1-x", false)
+            )
+            .len(),
+            3
+        );
+        let unnamed = log_with_completed(
+            "- **Date**: 2026-10-09\n- **Action**: earlier\n\n- **Date**: 2026-10-10\n- **Action**: Owner decision, no path.\n",
+        );
+        assert_eq!(
+            evaluate(
+                &[
+                    modified("HUMAN_LOG.md", &before, &unnamed),
+                    modified("MANIFESTO.md", "old rule", "new rule"),
+                ],
+                &c
+            )
+            .len(),
+            1
+        );
+        let deleted = Change {
+            status: Status::Deleted,
+            path: "MANIFESTO.md".into(),
+            before: None,
+            after: None,
+        };
+        assert_eq!(evaluate(&[log, deleted], &c).len(), 1);
+        assert!(completed_suffix(&before, &after).is_some_and(|s| s.contains("MANIFESTO.md")));
+        assert!(completed_suffix(&before, &before).is_none());
     }
 }
