@@ -108,10 +108,15 @@ member versions drifted, so `--locked` CI (Build, Codecov, Bencher,
 Protected paths, Judge) stays green. That commit is pushed with the token the tree probe
 selected.
 `RELEASE_PLEASE_TOKEN` is used only when that probe can create a git
-tree, so the push starts workflows. Otherwise, and when that push is
+tree, so the push starts workflows. A fine-grained PAT owned by
+`megabase-agent` cannot:
+[GitHub's token docs](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens)
+say only a classic PAT has write access to a public repository owned by
+another personal account, including for a collaborator. The secret has to be a classic PAT with
+the `repo` and `workflow` scopes. Otherwise, and when that push is
 denied, the push uses `GITHUB_TOKEN`, which does not trigger
-`push`/`pull_request` workflows. Token permissions are under
-Human-only actions in `PROGRESS.md`. When the probe did not select
+`push`/`pull_request` workflows. The pending replacement is under
+Human-only actions in `PROGRESS.md` and in `HUMAN_LOG.md`. When the probe did not select
 the secret, the push was retried with `GITHUB_TOKEN`, or the lockfile
 commit was not pushed, the lockfile job `workflow_dispatch`es
 CI, Bencher, and Judge on the release branch

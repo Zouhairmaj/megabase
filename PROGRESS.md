@@ -127,33 +127,35 @@ Physically impossible for the agent (repository settings or credentials):
 - [x] Allow GitHub Actions to create and approve pull requests
       (Settings → Actions → General → Workflow permissions;
       `can_approve_pull_request_reviews=true`. Run 37961663758 predates it.)
-- [ ] Grant `RELEASE_PLEASE_TOKEN` **Contents: Read and write**
-      (fine-grained repository permission `contents: write`) and
-      **Pull requests: Read and write**. Run 38007606007 proved
-      Contents write is the missing one: the tree probe returned
-      HTTP 403 `Resource not accessible by personal access token` on
-      [Create a tree](https://docs.github.com/rest/git/trees#create-a-tree)
-      (that endpoint's fine-grained permission is Contents write),
-      then Sync Cargo.lock's `git push` failed with
-      `Permission to Zouhairmaj/megabase.git denied to megabase-agent`.
-      Run 38008795223 (`acf5bee`) repeated that push 403 after the tree
-      probe had already fallen back to `GITHUB_TOKEN`: the lockfile
-      checkout on `main` still used the secret, which authenticates as
-      `megabase-agent`. The lockfile checkout uses the probe's token, and
-      a push that is still denied drops the checkout authorization
-      header (`http.https://github.com/.extraheader`) and retries with
-      the job `GITHUB_TOKEN` (`contents: write`). Replacing `origin`
-      alone would still send the denied token. It does not keep the
-      `megabase-agent` identity. The push changed only `Cargo.lock`, so this is not
-      Workflows permission. Run 38003872424 failed the same way on
-      [Create a release](https://docs.github.com/rest/releases/releases#create-a-release)
-      after pull request #144 merged. Classic PAT equivalent: `repo`.
-      The tree probe and the release commit only add
-      `.release-please-manifest.json`, `CHANGELOG.md`, and `Cargo.toml`
-      on top of `base_tree`. The workflow falls back to `GITHUB_TOKEN`
-      only on HTTP 403 or 404 from that tree call (not a rate limit).
-      A `GITHUB_TOKEN` push does not start `push` workflows, so the job
-      dispatches the required checks.
+- [ ] Replace `RELEASE_PLEASE_TOKEN` with a **classic PAT** (`repo`
+      and `workflow`) that can write `Zouhairmaj/megabase`. The secret
+      authenticates as `megabase-agent` and is a fine-grained PAT.
+      [GitHub's token docs](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens)
+      say a fine-grained PAT cannot write a public repository owned by
+      another personal account, even for a collaborator; only a classic
+      PAT has that write access. Granting Contents write on the
+      fine-grained token does not remove the limit. Run 38007606007:
+      the tree probe returned HTTP 403 `Resource not accessible by
+      personal access token` on
+      [Create a tree](https://docs.github.com/rest/git/trees#create-a-tree),
+      then Sync Cargo.lock's `git push` failed with `Permission to
+      Zouhairmaj/megabase.git denied to megabase-agent`. Run 38008795223
+      (`acf5bee`) repeated that push 403 after the probe had fallen
+      back, because the lockfile checkout on `main` still used the
+      secret. This workflow checks out with the probe token, logs that
+      limit when the denial names `megabase-agent`, drops the checkout
+      authorization header (`http.https://github.com/.extraheader`),
+      and retries with the job `GITHUB_TOKEN` (`contents: write`). The
+      denied commit changed only `Cargo.lock`, so the 403 is not a
+      missing `workflow` scope; include `workflow` so the replacement
+      token can also update `.github/workflows`. The probe still falls
+      back only on HTTP 403 or 404 that is not a rate limit. A
+      `GITHUB_TOKEN` push does not start `push` workflows, so the job
+      dispatches the required checks. After the secret is replaced,
+      re-run Release on `main` so later lockfile pushes start
+      workflows. Pull request #180's workspace packages in `Cargo.lock`
+      are `0.1.2` (`54594f0`); the denied workflow push had left them
+      at `0.1.1`.
 - [ ] Allow `github-actions` to publish GitHub Releases / tags on `main`
 - [ ] Enforce CODEOWNERS
 - [x] Coverage commits on `main` are not used. Shields JSON is

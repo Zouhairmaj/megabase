@@ -112,7 +112,7 @@ jobs:
               echo "::error::RELEASE_PLEASE_TOKEN tree probe failed with HTTP ${last_http:-unknown}. This job falls back only for HTTP 403 or 404 that is not a rate limit, so this response is left to retry. GitHub response: ${last_probe}. Permissions: PROGRESS.md Human-only actions."
               exit 1
             fi
-            echo "::warning::RELEASE_PLEASE_TOKEN cannot create a git tree (HTTP ${last_http}; release-please would report Error adding to tree: ${GITHUB_SHA}). Falling back to GITHUB_TOKEN for this job. Permissions: PROGRESS.md Human-only actions. GitHub response: ${last_probe}"
+            echo "::warning::RELEASE_PLEASE_TOKEN cannot create a git tree (HTTP ${last_http}; release-please would report Error adding to tree: ${GITHUB_SHA}). Falling back to GITHUB_TOKEN for this job. If this secret is megabase-agent's fine-grained PAT, GitHub does not allow it to write a public repository owned by another personal account, even for a collaborator. Replace it with a classic PAT (scopes repo and workflow). Pending: PROGRESS.md Human-only actions and HUMAN_LOG.md. GitHub response: ${last_probe}"
           fi
           if can_create_tree "${FALLBACK_TOKEN}"; then
             echo "source=github" >> "$GITHUB_OUTPUT"
@@ -140,14 +140,14 @@ jobs:
       pull-requests: read
     steps:
       # Same credential the tree probe selected. RELEASE_PLEASE_TOKEN
-      # currently authenticates as megabase-agent and lacks Contents
-      # write: runs 38007606007 and 38008795223 both got HTTP 403
-      # "Permission to Zouhairmaj/megabase.git denied to megabase-agent"
-      # because this checkout used that secret even after the probe had
-      # fallen back. Do not push with that identity. GITHUB_TOKEN on
-      # this job has contents: write. It does not start push workflows,
-      # so the confirm step dispatches checks unless the push used the
-      # probed release token.
+      # authenticates as megabase-agent. A fine-grained PAT from that
+      # account cannot write this repository (owned by another user),
+      # so runs 38007606007 and 38008795223 got HTTP 403
+      # "Permission to Zouhairmaj/megabase.git denied to megabase-agent".
+      # Do not keep that identity. GITHUB_TOKEN on this job has
+      # contents: write. It does not start push workflows, so the
+      # confirm step dispatches checks unless the push used a release
+      # token that GitHub actually accepted.
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
@@ -199,10 +199,10 @@ jobs:
             exit 0
           fi
           git commit -m "chore: sync Cargo.lock with workspace version"
-          # A checkout token that identifies as megabase-agent without
-          # Contents write is denied on this ref (runs 38007606007 and
-          # 38008795223). Retry that 403 with the job GITHUB_TOKEN,
-          # which has contents: write. Leave other push failures alone.
+          # A fine-grained PAT owned by megabase-agent is denied on this
+          # ref (runs 38007606007 and 38008795223). Retry that 403 with
+          # the job GITHUB_TOKEN, which has contents: write. Leave other
+          # push failures alone.
           set +e
           push_out="$(git push origin "HEAD:refs/heads/${BRANCH}" 2>&1)"
           push_code=$?
@@ -214,6 +214,9 @@ jobs:
               exit "$push_code"
             fi
             echo "Push denied for the checkout token; retrying with GITHUB_TOKEN (contents: write)."
+            if printf '%s\n' "$push_out" | grep -q 'denied to megabase-agent'; then
+              echo "::error::RELEASE_PLEASE_TOKEN authenticated as megabase-agent and git push was denied (HTTP 403). That secret is a fine-grained PAT. Fine-grained PATs cannot write a public repository owned by another personal account, even for a collaborator (https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens). Replace it with a classic PAT that can write ${GITHUB_REPOSITORY}, scopes repo and workflow. Granting Contents write on the fine-grained token does not remove this limit. Pending: PROGRESS.md Human-only actions and HUMAN_LOG.md. Retrying with GITHUB_TOKEN (contents: write); that push does not start workflows."
+            fi
             # actions/checkout stores AUTHORIZATION in
             # http.https://github.com/.extraheader. Replacing origin does
             # not remove that header, so the denied token would still be
