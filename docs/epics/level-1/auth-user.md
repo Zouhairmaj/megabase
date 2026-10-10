@@ -11,4 +11,4 @@ Specs go in `specs/auth/<unit>.md` (GOAL.md section 5). Mark served code with `/
 | State | Unit id | Upstream source |
 |---|---|---|
 | 🟩 | `auth:route:GET /auth/v1/user` | [internal/api/api.go:282](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/api.go#L282) |
-| 🟨 | `auth:route:PUT /auth/v1/user` | [internal/api/api.go:283](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/api.go#L283) |
+| 🟩 | `auth:route:PUT /auth/v1/user` | [internal/api/api.go:283](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/api.go#L283) |
