@@ -80,7 +80,8 @@ pub const HOME_MOBILE: Preset = Preset {
     group_label_px: 7,
     id: "home-m",
 };
-/// Home hero card, 442×260, component grids without group labels.
+/// Compact component grid, 442×260, without group labels. Layout tests only.
+#[cfg(test)]
 pub const HERO_DESKTOP: Preset = Preset {
     width: 442,
     height: 260,
@@ -90,7 +91,8 @@ pub const HERO_DESKTOP: Preset = Preset {
     group_label_px: 8,
     id: "hero-d",
 };
-/// Home hero card, 308×300 on small viewports.
+/// Compact component grid, 308×300. Layout tests only.
+#[cfg(test)]
 pub const HERO_MOBILE: Preset = Preset {
     width: 308,
     height: 300,
@@ -169,12 +171,7 @@ pub fn render(metrics: &Metrics, preset: Preset) -> String {
     paint(&build(metrics, preset), metrics)
 }
 
-/// Alias for [`alt_text`].
-pub fn panel_alt(metrics: &Metrics) -> String {
-    alt_text(metrics)
-}
-
-/// Accessible description of the map, used as `aria-label` and visually hidden copy.
+/// Accessible description of the map, used as the SVG `aria-label` and title.
 pub fn alt_text(metrics: &Metrics) -> String {
     if !metrics.has_data() || metrics.components.iter().all(|c| c.total() == 0) {
         return "Component map: no coverage data yet.".into();

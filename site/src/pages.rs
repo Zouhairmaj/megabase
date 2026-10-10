@@ -10,7 +10,6 @@ use crate::GITHUB;
 
 pub fn home(paths: &Paths, metrics: &Metrics) -> String {
     let treemap = treemap_block(metrics);
-    let status_panel = status_panel(metrics);
     let components = component_cards(paths, metrics);
     let faq = home_faq(paths, metrics);
     format!(
@@ -29,7 +28,9 @@ pub fn home(paths: &Paths, metrics: &Metrics) -> String {
     </div>
     <p class="hero-disclaimer">Independent experiment. Not affiliated with or endorsed by Supabase, Inc.</p>
   </div>
-  {status_panel}
+  <figure class="hero-art" aria-hidden="true">
+    <canvas class="db-dither" width="150" height="150" data-db-dither></canvas>
+  </figure>
 </section>
 
 <section class="band home-what">
@@ -206,39 +207,6 @@ fn four_state_legend_list() -> &'static str {
     )
 }
 
-fn status_panel(metrics: &Metrics) -> String {
-    let desktop = treemap::render(metrics, treemap::HERO_DESKTOP);
-    let mobile = treemap::render(metrics, treemap::HERO_MOBILE);
-    format!(
-        r#"<aside class="status-panel" aria-labelledby="status-title">
-  <div class="status-head">
-    <span id="status-title">EXPERIMENT STATUS</span>
-    <span class="status-updated">updated on every commit</span>
-  </div>
-  <div class="status-treemap">
-    <p class="visually-hidden">{alt}</p>
-    <div class="hide-mobile">{desktop}</div>
-    <div class="hide-desktop">{mobile}</div>
-  </div>
-  <div class="legend-inline status-panel-legend">{legend}</div>
-  <dl>
-    <div><dt>Units passing the judge</dt><dd>{passing}</dd></div>
-    <div><dt>{coverage_label}</dt><dd>{coverage}</dd></div>
-    <div><dt>Current stage</dt><dd class="accent">{stage}</dd></div>
-  </dl>
-</aside>"#,
-        alt = esc(&treemap::panel_alt(metrics)),
-        passing = esc(&metrics.passing_total_label()),
-        coverage_label = coverage_row_label(metrics::SHOW_CONFORMANCE_PERCENT),
-        coverage = esc(&coverage_row_value(
-            metrics,
-            metrics::SHOW_CONFORMANCE_PERCENT
-        )),
-        stage = esc(&metrics.stage),
-        legend = four_state_legend_inline(),
-    )
-}
-
 fn treemap_head(metrics: &Metrics, show_conformance: bool) -> String {
     if !metrics.has_data() {
         return "SUPABASE COMPONENTS".into();
@@ -258,22 +226,6 @@ fn treemap_head(metrics: &Metrics, show_conformance: bool) -> String {
         )
     } else {
         format!("SUPABASE COMPONENTS: {passing} / {total} UNITS PASS")
-    }
-}
-
-fn coverage_row_label(show_conformance: bool) -> &'static str {
-    if show_conformance {
-        "Coverage · Conformance"
-    } else {
-        "Coverage"
-    }
-}
-
-fn coverage_row_value(metrics: &Metrics, show_conformance: bool) -> String {
-    if show_conformance {
-        metrics.coverage_conformance_label()
-    } else {
-        metrics.coverage_label()
     }
 }
 
@@ -1069,8 +1021,6 @@ mod tests {
         assert_eq!(live.conformance_label(), "40.0%");
         assert_eq!(live.coverage_conformance_label(), "40.0% · 40.0%");
 
-        assert_eq!(coverage_row_label(false), "Coverage");
-        assert_eq!(coverage_row_value(&live, false), "40.0%");
         assert_eq!(
             treemap_head(&live, false),
             "SUPABASE COMPONENTS: 2 / 5 UNITS PASS"
@@ -1078,8 +1028,6 @@ mod tests {
         assert_eq!(status_metric_class(false), "metric-grid metric-grid-3");
         assert!(conformance_metric(&live, false).is_empty());
 
-        assert_eq!(coverage_row_label(true), "Coverage · Conformance");
-        assert_eq!(coverage_row_value(&live, true), "40.0% · 40.0%");
         assert_eq!(
             treemap_head(&live, true),
             "SUPABASE COMPONENTS: 40.0% CONFORMANT (2/5)"
@@ -1100,12 +1048,15 @@ mod tests {
 
         let home = home(&Paths::home(false), &live);
         let status_html = status(&Paths::nested("status", false), &live);
-        assert!(home.contains("<dt>Coverage</dt><dd>40.0%</dd>"));
+        assert!(home.contains(r#"data-db-dither"#));
+        assert!(!home.contains("<dt>Coverage</dt>"));
         assert!(!home.contains("Coverage · Conformance"));
         assert!(home.contains("SUPABASE COMPONENTS: 2 / 5 UNITS PASS"));
         assert!(!home.contains("% CONFORMANT"));
-        assert!(home.contains("Units passing the judge"));
+        assert!(!home.contains("Units passing the judge"));
+        assert!(home.contains("Not affiliated with or endorsed by Supabase, Inc."));
         assert!(status_html.contains(r#"class="metric-grid metric-grid-3""#));
+        assert!(status_html.contains(r#"<p class="stat-xl">40.0%</p>"#));
         assert!(!status_html.contains(r#"<p class="muted">Conformance</p>"#));
         assert!(status_html.contains(r#"<p class="muted">Units done</p>"#));
         assert!(status_html.contains(r#"<p class="muted">Coverage</p>"#));
@@ -1230,9 +1181,16 @@ mod tests {
         let metrics = crate::metrics::load(root);
         let home = home(&Paths::home(false), &metrics);
         let status = status(&Paths::nested("status", false), &metrics);
-        assert!(home.contains("Units passing the judge"));
-        assert!(home.contains("status-panel-legend"));
-        assert!(!home.contains("status-panel-legend hide-mobile"));
+        assert!(home.contains(r#"<figure class="hero-art" aria-hidden="true">"#));
+        assert!(home.contains(
+            r#"<canvas class="db-dither" width="150" height="150" data-db-dither></canvas>"#
+        ));
+        assert!(!home.contains("status-panel"));
+        assert!(!home.contains("Units passing the judge"));
+        assert!(home.contains("UNITS PASS"));
+        assert!(home.contains("Not affiliated with or endorsed by Supabase, Inc."));
+        assert!(status.contains(r#"<p class="muted">Units done</p>"#));
+        assert!(status.contains(r#"<p class="muted">Coverage</p>"#));
         for html in [&home, &status] {
             assert!(html.contains("swatch implemented"));
             assert!(html.contains("not started"));
@@ -1241,5 +1199,41 @@ mod tests {
             assert!(html.contains("data-status=\"implemented\""));
             assert!(html.contains("#005441"));
         }
+    }
+
+    #[test]
+    fn dither_script_stays_local_and_pauses() {
+        let js = include_str!("../static/db-dither.js");
+        assert!(js.contains("prefers-reduced-motion: reduce"));
+        assert!(js.contains("IntersectionObserver"));
+        assert!(js.contains("document.hidden"));
+        assert!(js.contains("GREEN = [0, 216, 146]"));
+        assert!(js.contains("GREY = [48, 50, 53]"));
+        assert!(js.contains("DARK = [11, 14, 18]"));
+        assert!(js.contains("(y - curve) - pulseY"));
+        assert!(js.contains("draw(4.0)"));
+        assert!(!js.contains("fetch("));
+        assert!(!js.contains("XMLHttpRequest"));
+        assert!(!js.contains("http://"));
+        assert!(!js.contains("https://"));
+        let css = include_str!("../static/styles.css");
+        let hero = css
+            .split(".hero {")
+            .nth(1)
+            .expect(".hero")
+            .split('}')
+            .next()
+            .expect("hero body");
+        assert!(
+            hero.contains("align-items: center;"),
+            "the illustration is vertically centered against the copy: {hero}"
+        );
+        assert!(css.contains("width: min(450px, 80vw);"));
+        let mobile = css
+            .split("@media (max-width: 900px)")
+            .nth(1)
+            .expect("stacked breakpoint");
+        assert!(mobile.contains("width: min(260px, 80vw);"));
+        assert!(mobile.contains("align-items: stretch;"));
     }
 }
