@@ -1950,14 +1950,18 @@ fn push_order(sql: &mut String, params: &mut Vec<String>, relation: &str, orders
         if let Some(direction) = direction {
             sql.push(' ');
             sql.push_str(match direction {
+                // megabase:unit rest:order-modifier:asc
                 Direction::Asc => "ASC",
+                // megabase:unit rest:order-modifier:desc
                 Direction::Desc => "DESC",
             });
         }
         if let Some(nulls) = nulls {
             sql.push(' ');
             sql.push_str(match nulls {
+                // megabase:unit rest:order-modifier:nullsfirst
                 Nulls::First => "NULLS FIRST",
+                // megabase:unit rest:order-modifier:nullslast
                 Nulls::Last => "NULLS LAST",
             });
         }
@@ -2038,6 +2042,25 @@ mod tests {
         QueryFail::Parse {
             message: format!("\"failed to parse order ({input})\" (line 1, column {column})"),
             details: format!("unexpected {unexpected} expecting {expecting}"),
+        }
+    }
+
+    #[test]
+    fn order_modifiers_render_sql() {
+        for (input, expected) in [
+            ("a.asc", "ORDER BY r.\"a\" ASC"),
+            ("a.desc", "ORDER BY r.\"a\" DESC"),
+            ("a.nullsfirst", "ORDER BY r.\"a\" NULLS FIRST"),
+            ("a.nullslast", "ORDER BY r.\"a\" NULLS LAST"),
+            (
+                "a.desc.nullslast,b.asc.nullsfirst",
+                "ORDER BY r.\"a\" DESC NULLS LAST, r.\"b\" ASC NULLS FIRST",
+            ),
+        ] {
+            let query = parse_get_query(&format!("order={input}")).unwrap();
+            let mut sql = String::new();
+            push_order(&mut sql, &mut Vec::new(), "r", &query.orders);
+            assert_eq!(sql, expected);
         }
     }
 
