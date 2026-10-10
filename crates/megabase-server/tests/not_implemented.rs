@@ -86,8 +86,8 @@ async fn rest_resource_routes_leave_501() {
     assert!(body.is_null());
 
     let (status, body) = send("GET", "/rest/v1/rpc/add_numbers").await;
-    assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
-    assert_not_implemented(&body, "rest", "GET /rest/v1/rpc/add_numbers");
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(body["code"], "PGRST000");
 
     let (status, body) = send("GET", "/rest/v1/some/deep/path").await;
     assert_eq!(status, StatusCode::NOT_FOUND);
@@ -96,9 +96,17 @@ async fn rest_resource_routes_leave_501() {
 
 #[tokio::test]
 async fn unit_keeps_full_path_without_query() {
-    let (status, body) = send("GET", "/rest/v1/rpc/add_numbers?a=1").await;
+    let request = Request::builder()
+        .uri("/rest/v1/todos?id=eq.1")
+        .header("range", "0-0")
+        .body(Body::empty())
+        .unwrap();
+    let response = create_router().oneshot(request).await.unwrap();
+    let status = response.status();
+    let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let body: Value = serde_json::from_slice(&bytes).unwrap();
     assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
-    assert_not_implemented(&body, "rest", "GET /rest/v1/rpc/add_numbers");
+    assert_not_implemented(&body, "rest", "GET /rest/v1/todos");
 }
 
 #[tokio::test]

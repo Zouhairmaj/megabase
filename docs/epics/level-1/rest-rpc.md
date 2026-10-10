@@ -10,7 +10,7 @@ Specs go in `specs/rest/<unit>.md` (GOAL.md section 5). Mark served code with `/
 
 | State | Unit id | Upstream source |
 |---|---|---|
-| ⬜ | `rest:route:GET /rest/v1/rpc/{function}` | [src/library/PostgREST/ApiRequest.hs:162](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/ApiRequest.hs#L162) |
-| ⬜ | `rest:route:HEAD /rest/v1/rpc/{function}` | [src/library/PostgREST/ApiRequest.hs:161](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/ApiRequest.hs#L161) |
-| ⬜ | `rest:route:OPTIONS /rest/v1/rpc/{function}` | [src/library/PostgREST/ApiRequest.hs:164](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/ApiRequest.hs#L164) |
-| ⬜ | `rest:route:POST /rest/v1/rpc/{function}` | [src/library/PostgREST/ApiRequest.hs:163](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/ApiRequest.hs#L163) |
+| 🟩 | `rest:route:GET /rest/v1/rpc/{function}` | [src/library/PostgREST/ApiRequest.hs:162](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/ApiRequest.hs#L162) |
+| 🟨 | `rest:route:HEAD /rest/v1/rpc/{function}` | [src/library/PostgREST/ApiRequest.hs:161](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/ApiRequest.hs#L161) |
+| 🟨 | `rest:route:OPTIONS /rest/v1/rpc/{function}` | [src/library/PostgREST/ApiRequest.hs:164](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/ApiRequest.hs#L164) |
+| 🟩 | `rest:route:POST /rest/v1/rpc/{function}` | [src/library/PostgREST/ApiRequest.hs:163](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/ApiRequest.hs#L163) |

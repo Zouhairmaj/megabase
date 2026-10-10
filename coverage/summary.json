@@ -2,12 +2,12 @@
   "schema": 1,
   "totals": {
     "units": 1024,
-    "implemented": 117,
-    "tested": 85,
+    "implemented": 121,
+    "tested": 87,
     "conformant": 0
   },
   "percent": {
-    "coverage": 11.4,
+    "coverage": 11.8,
     "conformance": 0.0,
     "done": 0.0
   },
@@ -316,8 +316,8 @@
     },
     "rest": {
       "units": 93,
-      "implemented": 46,
-      "tested": 25,
+      "implemented": 50,
+      "tested": 27,
       "conformant": 0,
       "groups": {
         "aggregates": {
@@ -376,8 +376,8 @@
         },
         "rpc": {
           "units": 4,
-          "implemented": 0,
-          "tested": 0,
+          "implemented": 4,
+          "tested": 2,
           "conformant": 0
         }
       }
@@ -665,12 +665,16 @@
     "rest:query-param:select": "tested",
     "rest:route:DELETE /rest/v1/{relation}": "tested",
     "rest:route:GET /rest/v1/": "implemented",
+    "rest:route:GET /rest/v1/rpc/{function}": "tested",
     "rest:route:GET /rest/v1/{relation}": "tested",
     "rest:route:HEAD /rest/v1/": "implemented",
+    "rest:route:HEAD /rest/v1/rpc/{function}": "implemented",
     "rest:route:HEAD /rest/v1/{relation}": "implemented",
     "rest:route:OPTIONS /rest/v1/": "implemented",
+    "rest:route:OPTIONS /rest/v1/rpc/{function}": "implemented",
     "rest:route:OPTIONS /rest/v1/{relation}": "implemented",
     "rest:route:PATCH /rest/v1/{relation}": "tested",
+    "rest:route:POST /rest/v1/rpc/{function}": "tested",
     "rest:route:POST /rest/v1/{relation}": "tested",
     "rest:route:PUT /rest/v1/{relation}": "implemented"
   }
