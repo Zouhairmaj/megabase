@@ -91,8 +91,9 @@ are rejected.
 On a `review/*` branch, a modification of `GOAL.md` or `MANIFESTO.md` is
 allowed only when that same diff also passes the `HUMAN_LOG.md` rule
 above and the new Completed suffix contains the file name in backticks
-(`` `GOAL.md` `` or `` `MANIFESTO.md` ``). A longer path, or the same
-name without backticks, does not count. Deletions stay rejected. Any
+(`` `GOAL.md` `` or `` `MANIFESTO.md` ``). A longer path, the same
+name without backticks, or a continuation of an earlier entry does not
+count. Deletions stay rejected. Any
 other branch cannot use this exception. This is the logged human
 approval `CODEOWNERS` describes. The reviewer agent still reviews the
 pull request.

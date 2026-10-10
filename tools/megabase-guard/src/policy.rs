@@ -201,10 +201,11 @@ fn completed_suffix<'a>(before: &str, after: &'a str) -> Option<&'a str> {
     (!suffix.is_empty()).then_some(suffix)
 }
 
-/// A `review/*` mission edit is logged when Completed grew and names `path`.
+/// A `review/*` mission edit is logged when a new Completed entry names `path`.
 ///
-/// The name must be a backtick-delimited token, the form log entries use.
-/// A substring such as `docs/GOAL.md` or `SUBGOAL.md` does not count.
+/// The name must be a backtick-delimited token inside that new entry.
+/// A continuation of an earlier entry does not count, and neither does
+/// `docs/GOAL.md`, `SUBGOAL.md`, or an unquoted name.
 fn mission_edit_is_logged(path: &str, changes: &[Change]) -> bool {
     let Some(log) = changes.iter().find(|change| change.path == "HUMAN_LOG.md") else {
         return false;
@@ -216,7 +217,15 @@ fn mission_edit_is_logged(path: &str, changes: &[Change]) -> bool {
         return false;
     };
     is_human_log_review_ok(before, after)
-        && completed_suffix(before, after).is_some_and(|added| log_names_path(added, path))
+        && completed_suffix(before, after)
+            .is_some_and(|added| new_completed_entry(added) && log_names_path(added, path))
+}
+
+/// The completed growth starts a new dated entry, not a continuation line.
+fn new_completed_entry(suffix: &str) -> bool {
+    let body = suffix.trim_start_matches('\n');
+    let body = body.strip_prefix("## Completed").unwrap_or(body);
+    body.trim_start_matches('\n').starts_with("- **Date**")
 }
 
 /// True when `text` contains `` `{path}` ``.
@@ -752,6 +761,26 @@ mod tests {
             "GOAL.md"
         ));
         assert!(log_names_path("edited `GOAL.md`.", "GOAL.md"));
+        let continuation =
+            log_with_completed("- **Date**: 2026-10-09\n- **Action**: earlier\n  `GOAL.md`\n");
+        assert_eq!(
+            evaluate(
+                &[
+                    modified("HUMAN_LOG.md", &before, &continuation),
+                    modified("GOAL.md", "old goal", "new goal"),
+                ],
+                &c
+            )
+            .len(),
+            1
+        );
+        assert!(!new_completed_entry("  `GOAL.md`\n"));
+        assert!(new_completed_entry(
+            "\n\n- **Date**: 2026-10-10\n- **Action**: `GOAL.md`\n"
+        ));
+        assert!(new_completed_entry(
+            "## Completed\n\n- **Date**: 2026-10-10\n"
+        ));
         let deleted = Change {
             status: Status::Deleted,
             path: "MANIFESTO.md".into(),
