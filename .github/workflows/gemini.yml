@@ -1,0 +1,104 @@
+name: Gemini CLI
+
+on:
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gemini-${{ github.event.issue.number || github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  gemini:
+    if: |
+      github.actor == 'megabase-agent' &&
+      github.event.comment.user.login == 'megabase-agent' &&
+      contains(github.event.comment.body, '@gemini-cli')
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+    env:
+      ISSUE_NUMBER: ${{ github.event.issue.number || github.event.pull_request.number }}
+      IS_PR: ${{ github.event.issue.pull_request != null || github.event_name == 'pull_request_review_comment' }}
+      PROTECTED: ${{ contains(join(github.event.issue.labels.*.name, ','), 'protected-paths') }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          fetch-depth: 0
+          submodules: true
+          # PAT so pushes and `gh pr create` are authored by megabase-agent
+          # and CI runs without approval.
+          token: ${{ secrets.MEGABASE_AGENT_GH_TOKEN || github.token }}
+
+      - name: Prepare working branch
+        env:
+          GH_TOKEN: ${{ secrets.MEGABASE_AGENT_GH_TOKEN || github.token }}
+        run: |
+          set -euo pipefail
+          git config user.name "megabase-agent"
+          git config user.email "megabase-agent@users.noreply.github.com"
+          if [ "$IS_PR" = "true" ]; then
+            gh pr checkout "$ISSUE_NUMBER"
+          else
+            # Protected-path issues start on review/gemini-*; others on gemini-*.
+            if [ "$PROTECTED" = "true" ]; then prefix="review/gemini-"; else prefix="gemini-"; fi
+            git switch -c "${prefix}${ISSUE_NUMBER}"
+          fi
+          echo "WORK_BRANCH=$(git branch --show-current)" >> "$GITHUB_ENV"
+
+      - name: Run Gemini CLI
+        uses: google-github-actions/run-gemini-cli@f77273f4c914e4bf38440cf36a0369cb64a37489 # v0.1.22
+        env:
+          GH_TOKEN: ${{ secrets.MEGABASE_AGENT_GH_TOKEN || github.token }}
+        with:
+          gemini_api_key: ${{ secrets.GEMINI_API_KEY }}
+          settings: |-
+            {
+              "tools": {
+                "core": [
+                  "read_file", "read_many_files", "list_directory", "glob",
+                  "search_file_content", "write_file", "replace",
+                  "run_shell_command(cargo)", "run_shell_command(just)",
+                  "run_shell_command(git status)", "run_shell_command(git diff)",
+                  "run_shell_command(git log)", "run_shell_command(git add)",
+                  "run_shell_command(git commit)", "run_shell_command(git push)",
+                  "run_shell_command(gh pr create)", "run_shell_command(gh pr edit)",
+                  "run_shell_command(gh pr view)", "run_shell_command(gh pr list)",
+                  "run_shell_command(gh issue view)"
+                ]
+              }
+            }
+          prompt: |-
+            You are working on Megabase (repository ${{ github.repository }}), on
+            ${{ env.IS_PR == 'true' && 'pull request' || 'issue' }} #${{ env.ISSUE_NUMBER }}.
+            Your working branch is already checked out: ${{ env.WORK_BRANCH }}.
+            Read the issue or PR with `gh issue view` / `gh pr view` and the request in
+            the triggering comment, then do the work.
+
+            Rules:
+            - Follow AGENTS.md and GOAL.md. Write Rust only.
+            - Never modify vendor/, vendor.toml, or .gitmodules.
+            - Modify protected paths (judge/, .github/, tools/megabase-guard/, CODEOWNERS)
+              only when the issue explicitly requires it, and only when the current branch
+              starts with `review/gemini-`. Never touch protected paths on any other branch.
+            - Do not create, switch, or check out other branches. Push only the current
+              branch with `git push -u origin HEAD`.
+            - Leave humans-only files (GOAL.md, MANIFESTO.md, HUMAN_LOG.md) alone.
+            - Run `cargo fmt --all`, `cargo clippy --workspace --all-targets -- -D warnings`,
+              and the relevant tests before pushing.
+            - Iteration commits use `[component] unit: what changed (coverage X→Y, conformance A→B)`.
+            - When implementing an issue, after pushing open the pull request yourself with
+              `gh pr create`. Use a Conventional Commits title (types and scopes in
+              .github/workflows/semantic-pr.yml). The body follows
+              .github/pull_request_template.md and must include `Closes #${{ env.ISSUE_NUMBER }}`.
+              If a PR for this branch already exists, update it with `gh pr edit` instead.
+            - Never include the trigger phrase in comments, commits, or PR text.

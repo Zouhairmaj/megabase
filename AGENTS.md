@@ -296,6 +296,14 @@ The board must match reality at all times.
   workflow prefers `MEGABASE_AGENT_GH_TOKEN` so CI runs automatically
   (`GITHUB_TOKEN` can open a PR, but its `pull_request` workflow runs
   require approval).
+- **Gemini CLI.** `@gemini-cli` comments from `megabase-agent` only, via
+  `.github/workflows/gemini.yml` (60-minute timeout, uses the
+  `GEMINI_API_KEY` secret, a free Google AI Studio key). Job permissions
+  are `contents: write`, `pull-requests: write`, and `issues: write`. Same
+  rules as Claude Code: follow AGENTS.md, never touch `vendor/`, protected
+  paths only on `review/gemini-<n>` branches (issues labelled
+  `protected-paths`; others start on `gemini-<n>`), and open the PR itself
+  with `gh pr create`, a Conventional Commits title, and `Closes #<n>`.
 - **Orchestrator.** It alone merges (`gh pr merge <n> --squash`), and only
   when three things hold: the approval covers the current head SHA
   (`gh pr view <n> --json headRefOid`), no change request is open, and every

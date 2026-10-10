@@ -160,6 +160,8 @@ Physically impossible for the agent (repository settings or credentials):
 - [x] Install the [Claude GitHub App](https://github.com/apps/claude) on this
       repository (2026-10-09)
 - [x] Set repo secret `CLAUDE_CODE_OAUTH_TOKEN` (2026-10-09)
+- [x] Set repo secret `GEMINI_API_KEY` (free Google AI Studio key,
+      Zouhair, 2026-10-10) for `.github/workflows/gemini.yml`
 - [x] Set repo secret `SCORECARD_TOKEN` (fine-grained PAT, read-only
       Administration / Contents / Metadata / Pull requests) so OpenSSF
       Scorecard's Branch-Protection check can read classic branch
