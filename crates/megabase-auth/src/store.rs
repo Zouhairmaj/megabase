@@ -94,8 +94,8 @@ pub struct UserRecord {
     pub password_hash: String,
     pub phone_confirmed_at: Option<SystemTime>,
     /// Generated `LEAST(email_confirmed_at, phone_confirmed_at)`. Populated
-    /// only when the row is loaded. Signup's in-memory user never reloads it,
-    /// so the signup body omits `confirmed_at`.
+    /// when the row is loaded. Signup leaves it unset. Login and refresh
+    /// fill it, including the in-memory store.
     pub confirmed_at: Option<SystemTime>,
 }
 
@@ -360,7 +360,8 @@ impl Backend {
                 if let Some(hash) = replacement_hash {
                     user.password_hash = hash;
                 }
-                let issued = grant_session(user, now);
+                let mut issued = grant_session(user, now);
+                reload_confirmed_at(&mut issued.user);
                 let traits = json!({ "provider": provider });
                 remember_audit(&issued.user, "login", "account", Some(traits));
                 db.track(&issued);
@@ -665,6 +666,14 @@ impl MemoryDb {
     }
 }
 
+/// PostgreSQL `LEAST` skips nulls, so one confirmed timestamp is enough.
+fn reload_confirmed_at(user: &mut UserRecord) {
+    user.confirmed_at = match (user.email_confirmed_at, user.phone_confirmed_at) {
+        (Some(email), Some(phone)) => Some(email.min(phone)),
+        (email, phone) => email.or(phone),
+    };
+}
+
 fn grant_session(user: &mut UserRecord, now: SystemTime) -> IssuedSession {
     let session_id = Uuid::new_v4();
     let refresh_token = secure_alphanumeric(12);
@@ -701,9 +710,10 @@ fn refresh_memory(db: &mut MemoryDb, token: &str) -> RefreshStatus {
     let Some(row) = db.refresh_tokens.get(token).cloned() else {
         return RefreshStatus::NotFound;
     };
-    let Some(user) = db.users.get(&row.user_id).cloned() else {
+    let Some(mut user) = db.users.get(&row.user_id).cloned() else {
         return RefreshStatus::NotFound;
     };
+    reload_confirmed_at(&mut user);
     if login_banned(user.banned_until) {
         return RefreshStatus::Banned;
     }

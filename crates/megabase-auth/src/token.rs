@@ -517,6 +517,7 @@ mod tests {
         assert_eq!(body["token_type"], "bearer");
         assert_eq!(body["expires_in"], 3600);
         assert_eq!(body["user"]["email"], "ada@example.com");
+        assert!(body["user"]["confirmed_at"].is_string());
         assert_eq!(body["refresh_token"].as_str().unwrap().len(), 12);
         assert!(body["weak_password"].is_null());
     }
@@ -549,6 +550,7 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::OK, "{body}");
+        assert!(body["user"]["confirmed_at"].is_string());
         let rotated = body["refresh_token"].as_str().unwrap();
         assert_ne!(rotated, refresh);
         assert_eq!(rotated.len(), 12);

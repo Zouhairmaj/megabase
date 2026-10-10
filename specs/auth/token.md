@@ -57,9 +57,12 @@ default, taken from one clock), `expires_at`, `refresh_token`, `user`.
 The access token is HS256 (`typ` `JWT`) with `aal` `aal1` and `amr`
 `[{"method":"password","timestamp":...}]`. Password login writes that AMR
 on the new session. Refresh keeps the session's existing AMR timestamp.
-The user object is reloaded, so `confirmed_at` is present and the email
-identity still has `email_verified: false` (the signup response had
-flipped that flag only in memory).
+The user object is reloaded, so `confirmed_at` is present. Postgres reads
+the generated column. The in-memory store fills that same
+`LEAST(email_confirmed_at, phone_confirmed_at)` value on the reload (nulls
+skipped, as in PostgreSQL). The email identity still has
+`email_verified: false` (the signup response had flipped that flag only in
+memory).
 
 Headers (not compared by the judge unless a case opts in):
 `sb-auth-user-id`, `sb-auth-session-id`, `sb-auth-refresh-token-prefix`
