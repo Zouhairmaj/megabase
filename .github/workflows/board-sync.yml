@@ -87,9 +87,31 @@ jobs:
             }
 
             function negatedClose(text, index) {
-              const prefix = text.slice(Math.max(0, index - 40), index);
-              // Any "n't" contraction (don't, can't, wouldn't), plus not/cannot.
-              return /(?:\b(?:[a-z]+n['\u2019]t|cannot|not)\s+)$/i.test(prefix);
+              const prefix = text.slice(Math.max(0, index - 80), index);
+              // "not" / "cannot" / an n't contraction, then up to three
+              // modifiers: "does not currently close".
+              return /(?:\b(?:[a-z]+n['\u2019]t|cannot|not)\b(?:\s+[a-z][\w'-]*){0,3}\s*)$/i.test(
+                prefix
+              );
+            }
+
+            function assertClosingKeywordFixtures() {
+              const cases = [
+                ["does not currently close #42", ""],
+                ["does not close #209", ""],
+                ["can't close #5", ""],
+                ["wouldn't close #5", ""],
+                ["Closes #42", "42"],
+                ["note close #8", "8"],
+              ];
+              for (const [sample, expected] of cases) {
+                const got = issuesFromText(sample).join(",");
+                if (got !== expected) {
+                  throw new Error(
+                    `closing-keyword fixture failed: ${JSON.stringify(sample)} => ${got}`
+                  );
+                }
+              }
             }
 
             function norm(name) {
@@ -443,6 +465,8 @@ jobs:
               }
               return nums;
             }
+
+            assertClosingKeywordFixtures();
 
             const project = await findProject();
             const openPulls = await loadOpenPulls();
