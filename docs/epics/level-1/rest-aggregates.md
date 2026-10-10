@@ -10,8 +10,8 @@ Specs go in `specs/rest/<unit>.md` (GOAL.md section 5). Mark served code with `/
 
 | State | Unit id | Upstream source |
 |---|---|---|
-| ⬜ | `rest:aggregate:avg` | [src/library/PostgREST/ApiRequest/QueryParams.hs:609](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/ApiRequest/QueryParams.hs#L609) |
-| ⬜ | `rest:aggregate:count` | [src/library/PostgREST/ApiRequest/QueryParams.hs:610](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/ApiRequest/QueryParams.hs#L610) |
-| ⬜ | `rest:aggregate:max` | [src/library/PostgREST/ApiRequest/QueryParams.hs:614](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/ApiRequest/QueryParams.hs#L614) |
-| ⬜ | `rest:aggregate:min` | [src/library/PostgREST/ApiRequest/QueryParams.hs:615](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/ApiRequest/QueryParams.hs#L615) |
-| ⬜ | `rest:aggregate:sum` | [src/library/PostgREST/ApiRequest/QueryParams.hs:608](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/ApiRequest/QueryParams.hs#L608) |
+| 🟨 | `rest:aggregate:avg` | [src/library/PostgREST/ApiRequest/QueryParams.hs:609](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/ApiRequest/QueryParams.hs#L609) |
+| 🟨 | `rest:aggregate:count` | [src/library/PostgREST/ApiRequest/QueryParams.hs:610](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/ApiRequest/QueryParams.hs#L610) |
+| 🟨 | `rest:aggregate:max` | [src/library/PostgREST/ApiRequest/QueryParams.hs:614](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/ApiRequest/QueryParams.hs#L614) |
+| 🟨 | `rest:aggregate:min` | [src/library/PostgREST/ApiRequest/QueryParams.hs:615](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/ApiRequest/QueryParams.hs#L615) |
+| 🟨 | `rest:aggregate:sum` | [src/library/PostgREST/ApiRequest/QueryParams.hs:608](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/ApiRequest/QueryParams.hs#L608) |
