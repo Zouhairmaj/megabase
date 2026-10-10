@@ -148,8 +148,8 @@ fn run() -> Result<bool> {
             other => bail!("unknown argument `{other}`"),
         }
     }
-    let base = base.context("--base is required")?;
-    let base = git(&["merge-base", &base, &head])?.trim().to_string();
+    let base_tip = base.context("--base is required")?;
+    let base = git(&["merge-base", &base_tip, &head])?.trim().to_string();
 
     let base_is_pre_bootstrap = !git_ok(&["cat-file", "-e", &format!("{base}:vendor.toml")])
         && git(&["ls-tree", &base, "--", "judge"])?.trim().is_empty()
@@ -157,11 +157,22 @@ fn run() -> Result<bool> {
     let human_log_size = git(&["cat-file", "-s", &format!("{head}:HUMAN_LOG.md")])
         .ok()
         .and_then(|s| s.trim().parse().ok());
+    // The base branch tip, not the merge base. A pull request cut from
+    // history older than the landing still has `main` as its base ref, and
+    // that tip is what closes the exception.
+    let base_policy = git(&[
+        "show",
+        &format!("{base_tip}:tools/megabase-guard/src/policy.rs"),
+    ])
+    .unwrap_or_default();
+    let base_log = git(&["show", &format!("{base_tip}:HUMAN_LOG.md")]).unwrap_or_default();
+    let decorative_landing_open = policy::decorative_landing_open(&base_policy, &base_log);
     let mut ctx = Context {
         head_ref,
         base_is_pre_bootstrap,
         human_log_size,
         pin_errors: Vec::new(),
+        decorative_landing_open,
     };
     if policy::is_bootstrap(&ctx) {
         ctx.pin_errors = pin_errors(&head)?;

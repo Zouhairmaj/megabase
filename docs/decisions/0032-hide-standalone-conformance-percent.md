@@ -24,10 +24,11 @@ Judge on `main` to `gh-pages`, remains that percentage.
   copy `percent.conformance` from `coverage/summary.json` or from
   `coverage/judge-results.json`.
 - While `SHOW_CONFORMANCE_PERCENT` is `false`, the site does not render a
-  standalone conformance percentage. That covers the home status panel, the
-  home treemap header, the status-page stat card, the Day 0 strip on How it
+  standalone conformance percentage. That covers the home live-status
+  treemap header, the status-page stat card, the Day 0 strip on How it
   works and Roadmap, and the docs status total row. Unit counts and coverage
-  stay.
+  stay. The home hero is the dither illustration; those numbers stay in the
+  Live status section and on `/status/`.
 - `docs/COMPATIBILITY.md` may still link megabase.sh/status for live
   conformant counts. A count is not the standalone percentage.
 

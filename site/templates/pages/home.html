@@ -18,43 +18,7 @@
     </div>
   </section>
 
-  <aside class="status" id="status" tabindex="-1" aria-labelledby="status-title">
-    <div class="status-head">
-      <span id="status-title" class="status-title">EXPERIMENT STATUS</span>
-      <span class="status-note">updated on every commit</span>
-    </div>
-    <div class="treemap">{{treemap}}</div>
-    <dl class="stats-rows">
-      <div class="stat-row">
-        <dt>Units passing the judge</dt>
-        <dd>{{passing_total}}</dd>
-      </div>
-      <div class="stat-row">
-        <dt>Coverage · Conformance</dt>
-        <dd>{{coverage_conformance}}</dd>
-      </div>
-      <div class="stat-row">
-        <dt>Current stage</dt>
-        <dd class="accent">{{stage}}</dd>
-      </div>
-    </dl>
-    <dl class="stats-grid">
-      <div>
-        <dt>Units passing</dt>
-        <dd>{{passing_total}}</dd>
-      </div>
-      <div>
-        <dt>Stage</dt>
-        <dd class="accent">{{stage_short}}</dd>
-      </div>
-      <div>
-        <dt>Coverage</dt>
-        <dd>{{coverage}}</dd>
-      </div>
-      <div>
-        <dt>Conformance</dt>
-        <dd>{{conformance}}</dd>
-      </div>
-    </dl>
-  </aside>
+  <figure class="hero-art" aria-hidden="true">
+    <canvas class="db-dither" width="150" height="150" data-db-dither></canvas>
+  </figure>
 </main>

@@ -27,7 +27,8 @@ agreement). CI runs it on every pull request.
 - Edits to `vendor/`, `vendor.toml` or `.gitmodules` after bootstrap.
 - Source files in languages other than Rust (`.py`, `.js`, `.ts`, `.go`,
   `.ex`, `.hs`, `.rb`, `.lua`, `.sh`, …) outside `vendor/`. SQL, TOML,
-  YAML, Markdown and SVG stay allowed.
+  YAML, Markdown and SVG stay allowed. The one exception is the exact
+  path `site/static/db-dither.js` (below).
 
 ### Allowed only on `review/*` branches
 
@@ -103,6 +104,32 @@ count. Deletions stay rejected. Any
 other branch cannot use this exception. This is the logged human
 approval `CODEOWNERS` describes. The reviewer agent still reviews the
 pull request.
+
+### Decorative hero canvas (issue #228)
+
+Owner Zouhair approved one client-side canvas, `site/static/db-dither.js`,
+as the site hero illustration. Product code stays Rust. The guard allows
+that exact path on any branch. A different extension, a different file,
+or a capitalised `.JS` name stays rejected.
+
+The branch `cursor/hero-dither-db-13b4` may edit `tools/megabase-guard/`
+and append `HUMAN_LOG.md` only while that landing is open. The guard
+reads the base branch tip, before the merge base. The landing is open
+when that tip's guard source does not contain `site/static/db-dither.js`
+and its `HUMAN_LOG.md` does not name that path in backticks. After this
+pull request merges, `main` has both, and a later pull request that
+reuses the branch name — including one cut from older history — cannot
+edit the guard.
+
+The log change on that landing is one appended Completed entry. The new
+file must start with every byte of the old file. The suffix is a single
+`- **Date**` item, and `` `site/static/db-dither.js` `` must appear in
+that item. Pending and every earlier Completed entry stay byte-for-byte
+unchanged. Dropping a Pending item, editing an earlier entry, appending
+a second item, or adding a heading or `---` in the suffix is rejected.
+A path that shows up only under a new Pending heading does not count. `judge/`, `.github/`, `CODEOWNERS`, `GOAL.md` and
+`MANIFESTO.md` stay closed on that branch. Further guard edits need
+`review/*`.
 
 ## Consequences
 

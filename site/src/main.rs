@@ -609,6 +609,11 @@ fn wrap(
     let needs_copy =
         matches!(page.kind, Kind::Docs | Kind::HowItWorks) || page.id.starts_with("docs-");
     let mut scripts = String::new();
+    if page.id == "home" {
+        scripts.push_str(&format!(
+            r#"<script src="{asset}db-dither.js" defer></script>"#
+        ));
+    }
     if page.id == "manifesto" {
         scripts.push_str(&format!(r#"<script src="{asset}toc.js" defer></script>"#));
     }
@@ -940,17 +945,29 @@ mod tests {
         );
         assert!(home.contains("Not affiliated with or endorsed by Supabase, Inc."));
         assert!(!home.to_ascii_lowercase().contains("oxide"));
-        assert!(home.contains("EXPERIMENT STATUS"));
-        assert!(home.contains("updated on every commit"));
+        assert!(home.contains(r#"<figure class="hero-art" aria-hidden="true">"#));
+        assert!(home.contains(
+            r#"<canvas class="db-dither" width="150" height="150" data-db-dither></canvas>"#
+        ));
+        assert!(home.contains(r#"<script src="db-dither.js" defer></script>"#));
+        assert!(out.join("db-dither.js").is_file());
+        assert!(!home.contains("status-panel"));
+        assert!(!home.contains("EXPERIMENT STATUS"));
         assert!(home.contains("treemap-svg"));
-        assert!(home.contains("visually-hidden"));
-        assert!(home.contains("<dt>Coverage</dt>"));
+        assert!(home.contains("03 · LIVE STATUS"));
+        assert!(!home.contains("<dt>Coverage</dt>"));
         assert!(!home.contains("Coverage · Conformance"));
         assert!(!home.contains("BUILT BY AGENTS"));
-        assert!(home.contains("Units passing the judge"));
+        assert!(!home.contains("Units passing the judge"));
         assert!(home.contains("https://analytics.ahrefs.com/analytics.js"));
         assert!(home.contains("NOTHING PASSES YET"));
         assert!(!home.contains("footer-measure"));
+        let status = fs::read_to_string(out.join("status/index.html")).unwrap();
+        assert!(!status.contains("db-dither.js"));
+        assert!(status.contains(r#"<p class="muted">Units done</p>"#));
+        assert!(status.contains(r#"<p class="muted">Coverage</p>"#));
+        let manifesto = fs::read_to_string(out.join("manifesto/index.html")).unwrap();
+        assert!(!manifesto.contains("db-dither.js"));
         let _ = fs::remove_dir_all(&out);
     }
 
@@ -1148,14 +1165,18 @@ mod tests {
         assert!(!home.to_ascii_lowercase().contains("the spend"));
         assert!(
             home.contains(r#"class="tm-cells implemented""#),
-            "home hero/live treemaps must paint implemented units"
+            "home live treemap must paint implemented units"
         );
         assert!(home.contains("#005441"));
         assert!(status.contains(r#"class="tm-cells implemented""#));
         assert!(status.contains("#005441"));
-        assert!(home.contains("status-panel-legend"));
-        assert!(home.contains("Units passing the judge"));
+        assert!(home.contains(r#"data-db-dither"#));
+        assert!(home.contains(r#"<script src="db-dither.js" defer></script>"#));
+        assert!(!home.contains("status-panel"));
+        assert!(!status.contains("db-dither.js"));
         assert!(home.contains("UNITS PASS"));
+        assert!(status.contains(r#"<p class="muted">Units done</p>"#));
+        assert!(status.contains(r#"<p class="muted">Coverage</p>"#));
         assert!(!home.contains("% CONFORMANT"));
         assert!(!home.contains("BUILT BY AGENTS"));
         assert!(status.contains("metric-grid-3"));
