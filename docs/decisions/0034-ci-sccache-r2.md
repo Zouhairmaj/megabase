@@ -12,7 +12,9 @@ Pushes and same-repository pull requests store compiler artifacts in the
 R2 bucket named by the `SCCACHE_BUCKET` repository variable. The S3
 endpoint is `SCCACHE_ENDPOINT`, the region is `auto`, and TLS is on.
 Keys are `SCCACHE_R2_ACCESS_KEY_ID` and `SCCACHE_R2_SECRET_ACCESS_KEY`.
-Object keys use the prefix `sccache`. Those runs are read-write so a
+Composite actions cannot read `secrets` or `vars`, so each workflow
+exports the keys and the bucket variables into the environment and the
+action reads that. Object keys use the prefix `sccache`. Those runs are read-write so a
 later job can hit what an earlier job wrote. Fork pull requests do not
 receive repository secrets. The action leaves `SCCACHE_BUCKET` unset in
 that case and sccache uses its local disk, so the job still passes. This

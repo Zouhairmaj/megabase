@@ -2,9 +2,9 @@ name: Publish coverage badges
 
 # workflow_run is read-only for the default-branch Actions cache
 # (CodeQL actions/cache-poisoning/poisonable-step). This file has no
-# push or workflow_dispatch trigger and no cache action, so applying
-# the Judge artifact cannot poison that cache. Do not merge it back
-# into pages.yml.
+# push or workflow_dispatch trigger and does not use actions/cache.
+# sccache writes R2, not that cache, so applying the Judge artifact
+# cannot poison it. Do not merge this file back into pages.yml.
 #
 # Checkout uses the default ref (the default branch). Do not set
 # actions/checkout ref from the triggering run: Scorecard
@@ -19,6 +19,13 @@ on:
 
 permissions:
   contents: read
+
+env:
+  # Composite actions cannot read secrets or vars.
+  SCCACHE_R2_ACCESS_KEY_ID: ${{ secrets.SCCACHE_R2_ACCESS_KEY_ID }}
+  SCCACHE_R2_SECRET_ACCESS_KEY: ${{ secrets.SCCACHE_R2_SECRET_ACCESS_KEY }}
+  SCCACHE_BUCKET_NAME: ${{ vars.SCCACHE_BUCKET }}
+  SCCACHE_ENDPOINT_URL: ${{ vars.SCCACHE_ENDPOINT }}
 
 concurrency:
   # Serializes publishes. pages.yml does not deploy and is not in this

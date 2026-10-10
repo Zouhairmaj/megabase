@@ -13,13 +13,10 @@ runs:
   steps:
     - name: Select sccache backend
       shell: bash
-      env:
-        # Passed through the environment so the values are never interpolated
-        # into the script text. Fork pull requests see empty secrets.
-        SCCACHE_R2_ACCESS_KEY_ID: ${{ secrets.SCCACHE_R2_ACCESS_KEY_ID }}
-        SCCACHE_R2_SECRET_ACCESS_KEY: ${{ secrets.SCCACHE_R2_SECRET_ACCESS_KEY }}
-        SCCACHE_BUCKET_NAME: ${{ vars.SCCACHE_BUCKET }}
-        SCCACHE_ENDPOINT_URL: ${{ vars.SCCACHE_ENDPOINT }}
+      # Composite actions cannot read secrets or vars. Callers export
+      # SCCACHE_R2_ACCESS_KEY_ID, SCCACHE_R2_SECRET_ACCESS_KEY,
+      # SCCACHE_BUCKET_NAME, and SCCACHE_ENDPOINT_URL. Fork pull requests
+      # export the keys as empty, and this step then keeps the local disk.
       run: |
         set -euo pipefail
         # Incremental compilation does not land in sccache.
