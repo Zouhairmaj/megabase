@@ -60,9 +60,10 @@ gateway prefixes in [ADR 0002](adr/0002-gateway-layout.md).
 
 Coverage = implemented ÷ units. Conformance = passing judge cases ÷ cases.
 A unit is **done** only when it is conformant. The committed
-`coverage/judge-results.json` is the regression baseline. Live counts on
-the README, the shields badges, and megabase.sh come from the Judge
-artifact on `main`.
+`coverage/judge-results.json` is the regression baseline, not the score
+([decision 0030](decisions/0030-conformance-is-the-live-judge-score.md)).
+Live counts on the README badge, the shields JSON, and megabase.sh come
+from the Judge artifact on `main`.
 
 ## Behavioral contract
 
@@ -81,87 +82,89 @@ Intentional divergences (none today) would be listed here and in
 
 In scope: **1024 units**. Excluded: **76** upstream items.
 
-| Component | Group | Level | Units | Implemented | Tested | Conformant |
-|---|---|---|---:|---:|---:|---:|
-| REST | aggregates | 1 | 5 | 0 | 0 | 0 |
-| REST | embedding | 1 | 2 | 0 | 0 | 0 |
-| REST | filtering | 1 | 28 | 20 | 4 | 0 |
-| REST | logic | 1 | 3 | 0 | 0 | 0 |
-| REST | media-types | 1 | 13 | 0 | 0 | 0 |
-| REST | ordering | 1 | 4 | 0 | 0 | 0 |
-| REST | prefer | 1 | 16 | 0 | 0 | 0 |
-| REST | query-params | 1 | 8 | 0 | 0 | 0 |
-| REST | resources | 1 | 10 | 0 | 0 | 0 |
-| REST | rpc | 1 | 4 | 0 | 0 | 0 |
-| Auth | admin | 1–2 | 28 | 20 | 11 | 0 |
-| Auth | database | 1 | 32 | 32 | 30 | 0 |
-| Auth | endpoints | 1–2 | 13 | 4 | 4 | 0 |
-| Auth | factors | 2 | 9 | 0 | 0 | 0 |
-| Auth | oauth | 2 | 6 | 0 | 0 | 0 |
-| Auth | oauth-providers | 2 | 26 | 0 | 0 | 0 |
-| Auth | passkeys | 2 | 7 | 0 | 0 | 0 |
-| Auth | scim | 2 | 3 | 0 | 0 | 0 |
-| Auth | sso | 2 | 3 | 0 | 0 | 0 |
-| Auth | token | 1–2 | 6 | 3 | 3 | 0 |
-| Auth | user | 1–2 | 6 | 6 | 6 | 0 |
-| Auth | verify | 1–2 | 10 | 6 | 6 | 0 |
-| Auth | well-known | 2 | 3 | 0 | 0 | 0 |
-| Realtime | client-events | 3 | 3 | 0 | 0 | 0 |
-| Realtime | http-api | 3 | 3 | 0 | 0 | 0 |
-| Realtime | protocol | 3 | 6 | 0 | 0 | 0 |
-| Realtime | server-events | 3 | 6 | 0 | 0 | 0 |
-| Realtime | websocket | 3 | 1 | 0 | 0 | 0 |
-| Storage | bucket | 2 | 6 | 0 | 0 | 0 |
-| Storage | cdn | 2 | 3 | 0 | 0 | 0 |
-| Storage | database | 2 | 46 | 0 | 0 | 0 |
-| Storage | health | 2 | 1 | 0 | 0 | 0 |
-| Storage | iceberg | 2 | 13 | 0 | 0 | 0 |
-| Storage | object | 2 | 22 | 0 | 0 | 0 |
-| Storage | render | 2 | 3 | 0 | 0 | 0 |
-| Storage | resumable | 2 | 16 | 0 | 0 | 0 |
-| Storage | s3 | 2 | 26 | 0 | 0 | 0 |
-| Storage | vector | 2 | 13 | 0 | 0 | 0 |
-| Functions | ai | 4 | 5 | 0 | 0 | 0 |
-| Functions | env | 4 | 4 | 0 | 0 | 0 |
-| Functions | event_worker | 4 | 2 | 0 | 0 | 0 |
-| Functions | invoke | 4 | 1 | 0 | 0 | 0 |
-| Functions | node | 4 | 233 | 0 | 0 | 0 |
-| Functions | os | 4 | 1 | 0 | 0 | 0 |
-| Functions | runtime | 4 | 25 | 0 | 0 | 0 |
-| Functions | workers | 4 | 5 | 0 | 0 | 0 |
-| Pooler | clusters | 4 | 3 | 0 | 0 | 0 |
-| Pooler | endpoints | 4 | 4 | 0 | 0 | 0 |
-| Pooler | pool-modes | 4 | 2 | 0 | 0 | 0 |
-| Pooler | tenants | 4 | 7 | 0 | 0 | 0 |
-| Meta | column-privileges | 4 | 3 | 0 | 0 | 0 |
-| Meta | columns | 4 | 5 | 0 | 0 | 0 |
-| Meta | endpoints | 4 | 14 | 0 | 0 | 0 |
-| Meta | extensions | 4 | 5 | 0 | 0 | 0 |
-| Meta | functions | 4 | 5 | 0 | 0 | 0 |
-| Meta | policies | 4 | 5 | 0 | 0 | 0 |
-| Meta | publications | 4 | 5 | 0 | 0 | 0 |
-| Meta | query | 4 | 4 | 0 | 0 | 0 |
-| Meta | roles | 4 | 5 | 0 | 0 | 0 |
-| Meta | schemas | 4 | 5 | 0 | 0 | 0 |
-| Meta | table-privileges | 4 | 3 | 0 | 0 | 0 |
-| Meta | tables | 4 | 5 | 0 | 0 | 0 |
-| Meta | triggers | 4 | 5 | 0 | 0 | 0 |
-| Studio | advisors | 5 | 4 | 0 | 0 | 0 |
-| Studio | api-ai | 5 | 12 | 0 | 0 | 0 |
-| Studio | api-platform | 5 | 85 | 0 | 0 | 0 |
-| Studio | api-v1 | 5 | 10 | 0 | 0 | 0 |
-| Studio | auth | 5 | 18 | 0 | 0 | 0 |
-| Studio | database | 5 | 23 | 0 | 0 | 0 |
-| Studio | editor | 5 | 3 | 0 | 0 | 0 |
-| Studio | endpoints | 5 | 22 | 0 | 0 | 0 |
-| Studio | functions | 5 | 8 | 0 | 0 | 0 |
-| Studio | integrations | 5 | 4 | 0 | 0 | 0 |
-| Studio | logs | 5 | 19 | 0 | 0 | 0 |
-| Studio | observability | 5 | 12 | 0 | 0 | 0 |
-| Studio | realtime | 5 | 3 | 0 | 0 | 0 |
-| Studio | settings | 5 | 14 | 0 | 0 | 0 |
-| Studio | sql | 5 | 4 | 0 | 0 | 0 |
-| Studio | storage | 5 | 9 | 0 | 0 | 0 |
+Implemented and tested counts come from markers and `judge/cases/`. Live conformant counts are on [megabase.sh/status](https://megabase.sh/status/), from Judge on `main`. This table does not repeat the regression baseline ([decision 0030](decisions/0030-conformance-is-the-live-judge-score.md)).
+
+| Component | Group | Level | Units | Implemented | Tested |
+|---|---|---|---:|---:|---:|
+| REST | aggregates | 1 | 5 | 0 | 0 |
+| REST | embedding | 1 | 2 | 0 | 0 |
+| REST | filtering | 1 | 28 | 20 | 4 |
+| REST | logic | 1 | 3 | 0 | 0 |
+| REST | media-types | 1 | 13 | 0 | 0 |
+| REST | ordering | 1 | 4 | 0 | 0 |
+| REST | prefer | 1 | 16 | 0 | 0 |
+| REST | query-params | 1 | 8 | 0 | 0 |
+| REST | resources | 1 | 10 | 0 | 0 |
+| REST | rpc | 1 | 4 | 0 | 0 |
+| Auth | admin | 1–2 | 28 | 20 | 11 |
+| Auth | database | 1 | 32 | 32 | 30 |
+| Auth | endpoints | 1–2 | 13 | 4 | 4 |
+| Auth | factors | 2 | 9 | 0 | 0 |
+| Auth | oauth | 2 | 6 | 0 | 0 |
+| Auth | oauth-providers | 2 | 26 | 0 | 0 |
+| Auth | passkeys | 2 | 7 | 0 | 0 |
+| Auth | scim | 2 | 3 | 0 | 0 |
+| Auth | sso | 2 | 3 | 0 | 0 |
+| Auth | token | 1–2 | 6 | 3 | 3 |
+| Auth | user | 1–2 | 6 | 6 | 6 |
+| Auth | verify | 1–2 | 10 | 6 | 6 |
+| Auth | well-known | 2 | 3 | 0 | 0 |
+| Realtime | client-events | 3 | 3 | 0 | 0 |
+| Realtime | http-api | 3 | 3 | 0 | 0 |
+| Realtime | protocol | 3 | 6 | 0 | 0 |
+| Realtime | server-events | 3 | 6 | 0 | 0 |
+| Realtime | websocket | 3 | 1 | 0 | 0 |
+| Storage | bucket | 2 | 6 | 0 | 0 |
+| Storage | cdn | 2 | 3 | 0 | 0 |
+| Storage | database | 2 | 46 | 0 | 0 |
+| Storage | health | 2 | 1 | 0 | 0 |
+| Storage | iceberg | 2 | 13 | 0 | 0 |
+| Storage | object | 2 | 22 | 0 | 0 |
+| Storage | render | 2 | 3 | 0 | 0 |
+| Storage | resumable | 2 | 16 | 0 | 0 |
+| Storage | s3 | 2 | 26 | 0 | 0 |
+| Storage | vector | 2 | 13 | 0 | 0 |
+| Functions | ai | 4 | 5 | 0 | 0 |
+| Functions | env | 4 | 4 | 0 | 0 |
+| Functions | event_worker | 4 | 2 | 0 | 0 |
+| Functions | invoke | 4 | 1 | 0 | 0 |
+| Functions | node | 4 | 233 | 0 | 0 |
+| Functions | os | 4 | 1 | 0 | 0 |
+| Functions | runtime | 4 | 25 | 0 | 0 |
+| Functions | workers | 4 | 5 | 0 | 0 |
+| Pooler | clusters | 4 | 3 | 0 | 0 |
+| Pooler | endpoints | 4 | 4 | 0 | 0 |
+| Pooler | pool-modes | 4 | 2 | 0 | 0 |
+| Pooler | tenants | 4 | 7 | 0 | 0 |
+| Meta | column-privileges | 4 | 3 | 0 | 0 |
+| Meta | columns | 4 | 5 | 0 | 0 |
+| Meta | endpoints | 4 | 14 | 0 | 0 |
+| Meta | extensions | 4 | 5 | 0 | 0 |
+| Meta | functions | 4 | 5 | 0 | 0 |
+| Meta | policies | 4 | 5 | 0 | 0 |
+| Meta | publications | 4 | 5 | 0 | 0 |
+| Meta | query | 4 | 4 | 0 | 0 |
+| Meta | roles | 4 | 5 | 0 | 0 |
+| Meta | schemas | 4 | 5 | 0 | 0 |
+| Meta | table-privileges | 4 | 3 | 0 | 0 |
+| Meta | tables | 4 | 5 | 0 | 0 |
+| Meta | triggers | 4 | 5 | 0 | 0 |
+| Studio | advisors | 5 | 4 | 0 | 0 |
+| Studio | api-ai | 5 | 12 | 0 | 0 |
+| Studio | api-platform | 5 | 85 | 0 | 0 |
+| Studio | api-v1 | 5 | 10 | 0 | 0 |
+| Studio | auth | 5 | 18 | 0 | 0 |
+| Studio | database | 5 | 23 | 0 | 0 |
+| Studio | editor | 5 | 3 | 0 | 0 |
+| Studio | endpoints | 5 | 22 | 0 | 0 |
+| Studio | functions | 5 | 8 | 0 | 0 |
+| Studio | integrations | 5 | 4 | 0 | 0 |
+| Studio | logs | 5 | 19 | 0 | 0 |
+| Studio | observability | 5 | 12 | 0 | 0 |
+| Studio | realtime | 5 | 3 | 0 | 0 |
+| Studio | settings | 5 | 14 | 0 | 0 |
+| Studio | sql | 5 | 4 | 0 | 0 |
+| Studio | storage | 5 | 9 | 0 | 0 |
 
 #### Excluded upstream items
 
