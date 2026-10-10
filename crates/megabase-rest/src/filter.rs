@@ -4,8 +4,8 @@
 //! Horizontal filter operators from a PostgREST query value (`eq.1`).
 //!
 //! Parsing follows `pOpExpr` in `QueryParams.hs`. SQL text follows
-//! `pgFmtFilter` in `SqlFragment.hs`: values stay bound parameters, and
-//! `*` in `ilike` becomes `%`.
+//! `pgFmtFilter` in `SqlFragment.hs`: values stay bound parameters, `*` in
+//! `like` and `ilike` becomes `%`, and `in` builds a bound array literal.
 
 use std::fmt::Write as _;
 
@@ -16,13 +16,19 @@ pub(crate) enum Quant {
     All,
 }
 
-/// Operators this issue executes.
+/// Operators whose SQL is `column op value`, plus full-text `fts`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ServedOp {
     Eq,
+    Neq,
     Gt,
     Gte,
+    Lt,
+    Lte,
+    Like,
     Ilike,
+    Match,
+    Imatch,
     Fts,
     Cs,
     Cd,
@@ -34,12 +40,24 @@ impl ServedOp {
         match self {
             // megabase:unit rest:filter-operator:eq
             Self::Eq => "=",
+            // megabase:unit rest:filter-operator:neq
+            Self::Neq => "<>",
             // megabase:unit rest:filter-operator:gt
             Self::Gt => ">",
             // megabase:unit rest:filter-operator:gte
             Self::Gte => ">=",
+            // megabase:unit rest:filter-operator:lt
+            Self::Lt => "<",
+            // megabase:unit rest:filter-operator:lte
+            Self::Lte => "<=",
+            // megabase:unit rest:filter-operator:like
+            Self::Like => "like",
             // megabase:unit rest:filter-operator:ilike
             Self::Ilike => "ilike",
+            // megabase:unit rest:filter-operator:match
+            Self::Match => "~",
+            // megabase:unit rest:filter-operator:imatch
+            Self::Imatch => "~*",
             // megabase:unit rest:filter-operator:cs
             Self::Cs => "@>",
             // megabase:unit rest:filter-operator:cd
@@ -50,19 +68,62 @@ impl ServedOp {
             Self::Fts => "@@ to_tsquery",
         }
     }
+
+    /// `like` and `ilike` map every `*` to `%`. Other operators keep `*`.
+    fn stars_are_wildcards(self) -> bool {
+        matches!(self, Self::Like | Self::Ilike)
+    }
+}
+
+/// `is.null` / `is.true` / `is.unknown` after the case-insensitive match.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum IsVal {
+    Null,
+    NotNull,
+    True,
+    False,
+    Unknown,
+}
+
+impl IsVal {
+    fn sql(self) -> &'static str {
+        match self {
+            // megabase:unit rest:filter-operator:is
+            Self::Null => "NULL",
+            Self::NotNull => "NOT NULL",
+            Self::True => "TRUE",
+            Self::False => "FALSE",
+            Self::Unknown => "UNKNOWN",
+        }
+    }
+}
+
+/// `in.(...)`. A single empty element is `in.()` and becomes `= ANY('{}')`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum InList {
+    Empty,
+    Values(Vec<String>),
 }
 
 /// One filter after a successful parse.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ParsedFilter {
-    /// Operator this crate executes.
+    /// Comparison, pattern, or full-text operator this crate executes.
     Served {
+        /// `not.` prefix. The inner operator is still [`ServedOp`].
+        negated: bool,
         op: ServedOp,
         quant: Option<Quant>,
         /// `fts(english)` config name. Absent for `fts.terms`.
         language: Option<String>,
         value: String,
     },
+    /// `in.(1,2)` list. Owned by `rest:filter-operator:in`.
+    In { negated: bool, values: InList },
+    /// `is.null` and the other tri-state keywords.
+    Is { negated: bool, value: IsVal },
+    /// `isdistinct.value`.
+    IsDistinct { negated: bool, value: String },
     /// Recognized PostgREST operator that a later filtering issue owns.
     Unsupported { unit: &'static str },
 }
@@ -74,7 +135,7 @@ pub(crate) struct FilterParseError {
     pub details: String,
 }
 
-/// Parse `eq.1`, `not.gt.2`, `fts(english).cats`, `eq(any).{1,2}`.
+/// Parse `eq.1`, `not.gt.2`, `fts(english).cats`, `eq(any).{1,2}`, `in.(1,2)`.
 ///
 /// # Errors
 ///
@@ -87,22 +148,65 @@ pub(crate) fn parse_filter_value(value: &str) -> Result<ParsedFilter, FilterPars
         (false, value)
     };
     match parse_operation(expr) {
-        Some(_) if negated => Ok(ParsedFilter::Unsupported {
-            unit: "rest:filter-operator:not",
-        }),
-        Some(parsed) => Ok(parsed),
+        Some(parsed) => Ok(apply_negation(parsed, negated)),
         None => Err(parse_error(value)),
     }
 }
 
+fn apply_negation(filter: ParsedFilter, negated: bool) -> ParsedFilter {
+    if !negated {
+        return filter;
+    }
+    match filter {
+        ParsedFilter::Served {
+            op,
+            quant,
+            language,
+            value,
+            ..
+        } => ParsedFilter::Served {
+            negated: true,
+            op,
+            quant,
+            language,
+            value,
+        },
+        ParsedFilter::In { values, .. } => ParsedFilter::In {
+            negated: true,
+            values,
+        },
+        ParsedFilter::Is { value, .. } => ParsedFilter::Is {
+            negated: true,
+            value,
+        },
+        ParsedFilter::IsDistinct { value, .. } => ParsedFilter::IsDistinct {
+            negated: true,
+            value,
+        },
+        ParsedFilter::Unsupported { unit } => ParsedFilter::Unsupported { unit },
+    }
+}
+
+/// `Hit` is a parsed operator. `Fail` consumed a committed prefix (`in.`,
+/// `is.`) whose value is not valid, so later operators must not run.
+enum Attempt {
+    Miss,
+    Hit(ParsedFilter),
+    Fail,
+}
+
 fn parse_operation(input: &str) -> Option<ParsedFilter> {
-    if let Some(parsed) = attempt_prefix(input, "in.", "rest:filter-operator:in") {
-        return Some(parsed);
+    match attempt_in(input) {
+        Attempt::Hit(parsed) => return Some(parsed),
+        Attempt::Fail => return None,
+        Attempt::Miss => {}
     }
-    if let Some(parsed) = attempt_prefix(input, "isdistinct.", "rest:filter-operator:isdistinct") {
-        return Some(parsed);
+    match attempt_is(input) {
+        Attempt::Hit(parsed) => return Some(parsed),
+        Attempt::Fail => return None,
+        Attempt::Miss => {}
     }
-    if let Some(parsed) = attempt_prefix(input, "is.", "rest:filter-operator:is") {
+    if let Some(parsed) = attempt_isdistinct(input) {
         return Some(parsed);
     }
     if let Some(parsed) = attempt_fts(input, "plfts", "rest:filter-operator:plfts") {
@@ -117,8 +221,10 @@ fn parse_operation(input: &str) -> Option<ParsedFilter> {
     if let Some(parsed) = attempt_fts_served(input) {
         return Some(parsed);
     }
+    if let Some(parsed) = attempt_simple_served(input, "neq", ServedOp::Neq) {
+        return Some(parsed);
+    }
     for (name, unit) in [
-        ("neq", "rest:filter-operator:neq"),
         ("ov", "rest:filter-operator:ov"),
         ("sl", "rest:filter-operator:sl"),
         ("sr", "rest:filter-operator:sr"),
@@ -139,15 +245,15 @@ fn parse_operation(input: &str) -> Option<ParsedFilter> {
         return Some(parsed);
     }
     for (name, op) in [
-        ("ilike", Some(ServedOp::Ilike)),
-        ("imatch", None),
-        ("like", None),
-        ("match", None),
-        ("gte", Some(ServedOp::Gte)),
-        ("gt", Some(ServedOp::Gt)),
-        ("lte", None),
-        ("lt", None),
-        ("eq", Some(ServedOp::Eq)),
+        ("ilike", ServedOp::Ilike),
+        ("imatch", ServedOp::Imatch),
+        ("like", ServedOp::Like),
+        ("match", ServedOp::Match),
+        ("gte", ServedOp::Gte),
+        ("gt", ServedOp::Gt),
+        ("lte", ServedOp::Lte),
+        ("lt", ServedOp::Lt),
+        ("eq", ServedOp::Eq),
     ] {
         if let Some(parsed) = attempt_quant(input, name, op) {
             return Some(parsed);
@@ -156,10 +262,45 @@ fn parse_operation(input: &str) -> Option<ParsedFilter> {
     None
 }
 
-fn attempt_prefix(input: &str, prefix: &str, unit: &'static str) -> Option<ParsedFilter> {
-    input
-        .strip_prefix(prefix)
-        .map(|_| ParsedFilter::Unsupported { unit })
+fn attempt_in(input: &str) -> Attempt {
+    let Some(rest) = input.strip_prefix("in") else {
+        return Attempt::Miss;
+    };
+    let Some(rest) = rest.strip_prefix('.') else {
+        return Attempt::Miss;
+    };
+    match parse_in_list(rest) {
+        Ok(values) => Attempt::Hit(ParsedFilter::In {
+            negated: false,
+            values,
+        }),
+        Err(_) => Attempt::Fail,
+    }
+}
+
+fn attempt_is(input: &str) -> Attempt {
+    let Some(rest) = input.strip_prefix("is") else {
+        return Attempt::Miss;
+    };
+    let Some(rest) = rest.strip_prefix('.') else {
+        return Attempt::Miss;
+    };
+    match parse_is_val(rest) {
+        Some(value) => Attempt::Hit(ParsedFilter::Is {
+            negated: false,
+            value,
+        }),
+        None => Attempt::Fail,
+    }
+}
+
+fn attempt_isdistinct(input: &str) -> Option<ParsedFilter> {
+    let rest = input.strip_prefix("isdistinct")?;
+    let value = rest.strip_prefix('.')?;
+    Some(ParsedFilter::IsDistinct {
+        negated: false,
+        value: value.to_string(),
+    })
 }
 
 fn attempt_simple_unsupported(input: &str, name: &str, unit: &'static str) -> Option<ParsedFilter> {
@@ -172,6 +313,7 @@ fn attempt_simple_served(input: &str, name: &str, op: ServedOp) -> Option<Parsed
     let rest = input.strip_prefix(name)?;
     let value = rest.strip_prefix('.')?;
     Some(ParsedFilter::Served {
+        negated: false,
         op,
         quant: None,
         language: None,
@@ -191,6 +333,7 @@ fn attempt_fts_served(input: &str) -> Option<ParsedFilter> {
     let (language, rest) = split_optional_language(rest)?;
     let value = rest.strip_prefix('.')?;
     Some(ParsedFilter::Served {
+        negated: false,
         op: ServedOp::Fts,
         quant: None,
         language,
@@ -216,7 +359,7 @@ fn split_optional_language(input: &str) -> Option<(Option<String>, &str)> {
     }
 }
 
-fn attempt_quant(input: &str, name: &str, served: Option<ServedOp>) -> Option<ParsedFilter> {
+fn attempt_quant(input: &str, name: &str, op: ServedOp) -> Option<ParsedFilter> {
     let rest = input.strip_prefix(name)?;
     let (quant, rest) = if let Some(rest) = rest.strip_prefix('(') {
         if let Some(rest) = rest.strip_prefix("any)") {
@@ -229,24 +372,13 @@ fn attempt_quant(input: &str, name: &str, served: Option<ServedOp>) -> Option<Pa
         (None, rest)
     };
     let value = rest.strip_prefix('.')?;
-    if let Some(op) = served {
-        Some(ParsedFilter::Served {
-            op,
-            quant,
-            language: None,
-            value: value.to_string(),
-        })
-    } else {
-        let unit = match name {
-            "imatch" => "rest:filter-operator:imatch",
-            "like" => "rest:filter-operator:like",
-            "match" => "rest:filter-operator:match",
-            "lte" => "rest:filter-operator:lte",
-            "lt" => "rest:filter-operator:lt",
-            _ => "rest:filter-operator:eq",
-        };
-        Some(ParsedFilter::Unsupported { unit })
-    }
+    Some(ParsedFilter::Served {
+        negated: false,
+        op,
+        quant,
+        language: None,
+        value: value.to_string(),
+    })
 }
 
 fn is_identifier(text: &str) -> bool {
@@ -503,11 +635,19 @@ fn not_prefix(at: At<'_>) -> Result<At<'_>, PErr> {
 
 fn p_operation(at: At<'_>) -> Result<(), PErr> {
     let mut acc = None;
-    for name in ["in", "is", "isdistinct"] {
-        match word_then_dot(at, name) {
-            Ok(()) => return Ok(()),
-            Err(err) => merge_acc(&mut acc, err),
-        }
+    match classify_in(at) {
+        Control::Success => return Ok(()),
+        Control::Hard(err) => return Err(err),
+        Control::Soft(err) => merge_acc(&mut acc, err),
+    }
+    match classify_is(at) {
+        Control::Success => return Ok(()),
+        Control::Hard(err) => return Err(err),
+        Control::Soft(err) => merge_acc(&mut acc, err),
+    }
+    match word_then_dot(at, "isdistinct") {
+        Ok(()) => return Ok(()),
+        Err(err) => merge_acc(&mut acc, err),
     }
     for attempt in [p_fts(at), p_simple(at), p_quant(at)] {
         match attempt {
@@ -524,6 +664,108 @@ fn p_operation(at: At<'_>) -> Result<(), PErr> {
 fn word_then_dot(at: At<'_>, name: &str) -> Result<(), PErr> {
     let after = parse_string(at, name)?;
     parse_char(after, '.', "delimiter (.)").map(|_| ())
+}
+
+/// A soft error is still inside `try` and the outer operator label applies.
+/// A hard error consumed `in.` or `is.` and keeps its own expectation.
+enum Control {
+    Success,
+    Soft(PErr),
+    Hard(PErr),
+}
+
+fn classify_in(at: At<'_>) -> Control {
+    let after = match parse_string(at, "in") {
+        Ok(next) => next,
+        Err(err) => return Control::Soft(err),
+    };
+    let after_dot = match parse_char(after, '.', "delimiter (.)") {
+        Ok(next) => next,
+        Err(err) => return Control::Soft(err),
+    };
+    match parse_in_list(after_dot.rest()) {
+        Ok(_) => Control::Success,
+        Err(fail) => {
+            let at_fail = shift(after_dot, fail.at);
+            let unexpected = fail.unexpected.map(show_char).unwrap_or_default();
+            Control::Hard(PErr {
+                line: at_fail.line,
+                col: at_fail.col,
+                unexpected,
+                expects: vec![fail.expecting.to_string()],
+                known: true,
+            })
+        }
+    }
+}
+
+fn classify_is(at: At<'_>) -> Control {
+    let after = match parse_string(at, "is") {
+        Ok(next) => next,
+        Err(err) => return Control::Soft(err),
+    };
+    let after_dot = match parse_char(after, '.', "delimiter (.)") {
+        Ok(next) => next,
+        Err(err) => return Control::Soft(err),
+    };
+    if parse_is_val(after_dot.rest()).is_some() {
+        Control::Success
+    } else {
+        Control::Hard(is_val_error(after_dot))
+    }
+}
+
+fn shift(at: At<'_>, bytes: usize) -> At<'_> {
+    let target = at.byte + bytes;
+    let mut cur = at;
+    while cur.byte < target {
+        let Some(ch) = cur.peek() else {
+            break;
+        };
+        cur = cur.bump(ch);
+    }
+    cur
+}
+
+fn is_val_error(at: At<'_>) -> PErr {
+    const WORDS: &[&str] = &["null", "not_null", "true", "false", "unknown"];
+    let mut best = None;
+    for word in WORDS {
+        merge_acc(&mut best, ci_word_error(at, word));
+    }
+    label(
+        best.unwrap_or_else(|| unknown(at)),
+        "isVal: (null, not_null, true, false, unknown)",
+    )
+}
+
+/// Furthest mismatch of one `ciString`. The error sits on the failing character.
+fn ci_word_error(at: At<'_>, word: &str) -> PErr {
+    let mut cur = at;
+    for expected in word.chars() {
+        match cur.peek() {
+            Some(got) if got.eq_ignore_ascii_case(&expected) => cur = cur.bump(got),
+            Some(got) => {
+                return PErr {
+                    line: cur.line,
+                    col: cur.col,
+                    unexpected: show_char(got),
+                    expects: Vec::new(),
+                    known: true,
+                };
+            }
+            None => {
+                return PErr {
+                    line: cur.line,
+                    col: cur.col,
+                    unexpected: String::new(),
+                    expects: Vec::new(),
+                    known: true,
+                };
+            }
+        }
+    }
+    unknown(cur)
 }
 
 fn p_simple(at: At<'_>) -> Result<(), PErr> {
@@ -618,11 +860,33 @@ pub(crate) struct PredicateSql {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct BoundFilter {
     pub column: String,
-    pub op: ServedOp,
-    pub quant: Option<Quant>,
-    pub language: Option<String>,
-    pub value: String,
+    pub negated: bool,
+    pub body: FilterBody,
     pub pg_type: Option<String>,
+}
+
+/// SQL shape of one served filter, without the column or the `NOT` prefix.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum FilterBody {
+    /// Comparison, pattern, range, or `fts`.
+    Op {
+        op: ServedOp,
+        quant: Option<Quant>,
+        language: Option<String>,
+        value: String,
+    },
+    /// `in.(...)`.
+    In(InList),
+    /// `is.null` and the other keywords.
+    Is(IsVal),
+    /// `isdistinct.value`.
+    IsDistinct(String),
+}
+
+struct ListFail {
+    at: usize,
+    unexpected: Option<char>,
+    expecting: &'static str,
 }
 
 /// Why a catalog type cannot be interpolated into a cast.
@@ -660,35 +924,87 @@ fn push_predicate(
     relation: &str,
     filter: &BoundFilter,
 ) -> Result<(), UnsafeType> {
+    if filter.negated {
+        // megabase:unit rest:filter-operator:not
+        sql.push_str("NOT ");
+    }
     sql.push_str(&quote_ident(relation));
     sql.push('.');
     sql.push_str(&quote_ident(&filter.column));
+    match &filter.body {
+        FilterBody::Op {
+            op,
+            quant,
+            language,
+            value,
+        } => push_op(
+            sql,
+            params,
+            filter.pg_type.as_deref(),
+            *op,
+            *quant,
+            language,
+            value,
+        ),
+        FilterBody::In(values) => {
+            // megabase:unit rest:filter-operator:in
+            push_in(sql, params, filter.pg_type.as_deref(), values)
+        }
+        FilterBody::Is(value) => {
+            sql.push_str(" IS ");
+            sql.push_str(value.sql());
+            Ok(())
+        }
+        FilterBody::IsDistinct(value) => {
+            // megabase:unit rest:filter-operator:isdistinct
+            sql.push_str(" IS DISTINCT FROM ");
+            match filter.pg_type.as_deref() {
+                Some(pg_type) => {
+                    let cast = cast_target(pg_type)?;
+                    push_text_cast(sql, params, value, cast);
+                }
+                None => push_param(sql, params, value),
+            }
+            Ok(())
+        }
+    }
+}
+
+fn push_op(
+    sql: &mut String,
+    params: &mut Vec<String>,
+    pg_type: Option<&str>,
+    op: ServedOp,
+    quant: Option<Quant>,
+    language: &Option<String>,
+    value: &str,
+) -> Result<(), UnsafeType> {
     sql.push(' ');
-    if filter.op == ServedOp::Fts {
+    if op == ServedOp::Fts {
         sql.push_str(ServedOp::Fts.sql());
         sql.push('(');
-        if let Some(language) = &filter.language {
+        if let Some(language) = language {
             push_text_cast(sql, params, language, "regconfig");
             sql.push_str(", ");
         }
-        push_text_cast(sql, params, &filter.value, "text");
+        push_text_cast(sql, params, value, "text");
         sql.push(')');
         return Ok(());
     }
-    sql.push_str(filter.op.sql());
+    sql.push_str(op.sql());
     sql.push(' ');
-    let ilike_value;
-    let value = if filter.op == ServedOp::Ilike {
-        ilike_value = filter.value.replace('*', "%");
-        ilike_value.as_str()
+    let starred;
+    let value = if op.stars_are_wildcards() {
+        starred = value.replace('*', "%");
+        starred.as_str()
     } else {
-        filter.value.as_str()
+        value
     };
-    let Some(pg_type) = filter.pg_type.as_deref() else {
+    let Some(pg_type) = pg_type else {
         push_param(sql, params, value);
         return Ok(());
     };
-    let cast = match filter.quant {
+    let cast = match quant {
         Some(quant) => {
             match quant {
                 // megabase:unit rest:filter-operator:any
@@ -701,10 +1017,36 @@ fn push_predicate(
         None => cast_target(pg_type)?.to_string(),
     };
     push_text_cast(sql, params, value, &cast);
-    if filter.quant.is_some() {
+    if quant.is_some() {
         sql.push(')');
     }
     Ok(())
+}
+
+fn push_in(
+    sql: &mut String,
+    params: &mut Vec<String>,
+    pg_type: Option<&str>,
+    values: &InList,
+) -> Result<(), UnsafeType> {
+    match values {
+        InList::Empty => {
+            sql.push_str(" = ANY('{}')");
+            Ok(())
+        }
+        InList::Values(items) => {
+            let literal = pg_build_array_literal(items);
+            sql.push_str(" = ANY (");
+            if let Some(pg_type) = pg_type {
+                let cast = array_cast(pg_type)?;
+                push_text_cast(sql, params, &literal, &cast);
+            } else {
+                push_param(sql, params, &literal);
+            }
+            sql.push(')');
+            Ok(())
+        }
+    }
 }
 
 fn push_param(sql: &mut String, params: &mut Vec<String>, value: &str) {
@@ -736,6 +1078,177 @@ fn cast_target(pg_type: &str) -> Result<&str, UnsafeType> {
     Ok(pg_type)
 }
 
+/// `is.null` matches a keyword prefix, case-insensitively, with leftover text ignored.
+fn parse_is_val(input: &str) -> Option<IsVal> {
+    const WORDS: &[(&str, IsVal)] = &[
+        ("null", IsVal::Null),
+        ("not_null", IsVal::NotNull),
+        ("true", IsVal::True),
+        ("false", IsVal::False),
+        ("unknown", IsVal::Unknown),
+    ];
+    for (word, value) in WORDS {
+        if starts_with_ci(input, word) {
+            return Some(*value);
+        }
+    }
+    None
+}
+
+fn starts_with_ci(input: &str, word: &str) -> bool {
+    let mut chars = input.chars();
+    for expected in word.chars() {
+        match chars.next() {
+            Some(got) if got.eq_ignore_ascii_case(&expected) => {}
+            _ => return false,
+        }
+    }
+    true
+}
+
+/// `pListVal` from `QueryParams.hs`. Whitespace is space and tab only.
+fn parse_in_list(input: &str) -> Result<InList, ListFail> {
+    let mut scan = Scan { input, byte: 0 };
+    scan.skip_ws();
+    if !scan.eat('(') {
+        return Err(scan.fail("\"(\""));
+    }
+    scan.skip_ws();
+    let mut items = Vec::new();
+    loop {
+        items.push(scan.element());
+        if scan.eat(',') {
+            continue;
+        }
+        scan.skip_ws();
+        if scan.eat(')') {
+            return Ok(in_list(items));
+        }
+        return Err(scan.fail("\")\""));
+    }
+}
+
+fn in_list(items: Vec<String>) -> InList {
+    if items.len() == 1 && items[0].is_empty() {
+        InList::Empty
+    } else {
+        InList::Values(items)
+    }
+}
+
+struct Scan<'a> {
+    input: &'a str,
+    byte: usize,
+}
+
+impl<'a> Scan<'a> {
+    fn rest(&self) -> &'a str {
+        &self.input[self.byte..]
+    }
+
+    fn peek(&self) -> Option<char> {
+        self.rest().chars().next()
+    }
+
+    fn bump(&mut self) {
+        if let Some(ch) = self.peek() {
+            self.byte += ch.len_utf8();
+        }
+    }
+
+    fn skip_ws(&mut self) {
+        while matches!(self.peek(), Some(' ' | '\t')) {
+            self.bump();
+        }
+    }
+
+    fn eat(&mut self, expected: char) -> bool {
+        if self.peek() == Some(expected) {
+            self.bump();
+            true
+        } else {
+            false
+        }
+    }
+
+    fn fail(&self, expecting: &'static str) -> ListFail {
+        ListFail {
+            at: self.byte,
+            unexpected: self.peek(),
+            expecting,
+        }
+    }
+
+    fn element(&mut self) -> String {
+        if self.peek() == Some('"') {
+            let saved = self.byte;
+            if let Some(value) = self.quoted() {
+                return value;
+            }
+            self.byte = saved;
+        }
+        let start = self.byte;
+        while let Some(ch) = self.peek() {
+            if ch == ',' || ch == ')' {
+                break;
+            }
+            self.bump();
+        }
+        self.input[start..self.byte].to_string()
+    }
+
+    /// Quoted element, or `None` when the `try` would backtrack.
+    fn quoted(&mut self) -> Option<String> {
+        if !self.eat('"') {
+            return None;
+        }
+        let mut out = String::new();
+        loop {
+            match self.peek() {
+                Some('\\') => {
+                    self.bump();
+                    let ch = self.peek()?;
+                    out.push(ch);
+                    self.bump();
+                }
+                Some('"') => {
+                    self.bump();
+                    match self.peek() {
+                        None | Some(',' | ')') => return Some(out),
+                        _ => return None,
+                    }
+                }
+                Some(ch) => {
+                    out.push(ch);
+                    self.bump();
+                }
+                None => return None,
+            }
+        }
+    }
+}
+
+/// PostgREST `pgBuildArrayLiteral`. The result is a bound parameter, not SQL text.
+fn pg_build_array_literal(values: &[String]) -> String {
+    let mut out = String::from("{");
+    for (index, value) in values.iter().enumerate() {
+        if index > 0 {
+            out.push(',');
+        }
+        let trimmed = match value.find('\0') {
+            Some(end) => &value[..end],
+            None => value.as_str(),
+        };
+        let slashed = trimmed.replace('\\', "\\\\");
+        let escaped = slashed.replace('"', "\\\"");
+        out.push('"');
+        out.push_str(&escaped);
+        out.push('"');
+    }
+    out.push('}');
+    out
+}
+
 /// Quote a PostgreSQL identifier. Null bytes are dropped, quotes are doubled.
 pub(crate) fn quote_ident(name: &str) -> String {
     let mut out = String::from("\"");
@@ -765,6 +1278,7 @@ mod tests {
         assert_eq!(
             served("eq.true"),
             ParsedFilter::Served {
+                negated: false,
                 op: ServedOp::Eq,
                 quant: None,
                 language: None,
@@ -774,6 +1288,7 @@ mod tests {
         assert_eq!(
             served("gt.1"),
             ParsedFilter::Served {
+                negated: false,
                 op: ServedOp::Gt,
                 quant: None,
                 language: None,
@@ -783,6 +1298,7 @@ mod tests {
         assert_eq!(
             served("gte.1"),
             ParsedFilter::Served {
+                negated: false,
                 op: ServedOp::Gte,
                 quant: None,
                 language: None,
@@ -792,6 +1308,7 @@ mod tests {
         assert_eq!(
             served("ilike.*spec*"),
             ParsedFilter::Served {
+                negated: false,
                 op: ServedOp::Ilike,
                 quant: None,
                 language: None,
@@ -801,6 +1318,7 @@ mod tests {
         assert_eq!(
             served("cs.{1,2}"),
             ParsedFilter::Served {
+                negated: false,
                 op: ServedOp::Cs,
                 quant: None,
                 language: None,
@@ -810,6 +1328,7 @@ mod tests {
         assert_eq!(
             served("cd.{a,b}"),
             ParsedFilter::Served {
+                negated: false,
                 op: ServedOp::Cd,
                 quant: None,
                 language: None,
@@ -819,6 +1338,7 @@ mod tests {
         assert_eq!(
             served("adj.[1,4)"),
             ParsedFilter::Served {
+                negated: false,
                 op: ServedOp::Adj,
                 quant: None,
                 language: None,
@@ -828,6 +1348,7 @@ mod tests {
         assert_eq!(
             served("fts.cats"),
             ParsedFilter::Served {
+                negated: false,
                 op: ServedOp::Fts,
                 quant: None,
                 language: None,
@@ -837,6 +1358,7 @@ mod tests {
         assert_eq!(
             served("fts(english).cats"),
             ParsedFilter::Served {
+                negated: false,
                 op: ServedOp::Fts,
                 quant: None,
                 language: Some("english".into()),
@@ -846,6 +1368,7 @@ mod tests {
         assert_eq!(
             served("eq(any).{1,2}"),
             ParsedFilter::Served {
+                negated: false,
                 op: ServedOp::Eq,
                 quant: Some(Quant::Any),
                 language: None,
@@ -855,6 +1378,7 @@ mod tests {
         assert_eq!(
             served("gt(all).{3,4}"),
             ParsedFilter::Served {
+                negated: false,
                 op: ServedOp::Gt,
                 quant: Some(Quant::All),
                 language: None,
@@ -864,6 +1388,7 @@ mod tests {
         assert_eq!(
             served("eq."),
             ParsedFilter::Served {
+                negated: false,
                 op: ServedOp::Eq,
                 quant: None,
                 language: None,
@@ -873,41 +1398,198 @@ mod tests {
     }
 
     #[test]
-    fn leaves_later_operators_unsupported() {
+    fn parses_issue_28_operators() {
+        assert_eq!(
+            served("neq.1"),
+            ParsedFilter::Served {
+                negated: false,
+                op: ServedOp::Neq,
+                quant: None,
+                language: None,
+                value: "1".into(),
+            }
+        );
         assert_eq!(
             served("lt.3"),
-            ParsedFilter::Unsupported {
-                unit: "rest:filter-operator:lt"
+            ParsedFilter::Served {
+                negated: false,
+                op: ServedOp::Lt,
+                quant: None,
+                language: None,
+                value: "3".into(),
             }
         );
         assert_eq!(
-            served("not.eq.1"),
-            ParsedFilter::Unsupported {
-                unit: "rest:filter-operator:not"
-            }
-        );
-        assert_eq!(
-            served("in.(1,3)"),
-            ParsedFilter::Unsupported {
-                unit: "rest:filter-operator:in"
-            }
-        );
-        assert_eq!(
-            served("is.null"),
-            ParsedFilter::Unsupported {
-                unit: "rest:filter-operator:is"
+            served("lte.3"),
+            ParsedFilter::Served {
+                negated: false,
+                op: ServedOp::Lte,
+                quant: None,
+                language: None,
+                value: "3".into(),
             }
         );
         assert_eq!(
             served("like.*a*"),
+            ParsedFilter::Served {
+                negated: false,
+                op: ServedOp::Like,
+                quant: None,
+                language: None,
+                value: "*a*".into(),
+            }
+        );
+        assert_eq!(
+            served("match.yx$"),
+            ParsedFilter::Served {
+                negated: false,
+                op: ServedOp::Match,
+                quant: None,
+                language: None,
+                value: "yx$".into(),
+            }
+        );
+        assert_eq!(
+            served("imatch..*YY.*"),
+            ParsedFilter::Served {
+                negated: false,
+                op: ServedOp::Imatch,
+                quant: None,
+                language: None,
+                value: ".*YY.*".into(),
+            }
+        );
+        assert_eq!(
+            served("lt(any).{1,2}"),
+            ParsedFilter::Served {
+                negated: false,
+                op: ServedOp::Lt,
+                quant: Some(Quant::Any),
+                language: None,
+                value: "{1,2}".into(),
+            }
+        );
+        assert_eq!(
+            served("in.(1,3)"),
+            ParsedFilter::In {
+                negated: false,
+                values: InList::Values(vec!["1".into(), "3".into()]),
+            }
+        );
+        assert_eq!(
+            served("in.()"),
+            ParsedFilter::In {
+                negated: false,
+                values: InList::Empty,
+            }
+        );
+        assert_eq!(
+            served("in.(    )"),
+            ParsedFilter::In {
+                negated: false,
+                values: InList::Empty,
+            }
+        );
+        assert_eq!(
+            served("in.(\"a,b\",c)"),
+            ParsedFilter::In {
+                negated: false,
+                values: InList::Values(vec!["a,b".into(), "c".into()]),
+            }
+        );
+        assert_eq!(
+            served("is.null"),
+            ParsedFilter::Is {
+                negated: false,
+                value: IsVal::Null,
+            }
+        );
+        assert_eq!(
+            served("is.NULL"),
+            ParsedFilter::Is {
+                negated: false,
+                value: IsVal::Null,
+            }
+        );
+        assert_eq!(
+            served("is.not_null"),
+            ParsedFilter::Is {
+                negated: false,
+                value: IsVal::NotNull,
+            }
+        );
+        assert_eq!(
+            served("isdistinct.2"),
+            ParsedFilter::IsDistinct {
+                negated: false,
+                value: "2".into(),
+            }
+        );
+        assert_eq!(
+            served("not.eq.1"),
+            ParsedFilter::Served {
+                negated: true,
+                op: ServedOp::Eq,
+                quant: None,
+                language: None,
+                value: "1".into(),
+            }
+        );
+        assert_eq!(
+            served("not.in.()"),
+            ParsedFilter::In {
+                negated: true,
+                values: InList::Empty,
+            }
+        );
+        assert_eq!(
+            served("not.is.not_null"),
+            ParsedFilter::Is {
+                negated: true,
+                value: IsVal::NotNull,
+            }
+        );
+    }
+
+    #[test]
+    fn leaves_later_operators_unsupported() {
+        assert_eq!(
+            served("ov.{1,2}"),
             ParsedFilter::Unsupported {
-                unit: "rest:filter-operator:like"
+                unit: "rest:filter-operator:ov"
+            }
+        );
+        assert_eq!(
+            served("not.ov.{1,2}"),
+            ParsedFilter::Unsupported {
+                unit: "rest:filter-operator:ov"
+            }
+        );
+        assert_eq!(
+            served("plfts.cats"),
+            ParsedFilter::Unsupported {
+                unit: "rest:filter-operator:plfts"
+            }
+        );
+        assert_eq!(
+            served("wfts.cats"),
+            ParsedFilter::Unsupported {
+                unit: "rest:filter-operator:wfts"
+            }
+        );
+        assert_eq!(
+            served("nxl.1"),
+            ParsedFilter::Unsupported {
+                unit: "rest:filter-operator:nxl"
             }
         );
         assert!(parse_filter_value("nope.1").is_err());
         assert!(parse_filter_value("0").is_err());
         assert!(parse_filter_value("fts().x").is_err());
         assert!(parse_filter_value("eq(foo).1").is_err());
+        assert!(parse_filter_value("is.foo").is_err());
+        assert!(parse_filter_value("in.foo").is_err());
+        assert!(parse_filter_value("neq(any).1").is_err());
     }
 
     #[test]
@@ -1049,6 +1731,23 @@ mod tests {
                 "unexpected end of input expecting operator (eq, gt, ...)",
             ),
             ("notX", 4, "unexpected \"X\" expecting delimiter (.)"),
+            (
+                "is.foo",
+                5,
+                "unexpected \"o\" expecting isVal: (null, not_null, true, false, unknown)",
+            ),
+            ("in.foo", 4, "unexpected \"f\" expecting \"(\""),
+            (
+                "not.is.foo",
+                9,
+                "unexpected \"o\" expecting isVal: (null, not_null, true, false, unknown)",
+            ),
+            ("in.(1", 6, "unexpected end of input expecting \")\""),
+            (
+                "is.",
+                4,
+                "unexpected end of input expecting isVal: (null, not_null, true, false, unknown)",
+            ),
         ];
         for (input, column, details) in cases {
             let err = parse_filter_value(input).unwrap_err();
@@ -1061,43 +1760,50 @@ mod tests {
         }
     }
 
+    fn bound(
+        column: &str,
+        op: ServedOp,
+        quant: Option<Quant>,
+        language: Option<&str>,
+        value: &str,
+        pg_type: &str,
+    ) -> BoundFilter {
+        BoundFilter {
+            column: column.into(),
+            negated: false,
+            body: FilterBody::Op {
+                op,
+                quant,
+                language: language.map(str::to_string),
+                value: value.into(),
+            },
+            pg_type: Some(pg_type.into()),
+        }
+    }
+
     #[test]
     fn predicate_binds_values_and_casts_catalog_types() {
         let rendered = predicate_sql(
             "todos",
             &[
-                BoundFilter {
-                    column: "done".into(),
-                    op: ServedOp::Eq,
-                    quant: None,
-                    language: None,
-                    value: "true".into(),
-                    pg_type: Some("boolean".into()),
-                },
-                BoundFilter {
-                    column: "title".into(),
-                    op: ServedOp::Ilike,
-                    quant: None,
-                    language: None,
-                    value: "*spec*".into(),
-                    pg_type: Some("text".into()),
-                },
-                BoundFilter {
-                    column: "id".into(),
-                    op: ServedOp::Eq,
-                    quant: Some(Quant::Any),
-                    language: None,
-                    value: "{1,2}".into(),
-                    pg_type: Some("bigint".into()),
-                },
-                BoundFilter {
-                    column: "body".into(),
-                    op: ServedOp::Fts,
-                    quant: None,
-                    language: Some("english".into()),
-                    value: "cats".into(),
-                    pg_type: Some("tsvector".into()),
-                },
+                bound("done", ServedOp::Eq, None, None, "true", "boolean"),
+                bound("title", ServedOp::Ilike, None, None, "*spec*", "text"),
+                bound(
+                    "id",
+                    ServedOp::Eq,
+                    Some(Quant::Any),
+                    None,
+                    "{1,2}",
+                    "bigint",
+                ),
+                bound(
+                    "body",
+                    ServedOp::Fts,
+                    None,
+                    Some("english"),
+                    "cats",
+                    "tsvector",
+                ),
             ],
         )
         .unwrap();
@@ -1117,14 +1823,14 @@ mod tests {
         let payload = "1'; DROP TABLE todos;--";
         let rendered = predicate_sql(
             "todos",
-            &[BoundFilter {
-                column: "id\".\"x".into(),
-                op: ServedOp::Eq,
-                quant: None,
-                language: None,
-                value: payload.into(),
-                pg_type: Some("bigint".into()),
-            }],
+            &[bound(
+                "id\".\"x",
+                ServedOp::Eq,
+                None,
+                None,
+                payload,
+                "bigint",
+            )],
         )
         .unwrap();
         assert!(!rendered.sql.contains("DROP"));
@@ -1138,16 +1844,107 @@ mod tests {
     fn rejects_unsafe_cast_targets() {
         let err = predicate_sql(
             "todos",
-            &[BoundFilter {
-                column: "id".into(),
-                op: ServedOp::Gt,
-                quant: None,
-                language: None,
-                value: "1".into(),
-                pg_type: Some("int;drop".into()),
-            }],
+            &[bound("id", ServedOp::Gt, None, None, "1", "int;drop")],
         );
         assert!(err.is_err());
+    }
+
+    #[test]
+    fn issue_28_predicates_bind_and_whitelist() {
+        let rendered = predicate_sql(
+            "todos",
+            &[
+                BoundFilter {
+                    column: "id".into(),
+                    negated: true,
+                    body: FilterBody::Op {
+                        op: ServedOp::Eq,
+                        quant: None,
+                        language: None,
+                        value: "1".into(),
+                    },
+                    pg_type: Some("bigint".into()),
+                },
+                bound("priority", ServedOp::Lt, None, None, "3", "integer"),
+                bound("priority", ServedOp::Lte, None, None, "3", "integer"),
+                bound("title", ServedOp::Like, None, None, "*a*", "text"),
+                bound("title", ServedOp::Match, None, None, "yx$", "text"),
+                bound("title", ServedOp::Imatch, None, None, ".*yy.*", "text"),
+                bound("id", ServedOp::Neq, None, None, "2", "bigint"),
+                BoundFilter {
+                    column: "id".into(),
+                    negated: false,
+                    body: FilterBody::In(InList::Values(vec!["1".into(), "3".into()])),
+                    pg_type: Some("bigint".into()),
+                },
+                BoundFilter {
+                    column: "id".into(),
+                    negated: false,
+                    body: FilterBody::In(InList::Empty),
+                    pg_type: Some("bigint".into()),
+                },
+                BoundFilter {
+                    column: "done".into(),
+                    negated: false,
+                    body: FilterBody::Is(IsVal::Null),
+                    pg_type: Some("boolean".into()),
+                },
+                BoundFilter {
+                    column: "done".into(),
+                    negated: true,
+                    body: FilterBody::Is(IsVal::NotNull),
+                    pg_type: Some("boolean".into()),
+                },
+                BoundFilter {
+                    column: "id".into(),
+                    negated: false,
+                    body: FilterBody::IsDistinct("2".into()),
+                    pg_type: Some("bigint".into()),
+                },
+            ],
+        )
+        .unwrap();
+        assert_eq!(
+            rendered.sql,
+            "NOT \"todos\".\"id\" = ($1::text)::bigint \
+             AND \"todos\".\"priority\" < ($2::text)::integer \
+             AND \"todos\".\"priority\" <= ($3::text)::integer \
+             AND \"todos\".\"title\" like ($4::text)::text \
+             AND \"todos\".\"title\" ~ ($5::text)::text \
+             AND \"todos\".\"title\" ~* ($6::text)::text \
+             AND \"todos\".\"id\" <> ($7::text)::bigint \
+             AND \"todos\".\"id\" = ANY (($8::text)::bigint[]) \
+             AND \"todos\".\"id\" = ANY('{}') \
+             AND \"todos\".\"done\" IS NULL \
+             AND NOT \"todos\".\"done\" IS NOT NULL \
+             AND \"todos\".\"id\" IS DISTINCT FROM ($9::text)::bigint"
+        );
+        assert_eq!(
+            rendered.params,
+            vec![
+                "1",
+                "3",
+                "3",
+                "%a%",
+                "yx$",
+                ".*yy.*",
+                "2",
+                "{\"1\",\"3\"}",
+                "2"
+            ]
+        );
+        let injected = predicate_sql(
+            "todos",
+            &[BoundFilter {
+                column: "title".into(),
+                negated: false,
+                body: FilterBody::In(InList::Values(vec!["a\");drop".into()])),
+                pg_type: Some("text".into()),
+            }],
+        )
+        .unwrap();
+        assert!(!injected.sql.contains("drop"));
+        assert_eq!(injected.params, vec!["{\"a\\\");drop\"}"]);
     }
 
     #[test]
