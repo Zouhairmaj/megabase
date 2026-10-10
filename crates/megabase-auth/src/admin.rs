@@ -56,7 +56,9 @@ pub fn router(state: AuthState) -> Router {
         )
         .route(
             "/auth/v1/admin/custom-providers/:identifier",
-            get(get_custom_provider).delete(delete_custom_provider),
+            get(get_custom_provider)
+                .put(crate::admin_batch2::batch3::update_custom_provider)
+                .delete(delete_custom_provider),
         )
         .route(
             "/auth/v1/admin/oauth/clients",
@@ -64,20 +66,34 @@ pub fn router(state: AuthState) -> Router {
         )
         .route(
             "/auth/v1/admin/oauth/clients/:client_id",
-            get(crate::admin_batch2::get_oauth_client).delete(delete_oauth_client),
+            get(crate::admin_batch2::get_oauth_client)
+                .put(crate::admin_batch2::batch3::update_oauth_client)
+                .delete(delete_oauth_client),
+        )
+        .route(
+            "/auth/v1/admin/oauth/clients/:client_id/regenerate_secret",
+            post(crate::admin_batch2::batch3::regenerate_oauth_secret),
         )
         .route(
             "/auth/v1/admin/sso/providers",
-            get(crate::admin_batch2::list_sso_providers),
+            get(crate::admin_batch2::list_sso_providers)
+                .post(crate::admin_batch2::batch3::create_sso_provider),
         )
         .route(
             "/auth/v1/admin/sso/providers/:idp_id",
-            get(crate::admin_batch2::get_sso_provider).delete(delete_sso_provider),
+            get(crate::admin_batch2::get_sso_provider)
+                .put(crate::admin_batch2::batch3::update_sso_provider)
+                .delete(delete_sso_provider),
         )
-        .route("/auth/v1/admin/users", get(crate::admin_batch2::list_users))
+        .route(
+            "/auth/v1/admin/users",
+            get(crate::admin_batch2::list_users).post(crate::admin_batch2::batch3::create_user),
+        )
         .route(
             "/auth/v1/admin/users/:user_id",
-            get(crate::admin_batch2::get_user).delete(delete_user),
+            get(crate::admin_batch2::get_user)
+                .put(crate::admin_batch2::batch3::update_user)
+                .delete(delete_user),
         )
         .route(
             "/auth/v1/admin/users/:user_id/factors",
@@ -93,7 +109,7 @@ pub fn router(state: AuthState) -> Router {
         )
         .route(
             "/auth/v1/admin/users/:user_id/factors/:factor_id",
-            delete(delete_factor),
+            delete(delete_factor).put(crate::admin_batch2::batch3::update_factor),
         )
         .route(
             "/auth/v1/admin/users/:user_id/passkeys/:passkey_id",

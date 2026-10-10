@@ -4,6 +4,20 @@ All notable changes to Megabase are documented in this file.
 The format is produced by [release-please](https://github.com/googleapis/release-please).
 Sections: Features, Bug Fixes, Performance, Conformance/judge, Documentation.
 
+## [0.1.15](https://github.com/Zouhairmaj/megabase/compare/v0.1.14...v0.1.15) (2026-10-10)
+
+
+### Features
+
+* **auth:** serve admin user, SSO, OAuth client and custom-provider writes ([#250](https://github.com/Zouhairmaj/megabase/issues/250)) ([34f2b89](https://github.com/Zouhairmaj/megabase/commit/34f2b89fc1f922001532dc8a35313da2e4d1b993))
+
+## [0.1.14](https://github.com/Zouhairmaj/megabase/compare/v0.1.13...v0.1.14) (2026-10-10)
+
+
+### Features
+
+* **rest:** serve select aggregate functions ([#254](https://github.com/Zouhairmaj/megabase/issues/254)) ([f62a8bd](https://github.com/Zouhairmaj/megabase/commit/f62a8bd126bbab3f5edcb98c7dd8f7ea0589c38f))
+
 ## [0.1.13](https://github.com/Zouhairmaj/megabase/compare/v0.1.12...v0.1.13) (2026-10-10)
 
 
