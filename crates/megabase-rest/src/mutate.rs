@@ -187,11 +187,24 @@ pub(crate) async fn mutate(
         }
     }
 
+    // megabase:unit rest:prefer:return=headers-only
+    let ret = match prefs.representation {
+        Some(Representation::Full) => Ret::Full,
+        Some(Representation::HeadersOnly) if matches!(kind, Kind::Create) => {
+            match primary_key(&mut tx, schema, relation, session.anon).await {
+                Ok(pk) if !pk.is_empty() => Ret::Keys(pk),
+                Ok(_) => Ret::One,
+                Err(response) => return *response,
+            }
+        }
+        _ => Ret::One,
+    };
+
     let mut built = match kind {
         Kind::Update if keys.is_empty() => MutationSql {
             sql: format!(
                 "WITH mutated AS (SELECT {} FROM {}.{} WHERE false)",
-                returning(relation, &kind, &column_types),
+                returning(relation, &kind, &column_types, &ret),
                 quote_ident(schema),
                 quote_ident(relation)
             ),
@@ -211,12 +224,13 @@ pub(crate) async fn mutate(
                 &column_types,
                 &pk,
                 eq_filters.as_deref().unwrap_or(&[]),
+                &ret,
             ) {
                 Ok(sql) => sql,
                 Err(response) => return *response,
             }
         }
-        Kind::Delete => match delete_sql(schema, relation, query, &column_types) {
+        Kind::Delete => match delete_sql(schema, relation, query, &column_types, &ret) {
             Ok(sql) => sql,
             Err(response) => return *response,
         },
@@ -233,25 +247,7 @@ pub(crate) async fn mutate(
     {
         return *response;
     }
-    // megabase:unit rest:prefer:return=headers-only
-    let location_pk = if matches!(kind, Kind::Create)
-        && prefs.representation == Some(Representation::HeadersOnly)
-    {
-        match primary_key(&mut tx, schema, relation, session.anon).await {
-            Ok(pk) => pk,
-            Err(response) => return *response,
-        }
-    } else {
-        Vec::new()
-    };
-    finish_sql(
-        &mut built,
-        relation,
-        query,
-        &column_types,
-        prefs.representation,
-        &location_pk,
-    );
+    finish_sql(&mut built, relation, query, &column_types, &ret, &kind);
     let mut statement =
         sqlx::query_as::<sqlx::Postgres, (i64, i64, String, Option<String>)>(&built.sql);
     for param in &built.params {
@@ -305,25 +301,52 @@ struct Outcome {
     location: Option<String>,
 }
 
-/// `RETURNING` list: the table's own columns, plus `_mb_inserted`.
+/// What the mutation's `RETURNING` clause must produce.
 ///
-/// Only an upsert reads `xmax`. A view has no such system column.
-fn returning(relation: &str, kind: &Kind, column_types: &[(&str, &str)]) -> String {
+/// PostgreSQL needs `SELECT` privilege on every column a `RETURNING` names, so a
+/// write-only role keeps working only if minimal responses return no columns.
+/// PostgREST's `returningF` is empty in that case (`QueryBuilder.hs`).
+enum Ret {
+    /// `RETURNING 1`: the default and `return=minimal`.
+    One,
+    /// Primary-key columns for the `Location` of `return=headers-only`.
+    Keys(Vec<String>),
+    /// Every column for `return=representation`.
+    Full,
+}
+
+/// Alias of the `xmax = 0` flag. It sits next to the user's columns, so it is
+/// prefixed like the other generated names.
+const INSERTED: &str = "_megabase_inserted";
+
+/// `RETURNING` list for `ret`.
+///
+/// Only a full upsert reads `xmax` to tell inserted rows from updated ones. A
+/// view has no such system column.
+fn returning(relation: &str, kind: &Kind, column_types: &[(&str, &str)], ret: &Ret) -> String {
     let table = quote_ident(relation);
-    let mut parts: Vec<String> = if column_types.is_empty() {
-        vec![format!("{table}.*")]
-    } else {
-        column_types
+    match ret {
+        Ret::One => "1".to_string(),
+        Ret::Keys(pk) => pk
             .iter()
-            .map(|(name, _)| format!("{table}.{}", quote_ident(name)))
-            .collect()
-    };
-    parts.push(if matches!(kind, Kind::Upsert) {
-        format!("({table}.xmax = 0) AS _mb_inserted")
-    } else {
-        "false AS _mb_inserted".to_string()
-    });
-    parts.join(", ")
+            .map(|name| format!("{table}.{}", quote_ident(name)))
+            .collect::<Vec<_>>()
+            .join(", "),
+        Ret::Full => {
+            let mut parts: Vec<String> = if column_types.is_empty() {
+                vec![format!("{table}.*")]
+            } else {
+                column_types
+                    .iter()
+                    .map(|(name, _)| format!("{table}.{}", quote_ident(name)))
+                    .collect()
+            };
+            if matches!(kind, Kind::Upsert) {
+                parts.push(format!("({table}.xmax = 0) AS {INSERTED}"));
+            }
+            parts.join(", ")
+        }
+    }
 }
 
 /// Append the final `SELECT` to the `WITH mutated AS (…)` head.
@@ -334,50 +357,73 @@ fn finish_sql(
     relation: &str,
     query: &ReadQuery,
     column_types: &[(&str, &str)],
-    representation: Option<Representation>,
-    location_pk: &[String],
+    ret: &Ret,
+    kind: &Kind,
 ) {
-    let cols = if column_types.is_empty() {
-        "*".to_string()
-    } else {
-        quote_list(
-            &column_types
-                .iter()
-                .map(|(name, _)| (*name).to_string())
-                .collect::<Vec<_>>(),
-        )
-    };
-    let body = if representation == Some(Representation::Full) {
-        let select = query.representation_select("_megabase_src", relation, &mut built.params);
-        format!(
-            "coalesce((SELECT json_agg(t.row ORDER BY t.rn) FROM \
-             (SELECT to_json(s) AS row, row_number() OVER () AS rn FROM ({select}) s) t), \
-             '[]'::json)::text"
-        )
-    } else {
-        "'[]'::text".to_string()
-    };
-    let location = if location_pk.is_empty() {
-        "NULL::text".to_string()
-    } else {
-        let mut marks = Vec::new();
-        for name in location_pk {
-            built.params.push(name.clone());
-            marks.push(format!("${}", built.params.len()));
+    let (src, inserted, body, location) = match ret {
+        Ret::One => (
+            String::new(),
+            "0::bigint".to_string(),
+            "'[]'::text".to_string(),
+            "NULL::text".to_string(),
+        ),
+        Ret::Keys(pk) => {
+            let mut marks = Vec::new();
+            for name in pk {
+                built.params.push(name.clone());
+                marks.push(format!("${}", built.params.len()));
+            }
+            // Pairs follow the primary-key order, not the order `row_to_json`
+            // emits the columns in.
+            let location = format!(
+                "CASE WHEN (SELECT count(*) FROM mutated) = 1 THEN (SELECT array_to_json(\
+                 array_agg(j.key || '=' || coalesce('eq.' || j.value, 'is.null') ORDER BY k.ord))::text \
+                 FROM (SELECT row_to_json(_) AS row FROM _megabase_src AS _ LIMIT 1) d \
+                 CROSS JOIN json_each_text(d.row) AS j \
+                 JOIN unnest(ARRAY[{}]::text[]) WITH ORDINALITY AS k(name, ord) ON k.name = j.key) END",
+                marks.join(", ")
+            );
+            (
+                format!(
+                    ", _megabase_src AS (SELECT {} FROM mutated)",
+                    quote_list(pk)
+                ),
+                "0::bigint".to_string(),
+                "'[]'::text".to_string(),
+                location,
+            )
         }
-        format!(
-            "CASE WHEN (SELECT count(*) FROM mutated) = 1 THEN (SELECT array_to_json(\
-             array_agg(j.key || '=' || coalesce('eq.' || j.value, 'is.null')))::text \
-             FROM (SELECT row_to_json(_) AS row FROM _megabase_src AS _ LIMIT 1) d \
-             CROSS JOIN json_each_text(d.row) AS j WHERE j.key IN ({})) END",
-            marks.join(", ")
-        )
+        Ret::Full => {
+            let cols = if column_types.is_empty() {
+                "*".to_string()
+            } else {
+                quote_list(
+                    &column_types
+                        .iter()
+                        .map(|(name, _)| (*name).to_string())
+                        .collect::<Vec<_>>(),
+                )
+            };
+            let select = query.representation_select("_megabase_src", relation, &mut built.params);
+            let inserted = if matches!(kind, Kind::Upsert) {
+                format!("(SELECT count(*) FROM mutated WHERE {INSERTED})::bigint")
+            } else {
+                "0::bigint".to_string()
+            };
+            (
+                format!(", _megabase_src AS (SELECT {cols} FROM mutated)"),
+                inserted,
+                format!(
+                    "coalesce((SELECT json_agg(t.row ORDER BY t.rn) FROM \
+                     (SELECT to_json(s) AS row, row_number() OVER () AS rn FROM ({select}) s) t), \
+                     '[]'::json)::text"
+                ),
+                "NULL::text".to_string(),
+            )
+        }
     };
     built.sql = format!(
-        "{}, _megabase_src AS (SELECT {cols} FROM mutated) \
-         SELECT (SELECT count(*) FROM mutated)::bigint, \
-         (SELECT count(*) FROM mutated WHERE _mb_inserted)::bigint, \
-         {body}, {location}",
+        "{}{src} SELECT (SELECT count(*) FROM mutated)::bigint, {inserted}, {body}, {location}",
         built.sql
     );
 }
@@ -471,6 +517,7 @@ fn write_sql(
     column_types: &[(&str, &str)],
     pk: &[String],
     eq_filters: &[(String, String)],
+    ret: &Ret,
 ) -> Result<MutationSql, Box<Response>> {
     let mut params = Vec::new();
     params.push(payload.raw.clone());
@@ -547,7 +594,7 @@ fn write_sql(
             }
             sql.push_str(&format!(
                 " RETURNING {})",
-                returning(relation, kind, column_types)
+                returning(relation, kind, column_types, ret)
             ));
             sql
         }
@@ -572,7 +619,7 @@ fn write_sql(
             }
             sql.push_str(&format!(
                 " RETURNING {})",
-                returning(relation, kind, column_types)
+                returning(relation, kind, column_types, ret)
             ));
             sql
         }
@@ -586,6 +633,7 @@ fn delete_sql(
     relation: &str,
     query: &ReadQuery,
     column_types: &[(&str, &str)],
+    ret: &Ret,
 ) -> Result<MutationSql, Box<Response>> {
     let qualified = format!("{}.{}", quote_ident(schema), quote_ident(relation));
     let mut sql = format!("WITH mutated AS (DELETE FROM {qualified}");
@@ -600,7 +648,7 @@ fn delete_sql(
     };
     sql.push_str(&format!(
         " RETURNING {})",
-        returning(relation, &Kind::Delete, column_types)
+        returning(relation, &Kind::Delete, column_types, ret)
     ));
     Ok(MutationSql { sql, params })
 }
@@ -886,8 +934,14 @@ mod tests {
             &[],
             &[],
             &[],
+            &Ret::One,
         )
         .expect("sql");
+        assert!(
+            built.sql.contains("RETURNING 1)"),
+            "minimal must not name columns: {}",
+            built.sql
+        );
         assert!(
             built.sql.contains("$1::json"),
             "empty object insert must reference the bound body: {}",
@@ -988,14 +1042,56 @@ mod tests {
             "todos",
             &query,
             &[("id", "bigint")],
-            Some(Representation::Full),
-            &["id".to_string()],
+            &Ret::Full,
+            &Kind::Delete,
         );
         assert!(built
             .sql
             .contains("FROM _megabase_src AS \"todos\" ORDER BY"));
-        assert!(built.sql.contains("j.key IN ($"));
-        assert_eq!(built.params.last().map(String::as_str), Some("id"));
+
+        let mut keyed = MutationSql {
+            sql: "WITH mutated AS (INSERT INTO t DEFAULT VALUES RETURNING \"t\".\"id\")"
+                .to_string(),
+            params: Vec::new(),
+        };
+        finish_sql(
+            &mut keyed,
+            "t",
+            &query,
+            &[("id", "bigint")],
+            &Ret::Keys(vec!["id".to_string()]),
+            &Kind::Create,
+        );
+        assert!(keyed.sql.contains("ORDER BY k.ord"));
+        assert!(keyed.sql.contains("ARRAY[$1]"));
+        assert_eq!(keyed.params, vec!["id".to_string()]);
+    }
+
+    #[test]
+    fn returning_names_columns_only_when_needed() {
+        let columns = [("id", "bigint"), ("secret", "text")];
+        assert_eq!(returning("t", &Kind::Create, &columns, &Ret::One), "1");
+        assert_eq!(
+            returning("t", &Kind::Create, &columns, &Ret::Keys(vec!["id".into()])),
+            "\"t\".\"id\""
+        );
+        let full = returning("t", &Kind::Upsert, &columns, &Ret::Full);
+        assert!(full.contains("\"t\".\"secret\""));
+        assert!(full.contains("xmax = 0"));
+        let mut minimal = MutationSql {
+            sql: "WITH mutated AS (DELETE FROM t RETURNING 1)".to_string(),
+            params: Vec::new(),
+        };
+        let query = parse_get_query("").expect("blank query");
+        finish_sql(
+            &mut minimal,
+            "t",
+            &query,
+            &columns,
+            &Ret::One,
+            &Kind::Delete,
+        );
+        assert!(!minimal.sql.contains("_megabase_src"));
     }
 
     #[test]
@@ -1020,6 +1116,7 @@ mod tests {
             &[("a$1", "text"), ("title", "text")],
             &[],
             &[],
+            &Ret::One,
         )
         .expect("sql");
         assert!(

@@ -489,7 +489,7 @@ pub(crate) struct Session {
     /// `true` when the role is the anon role. PostgREST uses that to choose
     /// 401 versus 403 for `42501`.
     pub(crate) anon: bool,
-    /// `Prefer: timezone=` value, applied with `SET LOCAL timezone`.
+    /// `Prefer: timezone=` value, applied with `set_config('timezone', …, true)`.
     pub(crate) timezone: Option<String>,
 }
 
