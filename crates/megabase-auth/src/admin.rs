@@ -121,7 +121,7 @@ pub(crate) fn verified_admin_role(
         .jwt
         .as_ref()
         .ok_or_else(|| AuthError::bad_jwt("missing JWT secret"))?;
-    let claims = jwt.verify(token).map_err(AuthError::bad_jwt)?;
+    let claims = jwt.verify_gotrue(token).map_err(AuthError::bad_jwt)?;
     if !state.is_admin_role(claims.role.as_deref()) {
         return Err(AuthError::not_admin());
     }
