@@ -7,6 +7,7 @@
 //! `dashboard` route. Supavisor's management API is not routed through Kong
 //! upstream, so it has no prefix here; see `docs/adr/0002-gateway-layout.md`.
 
+use std::future::IntoFuture;
 use std::sync::Arc;
 
 use axum::{
@@ -172,11 +173,54 @@ pub async fn run(config: Config) -> std::io::Result<()> {
     let addr = config.bind_address();
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     info!("megabase listening on {}", listener.local_addr()?);
-    axum::serve(listener, create_router_from(&auth, &config))
-        .with_graceful_shutdown(shutdown_signal())
-        .await?;
+    serve_until_drained(
+        listener,
+        create_router_from(&auth, &config),
+        shutdown_signal(),
+        SHUTDOWN_DRAIN,
+    )
+    .await?;
     auth.backend.close().await;
     info!("megabase stopped");
+    Ok(())
+}
+
+/// How long in-flight requests may finish after SIGINT or SIGTERM.
+/// The listener stops as soon as the signal arrives. This bound is independent
+/// of `MEGABASE_HTTP_TIMEOUT_MS`: a slow request must not hold the Auth pool
+/// open for the whole request deadline.
+const SHUTDOWN_DRAIN: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// Stop accepting when `shutdown` completes. Wait up to `drain` for in-flight
+/// requests, then drop the server future so the caller can close the pool.
+async fn serve_until_drained(
+    listener: tokio::net::TcpListener,
+    app: Router,
+    shutdown: impl std::future::Future<Output = ()> + Send + 'static,
+    drain: std::time::Duration,
+) -> std::io::Result<()> {
+    let (tx, mut graceful) = tokio::sync::watch::channel(false);
+    // `WithGracefulShutdown` is `IntoFuture`, not `Future`. Connection tasks are
+    // spawned, so dropping this future stops the accept loop and lets the
+    // caller close the pool; it does not wait out `MEGABASE_HTTP_TIMEOUT_MS`.
+    let server = axum::serve(listener, app)
+        .with_graceful_shutdown(async move {
+            let _ = graceful.wait_for(|stopping| *stopping).await;
+        })
+        .into_future();
+    tokio::pin!(server);
+    tokio::select! {
+        result = &mut server => return result,
+        () = shutdown => {}
+    }
+    info!("shutdown signal received");
+    let _ = tx.send(true);
+    tokio::select! {
+        result = server => result?,
+        () = tokio::time::sleep(drain) => {
+            info!("shutdown drain elapsed; closing open connections");
+        }
+    }
     Ok(())
 }
 
@@ -203,7 +247,6 @@ async fn shutdown_signal() {
         () = ctrl_c => {}
         () = terminate => {}
     }
-    info!("shutdown signal received");
 }
 
 #[cfg(test)]
@@ -242,5 +285,54 @@ mod tests {
         assert_eq!(gateway_component_for_target(b"\n/rest/v1/"), None);
         assert_eq!(gateway_component_for_target(b"/rest/v1/\r"), None);
         assert_eq!(gateway_component_for_target(&[0xff, 0xfe]), None);
+    }
+
+    #[tokio::test]
+    async fn shutdown_drain_returns_while_a_handler_is_pending() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (trigger, shutdown) = tokio::sync::oneshot::channel::<()>();
+        let drain = std::time::Duration::from_millis(200);
+        let server = tokio::spawn(serve_until_drained(
+            listener,
+            Router::new().route(
+                "/hang",
+                get(|| async {
+                    tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+                    "done"
+                }),
+            ),
+            async move {
+                let _ = shutdown.await;
+            },
+            drain,
+        ));
+
+        let mut stream = None;
+        for _ in 0..50 {
+            match tokio::net::TcpStream::connect(addr).await {
+                Ok(connected) => {
+                    stream = Some(connected);
+                    break;
+                }
+                Err(_) => tokio::time::sleep(std::time::Duration::from_millis(10)).await,
+            }
+        }
+        let mut stream = stream.expect("listener");
+        tokio::io::AsyncWriteExt::write_all(
+            &mut stream,
+            b"GET /hang HTTP/1.1\r\nHost: localhost\r\n\r\n",
+        )
+        .await
+        .unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        let started = std::time::Instant::now();
+        trigger.send(()).unwrap();
+        server.await.unwrap().unwrap();
+        let elapsed = started.elapsed();
+        assert!(
+            elapsed < std::time::Duration::from_secs(2),
+            "drain waited {elapsed:?}"
+        );
     }
 }

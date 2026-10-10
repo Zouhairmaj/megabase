@@ -12,6 +12,7 @@ use std::time::Duration;
 
 use axum::{
     body::Body,
+    extract::DefaultBodyLimit,
     http::{Request, StatusCode},
     response::{IntoResponse, Response},
     Router,
@@ -44,10 +45,13 @@ pub fn sensitive_request_headers() -> [axum::http::HeaderName; 3] {
 ///
 /// Request path, outer to inner: catch panic, assign `x-request-id`, mark
 /// `Authorization` / `apikey` / `Cookie` sensitive, trace, copy the request id
-/// onto the response, enforce the body limit, then the timeout.
+/// onto the response, enforce the body limit, then the timeout. `Bytes` and
+/// `Json` use the same byte cap. Axum's extractor default is 2 MiB, which
+/// would reject a smaller body than `RequestBodyLimitLayer` allows.
 pub fn apply_http_layers(router: Router, config: &Config) -> Router {
     let sensitive: Arc<[axum::http::HeaderName]> = Arc::from(sensitive_request_headers());
     router
+        .layer(DefaultBodyLimit::max(config.request_body_limit))
         .layer(DeadlineLayer::new(
             axum::http::StatusCode::GATEWAY_TIMEOUT,
             config.http_timeout,
@@ -322,6 +326,27 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), axum::http::StatusCode::PAYLOAD_TOO_LARGE);
+    }
+
+    #[tokio::test]
+    async fn body_between_axum_default_and_configured_limit_is_accepted() {
+        // Axum's `Bytes` extractor rejects above 2 MiB unless `DefaultBodyLimit`
+        // is raised to the configured cap.
+        const TWO_MIB: usize = 2 * 1024 * 1024;
+        let len = TWO_MIB + 1;
+        let response = limited(Duration::from_secs(2), len)
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/echo")
+                    .body(Body::from(vec![b'a'; len]))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        assert_eq!(std::str::from_utf8(&bytes).unwrap(), len.to_string());
     }
 
     #[tokio::test]
