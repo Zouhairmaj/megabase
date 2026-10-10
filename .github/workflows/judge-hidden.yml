@@ -48,6 +48,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
         with:
           toolchain: stable
+      - uses: ./.github/actions/sccache
       - uses: ./.github/actions/rust-cache
         with:
           key: mold
@@ -128,3 +129,6 @@ jobs:
           retention-days: 30
           if-no-files-found: ignore
           path: /tmp/hidden-summary.json
+      - name: sccache stats
+        if: always()
+        run: sccache --show-stats

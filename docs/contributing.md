@@ -99,6 +99,22 @@ Lockfiles under `vendor/` belong to the pinned upstream spec. Agents never edit 
 
 `site/` used `resvg` 0.45, which pulled in unmaintained `rustybuzz` (RUSTSEC-2026-0206) and `ttf-parser` (RUSTSEC-2026-0192). `resvg` 0.48 shapes text with `harfrust` and `skrifa` instead. Workspace `cargo audit` did not see those crates because `site/` is excluded from the workspace.
 
+## CI
+
+Compiling jobs use sccache ([0034](decisions/0034-ci-sccache-r2.md)).
+Same-repository runs write the R2 bucket named by `SCCACHE_BUCKET`.
+Fork pull requests have no repository secrets, so sccache uses its local
+disk and the job still passes. `Swatinem/rust-cache` caches the registry
+and git database, not `target/`. The image build compiles inside Docker
+and does not use sccache.
+
+CI runs workspace tests with `cargo nextest` (`cargo-nextest` from
+`taiki-e/install-action`). Profile `ci` in `.config/nextest.toml` retries
+a failed test twice, prints every attempt, and fails the job if the test
+never passes or exceeds three 60s slow-timeout periods. Doctests stay on
+`cargo test --doc`. Codecov runs `cargo llvm-cov nextest --doctests`.
+Local `just test` remains `cargo test`.
+
 ## What a human does
 
 Humans wrote the manifesto, GOAL.md and the initial setup. Every later human action is logged in HUMAN_LOG.md. The count is part of the result.

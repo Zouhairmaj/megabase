@@ -58,6 +58,8 @@ jobs:
         with:
           toolchain: stable
 
+      - uses: ./.github/actions/sccache
+        if: env.BENCHER_API_KEY != ''
       - uses: ./.github/actions/rust-cache
         if: env.BENCHER_API_KEY != ''
         with:
@@ -141,3 +143,7 @@ jobs:
             --error-on-alert \
             --github-actions "$GH_TOKEN" \
             "cargo bench --locked --bench health"
+
+      - name: sccache stats
+        if: always() && env.BENCHER_API_KEY != ''
+        run: sccache --show-stats

@@ -36,6 +36,8 @@ jobs:
         with:
           toolchain: stable
 
+      - uses: ./.github/actions/sccache
+
       # Trusted event SHA only. Do not download gh-pages or a
       # workflow_run artifact here: this job saves the default-branch
       # Rust cache. Live badges and the Judge-aware site are published
@@ -58,3 +60,7 @@ jobs:
           path: _site
           if-no-files-found: error
           retention-days: 1
+
+      - name: sccache stats
+        if: always()
+        run: sccache --show-stats

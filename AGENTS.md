@@ -53,6 +53,15 @@ image, Judge, Conventional Commits title, Fuzz, cargo-vet, cargo-machete,
 cargo-hack**. GitHub does not enforce them yet.
 Treat every one as required anyway.
 
+Compiling jobs wrap rustc with sccache. Pushes and same-repository pull
+requests store compiler artifacts in the R2 bucket from `SCCACHE_BUCKET`
+(endpoint `SCCACHE_ENDPOINT`, region `auto`). Fork pull requests do not
+receive repository secrets, so sccache stays on the local disk and the
+job still passes. `Swatinem/rust-cache` caches the Cargo registry and git
+database only. CI tests are `cargo nextest` (`.config/nextest.toml`
+profile `ci`); doctests stay `cargo test --doc`. See
+[0034](docs/decisions/0034-ci-sccache-r2.md).
+
 `fuzz/` is a standalone cargo-fuzz workspace (excluded from the root
 workspace). Targets: `jwt` (`megabase-core` HS256 + `bearer_token`),
 `gateway_http` (URI / Kong prefix matching), `rest_query` (stub query-string

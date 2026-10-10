@@ -36,6 +36,7 @@ jobs:
         with:
           toolchain: stable
           components: rustfmt, clippy
+      - uses: ./.github/actions/sccache
       - uses: ./.github/actions/rust-cache
         with:
           key: mold
@@ -44,8 +45,8 @@ jobs:
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
         with:
-          tool: nextest
-      - run: cargo nextest run --workspace --locked
+          tool: cargo-nextest
+      - run: cargo nextest run --workspace --locked --profile ci
       - run: cargo test --doc --workspace --locked
       - run: cargo build --release --locked -p megabase -p megabase-judge --bin megabase --bin megabase-healthcheck
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -54,6 +55,9 @@ jobs:
           path: |
             target/release/megabase
             target/release/megabase-healthcheck
+      - name: sccache stats
+        if: always()
+        run: sccache --show-stats
 
   msrv:
     name: MSRV 1.89
@@ -67,11 +71,15 @@ jobs:
       - uses: dtolnay/rust-toolchain@d77020bf130f2e8c39c025bf9c4c3a445fe2b9fa # 1.89.0
         with:
           toolchain: 1.89.0
+      - uses: ./.github/actions/sccache
       - uses: ./.github/actions/rust-cache
         with:
           key: mold
       - uses: ./.github/actions/linux-mold
       - run: cargo check --locked -p megabase -p megabase-core -p megabase-server
+      - name: sccache stats
+        if: always()
+        run: sccache --show-stats
 
   coverage:
     name: Coverage check
@@ -87,12 +95,16 @@ jobs:
       - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
         with:
           toolchain: stable
+      - uses: ./.github/actions/sccache
       - uses: ./.github/actions/rust-cache
         with:
           key: mold
       - uses: ./.github/actions/linux-mold
       - run: cargo run --locked -p megabase-coverage -- verify-pins
       - run: cargo run --locked -p megabase-coverage -- check
+      - name: sccache stats
+        if: always()
+        run: sccache --show-stats
 
   guard:
     name: Protected paths
@@ -108,6 +120,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
         with:
           toolchain: stable
+      - uses: ./.github/actions/sccache
       - uses: ./.github/actions/rust-cache
         with:
           key: mold
@@ -122,6 +135,9 @@ jobs:
             --base "origin/${BASE_REF}" \
             --head HEAD \
             --head-ref "${HEAD_REF}"
+      - name: sccache stats
+        if: always()
+        run: sccache --show-stats
 
   # cargo-audit is installed as a binary and does not compile the workspace.
   cargo-deny:
@@ -226,6 +242,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
         with:
           toolchain: stable
+      - uses: ./.github/actions/sccache
       - uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
         with:
           tool: cargo-hack@0.6.45
@@ -253,6 +270,9 @@ jobs:
             args+=(-p "$crate")
           done
           cargo hack check --locked --each-feature "${args[@]}"
+      - name: sccache stats
+        if: always()
+        run: sccache --show-stats
 
   llvm-cov:
     name: Codecov
@@ -267,21 +287,25 @@ jobs:
         with:
           toolchain: stable
           components: llvm-tools-preview
+      - uses: ./.github/actions/sccache
       - uses: ./.github/actions/rust-cache
         with:
           key: llvm-cov-mold
       - uses: ./.github/actions/linux-mold
       - uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
         with:
-          tool: cargo-llvm-cov
+          tool: cargo-llvm-cov,cargo-nextest
       - name: Generate lcov.info
-        run: cargo llvm-cov --workspace --locked --lcov --output-path lcov.info
+        run: cargo llvm-cov nextest --workspace --locked --lcov --output-path lcov.info --doctests
       - name: Upload to Codecov
         uses: codecov/codecov-action@0fb7174895f61a3b6b78fc075e0cd60383518dac # v5.5.3
         with:
           files: lcov.info
           fail_ci_if_error: false
           token: ${{ secrets.CODECOV_TOKEN }}
+      - name: sccache stats
+        if: always()
+        run: sccache --show-stats
 
   image:
     name: Container image
@@ -296,6 +320,9 @@ jobs:
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
+      # Compiles inside Docker. sccache is not installed in the image:
+      # R2 keys would be a second credential path, and fork PRs have none.
+      # Runner jobs above use sccache. See docs/decisions/0034-ci-sccache-r2.md.
       - run: docker build -t megabase:ci .
       - run: |
           docker run -d --name megabase-ci -p 8000:8000 megabase:ci

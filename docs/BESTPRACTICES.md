@@ -120,7 +120,7 @@ SUGGESTED 10 Met, 3 Unmet, 1 N/A.
 
 | Criterion | Level | Status | Justification | Evidence |
 |---|---|---|---|---|
-| `test` | MUST | Met | `cargo test --workspace --locked` is the public FLOSS suite, and CI runs it. | [.github/workflows/ci.yml](https://github.com/Zouhairmaj/megabase/blob/main/.github/workflows/ci.yml) |
+| `test` | MUST | Met | `cargo test --workspace --locked` is the public suite (`just test`). CI runs those tests with `cargo nextest` and doctests with `cargo test --doc`. | [.github/workflows/ci.yml](https://github.com/Zouhairmaj/megabase/blob/main/.github/workflows/ci.yml) |
 | `test_invocation` | SHOULD | Met | `cargo test` is the standard Rust invocation. | [README](https://github.com/Zouhairmaj/megabase/blob/main/README.md) |
 | `test_most` | SUGGESTED | Unmet | Codecov on main (2026-10-09) reports 51.32% line coverage and no branch coverage, which is not most branches. | [Codecov](https://codecov.io/gh/Zouhairmaj/megabase) |
 | `test_continuous_integration` | SUGGESTED | Met | GitHub Actions runs the test suite on pull requests and on pushes to main. | [.github/workflows/ci.yml](https://github.com/Zouhairmaj/megabase/blob/main/.github/workflows/ci.yml) |
