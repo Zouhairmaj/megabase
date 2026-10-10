@@ -54,6 +54,11 @@ Each entry should include:
 - **Files affected**: GitHub Actions repository secrets (not in git)
 
 - **Date**: 2026-10-10
+- **Action**: Owner decision by Zouhair to stop publishing cost and token spend. Removed that clause from rule 7 of `MANIFESTO.md`. The publicity rule stays: the code, the agent prompts, the loop and the logs, in real time. Removed the cost bullet from "How progress is measured". `GOAL.md` weekly reports no longer list cost. No rules were renumbered.
+- **Reason**: The manifesto shown on megabase.sh already omitted cost and token spend (PR #130). `MANIFESTO.md` now matches that text.
+- **Files affected**: `MANIFESTO.md`, `GOAL.md`, site manifesto source
+
+- **Date**: 2026-10-10
 - **Action**: Set GitHub Pages → Build and deployment → Source to GitHub Actions. The site is live at megabase.sh. `GET /repos/Zouhairmaj/megabase/pages` returns `build_type: workflow` and `html_url: https://megabase.sh/`.
 - **Reason**: The pending item said Pages was not enabled (`GET /pages` was 404). That is no longer true. `pages.yml` no longer deploys the baseline site over that publication.
 - **Files affected**: GitHub Pages settings (not in git)
@@ -77,8 +82,3 @@ Each entry should include:
 - **Action**: Confirmed repository secret `BENCHER_API_TOKEN` is used. Bencher run 38027086326 executed `bencher run` on `main` and printed `View results`.
 - **Reason**: Bencher was already listed as set up. The audit checked that the job did not skip for a missing token.
 - **Files affected**: GitHub Actions secrets (not in git)
-
-- **Date**: 2026-10-10
-- **Action**: Owner decision by Zouhair to stop publishing cost and token spend. Removed that clause from rule 7 of `MANIFESTO.md`. The publicity rule stays: the code, the agent prompts, the loop and the logs, in real time. Removed the cost bullet from "How progress is measured". `GOAL.md` weekly reports no longer list cost. No rules were renumbered.
-- **Reason**: The manifesto shown on megabase.sh already omitted cost and token spend (PR #130). `MANIFESTO.md` now matches that text.
-- **Files affected**: `MANIFESTO.md`, `GOAL.md`, site manifesto source
