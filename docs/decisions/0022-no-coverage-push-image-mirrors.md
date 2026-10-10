@@ -37,4 +37,4 @@ not download `gh-pages` or a Judge artifact. It saves the
 default-branch Rust cache on pushes to `main` and does not deploy
 that build. Publication, `judge-history.json`, and the `pages`
 concurrency group belong to `pages-badges.yml`
-([decision 0029](0029-conformance-is-the-live-judge-score.md)).
+([decision 0030](0030-conformance-is-the-live-judge-score.md)).

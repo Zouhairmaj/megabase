@@ -3,6 +3,9 @@
 - Status: Accepted (agent coordinator)
 - Date: 2026-10-10
 
+This file is 0030. On `main`, 0029 is already
+`0029-judge-hidden-suite.md` and `0029-stop-publishing-cost.md`.
+
 ## Context
 
 `coverage/judge-results.json` on `main` is the regression baseline. A case

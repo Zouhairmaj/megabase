@@ -29,6 +29,11 @@ Each entry should include:
 - **Reason**: Run 38007606007 Sync Cargo.lock failed with HTTP 403 `Permission to Zouhairmaj/megabase.git denied to megabase-agent`. GitHub's personal access token documentation says only a classic PAT has write access for a public repository you do not own. Granting Contents write on the fine-grained token does not fix that. `workflow` is included so the token can push workflow-file changes; the failed commit changed only `Cargo.lock`.
 - **Files affected**: GitHub Actions repository secrets (not in git)
 
+- **Date**: 2026-10-10
+- **Action**: (pending) Create the GitHub Actions environment `judge-hidden` (Settings → Environments), restrict deployment branches to `main`, and add environment secret `MEGABASE_JUDGE_HIDDEN_SEED` from `openssl rand -base64 48`. Optionally add `MEGABASE_JUDGE_HIDDEN_CASES` (ciphertext from `megabase-judge hidden-seal`). Do not store either value as a repository secret, and do not require reviewers on the environment. Do not add **Hidden judge** to required pull-request checks.
+- **Reason**: Issue #114. The held-out suite reads those secrets at runtime. A repository secret would be available to `workflow_dispatch` on any branch. The weekly workflow fails closed until the seed exists. The procedure is in `judge/README.md` (Held-out suite) and decision 0029.
+- **Files affected**: GitHub Actions environment `judge-hidden` (not in git)
+
 ---
 
 ## Completed
@@ -47,6 +52,11 @@ Each entry should include:
 - **Action**: Zouhair created a Docker Hub account and repository secrets `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` (read-only PAT).
 - **Reason**: Unauthenticated Docker Hub pulls were returning HTTP 429 and failing Judge, the container image build, and cargo-deny. CI logs in with these secrets before image pulls and builds, and skips login when the token is empty (fork pull requests). Digest-pinned `public.ecr.aws` and `ghcr.io` mirrors stay in place.
 - **Files affected**: GitHub Actions repository secrets (not in git)
+
+- **Date**: 2026-10-10
+- **Action**: Owner decision by Zouhair to stop publishing cost and token spend. Removed that clause from rule 7 of `MANIFESTO.md`. The publicity rule stays: the code, the agent prompts, the loop and the logs, in real time. Removed the cost bullet from "How progress is measured". `GOAL.md` weekly reports no longer list cost. No rules were renumbered.
+- **Reason**: The manifesto shown on megabase.sh already omitted cost and token spend (PR #130). `MANIFESTO.md` now matches that text.
+- **Files affected**: `MANIFESTO.md`, `GOAL.md`, site manifesto source
 
 - **Date**: 2026-10-10
 - **Action**: Set GitHub Pages → Build and deployment → Source to GitHub Actions. The site is live at megabase.sh. `GET /repos/Zouhairmaj/megabase/pages` returns `build_type: workflow` and `html_url: https://megabase.sh/`.

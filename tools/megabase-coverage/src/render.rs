@@ -300,7 +300,7 @@ judge case covers it, and *conformant* when every such case matches the referenc
 conformance = identical judge cases ÷ judge cases; component percentages count conformant units. The README picture is the \
 treemap PNG published to the `gh-pages` branch after Judge on `main`. The conformance percentage is the shields badge \
 above and [megabase.sh/status](https://megabase.sh/status/), not a figure in this block. `coverage/judge-results.json` \
-on `main` is the regression baseline ([decision 0029](docs/decisions/0029-conformance-is-the-live-judge-score.md)). \
+on `main` is the regression baseline ([decision 0030](docs/decisions/0030-conformance-is-the-live-judge-score.md)). \
 The website Status page is rebuilt from that same Judge publication.</sup>\n",
         units.total,
         units.excluded.len()
@@ -351,7 +351,7 @@ fn compatibility_units(units: &UnitsFile, summary: &Summary) -> String {
         s,
         "Implemented and tested counts come from markers and `judge/cases/`. Live conformant counts are on \
 [megabase.sh/status](https://megabase.sh/status/), from Judge on `main`. This table does not repeat the regression \
-baseline ([decision 0029](decisions/0029-conformance-is-the-live-judge-score.md)).\n"
+baseline ([decision 0030](decisions/0030-conformance-is-the-live-judge-score.md)).\n"
     );
     let _ = writeln!(
         s,
@@ -421,7 +421,7 @@ fn progress_status(summary: &Summary) -> String {
     );
     let _ = writeln!(
         s,
-        "- Conformance is the live Judge score on [megabase.sh/status](https://megabase.sh/status/) and the [conformance badge](https://github.com/Zouhairmaj/megabase#status). This block does not copy that number. `coverage/judge-results.json` on `main` is the regression baseline ([decision 0029](docs/decisions/0029-conformance-is-the-live-judge-score.md))."
+        "- Conformance is the live Judge score on [megabase.sh/status](https://megabase.sh/status/) and the [conformance badge](https://github.com/Zouhairmaj/megabase#status). This block does not copy that number. `coverage/judge-results.json` on `main` is the regression baseline ([decision 0030](docs/decisions/0030-conformance-is-the-live-judge-score.md))."
     );
     s
 }

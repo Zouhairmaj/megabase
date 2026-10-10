@@ -5,7 +5,7 @@ name: Build placeholder site
 # download a workflow_run artifact. It builds the site and does not
 # deploy it. A deploy from this checkout would publish the regression
 # baseline (0% conformance) over the live Judge score. Publication is
-# pages-badges.yml after Judge on main (decision 0029).
+# pages-badges.yml after Judge on main (decision 0030).
 
 on:
   push:

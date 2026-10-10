@@ -130,22 +130,24 @@ pub struct Step {
     pub capture: BTreeMap<String, String>,
 }
 
-pub fn load(dir: &Path) -> Result<Vec<Case>> {
-    let mut files: Vec<_> = std::fs::read_dir(dir)
-        .with_context(|| format!("reading {}", dir.display()))?
-        .filter_map(|e| e.ok().map(|e| e.path()))
-        .filter(|p| p.extension().is_some_and(|x| x == "toml"))
-        .collect();
-    files.sort();
-    let mut cases = Vec::new();
-    for file in files {
-        let text = std::fs::read_to_string(&file)?;
-        let parsed: CaseFile =
-            toml::from_str(&text).with_context(|| format!("parsing {}", file.display()))?;
-        cases.extend(parsed.case);
-    }
+/// Parses one case file. `origin` is used only in the error.
+///
+/// # Errors
+///
+/// Returns an error when `text` is not the case-file schema.
+pub fn parse_toml(text: &str, origin: &str) -> Result<Vec<Case>> {
+    let parsed: CaseFile = toml::from_str(text).with_context(|| format!("parsing {origin}"))?;
+    Ok(parsed.case)
+}
+
+/// Checks ids, units, and steps. Does not sort.
+///
+/// # Errors
+///
+/// Returns an error when a case is empty, duplicated, or internally inconsistent.
+pub fn validate(cases: &[Case]) -> Result<()> {
     let mut seen = std::collections::BTreeSet::new();
-    for case in &cases {
+    for case in cases {
         if !seen.insert(case.id.as_str()) {
             bail!("duplicate case id `{}`", case.id);
         }
@@ -166,6 +168,22 @@ pub fn load(dir: &Path) -> Result<Vec<Case>> {
             }
         }
     }
+    Ok(())
+}
+
+pub fn load(dir: &Path) -> Result<Vec<Case>> {
+    let mut files: Vec<_> = std::fs::read_dir(dir)
+        .with_context(|| format!("reading {}", dir.display()))?
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.extension().is_some_and(|x| x == "toml"))
+        .collect();
+    files.sort();
+    let mut cases = Vec::new();
+    for file in files {
+        let text = std::fs::read_to_string(&file)?;
+        cases.extend(parse_toml(&text, &file.display().to_string())?);
+    }
+    validate(&cases)?;
     cases.sort_by(|a, b| a.id.cmp(&b.id));
     Ok(cases)
 }

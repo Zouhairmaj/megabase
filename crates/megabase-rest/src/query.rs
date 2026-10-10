@@ -123,6 +123,43 @@ fn decode_component(raw: &str, plus_is_space: bool) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
+fn filter_name(parsed: &ParsedFilter) -> &'static str {
+    let (negated, name) = match parsed {
+        ParsedFilter::Unsupported { unit } => return unit,
+        ParsedFilter::Served {
+            negated, op, quant, ..
+        } => {
+            let name = match (op, quant) {
+                (_, Some(crate::filter::Quant::Any)) => "any",
+                (_, Some(crate::filter::Quant::All)) => "all",
+                (crate::filter::ServedOp::Eq, None) => "eq",
+                (crate::filter::ServedOp::Neq, None) => "neq",
+                (crate::filter::ServedOp::Gt, None) => "gt",
+                (crate::filter::ServedOp::Gte, None) => "gte",
+                (crate::filter::ServedOp::Lt, None) => "lt",
+                (crate::filter::ServedOp::Lte, None) => "lte",
+                (crate::filter::ServedOp::Like, None) => "like",
+                (crate::filter::ServedOp::Ilike, None) => "ilike",
+                (crate::filter::ServedOp::Match, None) => "match",
+                (crate::filter::ServedOp::Imatch, None) => "imatch",
+                (crate::filter::ServedOp::Fts, None) => "fts",
+                (crate::filter::ServedOp::Cs, None) => "cs",
+                (crate::filter::ServedOp::Cd, None) => "cd",
+                (crate::filter::ServedOp::Adj, None) => "adj",
+            };
+            (*negated, name)
+        }
+        ParsedFilter::In { negated, .. } => (*negated, "in"),
+        ParsedFilter::Is { negated, .. } => (*negated, "is"),
+        ParsedFilter::IsDistinct { negated, .. } => (*negated, "isdistinct"),
+    };
+    if negated {
+        "not"
+    } else {
+        name
+    }
+}
+
 fn hex_value(byte: u8) -> u8 {
     match byte {
         b'0'..=b'9' => byte - b'0',
@@ -141,19 +178,7 @@ pub fn interpret_query(query: &str) -> Vec<&'static str> {
         .filters
         .iter()
         .map(|filter| match parse_filter_value(&filter.value) {
-            Ok(ParsedFilter::Served { op, quant, .. }) => match (op, quant) {
-                (_, Some(crate::filter::Quant::Any)) => "any",
-                (_, Some(crate::filter::Quant::All)) => "all",
-                (crate::filter::ServedOp::Eq, None) => "eq",
-                (crate::filter::ServedOp::Gt, None) => "gt",
-                (crate::filter::ServedOp::Gte, None) => "gte",
-                (crate::filter::ServedOp::Ilike, None) => "ilike",
-                (crate::filter::ServedOp::Fts, None) => "fts",
-                (crate::filter::ServedOp::Cs, None) => "cs",
-                (crate::filter::ServedOp::Cd, None) => "cd",
-                (crate::filter::ServedOp::Adj, None) => "adj",
-            },
-            Ok(ParsedFilter::Unsupported { unit }) => unit,
+            Ok(parsed) => filter_name(&parsed),
             Err(_) => "invalid",
         })
         .collect()
@@ -212,8 +237,8 @@ mod tests {
     #[test]
     fn interpret_query_names_served_operators() {
         assert_eq!(
-            interpret_query("id=eq(any).{1,2}&title=ilike.*a*&id=nope.1"),
-            vec!["any", "ilike", "invalid"]
+            interpret_query("id=eq(any).{1,2}&title=ilike.*a*&id=nope.1&id=not.lt.3&id=in.(1,2)"),
+            vec!["any", "ilike", "invalid", "not", "in"]
         );
     }
 }

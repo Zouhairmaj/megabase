@@ -242,7 +242,7 @@ pub fn pct(part: usize, whole: usize) -> f64 {
 /// Passing judge cases in one results file.
 ///
 /// `None` when the file lists no cases. Callers must not substitute the
-/// committed regression baseline for that absence (decision 0029).
+/// committed regression baseline for that absence (decision 0030).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Conformance {
     pub percent: f64,
