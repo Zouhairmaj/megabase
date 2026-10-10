@@ -419,10 +419,23 @@ Upstream: `internal/api/api.go:394` (`adminGenerateLink` in `mail.go`).
 **Inputs.** `{type, email, new_email, password, data, redirect_to}`. Types:
 `magiclink`, `recovery`, `invite`, `signup`, `email_change_current`,
 `email_change_new`. Email is required, at most 255 characters, and must
-contain a local part and a dotted domain. Referrer is a valid `redirect_to`
-header, else `Referer`, else `GOTRUE_SITE_URL` (default
-`http://localhost:3000`); a valid body `redirect_to` wins. External URL
-default is `http://localhost:8000/auth/v1`. Mailer paths default to
+contain a local part and a dotted domain. The redirect follows GoTrue
+`GetReferrer` (`internal/utilities/request.go`), then a valid JSON
+`redirect_to` replaces it. A non-empty `redirect_to` header wins over the
+query `redirect_to` (percent-decoded, `+` as space) even when the header is
+invalid; otherwise the query value is used. An invalid candidate falls
+through to `Referer`, then `GOTRUE_SITE_URL` (default `http://localhost:3000`).
+A URL is accepted when its scheme and host match the site URL and the port
+matches, except a localhost host (`localhost`, `127.0.0.1`, `::1`, `0.0.0.0`,
+`::`, or a `.localhost` suffix) may use another port. A loopback IP is
+accepted. Any other IP, and an all-digit hostname, are rejected before the
+allow list. An `http` or `https` hostname must match GoTrue's regular
+hostname pattern. Otherwise the URL, with its fragment removed, must match
+`GOTRUE_URI_ALLOW_LIST` (comma-separated globs; `ADDITIONAL_REDIRECT_URLS`
+when that variable is unset or blank). `*` and `?` do not cross `.` or `/`;
+`**` does. A pattern with an unescaped character class or `{` alternative is
+not implemented. The external URL default is `http://localhost:8000/auth/v1`.
+Mailer paths default to
 `/auth/v1/verify`. OTP length defaults to 6 (clamped 6–10). Secure email
 change defaults on. Reading `/dev/urandom` for the OTP or the generated
 signup password fails the request when that device is unavailable.
@@ -451,6 +464,9 @@ duplicate new email: 422 `email_exists`
 `Enable secure email change to generate link for current email`.
 Body larger than 1 MiB: 413 `request_entity_too_large`. Random-byte
 failure: 500 `unexpected_failure` `failed to generate random bytes`.
+An allow-list pattern this build cannot evaluate: 501
+`MEGABASE_NOT_IMPLEMENTED` for unit `GOTRUE_URI_ALLOW_LIST`. Same-origin and
+loopback redirects do not consult that list.
 
 ---
 
@@ -458,7 +474,8 @@ failure: 500 `unexpected_failure` `failed to generate random bytes`.
 
 `POST /auth/v1/admin/users`, user update, factor update, SSO create/update,
 OAuth client update and secret regeneration, custom-provider update, and
-every non-admin Auth route remain `MEGABASE_NOT_IMPLEMENTED`. Unimplemented
+every non-admin Auth route other than signup, logout, and the password and
+refresh-token grants remain `MEGABASE_NOT_IMPLEMENTED`. Unimplemented
 methods on a registered admin path (for example
 `PUT /auth/v1/admin/custom-providers/{identifier}` and
 `PUT /auth/v1/admin/sso/providers/{idp_id}`) also return that 501, not Axum 405.

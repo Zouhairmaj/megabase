@@ -9,6 +9,7 @@
 //   internal/api/oauthserver/handlers.go
 //   internal/api/oauthserver/service.go
 //   internal/utilities/url_validator.go
+//   internal/utilities/request.go (GetReferrer, IsRedirectURLValid)
 //   internal/crypto/crypto.go
 
 //! Issue #7 admin reads and creates.
@@ -18,13 +19,14 @@ use std::time::{Duration, SystemTime};
 
 use axum::{
     body::Bytes,
-    extract::{Path, State},
+    extract::{OriginalUri, Path, State},
     http::{HeaderMap, HeaderValue, StatusCode},
-    response::Response,
+    response::{IntoResponse, Response},
 };
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use chrono::{DateTime, Utc};
+use megabase_core::MegabaseNotImplemented;
 use serde::Deserialize;
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha224, Sha256};
@@ -278,8 +280,9 @@ pub(crate) async fn post_custom_provider(
 pub(crate) async fn generate_link(
     State(state): State<AuthState>,
     headers: HeaderMap,
+    OriginalUri(uri): OriginalUri,
     body: Bytes,
-) -> Result<Response, AuthError> {
+) -> Result<Response, GenerateLinkError> {
     let role = verified_admin_role(&state, &headers)?;
     limit_body(&body)?;
     let mut params: LinkParams = serde_json::from_slice(&body).map_err(|err| {
@@ -293,7 +296,9 @@ pub(crate) async fn generate_link(
         )
     })?;
     params.email = validate_admin_email(&params.email)?;
-    let redirect = link_referrer(&state, &headers, &params.redirect_to);
+    let query = query_map(uri.query());
+    let query_redirect = first(&query, "redirect_to").unwrap_or("");
+    let redirect = link_referrer(&state, &headers, query_redirect, &params.redirect_to)?;
     let aud = request_aud(&headers, &state.config);
     let db = pool(&state)?;
     let mut conn = db
@@ -314,7 +319,8 @@ pub(crate) async fn generate_link(
                 return Err(AuthError::not_found(
                     "user_not_found",
                     "User with this email not found",
-                ));
+                )
+                .into());
             }
             _ => {}
         }
@@ -891,49 +897,256 @@ fn email_ok(email: &str) -> bool {
         && domain.contains('.')
 }
 
-fn link_referrer(state: &AuthState, headers: &HeaderMap, body_redirect: &str) -> String {
+/// `generate_link` fails with this when an allow-list pattern uses syntax this
+/// build does not evaluate (`[`, `]`, `{`, `}`, or a dangling `\`).
+#[derive(Debug)]
+struct RedirectAllowListUnsupported;
+
+pub(crate) enum GenerateLinkError {
+    Auth(AuthError),
+    NotImplemented(MegabaseNotImplemented),
+}
+
+impl From<AuthError> for GenerateLinkError {
+    fn from(value: AuthError) -> Self {
+        Self::Auth(value)
+    }
+}
+
+impl From<RedirectAllowListUnsupported> for GenerateLinkError {
+    fn from(_value: RedirectAllowListUnsupported) -> Self {
+        Self::NotImplemented(MegabaseNotImplemented::new(
+            crate::COMPONENT,
+            "GOTRUE_URI_ALLOW_LIST",
+        ))
+    }
+}
+
+impl IntoResponse for GenerateLinkError {
+    fn into_response(self) -> Response {
+        match self {
+            Self::Auth(err) => err.into_response(),
+            Self::NotImplemented(err) => err.into_response(),
+        }
+    }
+}
+
+/// GoTrue `GetReferrer`, then `adminGenerateLink` overwrites with a valid body
+/// `redirect_to`. A non-empty `redirect_to` header hides the query value even
+/// when the header itself is not a valid redirect.
+fn link_referrer(
+    state: &AuthState,
+    headers: &HeaderMap,
+    query_redirect: &str,
+    body_redirect: &str,
+) -> Result<String, RedirectAllowListUnsupported> {
     let header_redirect = headers
         .get("redirect_to")
         .and_then(|value| value.to_str().ok())
         .unwrap_or("");
+    let primary = if header_redirect.is_empty() {
+        query_redirect
+    } else {
+        header_redirect
+    };
     let referer = headers
         .get(axum::http::header::REFERER)
         .and_then(|value| value.to_str().ok())
         .unwrap_or("");
-    let mut referrer = if redirect_ok(&state.site_url, header_redirect) {
-        header_redirect.to_string()
-    } else if redirect_ok(&state.site_url, referer) {
+    let allow = state.uri_allow_list.as_slice();
+    let mut referrer = if redirect_ok(&state.site_url, primary, allow)? {
+        primary.to_string()
+    } else if redirect_ok(&state.site_url, referer, allow)? {
         referer.to_string()
     } else {
         state.site_url.clone()
     };
-    if redirect_ok(&state.site_url, body_redirect) {
+    if redirect_ok(&state.site_url, body_redirect, allow)? {
         referrer = body_redirect.to_string();
     }
-    referrer
+    Ok(referrer)
 }
 
-fn redirect_ok(site_url: &str, redirect: &str) -> bool {
+/// GoTrue `IsRedirectURLValid` (`internal/utilities/request.go`).
+fn redirect_ok(
+    site_url: &str,
+    redirect: &str,
+    allow: &[String],
+) -> Result<bool, RedirectAllowListUnsupported> {
     if redirect.is_empty() {
-        return false;
+        return Ok(false);
     }
     let Ok(base) = url_parts(site_url) else {
-        return false;
+        return Ok(false);
     };
     let Ok(target) = url_parts(redirect) else {
-        return false;
+        return Ok(false);
     };
-    if base.host == target.host && base.scheme == target.scheme {
-        return base.port == target.port || is_loopback_host(&target.host);
+    if base.host == target.host
+        && base.scheme == target.scheme
+        && (base.port == target.port || go_is_localhost(&target.host))
+    {
+        return Ok(true);
     }
     let host = target.host.as_str();
     if host.chars().all(|ch| ch.is_ascii_digit()) {
+        return Ok(false);
+    }
+    if let Ok(ip) = host.parse::<std::net::IpAddr>() {
+        return Ok(ip.is_loopback());
+    }
+    if (target.scheme == "http" || target.scheme == "https") && !regular_hostname(host) {
+        return Ok(false);
+    }
+    allow_list_matches(allow, redirect)
+}
+
+/// `url_validator.go` `isLocalhost`. Used only to skip the port check.
+fn go_is_localhost(host: &str) -> bool {
+    let host = host.to_ascii_lowercase();
+    matches!(
+        host.as_str(),
+        "localhost" | "127.0.0.1" | "::1" | "0.0.0.0" | "::"
+    ) || host.ends_with(".localhost")
+}
+
+/// `regularHostname` in `request.go`: `^[a-zA-Z0-9]([a-zA-Z0-9.-]*[a-zA-Z0-9])?$`.
+fn regular_hostname(host: &str) -> bool {
+    let bytes = host.as_bytes();
+    let Some((&first, rest)) = bytes.split_first() else {
+        return false;
+    };
+    if !first.is_ascii_alphanumeric() {
         return false;
     }
-    if host.parse::<std::net::IpAddr>().is_ok() {
-        return is_loopback_host(host);
+    let Some((&last, middle)) = rest.split_last() else {
+        return true;
+    };
+    last.is_ascii_alphanumeric()
+        && middle
+            .iter()
+            .all(|byte| byte.is_ascii_alphanumeric() || *byte == b'.' || *byte == b'-')
+}
+
+fn allow_list_matches(
+    allow: &[String],
+    redirect: &str,
+) -> Result<bool, RedirectAllowListUnsupported> {
+    let target = redirect.split_once('#').map_or(redirect, |(head, _)| head);
+    let mut unsupported = false;
+    for pattern in allow {
+        match glob_match(pattern, target) {
+            Ok(true) => return Ok(true),
+            Ok(false) => {}
+            Err(()) => unsupported = true,
+        }
     }
-    false
+    if unsupported {
+        Err(RedirectAllowListUnsupported)
+    } else {
+        Ok(false)
+    }
+}
+
+/// gobwas/glob with separators `.` and `/`, the separators GoTrue passes to
+/// `glob.MustCompile`. `*` and `?` do not cross a separator. `**` does.
+/// Character classes and `{` alternatives are not implemented.
+fn glob_match(pattern: &str, text: &str) -> Result<bool, ()> {
+    let pattern = pattern.as_bytes();
+    let text = text.as_bytes();
+    if pattern.len().saturating_mul(text.len().saturating_add(1)) > 250_000 {
+        return Err(());
+    }
+    let width = text.len() + 1;
+    let mut memo = vec![0u8; (pattern.len() + 1) * width];
+    glob_at(pattern, 0, text, 0, &mut memo)
+}
+
+fn glob_at(pattern: &[u8], pi: usize, text: &[u8], ti: usize, memo: &mut [u8]) -> Result<bool, ()> {
+    let width = text.len() + 1;
+    let index = pi * width + ti;
+    match memo[index] {
+        1 => return Ok(true),
+        2 => return Ok(false),
+        3 => return Err(()),
+        _ => {}
+    }
+    let result = glob_step(pattern, pi, text, ti, memo);
+    memo[index] = match &result {
+        Ok(true) => 1,
+        Ok(false) => 2,
+        Err(()) => 3,
+    };
+    result
+}
+
+fn glob_step(
+    pattern: &[u8],
+    mut pi: usize,
+    text: &[u8],
+    mut ti: usize,
+    memo: &mut [u8],
+) -> Result<bool, ()> {
+    loop {
+        if pi == pattern.len() {
+            return Ok(ti == text.len());
+        }
+        match pattern[pi] {
+            b'\\' => {
+                if pi + 1 >= pattern.len() {
+                    return Err(());
+                }
+                if ti >= text.len() || text[ti] != pattern[pi + 1] {
+                    return Ok(false);
+                }
+                pi += 2;
+                ti += 1;
+            }
+            b'[' | b']' | b'{' | b'}' => return Err(()),
+            b'?' => {
+                if ti >= text.len() || is_glob_sep(text[ti]) {
+                    return Ok(false);
+                }
+                pi += 1;
+                ti += 1;
+            }
+            b'*' if pi + 1 < pattern.len() && pattern[pi + 1] == b'*' => {
+                return glob_star(pattern, pi + 2, text, ti, true, memo);
+            }
+            b'*' => return glob_star(pattern, pi + 1, text, ti, false, memo),
+            literal => {
+                if ti >= text.len() || text[ti] != literal {
+                    return Ok(false);
+                }
+                pi += 1;
+                ti += 1;
+            }
+        }
+    }
+}
+
+fn glob_star(
+    pattern: &[u8],
+    rest: usize,
+    text: &[u8],
+    ti: usize,
+    crosses_separator: bool,
+    memo: &mut [u8],
+) -> Result<bool, ()> {
+    let mut end = ti;
+    loop {
+        if glob_at(pattern, rest, text, end, memo)? {
+            return Ok(true);
+        }
+        if end == text.len() || (!crosses_separator && is_glob_sep(text[end])) {
+            return Ok(false);
+        }
+        end += 1;
+    }
+}
+
+fn is_glob_sep(byte: u8) -> bool {
+    byte == b'.' || byte == b'/'
 }
 
 struct UrlParts {
@@ -994,15 +1207,6 @@ fn split_host_port(hostport: &str) -> Result<(String, String), ()> {
         }
     }
     Ok((hostport.to_string(), String::new()))
-}
-
-fn is_loopback_host(host: &str) -> bool {
-    host == "localhost"
-        || host == "127.0.0.1"
-        || host == "::1"
-        || host
-            .parse::<std::net::IpAddr>()
-            .is_ok_and(|ip| ip.is_loopback())
 }
 
 fn encode_redirect(redirect: &str) -> String {
@@ -2507,22 +2711,195 @@ mod tests {
 
     #[test]
     fn redirect_checks_ignore_userinfo() {
+        let allow = Vec::<String>::new();
         assert!(!redirect_ok(
             "http://localhost:3000",
-            "http://localhost:80@evil.com"
-        ));
+            "http://localhost:80@evil.com",
+            &allow
+        )
+        .unwrap());
         assert!(!redirect_ok(
             "http://localhost:3000",
-            "http://localhost:1@evil.com"
-        ));
+            "http://localhost:1@evil.com",
+            &allow
+        )
+        .unwrap());
+        assert!(redirect_ok("https://127.0.0.1", "https://a.com:443@127.0.0.1/", &allow).unwrap());
+        assert!(!redirect_ok(
+            "http://localhost:3000",
+            r"http://localhost\evil.com/cb",
+            &allow
+        )
+        .unwrap());
+    }
+
+    fn gotrue_allow_list() -> Vec<String> {
+        [
+            "http://localhost:8000/*",
+            "http://*.localhost:8000/*",
+            "http://*:12345/*",
+            "http://**:12345/*",
+        ]
+        .into_iter()
+        .map(str::to_string)
+        .collect()
+    }
+
+    fn referrer_state(allow: Vec<String>) -> AuthState {
+        let mut state = AuthState::from_lookup(|_| None);
+        state.site_url = "https://example.com".into();
+        state.uri_allow_list = allow;
+        state
+    }
+
+    #[test]
+    fn query_redirect_follows_gotrue_allow_list() {
+        let state = referrer_state(gotrue_allow_list());
+        let cases = [
+            ("http://localhost:8000/path", "http://localhost:8000/path"),
+            ("http://localhost:3000", "https://example.com"),
+            ("http://localhost:8000", "https://example.com"),
+            ("http://localhost:8000/path/to/page", "https://example.com"),
+            (
+                "http://localhost:8000/path?param=1",
+                "http://localhost:8000/path?param=1",
+            ),
+            ("http://123?.localhost:8000/path", "https://example.com"),
+            (
+                "http://123.123.123.123?localhost:8000/path",
+                "https://example.com",
+            ),
+            (
+                "http://[65e7:9410:d8b6:e227:58cd:e55b:8fc0:206d]?localhost:8000/path",
+                "https://example.com",
+            ),
+            (
+                "http://65e7:9410:d8b6:e227:58cd:e55b:8fc0:206d?localhost:8000/path",
+                "https://example.com",
+            ),
+            ("http://127.0.0.1:12345/path", "http://127.0.0.1:12345/path"),
+            (
+                "http://[0:0:0:0:0:0:0:1]:12345/path",
+                "http://[0:0:0:0:0:0:0:1]:12345/path",
+            ),
+            (
+                "https://example.com/dashboard",
+                "https://example.com/dashboard",
+            ),
+            ("http://example.com/dashboard", "https://example.com"),
+            ("https://example.com:8443/dashboard", "https://example.com"),
+            (
+                "http://foo.localhost:8000/path",
+                "http://foo.localhost:8000/path",
+            ),
+            ("http://a.b.localhost:8000/path", "https://example.com"),
+            ("http://a.b:12345/path", "http://a.b:12345/path"),
+            ("http://foo:12345/path", "http://foo:12345/path"),
+            (
+                "http://localhost:8000/path#section",
+                "http://localhost:8000/path#section",
+            ),
+        ];
+        for (query_redirect, expected) in cases {
+            let got = link_referrer(&state, &HeaderMap::new(), query_redirect, "").unwrap();
+            assert_eq!(got, expected, "{query_redirect}");
+        }
+    }
+
+    #[test]
+    fn redirect_header_hides_query_and_body_can_win() {
+        let state = referrer_state(gotrue_allow_list());
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "redirect_to",
+            HeaderValue::from_static("http://evil.example/nope"),
+        );
+        let hidden = link_referrer(&state, &headers, "http://localhost:8000/path", "").unwrap();
+        assert_eq!(hidden, "https://example.com");
+
+        headers.insert(
+            axum::http::header::REFERER,
+            HeaderValue::from_static("http://localhost:8000/ok"),
+        );
+        let from_referer =
+            link_referrer(&state, &headers, "http://localhost:8000/path", "").unwrap();
+        assert_eq!(from_referer, "http://localhost:8000/ok");
+
+        let from_body = link_referrer(
+            &state,
+            &HeaderMap::new(),
+            "http://localhost:8000/path",
+            "https://example.com/from-body",
+        )
+        .unwrap();
+        assert_eq!(from_body, "https://example.com/from-body");
+    }
+
+    #[test]
+    fn redirect_localhost_port_and_ip_rules() {
+        let allow = Vec::<String>::new();
         assert!(redirect_ok(
-            "https://127.0.0.1",
-            "https://a.com:443@127.0.0.1/"
-        ));
-        assert!(!redirect_ok(
             "http://localhost:3000",
-            r"http://localhost\evil.com/cb"
-        ));
+            "http://localhost:8080/callback",
+            &allow
+        )
+        .unwrap());
+        assert!(redirect_ok(
+            "http://127.0.0.1:3000",
+            "http://127.0.0.1:8080/callback",
+            &allow
+        )
+        .unwrap());
+        assert!(!redirect_ok(
+            "https://localhost:3000",
+            "http://localhost:8080/callback",
+            &allow
+        )
+        .unwrap());
+        assert!(redirect_ok("https://example.com", "http://127.0.0.2:9/cb", &allow).unwrap());
+        assert!(redirect_ok("http://0.0.0.0:3000", "http://0.0.0.0:9/cb", &allow).unwrap());
+        assert!(!redirect_ok("https://example.com", "http://0.0.0.0/cb", &allow).unwrap());
+        assert!(!redirect_ok("http://localhost:3000", "http://LocalHost:9/cb", &allow).unwrap());
+        assert!(redirect_ok(
+            "http://app.localhost:3000",
+            "http://app.localhost:9/cb",
+            &allow
+        )
+        .unwrap());
+        assert!(redirect_ok("https://example.com", "http://[::1]:12345/path", &allow).unwrap());
+        let ip_glob = vec!["http://8.8.8.8/*".to_string()];
+        assert!(!redirect_ok("https://example.com", "http://8.8.8.8/path", &ip_glob).unwrap());
+        let digit = vec!["http://2130706433/*".to_string()];
+        assert!(!redirect_ok("https://example.com", "http://2130706433/path", &digit).unwrap());
+    }
+
+    #[test]
+    fn unsupported_allow_list_pattern_is_not_implemented() {
+        let patterns = vec!["https://app.example/[id]/**".to_string()];
+        let err =
+            redirect_ok("https://example.com", "https://app.example/1", &patterns).unwrap_err();
+        let response = GenerateLinkError::from(err).into_response();
+        assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
+
+        assert!(redirect_ok("https://example.com", "https://example.com/dash", &patterns).unwrap());
+
+        let mixed = vec![
+            "https://app.example/[id]/**".to_string(),
+            "https://app.example/**".to_string(),
+        ];
+        assert!(redirect_ok("https://example.com", "https://app.example/ok", &mixed).unwrap());
+
+        let custom = vec!["myapp://**".to_string()];
+        assert!(redirect_ok("https://example.com", "myapp://callback", &custom).unwrap());
+    }
+
+    #[test]
+    fn query_redirect_is_percent_decoded() {
+        let state = referrer_state(gotrue_allow_list());
+        let query = query_map(Some("redirect_to=http%3A%2F%2Flocalhost%3A8000%2Fpath+two"));
+        let query_redirect = first(&query, "redirect_to").unwrap();
+        let got = link_referrer(&state, &HeaderMap::new(), query_redirect, "").unwrap();
+        assert_eq!(got, "http://localhost:8000/path two");
     }
 
     #[test]
