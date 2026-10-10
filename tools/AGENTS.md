@@ -22,6 +22,6 @@ Extends the root `AGENTS.md`; it does not relax it.
   weaken it, and update the ADR in the same PR as any rule change. A
   `review/*` modification of `GOAL.md` or `MANIFESTO.md` is allowed only
   when that same diff appends a Completed `HUMAN_LOG.md` entry that names
-  the file.
+  the file in backticks.
 - Treemap and badge style changes go through the root design gate.
   Regenerating data reuses the approved style.

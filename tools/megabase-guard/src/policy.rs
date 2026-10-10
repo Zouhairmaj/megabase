@@ -202,6 +202,9 @@ fn completed_suffix<'a>(before: &str, after: &'a str) -> Option<&'a str> {
 }
 
 /// A `review/*` mission edit is logged when Completed grew and names `path`.
+///
+/// The name must be a backtick-delimited token, the form log entries use.
+/// A substring such as `docs/GOAL.md` or `SUBGOAL.md` does not count.
 fn mission_edit_is_logged(path: &str, changes: &[Change]) -> bool {
     let Some(log) = changes.iter().find(|change| change.path == "HUMAN_LOG.md") else {
         return false;
@@ -213,7 +216,15 @@ fn mission_edit_is_logged(path: &str, changes: &[Change]) -> bool {
         return false;
     };
     is_human_log_review_ok(before, after)
-        && completed_suffix(before, after).is_some_and(|added| added.contains(path))
+        && completed_suffix(before, after).is_some_and(|added| log_names_path(added, path))
+}
+
+/// True when `text` contains `` `{path}` ``.
+///
+/// Backticks are the token. `docs/GOAL.md`, `SUBGOAL.md`, and an unquoted
+/// `GOAL.md` do not match `` `GOAL.md` ``.
+fn log_names_path(text: &str, path: &str) -> bool {
+    text.contains(&format!("`{path}`"))
 }
 
 fn split_pending_body(from_heading: &str) -> Option<(&str, &str)> {
@@ -712,7 +723,7 @@ mod tests {
             3
         );
         let unnamed = log_with_completed(
-            "- **Date**: 2026-10-09\n- **Action**: earlier\n\n- **Date**: 2026-10-10\n- **Action**: Owner decision, no path.\n",
+            "- **Date**: 2026-10-09\n- **Action**: earlier\n\n- **Date**: 2026-10-10\n- **Action**: Owner decision. Did not touch GOAL.md. See docs/GOAL.md and `SUBGOAL.md`.\n",
         );
         assert_eq!(
             evaluate(
@@ -725,6 +736,22 @@ mod tests {
             .len(),
             1
         );
+        assert_eq!(
+            evaluate(
+                &[
+                    modified("HUMAN_LOG.md", &before, &unnamed),
+                    modified("GOAL.md", "old goal", "new goal"),
+                ],
+                &c
+            )
+            .len(),
+            1
+        );
+        assert!(!log_names_path(
+            "see docs/GOAL.md and SUBGOAL.md",
+            "GOAL.md"
+        ));
+        assert!(log_names_path("edited `GOAL.md`.", "GOAL.md"));
         let deleted = Change {
             status: Status::Deleted,
             path: "MANIFESTO.md".into(),

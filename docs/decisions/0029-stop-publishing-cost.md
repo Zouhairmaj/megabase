@@ -19,7 +19,8 @@ reports do not list cost. No later rule existed, so nothing was
 renumbered.
 
 `review/*` may modify `GOAL.md` or `MANIFESTO.md` only when the same
-diff appends a Completed `HUMAN_LOG.md` entry that names that file.
+diff appends a Completed `HUMAN_LOG.md` entry that names that file in
+backticks.
 The reviewer agent still reviews the branch. Other edits to those files
 stay rejected. See [ADR 0003](../adr/0003-protected-paths.md).
 
