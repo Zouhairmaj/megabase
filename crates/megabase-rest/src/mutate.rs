@@ -505,8 +505,11 @@ fn shift_placeholders(sql: &str, by: usize) -> String {
                 continue;
             }
         }
-        out.push(byte as char);
-        index += 1;
+        let Some(ch) = sql[index..].chars().next() else {
+            break;
+        };
+        out.push(ch);
+        index += ch.len_utf8();
     }
     out
 }
@@ -706,6 +709,7 @@ mod tests {
     fn shift_placeholders_leaves_dollars_inside_identifiers() {
         let shifted = shift_placeholders(r#""todos"."a$1" = $1 AND "a""b$2" = $2"#, 1);
         assert_eq!(shifted, r#""todos"."a$1" = $2 AND "a""b$2" = $3"#);
+        assert_eq!(shift_placeholders("\"café$1\" = $1", 1), "\"café$1\" = $2");
 
         let query = parse_get_query("a$1=eq.1").expect("filter");
         let payload = Payload {
