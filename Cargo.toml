@@ -17,7 +17,7 @@ members = [
     "tools/megabase-backlog",
     "judge/harness",
 ]
-exclude = ["site", "fuzz"]
+exclude = ["site", "fuzz", "third_party/sqlx-mysql"]
 default-members = [
     "crates/megabase",
     "crates/megabase-core",
@@ -95,3 +95,10 @@ cloned_instead_of_copied = "deny"
 implicit_clone = "deny"
 map_clone = "deny"
 unnecessary_to_owned = "deny"
+
+# sqlx-mysql 0.8.6 depends on `rsa` unconditionally. Cargo still records that
+# crate in Cargo.lock when only the postgres feature is enabled, and
+# OpenSSF Scorecard flags RUSTSEC-2023-0071. The patch makes `rsa` optional
+# and leaves it off. sqlx 0.9 does the same, but it requires Rust 1.94.
+[patch.crates-io]
+sqlx-mysql = { path = "third_party/sqlx-mysql" }
