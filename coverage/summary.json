@@ -2,12 +2,12 @@
   "schema": 1,
   "totals": {
     "units": 1024,
-    "implemented": 149,
-    "tested": 90,
+    "implemented": 159,
+    "tested": 91,
     "conformant": 0
   },
   "percent": {
-    "coverage": 14.6,
+    "coverage": 15.5,
     "conformance": 0.0,
     "done": 0.0
   },
@@ -316,8 +316,8 @@
     },
     "rest": {
       "units": 93,
-      "implemented": 70,
-      "tested": 30,
+      "implemented": 80,
+      "tested": 31,
       "conformant": 0,
       "groups": {
         "aggregates": {
@@ -358,8 +358,8 @@
         },
         "prefer": {
           "units": 16,
-          "implemented": 0,
-          "tested": 0,
+          "implemented": 10,
+          "tested": 1,
           "conformant": 0
         },
         "query-params": {
@@ -683,6 +683,16 @@
     "rest:order-modifier:desc": "implemented",
     "rest:order-modifier:nullsfirst": "implemented",
     "rest:order-modifier:nullslast": "implemented",
+    "rest:prefer:count=estimated": "implemented",
+    "rest:prefer:count=exact": "tested",
+    "rest:prefer:count=planned": "implemented",
+    "rest:prefer:handling=lenient": "implemented",
+    "rest:prefer:handling=strict": "implemented",
+    "rest:prefer:max-affected=*": "implemented",
+    "rest:prefer:missing=default": "implemented",
+    "rest:prefer:missing=null": "implemented",
+    "rest:prefer:resolution=ignore-duplicates": "implemented",
+    "rest:prefer:resolution=merge-duplicates": "implemented",
     "rest:query-param:and": "tested",
     "rest:query-param:columns": "tested",
     "rest:query-param:limit": "tested",

@@ -15,6 +15,7 @@ mod filter;
 mod mutate;
 mod openapi;
 mod params;
+mod prefer;
 mod query;
 mod read;
 mod rpc;
