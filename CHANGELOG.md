@@ -4,6 +4,19 @@ All notable changes to Megabase are documented in this file.
 The format is produced by [release-please](https://github.com/googleapis/release-please).
 Sections: Features, Bug Fixes, Performance, Conformance/judge, Documentation.
 
+## [0.1.11](https://github.com/Zouhairmaj/megabase/compare/v0.1.10...v0.1.11) (2026-10-10)
+
+
+### Features
+
+* **site:** align home page with kite mockups ([#236](https://github.com/Zouhairmaj/megabase/issues/236)) ([de42810](https://github.com/Zouhairmaj/megabase/commit/de42810cd1aaf119255764e1e5e99e690c82ed3d))
+
+
+### Bug Fixes
+
+* **site:** cfg-gate counts.rs Write/Stdio imports ([#244](https://github.com/Zouhairmaj/megabase/issues/244)) ([b8851ff](https://github.com/Zouhairmaj/megabase/commit/b8851ff769bf0e61b46202953f2cdfa8e5a883f4))
+* **site:** mobile docs layout matches Kite ([#239](https://github.com/Zouhairmaj/megabase/issues/239)) ([642f18a](https://github.com/Zouhairmaj/megabase/commit/642f18ab35751985725dc2f15a90f7e0f2cc0cf5))
+
 ## [0.1.10](https://github.com/Zouhairmaj/megabase/compare/v0.1.9...v0.1.10) (2026-10-10)
 
 
