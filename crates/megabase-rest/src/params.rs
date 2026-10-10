@@ -1211,9 +1211,7 @@ fn logic_single_len(input: &str) -> usize {
             }
         }
     }
-    input
-        .find(|ch: char| matches!(ch, ',' | ')'))
-        .unwrap_or(input.len())
+    input.find([',', ')']).unwrap_or(input.len())
 }
 
 fn parse_json_path<'a>(at: &mut At<'a>) -> Result<Vec<JsonStep>, PErr> {
