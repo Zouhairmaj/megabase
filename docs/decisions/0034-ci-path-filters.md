@@ -22,4 +22,5 @@ and unclassifiable paths run every shard. The crate-to-shard map is
 `COMPONENT_SHARDS` in `.github/actions/pr-paths`.
 
 CodeQL stays on GitHub's default code-scanning setup. There is no
-`codeql.yml` to filter, and adding one would turn off that setup.
+`codeql.yml` to filter. Switching to advanced setup disables default
+setup. Default setup may leave an existing CodeQL workflow disabled.
