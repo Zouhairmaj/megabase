@@ -27,7 +27,8 @@ rows (`done=eq.true`, `priority=lt.3`, `id=in.(1,3)`, `title=like.*spec*`).
 
 | Behavior | File:line (pin) |
 |---|---|
-| `neq`, `cs`, `cd`, `ov`, `sl`, `sr`, `nxr`, `nxl`, `adj`, then `eq`, `gte`, `gt`, `lte`, `lt`, `like`, `ilike`, `match`, `imatch` | [`QueryParams.hs:234`](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/ApiRequest/QueryParams.hs#L234) |
+| `neq`, `cs`, `cd`, `ov`, `sl`, `sr`, `nxr`, `nxl`, `adj` | [`QueryParams.hs:234`](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/ApiRequest/QueryParams.hs#L234) |
+| `eq`, `gte`, `gt`, `lte`, `lt`, `like`, `ilike`, `match`, `imatch` | [`QueryParams.hs:247`](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/ApiRequest/QueryParams.hs#L247) |
 | `not.` prefix | [`QueryParams.hs:700`](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/ApiRequest/QueryParams.hs#L700) |
 | `in.(...)` list | [`QueryParams.hs:706`](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/ApiRequest/QueryParams.hs#L706) |
 | `is` tri-state keywords | [`QueryParams.hs:707`](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/ApiRequest/QueryParams.hs#L707) |
@@ -35,8 +36,9 @@ rows (`done=eq.true`, `priority=lt.3`, `id=in.(1,3)`, `title=like.*spec*`).
 | `any` / `all` quantifiers | [`QueryParams.hs:717`](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/ApiRequest/QueryParams.hs#L717) |
 | `fts`, `plfts`, `phfts`, `wfts` and optional `(language)` | [`QueryParams.hs:728`](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/ApiRequest/QueryParams.hs#L728) |
 | SQL for those operators, `IS`, and `= ANY` | [`SqlFragment.hs:130`](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/Query/SqlFragment.hs#L130) |
-| Range operator text (`&&`, `<<`, `>>`, `&<`, `&>`) | [`SqlFragment.hs:135`](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/Query/SqlFragment.hs#L135) |
-| Full-text function names | [`SqlFragment.hs:154`](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/Query/SqlFragment.hs#L154) |
+| Range operator text (`&&` at line 135, then `<<`, `>>`, `&<`, `&>`) | [`SqlFragment.hs:135`](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/Query/SqlFragment.hs#L135) |
+| Full-text function names (`ftsOperator`) | [`SqlFragment.hs:154`](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/Query/SqlFragment.hs#L154) |
+| `to_tsvector` on a non-`tsvector` column; a `tsvector` column is left as-is | [`Plan.hs:361`](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/Plan.hs#L361), [`SqlFragment.hs:284`](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/Query/SqlFragment.hs#L284) |
 | `like` / `ilike` `*` to `%`, empty `in` | [`SqlFragment.hs:424`](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/Query/SqlFragment.hs#L424) |
 | `PGRST100` message | [`QueryParams.hs:929`](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/ApiRequest/QueryParams.hs#L929) |
 | Read `Content-Range` | [`RangeQuery.hs:113`](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/RangeQuery.hs#L113) |
@@ -60,7 +62,7 @@ Each `column=operator.value` pair is a filter. Served shapes:
 | `like.pattern`, `ilike.pattern` | `like` / `ilike`, every `*` in the pattern becomes `%` |
 | `match.pattern`, `imatch.pattern` | `~` / `~*`. `*` stays `*` |
 | `cs.value`, `cd.value`, `ov.value`, `sl.value`, `sr.value`, `nxr.value`, `nxl.value`, `adj.value` | `@>`, `<@`, `&&`, `<<`, `>>`, `&<`, `&>`, `-\|-` |
-| `fts.terms`, `plfts.terms`, `phfts.terms`, `wfts.terms`, and the same with `(language)` | `@@ to_tsquery`, `@@ plainto_tsquery`, `@@ phraseto_tsquery`, `@@ websearch_to_tsquery`. A language is a bound `regconfig`. The terms are bound `text`. The column type is not cast |
+| `fts.terms`, `plfts.terms`, `phfts.terms`, `wfts.terms`, and the same with `(language)` | `@@ to_tsquery`, `@@ plainto_tsquery`, `@@ phraseto_tsquery`, `@@ websearch_to_tsquery`. A language is a bound `regconfig`. The terms are bound `text`. A `tsvector` column is the left operand. Any other column, including an unknown type, is `to_tsvector` with that same optional `regconfig` |
 | `op(any).value`, `op(all).value` | the same operator with `ANY` or `ALL` and `column_type[]` |
 | `in.(a,b)`, `in.("a,b",c)` | `= ANY` of one bound array literal. A quoted element keeps commas. A backslash escapes the next character inside quotes |
 | `in.()` and `in.(   )` | `= ANY('{}')` with no parameter. Space and tab inside the parentheses count as empty |
@@ -133,7 +135,9 @@ parse of the JSON body. There is no `ORDER BY` unless a later unit adds `order`.
   `wfts(french).amusant impossible` follow `fts`: optional `(language)`
   then `.` then the rest of the value, including spaces. `plfts.` is an
   empty query string. `plfts().x` is `PGRST100`, the same shape as
-  `fts().x`.
+  `fts().x`. On a `text` column the predicate is
+  `to_tsvector('english', "spans"."body") @@ phraseto_tsquery('english', ...)`.
+  On a `tsvector` column the column is not wrapped.
 - A catalog type that is not a safe cast target is not spliced into SQL.
 - The value is cast to the column type. An operator that does not exist for
   that type is PostgreSQL `42883` (404). PostgREST's unknown literal can

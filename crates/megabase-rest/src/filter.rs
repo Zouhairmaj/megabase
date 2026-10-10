@@ -930,9 +930,7 @@ fn push_predicate(
         // megabase:unit rest:filter-operator:not
         sql.push_str("NOT ");
     }
-    sql.push_str(&quote_ident(relation));
-    sql.push('.');
-    sql.push_str(&quote_ident(&filter.column));
+    push_field(sql, params, relation, filter);
     match &filter.body {
         FilterBody::Op {
             op,
@@ -970,6 +968,37 @@ fn push_predicate(
             Ok(())
         }
     }
+}
+
+/// Column reference, or `to_tsvector` for a full-text filter on a non-`tsvector` column.
+///
+/// PostgREST wraps every full-text field except a `tsvector` (`Plan.hs`
+/// `cfBaseType = "tsvector"`). A missing catalog type is not `tsvector`, so it
+/// is wrapped too. The optional language is the same `regconfig` as the query.
+fn push_field(sql: &mut String, params: &mut Vec<String>, relation: &str, filter: &BoundFilter) {
+    let language = match &filter.body {
+        FilterBody::Op { op, language, .. }
+            if op.is_fts() && filter.pg_type.as_deref() != Some("tsvector") =>
+        {
+            Some(language)
+        }
+        _ => None,
+    };
+    let Some(language) = language else {
+        sql.push_str(&quote_ident(relation));
+        sql.push('.');
+        sql.push_str(&quote_ident(&filter.column));
+        return;
+    };
+    sql.push_str("to_tsvector(");
+    if let Some(language) = language {
+        push_text_cast(sql, params, language, "regconfig");
+        sql.push_str(", ");
+    }
+    sql.push_str(&quote_ident(relation));
+    sql.push('.');
+    sql.push_str(&quote_ident(&filter.column));
+    sql.push(')');
 }
 
 fn push_op(
@@ -2066,9 +2095,9 @@ mod tests {
              AND \"spans\".\"during\" >> ($3::text)::int4range \
              AND \"spans\".\"during\" &< ($4::text)::int4range \
              AND NOT \"spans\".\"during\" &> ($5::text)::int4range \
-             AND \"spans\".\"body\" @@ plainto_tsquery(($6::text)::text) \
-             AND \"spans\".\"body\" @@ phraseto_tsquery(($7::text)::regconfig, ($8::text)::text) \
-             AND \"spans\".\"body\" @@ websearch_to_tsquery(($9::text)::regconfig, ($10::text)::text)"
+             AND to_tsvector(\"spans\".\"body\") @@ plainto_tsquery(($6::text)::text) \
+             AND to_tsvector(($7::text)::regconfig, \"spans\".\"body\") @@ phraseto_tsquery(($8::text)::regconfig, ($9::text)::text) \
+             AND to_tsvector(($10::text)::regconfig, \"spans\".\"body\") @@ websearch_to_tsquery(($11::text)::regconfig, ($12::text)::text)"
         );
         assert_eq!(
             rendered.params,
@@ -2080,10 +2109,28 @@ mod tests {
                 "[4,7)",
                 "The Fat Rats",
                 "english",
+                "english",
                 "The Fat Cats",
+                "french",
                 "french",
                 "amusant impossible",
             ]
+        );
+        let tsvector = predicate_sql(
+            "docs",
+            &[bound(
+                "body",
+                ServedOp::Plfts,
+                None,
+                Some("english"),
+                "spec",
+                "tsvector",
+            )],
+        )
+        .unwrap();
+        assert_eq!(
+            tsvector.sql,
+            "\"docs\".\"body\" @@ plainto_tsquery(($1::text)::regconfig, ($2::text)::text)"
         );
         let starred = predicate_sql(
             "spans",
