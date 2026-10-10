@@ -70,7 +70,13 @@ async fn dispatch(
             None,
             None,
         ),
-        Target::Root => root(&state, &method, &headers).await,
+        Target::Root => {
+            let mut response = root(&state, &method, &headers, &prefs).await;
+            if method != Method::OPTIONS {
+                prefs.stamp(&mut response, false);
+            }
+            response
+        }
         Target::Relation(relation) => {
             let mut response =
                 relation_route(&state, &method, &uri, &headers, &relation, &body).await;
@@ -108,11 +114,17 @@ fn classify(path: &str) -> Target {
     }
 }
 
-async fn root(state: &RestState, method: &Method, headers: &HeaderMap) -> Response {
-    let session = match session(state, headers.get(header::AUTHORIZATION)) {
+async fn root(
+    state: &RestState,
+    method: &Method,
+    headers: &HeaderMap,
+    prefs: &Preferences,
+) -> Response {
+    let mut session = match session(state, headers.get(header::AUTHORIZATION)) {
         Ok(session) => session,
         Err(response) => return *response,
     };
+    session.timezone = prefs.timezone.clone();
     let schema = match negotiated_schema(method, headers) {
         Ok(schema) => schema,
         Err(response) => return *response,
