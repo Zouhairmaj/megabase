@@ -117,8 +117,9 @@ registry package version in `Cargo.lock`. `--locked` CI
 commit is pushed with the token the tree probe selected.
 `RELEASE_PLEASE_CLASSIC_TOKEN` (classic PAT, scopes `repo` and
 `workflow`) is used when it is set, so the push to the release branch
-starts pull_request workflows. If that secret is absent, the probe
-tries `RELEASE_PLEASE_TOKEN`, then `GITHUB_TOKEN`. A fine-grained PAT
+starts pull_request workflows. If that secret is absent, or its probe
+returns HTTP 403 or 404 that is not a rate limit, the job tries
+`RELEASE_PLEASE_TOKEN`, then `GITHUB_TOKEN`. A fine-grained PAT
 owned by `megabase-agent` cannot write this public repository.
 [GitHub's token docs](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens)
 say only a classic PAT has write access to a public repository owned by

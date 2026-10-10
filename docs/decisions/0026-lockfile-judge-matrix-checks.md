@@ -26,9 +26,9 @@ protection can keep requiring the aggregate name `Judge`. This wait
 only proves the workflow was dispatched onto the lockfile SHA.
 
 Release prefers `RELEASE_PLEASE_CLASSIC_TOKEN` (classic PAT, `repo` and
-`workflow`). If that secret is absent, the probe tries
-`RELEASE_PLEASE_TOKEN`, then `GITHUB_TOKEN`. A fine-grained PAT cannot
-write this public user-owned repository, so a denial of that secret
-falls through. The job still dispatches with `GITHUB_TOKEN` when the
+`workflow`). If that secret is absent, or its probe returns HTTP 403
+or 404 that is not a rate limit, the job tries `RELEASE_PLEASE_TOKEN`,
+then `GITHUB_TOKEN`. A fine-grained PAT cannot write this public
+user-owned repository, so a denial of that secret falls through too. The job still dispatches with `GITHUB_TOKEN` when the
 selected push will not start workflows. That dispatch is what creates
 the matrix checks this wait accepts.

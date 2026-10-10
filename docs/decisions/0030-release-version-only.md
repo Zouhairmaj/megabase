@@ -24,7 +24,8 @@ The lockfile job now rebuilds `Cargo.toml` from the merge-base with the
 default branch and changes only `[workspace.package] version` to the
 manifest version, then runs `cargo update -w`. The push uses
 `RELEASE_PLEASE_CLASSIC_TOKEN` when that secret is set (classic PAT,
-scopes `repo` and `workflow`). If it is absent, the job probes
+scopes `repo` and `workflow`). If it is absent, or that probe returns
+HTTP 403 or 404 that is not a rate limit, the job probes
 `RELEASE_PLEASE_TOKEN`, then `GITHUB_TOKEN`. A classic-token push to the
 release branch starts pull_request workflows. `megabase-guard` rejects
 a release-please diff that changes anything else in `Cargo.toml` or

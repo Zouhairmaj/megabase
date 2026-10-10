@@ -160,9 +160,10 @@ jobs:
       # Same credential the tree probe selected.
       # RELEASE_PLEASE_CLASSIC_TOKEN is a classic PAT (repo and workflow);
       # its push to the release branch starts pull_request workflows.
-      # RELEASE_PLEASE_TOKEN is the previous fine-grained PAT and is used
-      # only when the classic secret is absent. GITHUB_TOKEN has
-      # contents: write and does not start those workflows.
+      # RELEASE_PLEASE_TOKEN is the previous fine-grained PAT. The probe
+      # uses it when the classic secret is absent, or when a present
+      # classic token gets HTTP 403 or 404 that is not a rate limit.
+      # GITHUB_TOKEN has contents: write and does not start those workflows.
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0

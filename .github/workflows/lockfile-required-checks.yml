@@ -1,7 +1,8 @@
-# Fallback for Release → Sync Cargo.lock when the push used GITHUB_TOKEN.
-# RELEASE_PLEASE_CLASSIC_TOKEN is preferred; RELEASE_PLEASE_TOKEN is next.
-# GITHUB_TOKEN pushes do not start push/pull_request workflows. This workflow
-# is dispatched from main (where it is defined) and reports the required
+# Fallback for Release → Sync Cargo.lock when required checks are missing
+# and dispatching CI, Bencher, and Judge on the release branch fails.
+# That path runs for a GITHUB_TOKEN push and also for a classic or release
+# token push onto a branch other than the default branch. This workflow is
+# dispatched from main (where it is defined) and reports the required
 # check names onto the lockfile SHA via the Checks API.
 name: Lockfile required checks
 
