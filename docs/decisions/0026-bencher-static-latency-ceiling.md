@@ -14,7 +14,7 @@ Release PR #180 still alerted. `GET /_megabase/health` measured 6.81 µs
 (6,810 ns) against an upper limit of 6.53 µs, which is 300% above a
 1.63 µs mean. The miss is 0.28 µs. `GET /rest/v1/todos` at 7.99 µs stayed
 under its limit. The bench uses 10 samples and one second of measurement.
-At a few microseconds, that gap is runner noise.
+At a few microseconds, we treat that gap as likely runner noise.
 
 A wider percentage boundary would pass this sample and then go loose once
 the mean moves up to the post-layer result.
