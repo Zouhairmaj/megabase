@@ -22,8 +22,30 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  changes:
+    name: Path filter
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      site: ${{ steps.paths.outputs.site }}
+      server: ${{ steps.paths.outputs.server }}
+      judge: ${{ steps.paths.outputs.judge }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+      - id: paths
+        uses: ./.github/actions/pr-paths
+
   build:
     name: Judge build
+    needs: changes
+    # Skip the image build when classification succeeded and this diff
+    # selects no shard (site-only, or no component crate and no shared input).
+    # A failed path-filter job leaves judge empty, which is not "none".
+    if: always() && !cancelled() && (needs.changes.result != 'success' || (needs.changes.outputs.server != 'false' && needs.changes.outputs.judge != 'none'))
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
@@ -51,18 +73,31 @@ jobs:
 
   services:
     name: Judge services
+    needs: changes
+    if: always() && !cancelled()
     runs-on: ubuntu-latest
     permissions:
       contents: read
     outputs:
-      services: ${{ steps.list.outputs.services }}
+      services: ${{ steps.list.outputs.services || steps.skip.outputs.services }}
+      selected: ${{ steps.list.outputs.selected || steps.skip.outputs.selected }}
     steps:
+      - name: No Judge shard applies
+        id: skip
+        if: needs.changes.result == 'success' && (needs.changes.outputs.server == 'false' || needs.changes.outputs.judge == 'none')
+        run: |
+          echo 'services=[]' >> "$GITHUB_OUTPUT"
+          echo 'selected=[]' >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        if: needs.changes.result != 'success' || (needs.changes.outputs.server != 'false' && needs.changes.outputs.judge != 'none')
         with:
           persist-credentials: false
           sparse-checkout: judge/cases
       - id: list
+        if: needs.changes.result != 'success' || (needs.changes.outputs.server != 'false' && needs.changes.outputs.judge != 'none')
         name: List judge/cases services
+        env:
+          JUDGE: ${{ needs.changes.outputs.judge }}
         run: |
           set -euo pipefail
           json=$(find judge/cases -maxdepth 1 -name '*.toml' -printf '%f\n' | sed 's/\.toml$//' | sort | jq -R . | jq -sc .)
@@ -70,12 +105,32 @@ jobs:
             echo "::error::judge/cases has no toml files"
             exit 1
           fi
+          # Empty or "all" (push, dispatch, classifier failure, shared input)
+          # runs every shard. A comma list still publishes every shard name
+          # so the other checks exist and succeed without running.
+          if [ -z "$JUDGE" ] || [ "$JUDGE" = "all" ]; then
+            selected='["*"]'
+          else
+            selected=$(jq -nc --arg s "$JUDGE" '$s | split(",")')
+            missing=$(jq -nr --argjson have "$json" --argjson want "$selected" \
+              '$want - $have | .[]')
+            if [ -n "$missing" ]; then
+              echo "::error::judge shard has no judge/cases file: ${missing}"
+              exit 1
+            fi
+          fi
           echo "services=${json}" >> "$GITHUB_OUTPUT"
+          echo "selected=${selected}" >> "$GITHUB_OUTPUT"
           echo "services: ${json}"
+          echo "selected: ${selected}"
 
   service:
     name: Judge (${{ matrix.service }})
-    needs: [build, services]
+    needs: [changes, build, services]
+    # always() overrides the implicit success() check. Without it, a
+    # failed changes job skips every shard even when build and services
+    # succeeded, and the aggregate fails without running cases.
+    if: always() && !cancelled() && (needs.changes.result != 'success' || (needs.changes.outputs.server != 'false' && needs.changes.outputs.judge != 'none')) && needs.build.result == 'success' && needs.services.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
@@ -85,22 +140,34 @@ jobs:
       matrix:
         service: ${{ fromJson(needs.services.outputs.services) }}
     steps:
+      - name: Not applicable
+        if: contains(fromJson(needs.services.outputs.selected), '*') == false && contains(fromJson(needs.services.outputs.selected), matrix.service) == false
+        run: echo "Judge (${{ matrix.service }}) is not selected for this diff. The check reports success without running."
+      - name: Select shard
+        id: run
+        if: contains(fromJson(needs.services.outputs.selected), '*') || contains(fromJson(needs.services.outputs.selected), matrix.service)
+        run: echo "run=true" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        if: steps.run.outputs.run == 'true'
         with:
           submodules: recursive
           fetch-depth: 1
           persist-credentials: false
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        if: steps.run.outputs.run == 'true'
         with:
           name: judge-binaries
           path: target/release
       - name: Mark binaries executable
+        if: steps.run.outputs.run == 'true'
         run: chmod +x target/release/megabase target/release/megabase-judge
       - uses: ./.github/actions/dockerhub-login
+        if: steps.run.outputs.run == 'true'
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
       - name: Pull reference images
+        if: steps.run.outputs.run == 'true'
         run: |
           set -euo pipefail
           # public.ecr.aws rejects a parallel burst with "toomanyrequests:
@@ -123,6 +190,7 @@ jobs:
             done
           done
       - name: Reference stack
+        if: steps.run.outputs.run == 'true'
         run: |
           docker compose -p megabase-judge \
             -f vendor/supabase/docker/docker-compose.yml \
@@ -130,8 +198,10 @@ jobs:
             --env-file vendor/supabase/docker/.env.example \
             up -d --pull never --wait --wait-timeout 300
       - name: Prepare Megabase database
+        if: steps.run.outputs.run == 'true'
         run: ./target/release/megabase-judge prepare
       - name: Megabase on :8100
+        if: steps.run.outputs.run == 'true'
         run: |
           set -euo pipefail
           JWT_SECRET=$(grep '^JWT_SECRET=' vendor/supabase/docker/.env.example | cut -d= -f2-)
@@ -147,8 +217,10 @@ jobs:
             ./target/release/megabase > /tmp/megabase.log 2>&1 &
           echo $! > /tmp/megabase.pid
       - name: Wait
+        if: steps.run.outputs.run == 'true'
         run: ./target/release/megabase-judge wait --timeout 240
       - name: Run cases
+        if: steps.run.outputs.run == 'true'
         env:
           SERVICE: ${{ matrix.service }}
         run: |
@@ -196,11 +268,12 @@ jobs:
             --summary /tmp/judge-summary.md
           cat /tmp/judge-summary.md >> "$GITHUB_STEP_SUMMARY"
       - name: vendor/ stayed clean
+        if: steps.run.outputs.run == 'true'
         run: |
           git -C vendor/supabase status --short
           test -z "$(git -C vendor/supabase status --porcelain)"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        if: always()
+        if: always() && steps.run.outputs.run == 'true'
         with:
           name: judge-results-${{ matrix.service }}
           retention-days: 1
@@ -210,7 +283,7 @@ jobs:
             /tmp/judge-summary.md
             /tmp/megabase.log
       - name: Logs on failure
-        if: failure()
+        if: failure() && steps.run.outputs.run == 'true'
         run: |
           docker compose -p megabase-judge \
             -f vendor/supabase/docker/docker-compose.yml \
@@ -222,19 +295,24 @@ jobs:
   # Required check name stays `Judge` so branch protection does not change.
   aggregate:
     name: Judge
-    needs: [services, service]
-    if: always()
+    needs: [changes, services, service]
+    if: always() && !cancelled()
     runs-on: ubuntu-latest
     permissions:
       contents: read
       pull-requests: write
     steps:
+      - name: Not applicable
+        if: needs.changes.result == 'success' && (needs.changes.outputs.server == 'false' || needs.changes.outputs.judge == 'none')
+        run: echo "This pull request does not change a Judge input. Judge reports success without starting the reference stack."
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        if: needs.changes.result != 'success' || (needs.changes.outputs.server != 'false' && needs.changes.outputs.judge != 'none')
         continue-on-error: true
         with:
           pattern: judge-results-*
           path: /tmp/parts
       - name: Merge service results
+        if: needs.changes.result != 'success' || (needs.changes.outputs.server != 'false' && needs.changes.outputs.judge != 'none')
         id: merge
         run: |
           set -euo pipefail
@@ -279,7 +357,7 @@ jobs:
           fi
           echo "ok=true" >> "$GITHUB_OUTPUT"
       - name: Comment on the PR
-        if: github.event_name == 'pull_request' && always()
+        if: github.event_name == 'pull_request' && (needs.changes.result != 'success' || (needs.changes.outputs.server != 'false' && needs.changes.outputs.judge != 'none')) && always()
         continue-on-error: true
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
         with:
@@ -300,7 +378,7 @@ jobs:
       # pages-badges.yml downloads this artifact from the Judge run.
       # Do not push the file onto main (branch protection, decision 0022).
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        if: steps.merge.outputs.ok == 'true'
+        if: (needs.changes.result != 'success' || (needs.changes.outputs.server != 'false' && needs.changes.outputs.judge != 'none')) && steps.merge.outputs.ok == 'true'
         with:
           name: judge-results
           retention-days: 1
