@@ -51,6 +51,10 @@ judge:
     cargo run --locked -p megabase-judge -- run --cases judge/cases --out /tmp/judge-results.json --baseline coverage/judge-results.json --summary /tmp/judge-summary.md
     @cat /tmp/judge-summary.md
 
+# Held-out suite. Needs MEGABASE_JUDGE_HIDDEN_SEED. Prints pass/fail counts only.
+judge-hidden:
+    cargo run --locked -p megabase-judge -- hidden --out /tmp/judge-hidden.json --summary /tmp/judge-hidden.md
+
 # Upsert GitHub milestones, labels, Project fields (needs issues+project write).
 # Matches existing issues by <!-- megabase-id -->; never recreates them.
 backlog:

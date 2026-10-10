@@ -34,6 +34,11 @@ Each entry should include:
 - **Reason**: Run 38007606007 Sync Cargo.lock failed with HTTP 403 `Permission to Zouhairmaj/megabase.git denied to megabase-agent`. GitHub's personal access token documentation says only a classic PAT has write access for a public repository you do not own. Granting Contents write on the fine-grained token does not fix that. `workflow` is included so the token can push workflow-file changes; the failed commit changed only `Cargo.lock`.
 - **Files affected**: GitHub Actions repository secrets (not in git)
 
+- **Date**: 2026-10-10
+- **Action**: (pending) Create the GitHub Actions environment `judge-hidden` (Settings → Environments), restrict deployment branches to `main`, and add environment secret `MEGABASE_JUDGE_HIDDEN_SEED` from `openssl rand -base64 48`. Optionally add `MEGABASE_JUDGE_HIDDEN_CASES` (ciphertext from `megabase-judge hidden-seal`). Do not store either value as a repository secret, and do not require reviewers on the environment. Do not add **Hidden judge** to required pull-request checks.
+- **Reason**: Issue #114. The held-out suite reads those secrets at runtime. A repository secret would be available to `workflow_dispatch` on any branch. The weekly workflow fails closed until the seed exists. The procedure is in `judge/README.md` (Held-out suite) and decision 0029.
+- **Files affected**: GitHub Actions environment `judge-hidden` (not in git)
+
 ---
 
 ## Completed
@@ -54,6 +59,16 @@ Each entry should include:
 - **Files affected**: GitHub Actions repository secrets (not in git)
 
 - **Date**: 2026-10-10
-- **Action**: Zouhair completed the Phase 0 owner review. Decision: validée avec modifications (validated with modifications). Validated: vendor pins 1.1–1.9 except 1.7; 2.2–2.6; 2.7 (the judge fails on a regression, and level gates use totals); 2.8–2.10; 2.13; 3.1–3.4. Modifications, left as issues and not implemented in the log pull request: 1.7 pin the Studio image to the one named by `vendor/supabase/docker/docker-compose.yml` at supabase `v1.26.08` (`supabase/studio:2026.08.03-sha-022b374`) — #198; 2.1 add a minimum number of judge cases per unit and require the hidden suite (#114) before Level 1 can be validated — #199; 2.11 and 2.12 set cargo-deny `[bans] wildcards` to `deny` — #200; 3.5 JWT normalisation must decode tokens and compare claims (`role`, `aud`, `sub`, `aal`, `amr`, and the rest), ignoring only `iat`, `exp` and identifiers — #201; 3.6 database side-effect checks add ACLs, column defaults and RLS policies — #202; 4.x the public display emphasises progress per level rather than a global percentage — #203. Item 3.9 is done in this review: “Require review from Code Owners” is enabled with admin enforcement (owner, 2026-10-10). Corrections recorded with the review: `vendor.toml` was created on 2026-10-09 during Phase 0 bootstrap and has not been modified since; `CODEOWNERS` exists at the repository root and was not enforced when pull request #1 merged.
+- **Action**: Owner decision by Zouhair to stop publishing cost and token spend. Removed that clause from rule 7 of `MANIFESTO.md`. The publicity rule stays: the code, the agent prompts, the loop and the logs, in real time. Removed the cost bullet from "How progress is measured". `GOAL.md` weekly reports no longer list cost. No rules were renumbered.
+- **Reason**: The manifesto shown on megabase.sh already omitted cost and token spend (PR #130). `MANIFESTO.md` now matches that text.
+- **Files affected**: `MANIFESTO.md`, `GOAL.md`, site manifesto source
+
+- **Date**: 2026-10-10
+- **Action**: Zouhair completed the Phase 0 owner review. Decision: validée avec modifications (validated with modifications). Validated: vendor pins 1.1–1.9 except 1.7; 2.2–2.6; 2.7 (the judge fails on a regression, and level gates use totals); 2.8–2.10; 2.13; 3.1–3.4. Modifications, left as issues and not implemented in the log pull request: 1.7 pin the Studio image to the one named by `vendor/supabase/docker/docker-compose.yml` at supabase `v1.26.08` (`supabase/studio:2026.08.03-sha-022b374`) — #198; 2.1 add a minimum number of judge cases per unit and require the hidden suite (#114) before Level 1 can be validated — #199; 2.11 and 2.12 set cargo-deny `[bans] wildcards` to `deny` — #200; 3.5 JWT normalisation must decode tokens and compare claims (`role`, `aud`, `sub`, `aal`, `amr`, and the rest), ignoring only `iat`, `exp` and identifiers — #201; 3.6 database side-effect checks add ACLs, column defaults and RLS policies — #202; 4.x the public display emphasises progress per level rather than a global percentage — #203. Item 3.9: “Require review from Code Owners” stays on. Corrections recorded with the review: `vendor.toml` was created on 2026-10-09 during Phase 0 bootstrap and has not been modified since; `CODEOWNERS` exists at the repository root and was not enforced when pull request #1 merged.
 - **Reason**: GOAL.md section 6 requires one human review of Phase 0, recorded in this file. The bootstrap is accepted with the follow-ups above. Those follow-ups stay open; this entry does not implement them. The log pull request still needs the code owner’s approval.
-- **Files affected**: `HUMAN_LOG.md`, `PROGRESS.md`. GitHub issues #198, #199, #200, #201, #202, #203. Branch protection (not in git): code-owner reviews with admin enforcement.
+- **Files affected**: `HUMAN_LOG.md`, `PROGRESS.md`. GitHub issues #198, #199, #200, #201, #202, #203.
+
+- **Date**: 2026-10-10
+- **Action**: On 2026-10-10 the owner chose: `enforce_admins` disabled, code-owner review kept, owner-approved protected pull requests merged by admin bypass on an explicit chat instruction.
+- **Reason**: Code-owner review stays required on protected paths. Turning off “Include administrators” lets the owner merge a pull request they have already approved when they say so in chat.
+- **Files affected**: GitHub branch protection on `main` (not in git)

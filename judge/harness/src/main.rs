@@ -3,6 +3,7 @@
 
 mod case;
 mod db;
+mod hidden;
 mod normalize;
 mod run;
 
@@ -20,6 +21,13 @@ usage:
   megabase-judge wait [--timeout SECS] [common]
   megabase-judge prepare [--fixtures FILE] [common]
   megabase-judge run [--cases DIR] [--out FILE] [--baseline FILE] [--summary FILE] [common]
+  megabase-judge hidden [--out FILE] [--summary FILE] [common]
+  megabase-judge hidden-seal --in FILE
+  megabase-judge hidden-open --in FILE --out FILE
+
+  hidden reads MEGABASE_JUDGE_HIDDEN_SEED from the environment (never as an
+  argument). MEGABASE_JUDGE_HIDDEN_CASES, when set, is a sealed case blob.
+  hidden-open also requires MEGABASE_JUDGE_HIDDEN_ALLOW_OPEN=1.
 
 common:
   --reference URL              reference gateway (default http://localhost:8000)
@@ -43,6 +51,7 @@ struct Args {
     reference_database: Option<String>,
     megabase_database: Option<String>,
     fixtures: PathBuf,
+    input: Option<PathBuf>,
 }
 
 fn parse_args() -> Result<Args> {
@@ -65,6 +74,7 @@ fn parse_args_from(it: impl IntoIterator<Item = String>) -> Result<Args> {
         reference_database: None,
         megabase_database: None,
         fixtures: "judge/fixtures/schema.sql".into(),
+        input: None,
     };
     while let Some(flag) = it.next() {
         let mut value = || {
@@ -82,6 +92,7 @@ fn parse_args_from(it: impl IntoIterator<Item = String>) -> Result<Args> {
             "--baseline" => args.baseline = Some(value()?.into()),
             "--summary" => args.summary = Some(value()?.into()),
             "--fixtures" => args.fixtures = value()?.into(),
+            "--in" => args.input = Some(value()?.into()),
             "--timeout" => args.timeout = value()?.parse().context("--timeout")?,
             other => bail!("unknown argument `{other}`\n{USAGE}"),
         }
@@ -333,15 +344,102 @@ fn find_regressions(baseline: &Results, current: &Results) -> Vec<String> {
     regressions
 }
 
+fn hidden_suite(args: &Args, keys: &Keys) -> Result<bool> {
+    let seed = hidden::HiddenSeed::from_env(hidden::SEED_ENV)?;
+    let sealed = match std::env::var(hidden::CASES_ENV) {
+        Ok(raw) if !raw.trim().is_empty() => Some(raw),
+        _ => None,
+    };
+    let assembled = hidden::assemble(&seed, sealed.as_deref())?;
+    let reference = Target {
+        name: "reference",
+        base: args.reference.trim_end_matches('/').into(),
+    };
+    let megabase = Target {
+        name: "megabase",
+        base: args.megabase.trim_end_matches('/').into(),
+    };
+    let databases = default_databases(args)?;
+    let report = hidden::execute(&assembled, &reference, &megabase, keys, &databases)?;
+    let markdown = hidden::summary_markdown(&report);
+    let json = hidden::summary_json(&report)?;
+    if let Some(path) = &args.out {
+        std::fs::write(path, &json).with_context(|| format!("writing {}", path.display()))?;
+    }
+    if let Some(path) = &args.summary {
+        std::fs::write(path, &markdown).with_context(|| format!("writing {}", path.display()))?;
+    }
+    eprintln!("{markdown}");
+    Ok(report.failed == 0)
+}
+
+fn hidden_seal(args: &Args) -> Result<bool> {
+    let seed = hidden::HiddenSeed::from_env(hidden::SEED_ENV)?;
+    let path = args
+        .input
+        .as_ref()
+        .context("hidden-seal requires --in FILE")?;
+    let text =
+        std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
+    let cases = case::parse_toml(&text, &path.display().to_string())?;
+    if cases.is_empty() {
+        bail!("refusing to seal a file with no cases");
+    }
+    case::validate(&cases)?;
+    let blob = hidden::seal(&seed, text.as_bytes())?;
+    println!("{blob}");
+    Ok(true)
+}
+
+fn hidden_open(args: &Args) -> Result<bool> {
+    let flag = std::env::var("MEGABASE_JUDGE_HIDDEN_ALLOW_OPEN").ok();
+    if !hidden::open_permitted(flag.as_deref()) {
+        bail!(
+            "hidden-open refuses to run unless MEGABASE_JUDGE_HIDDEN_ALLOW_OPEN=1 \
+             (do not set this in CI)"
+        );
+    }
+    let seed = hidden::HiddenSeed::from_env(hidden::SEED_ENV)?;
+    let path = args
+        .input
+        .as_ref()
+        .context("hidden-open requires --in FILE")?;
+    let out = args
+        .out
+        .as_ref()
+        .context("hidden-open requires --out FILE and refuses stdout")?;
+    let blob =
+        std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
+    let plain = hidden::open(&seed, &blob)?;
+    std::fs::write(out, plain).with_context(|| format!("writing {}", out.display()))?;
+    eprintln!(
+        "wrote held-out plaintext to {}; do not commit it or paste it into CI logs",
+        out.display()
+    );
+    Ok(true)
+}
+
 fn main() -> ExitCode {
-    let result = parse_args().and_then(|args| {
-        let keys = load_keys(&args.env)?;
-        match args.command.as_str() {
-            "wait" => wait(&args, &keys).map(|_| true),
-            "prepare" => prepare(&args).map(|_| true),
-            "run" => run_all(&args, &keys),
-            other => bail!("unknown command `{other}`\n{USAGE}"),
+    let result = parse_args().and_then(|args| match args.command.as_str() {
+        "wait" => {
+            let keys = load_keys(&args.env)?;
+            wait(&args, &keys).map(|_| true)
         }
+        "prepare" => {
+            load_keys(&args.env)?;
+            prepare(&args).map(|_| true)
+        }
+        "run" => {
+            let keys = load_keys(&args.env)?;
+            run_all(&args, &keys)
+        }
+        "hidden" => {
+            let keys = load_keys(&args.env)?;
+            hidden_suite(&args, &keys)
+        }
+        "hidden-seal" => hidden_seal(&args),
+        "hidden-open" => hidden_open(&args),
+        other => bail!("unknown command `{other}`\n{USAGE}"),
     });
     match result {
         Ok(true) => ExitCode::SUCCESS,
@@ -401,6 +499,12 @@ mod tests {
             Ok(_) => panic!("expected --out to require a value"),
         };
         assert!(err.contains("--out needs a value"), "{err}");
+        assert!(parse_args_from(
+            ["hidden", "--seed", "not-an-argument"]
+                .into_iter()
+                .map(str::to_string),
+        )
+        .is_err());
     }
 
     #[test]
