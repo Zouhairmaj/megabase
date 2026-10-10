@@ -52,3 +52,8 @@ Each entry should include:
 - **Action**: Zouhair created a Docker Hub account and repository secrets `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` (read-only PAT).
 - **Reason**: Unauthenticated Docker Hub pulls were returning HTTP 429 and failing Judge, the container image build, and cargo-deny. CI logs in with these secrets before image pulls and builds, and skips login when the token is empty (fork pull requests). Digest-pinned `public.ecr.aws` and `ghcr.io` mirrors stay in place.
 - **Files affected**: GitHub Actions repository secrets (not in git)
+
+- **Date**: 2026-10-10
+- **Action**: Owner decision by Zouhair to stop publishing cost and token spend. Removed that clause from rule 7 of `MANIFESTO.md`. The publicity rule stays: the code, the agent prompts, the loop and the logs, in real time. Removed the cost bullet from "How progress is measured". `GOAL.md` weekly reports no longer list cost. No rules were renumbered.
+- **Reason**: The manifesto shown on megabase.sh already omitted cost and token spend (PR #130). `MANIFESTO.md` now matches that text.
+- **Files affected**: `MANIFESTO.md`, `GOAL.md`, site manifesto source
