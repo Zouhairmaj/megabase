@@ -298,8 +298,10 @@ with a recorded reason (blocked or unexposed by the gateway, hosted-platform pag
 [`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md). A unit is *implemented* when Megabase code claims it, *tested* when a \
 judge case covers it, and *conformant* when every such case matches the reference stack. Coverage = implemented ÷ units; \
 conformance = identical judge cases ÷ judge cases; component percentages count conformant units. The README picture is the \
-treemap PNG published to the `gh-pages` branch after Judge on `main`. The website Status page is rebuilt from those same \
-results.</sup>\n",
+treemap PNG published to the `gh-pages` branch after Judge on `main`. The conformance percentage is the shields badge \
+above and [megabase.sh/status](https://megabase.sh/status/), not a figure in this block. `coverage/judge-results.json` \
+on `main` is the regression baseline ([decision 0029](docs/decisions/0029-conformance-is-the-live-judge-score.md)). \
+The website Status page is rebuilt from that same Judge publication.</sup>\n",
         units.total,
         units.excluded.len()
     );
@@ -347,9 +349,15 @@ fn compatibility_units(units: &UnitsFile, summary: &Summary) -> String {
     );
     let _ = writeln!(
         s,
-        "| Component | Group | Level | Units | Implemented | Tested | Conformant |"
+        "Implemented and tested counts come from markers and `judge/cases/`. Live conformant counts are on \
+[megabase.sh/status](https://megabase.sh/status/), from Judge on `main`. This table does not repeat the regression \
+baseline ([decision 0029](decisions/0029-conformance-is-the-live-judge-score.md)).\n"
     );
-    let _ = writeln!(s, "|---|---|---|---:|---:|---:|---:|");
+    let _ = writeln!(
+        s,
+        "| Component | Group | Level | Units | Implemented | Tested |"
+    );
+    let _ = writeln!(s, "|---|---|---|---:|---:|---:|");
     for (id, label) in COMPONENTS {
         let groups = &summary.components[*id].groups;
         for (group, c) in groups {
@@ -360,12 +368,11 @@ fn compatibility_units(units: &UnitsFile, summary: &Summary) -> String {
                 .collect();
             let _ = writeln!(
                 s,
-                "| {label} | {group} | {} | {} | {} | {} | {} |",
+                "| {label} | {group} | {} | {} | {} | {} |",
                 levels(&members),
                 c.units,
                 c.implemented,
-                c.tested,
-                c.conformant
+                c.tested
             );
         }
     }
@@ -404,17 +411,17 @@ fn progress_status(summary: &Summary) -> String {
     let _ = writeln!(s, "{GENERATED_NOTE}\n");
     let _ = writeln!(
         s,
-        "- Units: {} (implemented {}, tested {}, conformant {})",
-        t.units, t.implemented, t.tested, t.conformant
+        "- Units: {} (implemented {}, tested {})",
+        t.units, t.implemented, t.tested
     );
     let _ = writeln!(
         s,
-        "- Coverage {}% · conformance {}% ({}/{} judge cases) · done {}%",
-        summary.percent.coverage,
-        summary.percent.conformance,
-        summary.judge.passing,
-        summary.judge.cases,
-        summary.percent.done
+        "- Coverage {}% (implemented ÷ units)",
+        summary.percent.coverage
+    );
+    let _ = writeln!(
+        s,
+        "- Conformance is the live Judge score on [megabase.sh/status](https://megabase.sh/status/) and the [conformance badge](https://github.com/Zouhairmaj/megabase#status). This block does not copy that number. `coverage/judge-results.json` on `main` is the regression baseline ([decision 0029](docs/decisions/0029-conformance-is-the-live-judge-score.md))."
     );
     s
 }
@@ -657,7 +664,13 @@ mod tests {
         assert!(readme.contains("How the denominator is computed"));
         assert!(readme.contains(README_TREEMAP_PNG));
         assert!(readme.contains(README_TREEMAP_PNG_LIGHT));
+        assert!(readme.contains("https://megabase.sh"));
         assert!(!readme.contains("src=\"coverage/treemap.svg\""));
+        let progress = std::fs::read_to_string(tree.root.join("PROGRESS.md")).unwrap();
+        assert!(progress.contains("https://megabase.sh/status/"));
+        assert!(!progress.contains("conformance 0%"));
+        let compat = std::fs::read_to_string(tree.root.join("docs/COMPATIBILITY.md")).unwrap();
+        assert!(!compat.contains("| Conformant |"));
     }
 
     #[test]

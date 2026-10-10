@@ -329,36 +329,131 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      actions: read
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
           persist-credentials: false
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+        with:
+          toolchain: stable
+      - uses: ./.github/actions/rust-cache
+        with:
+          key: coverage-conformance
+      # Coverage (implemented ÷ units) is in the tag's summary.json.
+      # Conformance is not: that field is the regression baseline.
+      # Decision 0029. Read gh-pages judge-history.json, then the Judge
+      # artifact for the commit. Never print the baseline's 0%.
       - name: Append coverage and conformance delta
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.release-please.outputs.tag_name }}
         run: |
           set -euo pipefail
-          sumline() {
-            local file="$1" label="$2"
-            jq -r --arg l "$label" '
-              "- \($l): coverage \(.percent.coverage)% (\(.totals.implemented)/\(.totals.units) units implemented), conformance \(.percent.conformance)% (\(.judge.passing)/\(.judge.cases) judge cases)"
-            ' "$file"
+          if ! curl --retry 3 --retry-delay 2 -fsSL -o /tmp/judge-history.json \
+            "https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/gh-pages/coverage/judge-history.json"; then
+            echo '{"schema":1,"runs":[]}' > /tmp/judge-history.json
+          fi
+          from_history() {
+            jq -r --arg s "$1" '([.runs[] | select(.sha == $s)][0] // empty) as $r | if $r == null or $r == "" then empty else "\($r.percent) \($r.passing) \($r.cases)" end' /tmp/judge-history.json
+          }
+          from_artifact() {
+            local run_id="$1" sha="$2" dest line
+            dest="/tmp/judge-${sha}"
+            rm -rf "$dest"
+            if ! gh run download "$run_id" --repo "$GITHUB_REPOSITORY" --name judge-results --dir "$dest"; then
+              return 1
+            fi
+            local file
+            file="$(find "$dest" -name judge-results.json -print -quit)"
+            if [ -z "$file" ]; then
+              return 1
+            fi
+            line="$(cargo run --quiet --locked -p megabase-coverage -- conformance "$file")"
+            printf '%s\n' "$line"
+          }
+          # $2 is "wait" for the release commit (Judge may still be running)
+          # and "once" for an older tag.
+          measure() {
+            local sha="$1" mode="$2" hit status conclusion run_id json attempts i
+            hit="$(from_history "$sha" || true)"
+            if [ -n "$hit" ]; then
+              printf '%s\n' "$hit"
+              return 0
+            fi
+            attempts=1
+            if [ "$mode" = "wait" ]; then
+              attempts=50
+            fi
+            for i in $(seq 1 "$attempts"); do
+              json="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow judge.yml --commit "$sha" --limit 1 --json databaseId,status,conclusion)"
+              status="$(jq -r '.[0].status // empty' <<<"$json")"
+              conclusion="$(jq -r '.[0].conclusion // empty' <<<"$json")"
+              run_id="$(jq -r '.[0].databaseId // empty' <<<"$json")"
+              if [ "$status" = "completed" ] && [ "$conclusion" = "success" ] && [ -n "$run_id" ]; then
+                if hit="$(from_artifact "$run_id" "$sha")"; then
+                  printf '%s\n' "$hit"
+                  return 0
+                fi
+                return 1
+              fi
+              if [ "$mode" != "wait" ]; then
+                return 1
+              fi
+              if [ "$status" = "completed" ] && [ "$conclusion" != "success" ]; then
+                return 1
+              fi
+              echo "Waiting for Judge on ${sha} (status=${status:-none}, attempt ${i}/${attempts})" >&2
+              sleep 60
+            done
+            return 1
+          }
+          coverage_text() {
+            jq -r '"coverage \(.percent.coverage)% (\(.totals.implemented)/\(.totals.units) units implemented)"' "$1"
+          }
+          bullet() {
+            local label="$1" summary="$2" conf="${3:-}"
+            local cov
+            cov="$(coverage_text "$summary")"
+            if [ -n "$conf" ]; then
+              read -r pct passing cases <<<"$conf"
+              echo "- ${label}: ${cov}, conformance ${pct}% (${passing}/${cases} judge cases)"
+            else
+              echo "- ${label}: ${cov}, conformance not measured (no Judge publication for this commit; the git baseline is not the score)"
+            fi
           }
           git show "${TAG}:coverage/summary.json" > /tmp/cur.json
+          CUR_SHA="$(git rev-parse "${TAG}^{commit}")"
+          CUR_CONF=""
+          if CUR_CONF="$(measure "$CUR_SHA" wait)"; then
+            :
+          else
+            CUR_CONF=""
+          fi
           {
             echo
             echo "## Coverage and conformance"
             echo
-            sumline /tmp/cur.json "This release"
+            bullet "This release" /tmp/cur.json "$CUR_CONF"
             PREV="$(git tag --list 'v*' --sort=-v:refname | awk -v t="$TAG" '$0 != t { print; exit }')"
             if [ -n "${PREV:-}" ] && git cat-file -e "${PREV}:coverage/summary.json" 2>/dev/null; then
               git show "${PREV}:coverage/summary.json" > /tmp/prev.json
-              sumline /tmp/prev.json "Previous release (\`${PREV}\`)"
-              jq -s -r '
-                "- Delta: coverage \((.[0].percent.coverage - .[1].percent.coverage) | tostring) pp, conformance \((.[0].percent.conformance - .[1].percent.conformance) | tostring) pp"
-              ' /tmp/cur.json /tmp/prev.json
+              PREV_SHA="$(git rev-parse "${PREV}^{commit}")"
+              PREV_CONF=""
+              if PREV_CONF="$(measure "$PREV_SHA" once)"; then
+                :
+              else
+                PREV_CONF=""
+              fi
+              bullet "Previous release (\`${PREV}\`)" /tmp/prev.json "$PREV_CONF"
+              cov_delta="$(jq -s -r '.[0].percent.coverage - .[1].percent.coverage | . * 10 | round / 10' /tmp/cur.json /tmp/prev.json)"
+              if [ -n "$CUR_CONF" ] && [ -n "$PREV_CONF" ]; then
+                conf_delta="$(jq -n --argjson c "${CUR_CONF%% *}" --argjson p "${PREV_CONF%% *}" '($c - $p) * 10 | round / 10')"
+                echo "- Delta: coverage ${cov_delta} pp, conformance ${conf_delta} pp"
+              else
+                echo "- Delta: coverage ${cov_delta} pp (conformance delta omitted; a side has no Judge publication)"
+              fi
             else
               echo "- Initial release (no previous tag)."
             fi

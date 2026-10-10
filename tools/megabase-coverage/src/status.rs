@@ -239,6 +239,94 @@ pub fn pct(part: usize, whole: usize) -> f64 {
     }
 }
 
+/// Passing judge cases in one results file.
+///
+/// `None` when the file lists no cases. Callers must not substitute the
+/// committed regression baseline for that absence (decision 0029).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Conformance {
+    pub percent: f64,
+    pub passing: usize,
+    pub cases: usize,
+}
+
+impl Conformance {
+    /// `percent passing cases`, the line release notes and history share.
+    pub fn fields(&self) -> String {
+        format!("{} {} {}", self.percent, self.passing, self.cases)
+    }
+}
+
+pub fn conformance_of(results: &JudgeResults) -> Option<Conformance> {
+    let cases = results.cases.len();
+    if cases == 0 {
+        return None;
+    }
+    let passing = results.cases.iter().filter(|c| c.pass).count();
+    Some(Conformance {
+        percent: pct(passing, cases),
+        passing,
+        cases,
+    })
+}
+
+fn commit_sha(sha: &str) -> bool {
+    sha.len() == 40
+        && sha
+            .bytes()
+            .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
+}
+
+#[derive(Debug, Deserialize, Serialize, PartialEq)]
+struct JudgeHistory {
+    schema: u32,
+    runs: Vec<JudgeHistoryRun>,
+}
+
+#[derive(Debug, Deserialize, Serialize, PartialEq)]
+struct JudgeHistoryRun {
+    sha: String,
+    passing: usize,
+    cases: usize,
+    percent: f64,
+}
+
+/// Insert or replace the measurement for `sha` in `coverage/judge-history.json`.
+///
+/// # Errors
+///
+/// Returns an error when `sha` is not a commit id, the history JSON is
+/// unreadable or uses another schema, or `results` has no cases.
+pub fn merge_judge_history(
+    history_json: &str,
+    sha: &str,
+    results: &JudgeResults,
+) -> Result<String> {
+    if !commit_sha(sha) {
+        bail!("judge history sha is not a commit id");
+    }
+    let measured = conformance_of(results).context("judge results have no cases")?;
+    let mut history: JudgeHistory =
+        serde_json::from_str(history_json).context("parsing judge history")?;
+    if history.schema != 1 {
+        bail!("unsupported judge history schema {}", history.schema);
+    }
+    let run = JudgeHistoryRun {
+        sha: sha.to_string(),
+        passing: measured.passing,
+        cases: measured.cases,
+        percent: measured.percent,
+    };
+    if let Some(existing) = history.runs.iter_mut().find(|r| r.sha == sha) {
+        *existing = run;
+    } else {
+        history.runs.push(run);
+    }
+    let mut out = serde_json::to_string_pretty(&history)?;
+    out.push('\n');
+    Ok(out)
+}
+
 pub fn summarize(units: &UnitsFile, status: &Status) -> Summary {
     let mut totals = Counts::default();
     let mut components: BTreeMap<String, ComponentSummary> = COMPONENTS
@@ -529,10 +617,50 @@ units = ["{get_id}"]
         assert!(badges.contains("group: pages"));
         assert!(badges.contains("treemap.png"));
         assert!(
+            badges.contains("judge-history"),
+            "pages-badges must record the live score for release notes"
+        );
+        assert!(
             !pages.contains("judge-results"),
             "the cached Pages build must not download the Judge artifact"
         );
+        assert!(
+            !pages.contains("actions/deploy-pages"),
+            "a push must not publish the baseline site over the live Judge score"
+        );
         assert!(!pages.contains("github.event.workflow_run"));
+    }
+
+    #[test]
+    fn conformance_fields_round_like_pct_and_history_replaces_one_sha() {
+        let results = JudgeResults {
+            schema: 1,
+            cases: vec![
+                CaseResult {
+                    id: "a".into(),
+                    pass: true,
+                },
+                CaseResult {
+                    id: "b".into(),
+                    pass: false,
+                },
+            ],
+        };
+        let measured = conformance_of(&results).unwrap();
+        assert_eq!(measured.percent, 50.0);
+        assert_eq!(measured.fields(), "50 1 2");
+        assert!(conformance_of(&JudgeResults::default()).is_none());
+
+        let sha = "ff547511ed61f6b17661bdb1b98c131968d965df";
+        let other = "9f957e503eb6f9ad4f6e253162a6b2131e9ea120";
+        let first = merge_judge_history(r#"{"schema":1,"runs":[]}"#, sha, &results).unwrap();
+        let again = merge_judge_history(&first, sha, &results).unwrap();
+        assert_eq!(again.matches(sha).count(), 1);
+        let both = merge_judge_history(&again, other, &results).unwrap();
+        assert!(both.contains(sha) && both.contains(other));
+        assert!(merge_judge_history(&both, "FF547511", &results).is_err());
+        assert!(merge_judge_history("{}", sha, &results).is_err());
+        assert!(merge_judge_history(r#"{"schema":2,"runs":[]}"#, sha, &results).is_err());
     }
 
     #[test]

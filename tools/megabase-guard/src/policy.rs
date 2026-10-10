@@ -136,7 +136,8 @@ pub fn is_human_log_review_ok(before: &str, after: &str) -> bool {
         || (new_pending.starts_with(old_pending)
             && pending_grow_starts_at_item_boundary(old_pending, new_pending))
         || (old_pending.starts_with(new_pending)
-            && pending_shrink_ends_at_item_boundary(old_pending, new_pending));
+            && pending_shrink_ends_at_item_boundary(old_pending, new_pending))
+        || pending_only_drops_dated_items(old_pending, new_pending);
     pending_ok && is_completed_section_ok(old_rest, new_rest) && after != before
 }
 
@@ -144,6 +145,40 @@ fn pending_grow_starts_at_item_boundary(old_pending: &str, new_pending: &str) ->
     new_pending
         .get(old_pending.len()..)
         .is_some_and(|added| added.trim_start_matches('\n').starts_with("- "))
+}
+
+/// Drop whole `- **Date**` items anywhere in Pending. Items that remain
+/// must be unchanged, in the same order. An edited item is not a drop.
+fn pending_only_drops_dated_items(old_pending: &str, new_pending: &str) -> bool {
+    let old_items = pending_items(old_pending);
+    let new_items = pending_items(new_pending);
+    if new_items.len() >= old_items.len() {
+        return false;
+    }
+    let mut kept = 0;
+    let mut dropped = false;
+    for item in &old_items {
+        if kept < new_items.len() && new_items[kept] == *item {
+            kept += 1;
+        } else if item.starts_with("- **Date**") {
+            dropped = true;
+        } else {
+            return false;
+        }
+    }
+    kept == new_items.len() && dropped
+}
+
+fn pending_items(body: &str) -> Vec<&str> {
+    let trimmed = body.trim_matches('\n');
+    if trimmed.is_empty() {
+        return Vec::new();
+    }
+    trimmed
+        .split("\n\n")
+        .map(|item| item.trim_matches('\n'))
+        .filter(|item| !item.is_empty())
+        .collect()
 }
 
 fn pending_shrink_ends_at_item_boundary(old_pending: &str, new_pending: &str) -> bool {
@@ -568,6 +603,31 @@ mod tests {
             keep,
             "- **Date**: 2026-10-09\n- **Action**: keep\n- **Re"
         ));
+    }
+
+    #[test]
+    fn review_branch_may_drop_an_earlier_pending_item() {
+        let header = "# Human Intervention Log\n\n## Pending\n\n";
+        let rest = "\n---\n\n## Completed\n\n- already\n";
+        let first = "- **Date**: 2026-10-09\n- **Action**: pages\n";
+        let second = "- **Date**: 2026-10-09\n- **Action**: keep\n";
+        let third = "- **Date**: 2026-10-10\n- **Action**: still open\n";
+        let before = format!("{header}{first}\n{second}\n{third}{rest}");
+        let after = format!(
+            "{header}{second}\n{third}{rest}- **Date**: 2026-10-10\n- **Action**: pages is live\n"
+        );
+        let c = ctx("review/human-log", false);
+        assert!(
+            evaluate(&[modified("HUMAN_LOG.md", &before, &after)], &c).is_empty(),
+            "{:?}",
+            evaluate(&[modified("HUMAN_LOG.md", &before, &after)], &c)
+        );
+        let rewritten =
+            format!("{header}{second}\n- **Date**: 2026-10-09\n- **Action**: edited\n{rest}");
+        assert_eq!(
+            evaluate(&[modified("HUMAN_LOG.md", &before, &rewritten)], &c).len(),
+            1
+        );
     }
 
     #[test]

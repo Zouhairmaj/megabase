@@ -26,4 +26,4 @@ password and refresh-token grants carry markers. Other HTTP routes are
 still 501.
 
 > [!NOTE]
-> Conformant 0 with a real denominator is still honest. Inventing a mockup total is not.
+> The live conformance percentage is the Judge publication on [megabase.sh/status](https://megabase.sh/status/). The committed `coverage/judge-results.json` is the regression baseline, not that score ([decision 0029](decisions/0029-conformance-is-the-live-judge-score.md)).
