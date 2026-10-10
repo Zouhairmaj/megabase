@@ -3,7 +3,7 @@
   "totals": {
     "units": 1024,
     "implemented": 107,
-    "tested": 78,
+    "tested": 81,
     "conformant": 0
   },
   "percent": {
@@ -12,7 +12,7 @@
     "done": 0.0
   },
   "judge": {
-    "cases": 168,
+    "cases": 172,
     "passing": 0
   },
   "components": {
@@ -317,7 +317,7 @@
     "rest": {
       "units": 93,
       "implemented": 36,
-      "tested": 18,
+      "tested": 21,
       "conformant": 0,
       "groups": {
         "aggregates": {
@@ -365,7 +365,7 @@
         "query-params": {
           "units": 8,
           "implemented": 8,
-          "tested": 5,
+          "tested": 8,
           "conformant": 0
         },
         "resources": {
@@ -655,11 +655,11 @@
     "rest:filter-operator:sl": "tested",
     "rest:filter-operator:sr": "tested",
     "rest:filter-operator:wfts": "tested",
-    "rest:query-param:and": "implemented",
-    "rest:query-param:columns": "implemented",
+    "rest:query-param:and": "tested",
+    "rest:query-param:columns": "tested",
     "rest:query-param:limit": "tested",
     "rest:query-param:offset": "tested",
-    "rest:query-param:on_conflict": "implemented",
+    "rest:query-param:on_conflict": "tested",
     "rest:query-param:or": "tested",
     "rest:query-param:order": "tested",
     "rest:query-param:select": "tested"

@@ -944,7 +944,9 @@ mod tests {
         assert!(home.contains("updated on every commit"));
         assert!(home.contains("treemap-svg"));
         assert!(home.contains("visually-hidden"));
-        assert!(home.contains("Coverage · Conformance"));
+        assert!(home.contains("<dt>Coverage</dt>"));
+        assert!(!home.contains("Coverage · Conformance"));
+        assert!(!home.contains("BUILT BY AGENTS"));
         assert!(home.contains("Units passing the judge"));
         assert!(home.contains("https://analytics.ahrefs.com/analytics.js"));
         assert!(home.contains("NOTHING PASSES YET"));
@@ -1154,6 +1156,11 @@ mod tests {
         assert!(status.contains("#005441"));
         assert!(home.contains("status-panel-legend"));
         assert!(home.contains("Units passing the judge"));
+        assert!(home.contains("UNITS PASS"));
+        assert!(!home.contains("% CONFORMANT"));
+        assert!(!home.contains("BUILT BY AGENTS"));
+        assert!(status.contains("metric-grid-3"));
+        assert!(!status.contains(r#"<p class="muted">Conformance</p>"#));
         assert!(status.contains("conformant (matches real Supabase)"));
         assert!(
             out.join("coverage/badge-coverage.json").is_file(),

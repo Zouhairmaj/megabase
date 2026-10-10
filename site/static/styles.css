@@ -937,6 +937,11 @@ a:hover {
   border: 1px solid var(--border);
 }
 
+.metric-grid-3,
+.day0-strip-3 {
+  grid-template-columns: repeat(3, 1fr);
+}
+
 .home-mobile-stats {
   display: flex;
   flex-direction: column;
@@ -2209,6 +2214,23 @@ body:has(#licensing-and-credits:target) .toc-list a[href="#licensing-and-credits
   .metric {
     border-right: 0;
     border-bottom: 1px solid var(--border);
+  }
+
+  .metric-grid.metric-grid-3 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    border: 0;
+  }
+
+  .metric-grid.metric-grid-3 .metric {
+    border: 1px solid var(--border);
+    padding: 16px;
+    min-width: 0;
+  }
+
+  .metric-grid.metric-grid-3 .stat-xl {
+    font-size: 22px;
   }
 
   .level-card {

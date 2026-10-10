@@ -47,7 +47,7 @@ pub struct Card {
 pub const CARDS: &[Card] = &[
     Card {
         key: "home",
-        eyebrow: "DAY 0 · BUILT BY AGENTS, IN PUBLIC",
+        eyebrow: "DAY 0 · PHASE 0",
         line1: "The Supabase API.",
         line2: "One Rust binary.",
         summary: "AI agents rewrite every Supabase service in Rust, judged response by response against the real stack.",
@@ -358,6 +358,9 @@ mod tests {
             assert!(resvg::usvg::Tree::from_str(&svg, &resvg::usvg::Options::default()).is_ok());
             assert!(svg.contains("endorsed by Supabase, Inc."));
         }
+        assert_eq!(CARDS[0].eyebrow, "DAY 0 · PHASE 0");
+        assert!(svg(&CARDS[0]).contains("DAY 0 · PHASE 0"));
+        assert!(!svg(&CARDS[0]).contains("BUILT BY AGENTS"));
     }
 
     fn render_home_card(load_fonts: bool) -> resvg::tiny_skia::Pixmap {
