@@ -18,6 +18,9 @@ pub const REVIEW_BRANCH_PREFIX: &str = "review/";
 pub const RELEASE_PLEASE_BRANCH_PREFIX: &str = "release-please--branches--";
 
 /// Version-bump files release-please (and the lockfile sync job) may change.
+///
+/// `Cargo.toml` is accepted only when the parsed manifest differs solely in
+/// `workspace.package.version` ([`is_cargo_workspace_version_only`]).
 pub const RELEASE_PLEASE_ALLOWED: &[&str] = &[
     "CHANGELOG.md",
     ".release-please-manifest.json",
@@ -252,6 +255,59 @@ fn release_please_config_ok(change: &Change) -> bool {
             .is_some_and(|(before, after)| is_release_as_deletion_only(before, after))
 }
 
+fn release_please_cargo_toml_ok(change: &Change) -> bool {
+    change.status == Status::Modified
+        && change
+            .before
+            .as_deref()
+            .zip(change.after.as_deref())
+            .is_some_and(|(before, after)| is_cargo_workspace_version_only(before, after))
+}
+
+fn workspace_package_version(doc: &toml::Value) -> Option<&str> {
+    doc.get("workspace")?
+        .get("package")?
+        .get("version")?
+        .as_str()
+}
+
+fn set_workspace_package_version(doc: &mut toml::Value, version: &str) -> bool {
+    let Some(slot) = doc
+        .get_mut("workspace")
+        .and_then(|workspace| workspace.get_mut("package"))
+        .and_then(|package| package.get_mut("version"))
+    else {
+        return false;
+    };
+    if slot.as_str().is_none() {
+        return false;
+    }
+    *slot = toml::Value::String(version.to_string());
+    true
+}
+
+/// True when parsed `after` matches `before` except `workspace.package.version`.
+///
+/// A missing manifest, a missing version string, or any other key change
+/// returns false. That includes a dropped `[workspace.dependencies]` entry.
+/// Comments and whitespace do not count.
+pub fn is_cargo_workspace_version_only(before: &str, after: &str) -> bool {
+    let Ok(old) = toml::from_str::<toml::Value>(before) else {
+        return false;
+    };
+    let Ok(mut new) = toml::from_str::<toml::Value>(after) else {
+        return false;
+    };
+    let Some(version) = workspace_package_version(&old) else {
+        return false;
+    };
+    let version = version.to_string();
+    if !set_workspace_package_version(&mut new, &version) {
+        return false;
+    }
+    old == new
+}
+
 pub fn evaluate(changes: &[Change], ctx: &Context) -> Vec<String> {
     let bootstrap = is_bootstrap(ctx);
     let review = ctx.head_ref.starts_with(REVIEW_BRANCH_PREFIX);
@@ -260,6 +316,15 @@ pub fn evaluate(changes: &[Change], ctx: &Context) -> Vec<String> {
     for change in changes {
         let path = change.path.as_str();
         if release_please {
+            if path == "Cargo.toml" {
+                if release_please_cargo_toml_ok(change) {
+                    continue;
+                }
+                violations.push(format!(
+                    "{path}: release-please may only change workspace.package.version"
+                ));
+                continue;
+            }
             if matches(path, RELEASE_PLEASE_ALLOWED)
                 || (path == RELEASE_PLEASE_CONFIG && release_please_config_ok(change))
             {
@@ -379,6 +444,37 @@ mod tests {
   }
 }"#;
 
+    const CARGO_TOML_V014: &str = r#"
+[workspace.package]
+version = "0.1.4"
+
+[workspace.dependencies]
+base64 = "0.22"
+chacha20 = "0.10"
+hkdf = "0.12"
+hmac = "0.12"
+"#;
+
+    const CARGO_TOML_V015: &str = r#"
+[workspace.package]
+version = "0.1.5"
+
+[workspace.dependencies]
+base64 = "0.22"
+chacha20 = "0.10"
+hkdf = "0.12"
+hmac = "0.12"
+"#;
+
+    const CARGO_TOML_DROPPED_CRYPTO: &str = r#"
+[workspace.package]
+version = "0.1.5"
+
+[workspace.dependencies]
+base64 = "0.22"
+hmac = "0.12"
+"#;
+
     #[test]
     fn bootstrap_branch_may_create_protected_tree_once() {
         let changes = [
@@ -450,16 +546,58 @@ mod tests {
             &[
                 add("CHANGELOG.md"),
                 add(".release-please-manifest.json"),
-                add("Cargo.toml"),
+                modified("Cargo.toml", CARGO_TOML_V014, CARGO_TOML_V015),
                 add("Cargo.lock"),
             ],
             &c
         )
         .is_empty());
+        assert!(evaluate(&[add("Cargo.toml")], &c)[0].contains("workspace.package.version"));
         assert_eq!(evaluate(&[add("crates/megabase/src/main.rs")], &c).len(), 1);
         assert_eq!(evaluate(&[add("vendor/auth")], &c).len(), 1);
         assert_eq!(evaluate(&[add(".github/workflows/ci.yml")], &c).len(), 1);
         assert!(evaluate(&[add("GOAL.md")], &c)[0].contains("release-please"));
+    }
+
+    #[test]
+    fn release_please_cargo_toml_rejects_dropped_dependency_keys() {
+        let c = release_ctx();
+        assert!(is_cargo_workspace_version_only(
+            CARGO_TOML_V014,
+            CARGO_TOML_V015
+        ));
+        assert!(!is_cargo_workspace_version_only(
+            CARGO_TOML_V014,
+            CARGO_TOML_DROPPED_CRYPTO
+        ));
+        let violations = evaluate(
+            &[modified(
+                "Cargo.toml",
+                CARGO_TOML_V014,
+                CARGO_TOML_DROPPED_CRYPTO,
+            )],
+            &c,
+        );
+        assert_eq!(violations.len(), 1);
+        assert!(violations[0].contains("workspace.package.version"));
+        let bumped_hkdf = CARGO_TOML_V015.replace("hkdf = \"0.12\"", "hkdf = \"0.13\"");
+        assert!(!is_cargo_workspace_version_only(
+            CARGO_TOML_V014,
+            &bumped_hkdf
+        ));
+        assert!(!is_cargo_workspace_version_only(
+            "not toml",
+            CARGO_TOML_V015
+        ));
+        assert!(evaluate(
+            &[modified(
+                "Cargo.toml",
+                CARGO_TOML_V014,
+                CARGO_TOML_DROPPED_CRYPTO,
+            )],
+            &ctx("issue-1-deps", false),
+        )
+        .is_empty());
     }
 
     #[test]

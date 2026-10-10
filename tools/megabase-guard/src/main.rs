@@ -172,14 +172,17 @@ fn run() -> Result<bool> {
     }
     if policy::is_release_please(&ctx) {
         eprintln!(
-            "release-please exception active: branch `{}` may change CHANGELOG.md, .release-please-manifest.json, Cargo.toml, Cargo.lock, and delete release-as from release-please-config.json",
+            "release-please exception active: branch `{}` may change CHANGELOG.md, .release-please-manifest.json, Cargo.toml (workspace.package.version only), Cargo.lock, and delete release-as from release-please-config.json",
             ctx.head_ref
         );
     }
 
     let mut changes = changes(&base, &head)?;
     for change in &mut changes {
-        if change.path == policy::RELEASE_PLEASE_CONFIG || change.path == "HUMAN_LOG.md" {
+        if change.path == policy::RELEASE_PLEASE_CONFIG
+            || change.path == "HUMAN_LOG.md"
+            || change.path == "Cargo.toml"
+        {
             change.before = git(&["show", &format!("{}:{}", base, change.path)]).ok();
             change.after = git(&["show", &format!("{}:{}", head, change.path)]).ok();
         }

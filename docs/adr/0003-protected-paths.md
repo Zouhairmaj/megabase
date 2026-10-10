@@ -66,7 +66,9 @@ bump set:
 
 - `CHANGELOG.md`
 - `.release-please-manifest.json`
-- `Cargo.toml` (workspace package version)
+- `Cargo.toml`, and only `workspace.package.version`. The guard parses
+  both sides and rejects any other change, including a dropped
+  `[workspace.dependencies]` key. Comments and whitespace do not count.
 - `Cargo.lock` (workspace member versions, kept in sync by
   `cargo update -w` on the release branch)
 - `release-please-config.json` only when the sole change is deleting
