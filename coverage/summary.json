@@ -3,7 +3,7 @@
   "totals": {
     "units": 1024,
     "implemented": 99,
-    "tested": 65,
+    "tested": 73,
     "conformant": 0
   },
   "percent": {
@@ -12,7 +12,7 @@
     "done": 0.0
   },
   "judge": {
-    "cases": 160,
+    "cases": 168,
     "passing": 0
   },
   "components": {
@@ -317,7 +317,7 @@
     "rest": {
       "units": 93,
       "implemented": 28,
-      "tested": 5,
+      "tested": 13,
       "conformant": 0,
       "groups": {
         "aggregates": {
@@ -335,7 +335,7 @@
         "filtering": {
           "units": 28,
           "implemented": 28,
-          "tested": 5,
+          "tested": 13,
           "conformant": 0
         },
         "logic": {
@@ -647,13 +647,13 @@
     "rest:filter-operator:match": "implemented",
     "rest:filter-operator:neq": "implemented",
     "rest:filter-operator:not": "tested",
-    "rest:filter-operator:nxl": "implemented",
-    "rest:filter-operator:nxr": "implemented",
-    "rest:filter-operator:ov": "implemented",
-    "rest:filter-operator:phfts": "implemented",
-    "rest:filter-operator:plfts": "implemented",
-    "rest:filter-operator:sl": "implemented",
-    "rest:filter-operator:sr": "implemented",
-    "rest:filter-operator:wfts": "implemented"
+    "rest:filter-operator:nxl": "tested",
+    "rest:filter-operator:nxr": "tested",
+    "rest:filter-operator:ov": "tested",
+    "rest:filter-operator:phfts": "tested",
+    "rest:filter-operator:plfts": "tested",
+    "rest:filter-operator:sl": "tested",
+    "rest:filter-operator:sr": "tested",
+    "rest:filter-operator:wfts": "tested"
   }
 }
