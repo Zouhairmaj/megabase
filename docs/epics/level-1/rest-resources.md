@@ -10,13 +10,13 @@ Specs go in `specs/rest/<unit>.md` (GOAL.md section 5). Mark served code with `/
 
 | State | Unit id | Upstream source |
 |---|---|---|
-| ⬜ | `rest:route:DELETE /rest/v1/{relation}` | [src/library/PostgREST/ApiRequest.hs:171](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/ApiRequest.hs#L171) |
-| ⬜ | `rest:route:GET /rest/v1/` | [src/library/PostgREST/ApiRequest.hs:174](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/ApiRequest.hs#L174) |
-| ⬜ | `rest:route:GET /rest/v1/{relation}` | [src/library/PostgREST/ApiRequest.hs:167](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/ApiRequest.hs#L167) |
-| ⬜ | `rest:route:HEAD /rest/v1/` | [src/library/PostgREST/ApiRequest.hs:173](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/ApiRequest.hs#L173) |
-| ⬜ | `rest:route:HEAD /rest/v1/{relation}` | [src/library/PostgREST/ApiRequest.hs:166](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/ApiRequest.hs#L166) |
-| ⬜ | `rest:route:OPTIONS /rest/v1/` | [src/library/PostgREST/ApiRequest.hs:175](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/ApiRequest.hs#L175) |
-| ⬜ | `rest:route:OPTIONS /rest/v1/{relation}` | [src/library/PostgREST/ApiRequest.hs:172](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/ApiRequest.hs#L172) |
-| ⬜ | `rest:route:PATCH /rest/v1/{relation}` | [src/library/PostgREST/ApiRequest.hs:170](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/ApiRequest.hs#L170) |
-| ⬜ | `rest:route:POST /rest/v1/{relation}` | [src/library/PostgREST/ApiRequest.hs:168](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/ApiRequest.hs#L168) |
-| ⬜ | `rest:route:PUT /rest/v1/{relation}` | [src/library/PostgREST/ApiRequest.hs:169](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/ApiRequest.hs#L169) |
+| 🟩 | `rest:route:DELETE /rest/v1/{relation}` | [src/library/PostgREST/ApiRequest.hs:171](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/ApiRequest.hs#L171) |
+| 🟨 | `rest:route:GET /rest/v1/` | [src/library/PostgREST/ApiRequest.hs:174](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/ApiRequest.hs#L174) |
+| 🟩 | `rest:route:GET /rest/v1/{relation}` | [src/library/PostgREST/ApiRequest.hs:167](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/ApiRequest.hs#L167) |
+| 🟨 | `rest:route:HEAD /rest/v1/` | [src/library/PostgREST/ApiRequest.hs:173](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/ApiRequest.hs#L173) |
+| 🟨 | `rest:route:HEAD /rest/v1/{relation}` | [src/library/PostgREST/ApiRequest.hs:166](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/ApiRequest.hs#L166) |
+| 🟨 | `rest:route:OPTIONS /rest/v1/` | [src/library/PostgREST/ApiRequest.hs:175](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/ApiRequest.hs#L175) |
+| 🟨 | `rest:route:OPTIONS /rest/v1/{relation}` | [src/library/PostgREST/ApiRequest.hs:172](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/ApiRequest.hs#L172) |
+| 🟩 | `rest:route:PATCH /rest/v1/{relation}` | [src/library/PostgREST/ApiRequest.hs:170](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/ApiRequest.hs#L170) |
+| 🟩 | `rest:route:POST /rest/v1/{relation}` | [src/library/PostgREST/ApiRequest.hs:168](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/ApiRequest.hs#L168) |
+| 🟨 | `rest:route:PUT /rest/v1/{relation}` | [src/library/PostgREST/ApiRequest.hs:169](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/ApiRequest.hs#L169) |

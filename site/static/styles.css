@@ -379,7 +379,7 @@ a:hover {
   display: flex;
   gap: 72px;
   padding: 112px var(--pad) 120px;
-  align-items: flex-start;
+  align-items: center;
   min-width: 0;
 }
 
@@ -391,88 +391,28 @@ a:hover {
   min-width: 0;
 }
 
-.status-panel {
-  position: relative;
-  box-sizing: border-box;
+.hero-art {
+  margin: 0;
   display: flex;
-  width: 500px;
-  min-width: 0;
-  flex-shrink: 0;
-  flex-direction: column;
-  gap: 20px;
-  padding: 28px;
-  overflow: hidden;
-  border: 1px solid var(--border);
-  background: var(--panel);
-  font-size: 14px;
-}
-
-.status-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 16px;
-}
-
-#status-title {
-  color: var(--body);
-  font-size: 13px;
-  letter-spacing: 2px;
-  white-space: nowrap;
-}
-
-.status-updated {
-  color: var(--muted);
-  font-size: 13px;
-  white-space: nowrap;
-}
-
-.status-treemap {
-  width: 100%;
-  min-width: 0;
-  flex-shrink: 0;
-  overflow: hidden;
-  background: var(--bg);
-}
-
-.status-treemap .treemap-svg,
-.status-treemap .panel-treemap {
-  display: block;
-  width: 100%;
   max-width: 100%;
+  min-width: 0;
+  flex-shrink: 0;
+  justify-content: center;
+}
+
+.db-dither {
+  display: block;
+  width: min(450px, 80vw);
+  max-width: 100%;
+  aspect-ratio: 1;
   height: auto;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
 }
 
 .live-dot {
   color: var(--accent);
   font-size: 12px;
-}
-
-.status-panel dl,
-.stats-rows {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  margin: 0;
-}
-
-.status-panel dl div,
-.stat-row {
-  display: flex;
-  justify-content: space-between;
-  gap: 16px;
-}
-
-.status-panel dt {
-  margin: 0;
-  color: var(--body);
-  font-weight: 400;
-}
-
-.status-panel dd {
-  margin: 0;
-  color: var(--text);
-  text-align: right;
 }
 
 .rule,
@@ -714,11 +654,6 @@ a:hover {
   color: var(--body);
   font-size: 13px;
   letter-spacing: 0;
-}
-
-.status-panel-legend {
-  gap: 10px 14px;
-  font-size: 12px;
 }
 
 .swatch-row {
@@ -2114,6 +2049,7 @@ body:has(#licensing-and-credits:target) .toc-list a[href="#licensing-and-credits
 
   .hero {
     flex-direction: column;
+    align-items: stretch;
     padding: 40px 20px 48px;
     gap: 32px;
   }
@@ -2146,26 +2082,13 @@ body:has(#licensing-and-credits:target) .toc-list a[href="#licensing-and-credits
     min-height: 48px;
   }
 
-  .status-panel {
-    width: 100%;
-    gap: 16px;
-    padding: 20px;
-    font-size: 13px;
-  }
-
-  .status-panel-legend {
-    gap: 8px 12px;
-    font-size: 11px;
+  .db-dither {
+    width: min(260px, 80vw);
   }
 
   .treemap-block-head .legend-inline {
     width: 100%;
     gap: 8px 12px;
-    font-size: 11px;
-  }
-
-  #status-title,
-  .status-updated {
     font-size: 11px;
   }
 

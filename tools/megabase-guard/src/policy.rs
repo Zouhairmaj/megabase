@@ -29,6 +29,25 @@ pub const RELEASE_PLEASE_CONFIG: &str = "release-please-config.json";
 /// base branch does not have it yet.
 pub const BOOTSTRAP_BRANCH: &str = "cursor/phase-0-bootstrap-121c";
 
+/// Owner-approved decorative canvas (issue #228). This exact path only.
+pub const DECORATIVE_JS: &str = "site/static/db-dither.js";
+
+/// The one branch that may land the guard change and the `HUMAN_LOG.md`
+/// entry for [`DECORATIVE_JS`], and only while [`decorative_landing_open`]
+/// is still true for the base branch tip. Further guard edits need `review/*`.
+pub const DECORATIVE_JS_BRANCH: &str = "cursor/hero-dither-db-13b4";
+
+/// True when `base_policy` and `base_log` are the base branch tip and neither
+/// has recorded [`DECORATIVE_JS`] yet.
+///
+/// The guard reads those files from the base ref before resolving the merge
+/// base. After the landing merges, `main` names the path and the branch
+/// exception stays closed even if a later pull request is cut from older
+/// history.
+pub fn decorative_landing_open(base_policy: &str, base_log: &str) -> bool {
+    !base_policy.contains(DECORATIVE_JS) && !log_names_path(base_log, DECORATIVE_JS)
+}
+
 /// Source extensions of languages other than Rust (GOAL.md rule 1). SQL and
 /// configuration formats are allowed.
 pub const NON_RUST_CODE: &[&str] = &[
@@ -63,6 +82,10 @@ pub struct Context {
     pub human_log_size: Option<u64>,
     /// Errors from comparing vendor gitlinks with `vendor.toml` in the head tree.
     pub pin_errors: Vec<String>,
+    /// The base branch tip has not yet recorded the decorative-canvas landing.
+    /// False once that tip names [`DECORATIVE_JS`], so a reused branch cannot
+    /// edit `tools/megabase-guard/` again.
+    pub decorative_landing_open: bool,
 }
 
 fn matches(path: &str, patterns: &[&str]) -> bool {
@@ -467,10 +490,63 @@ fn release_please_config_ok(change: &Change) -> bool {
             .is_some_and(|(before, after)| is_release_as_deletion_only(before, after))
 }
 
+fn decorative_js_branch(ctx: &Context) -> bool {
+    ctx.decorative_landing_open && ctx.head_ref == DECORATIVE_JS_BRANCH
+}
+
+/// One Completed append that names the canvas path.
+///
+/// `after` must start with every byte of `before`, so Pending and earlier
+/// Completed entries cannot change. The new suffix is a single `- **Date**`
+/// item, and the path must appear in that item. A heading, a rule, or a
+/// second item in the suffix is rejected. A base log that already names the
+/// path is not the initial landing.
+fn decorative_log_ok(change: &Change) -> bool {
+    change.path == "HUMAN_LOG.md"
+        && change.status == Status::Modified
+        && change
+            .before
+            .as_deref()
+            .zip(change.after.as_deref())
+            .is_some_and(|(before, after)| decorative_completed_append(before, after))
+}
+
+fn decorative_completed_append(before: &str, after: &str) -> bool {
+    if log_names_path(before, DECORATIVE_JS) {
+        return false;
+    }
+    let Some(suffix) = after.strip_prefix(before) else {
+        return false;
+    };
+    let Some(entry) = single_completed_entry(suffix) else {
+        return false;
+    };
+    log_names_path(entry, DECORATIVE_JS)
+}
+
+/// The suffix is exactly one Completed item: a `- **Date**` block with no
+/// further dated item, heading, or horizontal rule.
+fn single_completed_entry(suffix: &str) -> Option<&str> {
+    let entry = suffix.trim_matches('\n');
+    if !entry.starts_with("- **Date**") {
+        return None;
+    }
+    let extra = entry.lines().skip(1).any(|line| {
+        let trimmed = line.trim_start();
+        trimmed.starts_with("- **Date**") || trimmed.starts_with('#') || trimmed == "---"
+    });
+    (!extra).then_some(entry)
+}
+
+fn diff_logs_decorative_js(changes: &[Change]) -> bool {
+    changes.iter().any(decorative_log_ok)
+}
+
 pub fn evaluate(changes: &[Change], ctx: &Context) -> Vec<String> {
     let bootstrap = is_bootstrap(ctx);
     let review = ctx.head_ref.starts_with(REVIEW_BRANCH_PREFIX);
     let release_please = is_release_please(ctx);
+    let decorative = decorative_js_branch(ctx);
     let mut violations = Vec::new();
     for change in changes {
         let path = change.path.as_str();
@@ -506,7 +582,13 @@ pub fn evaluate(changes: &[Change], ctx: &Context) -> Vec<String> {
                 && change.status == Status::Modified
                 && (path == "GOAL.md" || path == "MANIFESTO.md")
                 && mission_edit_is_logged(path, changes);
-            if !creating_empty_log && !bootstrap_goal && !human_log_review && !mission_logged {
+            let decorative_log = decorative && decorative_log_ok(change);
+            if !creating_empty_log
+                && !bootstrap_goal
+                && !human_log_review
+                && !mission_logged
+                && !decorative_log
+            {
                 violations.push(format!(
                     "{path}: human-owned file; only maintainers edit it"
                 ));
@@ -518,11 +600,17 @@ pub fn evaluate(changes: &[Change], ctx: &Context) -> Vec<String> {
                 ));
             }
         } else if matches(path, REVIEWED) && !bootstrap && !review {
-            violations.push(format!(
-                "{path}: reviewed path; change it on a `{REVIEW_BRANCH_PREFIX}*` branch for the reviewer agent"
-            ));
+            let decorative_guard = decorative
+                && matches(path, &["tools/megabase-guard/"])
+                && diff_logs_decorative_js(changes);
+            if !decorative_guard {
+                violations.push(format!(
+                    "{path}: reviewed path; change it on a `{REVIEW_BRANCH_PREFIX}*` branch for the reviewer agent"
+                ));
+            }
         }
-        if change.status != Status::Deleted && !path.starts_with("vendor/") {
+        if change.status != Status::Deleted && !path.starts_with("vendor/") && path != DECORATIVE_JS
+        {
             if let Some(ext) = path.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase()) {
                 if !path.ends_with('/') && NON_RUST_CODE.contains(&ext.as_str()) {
                     violations.push(format!("{path}: .{ext} source; Megabase code is Rust only"));
@@ -568,6 +656,7 @@ mod tests {
             base_is_pre_bootstrap: pre_bootstrap,
             human_log_size: Some(0),
             pin_errors: Vec::new(),
+            decorative_landing_open: false,
         }
     }
 
@@ -1023,6 +1112,149 @@ checksum = \"abc\"
             &ctx("review/ok", false)
         )
         .is_empty());
+    }
+
+    #[test]
+    fn decorative_canvas_js_is_the_only_non_rust_exception() {
+        let c = ctx("issue-228-hero", false);
+        assert!(
+            evaluate(&[add(DECORATIVE_JS)], &c).is_empty(),
+            "{:?}",
+            evaluate(&[add(DECORATIVE_JS)], &c)
+        );
+        assert!(evaluate(&[modified(DECORATIVE_JS, "a", "b")], &c).is_empty());
+        let other = evaluate(&[add("site/static/other.js")], &c);
+        assert_eq!(other.len(), 1);
+        assert!(other[0].contains("Rust only"));
+        assert_eq!(evaluate(&[add("site/static/db-dither.ts")], &c).len(), 1);
+        assert_eq!(evaluate(&[add("site/static/db-dither.JS")], &c).len(), 1);
+    }
+
+    #[test]
+    fn decorative_js_branch_may_land_the_guard_with_a_named_log_entry() {
+        let before = log_with_completed("- **Date**: 2026-10-09\n- **Action**: earlier\n");
+        let after = log_with_completed(
+            "- **Date**: 2026-10-09\n- **Action**: earlier\n\n- **Date**: 2026-10-10\n- **Action**: Owner approved `site/static/db-dither.js`.\n",
+        );
+        let log = modified("HUMAN_LOG.md", &before, &after);
+        let guard = modified("tools/megabase-guard/src/policy.rs", "old", "new");
+        let mut c = ctx(DECORATIVE_JS_BRANCH, false);
+        c.decorative_landing_open = true;
+        let landed = evaluate(&[log.clone(), guard.clone(), add(DECORATIVE_JS)], &c);
+        assert!(landed.is_empty(), "{landed:?}");
+        assert_eq!(
+            evaluate(
+                &[modified("tools/megabase-guard/src/policy.rs", "old", "new")],
+                &c
+            )
+            .len(),
+            1
+        );
+        let unnamed = log_with_completed(
+            "- **Date**: 2026-10-09\n- **Action**: earlier\n\n- **Date**: 2026-10-10\n- **Action**: approved the dither script.\n",
+        );
+        assert_eq!(
+            evaluate(
+                &[modified("HUMAN_LOG.md", &before, &unnamed), guard.clone()],
+                &c
+            )
+            .len(),
+            2
+        );
+        assert_eq!(
+            evaluate(&[log.clone(), add("judge/cases/a.toml")], &c).len(),
+            1
+        );
+        assert_eq!(
+            evaluate(&[log.clone(), add(".github/workflows/ci.yml")], &c).len(),
+            1
+        );
+        assert_eq!(evaluate(&[log.clone(), add("CODEOWNERS")], &c).len(), 1);
+        assert_eq!(
+            evaluate(&[log.clone(), modified("GOAL.md", "old", "new")], &c).len(),
+            1
+        );
+        let other = ctx("cursor/other", false);
+        assert_eq!(evaluate(&[log.clone(), guard.clone()], &other).len(), 2);
+        assert!(evaluate(&[add(DECORATIVE_JS)], &other).is_empty());
+        let mut closed = ctx(DECORATIVE_JS_BRANCH, false);
+        closed.decorative_landing_open = false;
+        let reused = evaluate(&[log, guard], &closed);
+        assert_eq!(reused.len(), 2, "{reused:?}");
+        assert!(evaluate(&[add(DECORATIVE_JS)], &closed).is_empty());
+    }
+
+    #[test]
+    fn decorative_log_is_one_completed_append() {
+        let before = log_with_completed("- **Date**: 2026-10-09\n- **Action**: earlier\n");
+        let entry =
+            "\n- **Date**: 2026-10-10\n- **Action**: Owner approved `site/static/db-dither.js`.\n";
+        let mut c = ctx(DECORATIVE_JS_BRANCH, false);
+        c.decorative_landing_open = true;
+        let guard = modified("tools/megabase-guard/src/policy.rs", "old", "new");
+        let ok = modified("HUMAN_LOG.md", &before, &format!("{before}{entry}"));
+        let landed = evaluate(&[ok, guard.clone()], &c);
+        assert!(landed.is_empty(), "{landed:?}");
+        let dropped_pending =
+            before.replacen("- **Date**: 2026-10-09\n- **Action**: keep\n\n", "", 1);
+        assert!(
+            evaluate(
+                &[modified(
+                    "HUMAN_LOG.md",
+                    &before,
+                    &format!("{dropped_pending}{entry}")
+                )],
+                &c
+            )
+            .iter()
+            .any(|v| v.contains("human-owned")),
+            "dropping Pending is not the decorative append"
+        );
+        let two = format!("{before}{entry}\n- **Date**: 2026-10-11\n- **Action**: second\n");
+        assert!(evaluate(&[modified("HUMAN_LOG.md", &before, &two)], &c)
+            .iter()
+            .any(|v| v.contains("human-owned")));
+        let pending_heading = format!(
+            "{before}\n- **Date**: 2026-10-10\n- **Action**: unrelated note\n\n## Pending\n\n`site/static/db-dither.js`\n"
+        );
+        let bypass = evaluate(
+            &[
+                modified("HUMAN_LOG.md", &before, &pending_heading),
+                guard.clone(),
+            ],
+            &c,
+        );
+        assert_eq!(bypass.len(), 2, "{bypass:?}");
+        assert!(bypass.iter().any(|v| v.contains("human-owned")));
+        assert!(bypass.iter().any(|v| v.contains("reviewed path")));
+        let edited = before.replacen("earlier", "changed", 1);
+        assert!(evaluate(
+            &[modified(
+                "HUMAN_LOG.md",
+                &before,
+                &format!("{edited}{entry}")
+            )],
+            &c
+        )
+        .iter()
+        .any(|v| v.contains("human-owned")));
+        let already = log_with_completed(
+            "- **Date**: 2026-10-09\n- **Action**: earlier `site/static/db-dither.js`.\n",
+        );
+        let again = format!("{already}{entry}");
+        assert_eq!(
+            evaluate(&[modified("HUMAN_LOG.md", &already, &again), guard], &c).len(),
+            2
+        );
+        assert!(decorative_landing_open("fn main() {}", "# log\n"));
+        assert!(!decorative_landing_open(
+            "allow site/static/db-dither.js\n",
+            "# log\n"
+        ));
+        assert!(!decorative_landing_open(
+            "fn main() {}",
+            "named `site/static/db-dither.js`\n"
+        ));
     }
 
     #[test]

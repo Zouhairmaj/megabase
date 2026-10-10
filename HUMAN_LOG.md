@@ -87,3 +87,8 @@ Each entry should include:
 - **Action**: Created repository secret `RELEASE_PLEASE_CLASSIC_TOKEN`, a classic PAT for `megabase-agent` with scopes `repo` and `workflow`. Release uses it for release-please and the Cargo.lock sync push, and falls back to `RELEASE_PLEASE_TOKEN`, then `GITHUB_TOKEN`, when that secret is absent.
 - **Reason**: The fine-grained `RELEASE_PLEASE_TOKEN` cannot write this public user-owned repository, so those pushes did not start workflows. The classic token does. This closes the pending items that asked to create or replace `RELEASE_PLEASE_TOKEN`.
 - **Files affected**: GitHub Actions repository secrets (not in git)
+
+- **Date**: 2026-10-10
+- **Action**: Owner Zouhair approved the decorative client canvas `site/static/db-dither.js` as the site hero illustration (issue #228). The file stays JavaScript. A Rust or WASM rewrite was declined for this illustration.
+- **Reason**: The home hero is a browser canvas. Megabase product code stays Rust. This exception is that one path only.
+- **Files affected**: `site/static/db-dither.js`, `HUMAN_LOG.md`, `tools/megabase-guard/`, `docs/adr/0003-protected-paths.md`

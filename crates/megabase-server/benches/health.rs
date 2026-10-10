@@ -69,7 +69,9 @@ fn gateway(c: &mut Criterion) {
                     )
                     .await
                     .expect("rest oneshot");
-                assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
+                // No DATABASE_URL in this bench: the route is served and
+                // answers PGRST000 until a pool exists.
+                assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
                 black_box(response.status())
             })
         });

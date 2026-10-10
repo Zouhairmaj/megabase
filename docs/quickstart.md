@@ -40,12 +40,12 @@ Keep the binary running, then in another terminal:
 curl -s localhost:8000/_megabase/health
 # {"name":"megabase","version":"0.0.0","status":"ok"}
 curl -sS -w '\nHTTP %{http_code}\n' localhost:8000/rest/v1/todos
-# {"code":"MEGABASE_NOT_IMPLEMENTED",...}
-# HTTP 501
+# {"code":"PGRST000","details":"DATABASE_URL is unset",...}
+# HTTP 503
 ```
 
-A 501 on `/rest/v1/todos` means the gateway is up and that unit is not
-implemented yet.
+A 503 on `/rest/v1/todos` means the gateway is up and `DATABASE_URL` is
+unset. A 501 still means that unit is not implemented yet.
 
 ## Container image
 

@@ -1,13 +1,18 @@
 //! PostgREST-compatible REST API (`/rest/v1`) for Megabase.
 //!
 //! Target behavior: PostgREST, vendor/postgrest (MIT), pinned in `vendor/`.
-//! `GET /rest/v1/{relation}` runs for the horizontal filters in
-//! [`specs/rest/filtering.md`](../../../specs/rest/filtering.md) and the query
-//! parameters in [`specs/rest/query-params.md`](../../../specs/rest/query-params.md).
-//! Every other REST request returns `MEGABASE_NOT_IMPLEMENTED`.
+//! Resource routes in [`specs/rest/resources.md`](../../../specs/rest/resources.md)
+//! serve reads, writes, `OPTIONS`, and the root OpenAPI document. Horizontal
+//! filters and query parameters are specified in
+//! [`specs/rest/filtering.md`](../../../specs/rest/filtering.md) and
+//! [`specs/rest/query-params.md`](../../../specs/rest/query-params.md).
+//! RPC, embeds, `Prefer`, and the other media types return
+//! `MEGABASE_NOT_IMPLEMENTED`.
 
 mod db;
 mod filter;
+mod mutate;
+mod openapi;
 mod params;
 mod query;
 mod read;

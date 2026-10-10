@@ -22,8 +22,8 @@ The table below is generated, not typed. Open [Status](/status/) for the treemap
 The denominator is `coverage/units.json`. Implemented units are those with a
 `// megabase:unit` marker. Auth SQL objects, the first admin GET/DELETE
 routes, health, settings, autoconfirm email signup, logout, and the
-password and refresh-token grants carry markers. Other HTTP routes are
-still 501.
+password and refresh-token grants, and the REST resource routes carry
+markers. RPC, embeds, `Prefer`, and other HTTP routes are still 501.
 
 > [!NOTE]
 > Units passing and coverage are on [megabase.sh/status](https://megabase.sh/status/). The standalone conformance percentage is not shown on that page for now; the README conformance badge is the live Judge publication ([decision 0032](decisions/0032-hide-standalone-conformance-percent.md)). The committed `coverage/judge-results.json` is the regression baseline, not that score ([decision 0030](decisions/0030-conformance-is-the-live-judge-score.md)).

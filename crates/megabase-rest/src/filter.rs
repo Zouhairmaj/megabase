@@ -1102,6 +1102,16 @@ fn array_cast(pg_type: &str) -> Result<String, UnsafeType> {
     Ok(format!("{base}[]"))
 }
 
+/// Catalog type name safe to splice into `json_to_record` and casts.
+///
+/// # Errors
+///
+/// Returns [`UnsafeType`] when `pg_type` contains a character outside the
+/// allow-list used by filter casts.
+pub(crate) fn sql_type_name(pg_type: &str) -> Result<&str, UnsafeType> {
+    cast_target(pg_type)
+}
+
 fn cast_target(pg_type: &str) -> Result<&str, UnsafeType> {
     if pg_type.is_empty()
         || !pg_type.chars().all(|c| {
