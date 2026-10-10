@@ -773,8 +773,6 @@ fn try_relation<'a>(at: &mut At<'a>) -> Result<Option<SelectItem>, PErr> {
         ParsedSelect::Ready(_) => return Ok(Some(SelectItem::Defer(QueryFail::Route))),
         ParsedSelect::Deferred(fail) => return Ok(Some(SelectItem::Defer(fail))),
     };
-    // megabase:unit rest:embed-join:left
-    // megabase:unit rest:embed-join:inner
     Ok(Some(SelectItem::Embed(Embed {
         alias,
         name,

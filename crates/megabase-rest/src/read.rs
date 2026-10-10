@@ -644,6 +644,8 @@ async fn read_relation(
     }
 }
 
+// megabase:unit rest:embed-join:left
+// megabase:unit rest:embed-join:inner
 async fn read_rows(
     pool: &sqlx::PgPool,
     schema: &str,
