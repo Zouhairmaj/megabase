@@ -9,7 +9,7 @@
 
 use crate::filter::{
     append_predicate, parse_filter_value, quote_ident, BoundFilter, FilterBody, FilterParseError,
-    ParsedFilter, UnsafeType,
+    ParsedFilter, ServedOp, UnsafeType,
 };
 use crate::query::percent_decode;
 
@@ -57,6 +57,45 @@ impl ReadQuery {
     #[must_use]
     pub(crate) fn handled(&self) -> bool {
         self.handled
+    }
+
+    /// `true` when `limit` or `offset` is present.
+    ///
+    /// `PUT` rejects that with `PGRST114` (`ApiRequest.getRanges`).
+    #[must_use]
+    pub(crate) fn limits_rows(&self) -> bool {
+        self.page.active
+    }
+
+    /// `columns` query parameter, when the client sent one.
+    #[must_use]
+    pub(crate) fn column_list(&self) -> Option<&[String]> {
+        self.columns.as_deref()
+    }
+
+    /// Horizontal `eq` filters, or `None` when any filter is not a plain `eq`.
+    ///
+    /// `PUT` needs every filter to be `column=eq.value` with no `and`/`or`
+    /// (`Plan.hs` single upsert). An empty list is still `Some`.
+    #[must_use]
+    pub(crate) fn eq_column_filters(&self) -> Option<Vec<(String, String)>> {
+        if !self.logic.is_empty() {
+            return None;
+        }
+        let mut out = Vec::new();
+        for (column, parsed) in &self.filters {
+            match parsed {
+                ParsedFilter::Served {
+                    negated: false,
+                    op: ServedOp::Eq,
+                    quant: None,
+                    language: None,
+                    value,
+                } => out.push((column.clone(), value.clone())),
+                _ => return None,
+            }
+        }
+        Some(out)
     }
 }
 
@@ -1521,22 +1560,24 @@ fn bump_str<'a>(at: &At<'a>, token: &str) -> At<'a> {
     cursor
 }
 
-/// Build the read statement for `query`.
+/// Build the read statement for `query` in `schema`.
 ///
 /// `column_types` is `(name, format_type)` in `attnum` order. Values, JSON
-/// keys, and limit/offset integers are bound parameters.
+/// keys, and limit/offset integers are bound parameters. The `FROM` target
+/// is `"schema"."relation"`.
 ///
 /// # Errors
 ///
 /// Returns [`UnsafeType`] when a filter's catalog type cannot be spliced.
 pub(crate) fn build_read_sql(
+    schema: &str,
     relation: &str,
     query: &ReadQuery,
     column_types: &[(&str, &str)],
 ) -> Result<ReadSql, UnsafeType> {
     let mut params = Vec::new();
     let relation_ident = quote_ident(relation);
-    let schema = quote_ident("public");
+    let schema = quote_ident(schema);
     let mut select_sql = String::new();
     // megabase:unit rest:query-param:select
     push_select(&mut select_sql, &mut params, &relation_ident, &query.select);
@@ -1673,6 +1714,38 @@ fn push_json(sql: &mut String, params: &mut Vec<String>, steps: &[JsonStep]) {
             }
         }
     }
+}
+
+/// `WHERE` fragment for a mutation, without the `WHERE` keyword.
+///
+/// Placeholders start at `$1`. `None` means the client sent no filter.
+///
+/// # Errors
+///
+/// Returns [`UnsafeType`] when a filter's catalog type cannot be spliced.
+pub(crate) fn where_clause(
+    relation: &str,
+    query: &ReadQuery,
+    column_types: &[(&str, &str)],
+) -> Result<Option<ReadSql>, UnsafeType> {
+    if query.filters.is_empty() && query.logic.is_empty() {
+        return Ok(None);
+    }
+    let mut sql = String::new();
+    let mut params = Vec::new();
+    push_where(
+        &mut sql,
+        &mut params,
+        relation,
+        &query.filters,
+        &query.logic,
+        column_types,
+    )?;
+    Ok(Some(ReadSql {
+        sql,
+        params,
+        offset: 0,
+    }))
 }
 
 fn push_where(
@@ -2040,7 +2113,7 @@ mod tests {
     #[test]
     fn sql_orders_limits_and_binds_filter_values() {
         let query = parse_get_query("select=id,title&order=id.desc&limit=1&offset=2").unwrap();
-        let sql = build_read_sql("todos", &query, &[]).unwrap();
+        let sql = build_read_sql("public", "todos", &query, &[]).unwrap();
         assert!(sql.sql.contains("\"todos\".\"id\", \"todos\".\"title\""));
         assert!(sql.sql.contains("ORDER BY \"todos\".\"id\" DESC"));
         assert!(sql.sql.contains("LIMIT ($1::bigint) OFFSET ($2::bigint)"));
@@ -2048,18 +2121,18 @@ mod tests {
         assert_eq!(sql.offset, 2);
 
         let query = parse_get_query("or=(id.eq.1,id.eq.3)&order=id").unwrap();
-        let sql = build_read_sql("todos", &query, &[]).unwrap();
+        let sql = build_read_sql("public", "todos", &query, &[]).unwrap();
         assert!(sql.sql.contains(" OR "));
         assert_eq!(sql.params, vec!["1", "3"]);
         assert!(!sql.sql.contains("drop"));
 
         let query = parse_get_query("columns=id,title&order=id").unwrap();
-        let sql = build_read_sql("todos", &query, &[]).unwrap();
+        let sql = build_read_sql("public", "todos", &query, &[]).unwrap();
         assert!(sql.sql.contains("\"todos\".*"));
         assert!(!sql.sql.contains("\"todos\".\"id\","));
 
         let query = parse_get_query("body=eq.victim-secret') or true--&select=body").unwrap();
-        let sql = build_read_sql("notes", &query, &[("body", "text")]).unwrap();
+        let sql = build_read_sql("public", "notes", &query, &[("body", "text")]).unwrap();
         assert_eq!(sql.params, vec!["victim-secret') or true--"]);
         assert!(!sql.sql.contains("victim-secret"));
     }
@@ -2091,7 +2164,7 @@ mod tests {
     fn json_select_uses_the_last_key_as_the_alias() {
         let query =
             parse_get_query("select=data->a,data->>b::text,data->1,data->1->mycol->>2").unwrap();
-        let sql = build_read_sql("todos", &query, &[]).unwrap();
+        let sql = build_read_sql("public", "todos", &query, &[]).unwrap();
         assert!(sql.sql.contains("\"todos\".\"data\"->$1 AS \"a\""));
         assert!(sql
             .sql

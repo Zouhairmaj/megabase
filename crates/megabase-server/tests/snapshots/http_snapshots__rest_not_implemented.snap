@@ -4,11 +4,11 @@ expression: "observe(\"GET\", \"/rest/v1/todos\", None).await"
 ---
 {
   "body": {
-    "code": "MEGABASE_NOT_IMPLEMENTED",
-    "component": "rest",
-    "message": "GET /rest/v1/todos is not implemented by Megabase yet",
-    "unit": "GET /rest/v1/todos"
+    "code": "PGRST000",
+    "details": "DATABASE_URL is unset",
+    "hint": null,
+    "message": "Database connection error."
   },
-  "content_type": "application/json",
-  "status": 501
+  "content_type": "application/json; charset=utf-8",
+  "status": 503
 }

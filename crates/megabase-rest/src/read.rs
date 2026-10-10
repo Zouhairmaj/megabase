@@ -1,26 +1,41 @@
-//! `GET /rest/v1/{relation}` for served filters and query parameters.
+//! Resource routes under `/rest/v1/`.
 //!
-//! Anything else on the REST prefix stays
-//! [`megabase_core::MegabaseNotImplemented`]. Values are bound parameters.
-//! Relation and column names come from `pg_catalog` after a bound lookup,
-//! then `quote_ident`.
+//! Reads, writes, `OPTIONS`, and the root OpenAPI document follow
+//! `specs/rest/resources.md`. RPC, embeds, `Prefer`, and other media types
+//! stay [`megabase_core::MegabaseNotImplemented`]. Values are bound
+//! parameters. Relation and column names come from `pg_catalog` after a
+//! bound lookup, then `quote_ident`.
 
+use axum::body::Bytes;
 use axum::extract::{OriginalUri, State};
-use axum::http::{header, HeaderMap, Method, StatusCode};
+use axum::http::{header, HeaderMap, HeaderName, HeaderValue, Method, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::Router;
 use megabase_core::{bearer_token, JwtError, MegabaseNotImplemented};
 use serde_json::{Map, Value};
 
 use crate::filter::UnsafeType;
+use crate::mutate::mutate;
+use crate::openapi::document;
 use crate::params::{build_read_sql, parse_get_query, QueryFail};
 use crate::query::path_decode;
 use crate::RestState;
 
-const JSON_UTF8: &str = "application/json; charset=utf-8";
+pub(crate) const JSON_UTF8: &str = "application/json; charset=utf-8";
+
+/// Schemas exposed by the pinned Supabase `PGRST_DB_SCHEMAS`.
+const EXPOSED_SCHEMAS: &[&str] = &["public", "graphql_public"];
 
 pub(crate) fn router(state: RestState) -> Router {
     Router::new().fallback(dispatch).with_state(state)
+}
+
+enum Target {
+    Root,
+    Relation(String),
+    Rpc,
+    Invalid,
+    Outside,
 }
 
 async fn dispatch(
@@ -28,57 +43,367 @@ async fn dispatch(
     method: Method,
     OriginalUri(uri): OriginalUri,
     headers: HeaderMap,
+    body: Bytes,
 ) -> Response {
     let path = uri.path();
-    let Some(relation) = relation_name(path) else {
-        return not_implemented(&method, path);
-    };
-    if method != Method::GET {
-        return not_implemented(&method, path);
-    }
-    let session = match session(&state, headers.get(header::AUTHORIZATION)) {
-        Ok(session) => session,
-        Err(response) => return *response,
-    };
-    let raw = uri.query().unwrap_or("");
-    if raw.is_empty() {
-        return not_implemented(&method, path);
-    }
-    let query = match parse_get_query(raw) {
-        Ok(query) if query.handled() => query,
-        Ok(_) => return not_implemented(&method, path),
-        Err(fail) => return query_fail(&method, path, fail),
-    };
-    if let Some(unit) = reject_accept(headers.get(header::ACCEPT)) {
-        return unimplemented_unit(&method, path, unit);
-    }
-    if let Some(unit) = reject_prefer(headers.get("prefer")) {
-        return unimplemented_unit(&method, path, unit);
-    }
-    if headers.get(header::RANGE).is_some() {
-        return not_implemented(&method, path);
-    }
-    if let Some(profile) = header_text(&headers, "accept-profile") {
-        if profile != "public" {
-            return not_implemented(&method, path);
-        }
-    }
-    let Some(pool) = state.pool.as_ref() else {
-        return pgrst(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "PGRST000",
-            "Database connection error.",
-            Some("DATABASE_URL is unset"),
+    match classify(path) {
+        Target::Outside | Target::Rpc => not_implemented(&method, path),
+        Target::Invalid => pgrst(
+            StatusCode::NOT_FOUND,
+            "PGRST125",
+            "Invalid path specified in request URL",
             None,
-        );
-    };
-    match read_rows(pool, &relation, &session, &query).await {
-        Ok((count, body, offset)) => json_rows(offset, count, &body),
-        Err(error) => *error,
+            None,
+        ),
+        Target::Root => root(&state, &method, &headers).await,
+        Target::Relation(relation) => {
+            relation_route(&state, &method, &uri, &headers, &relation, &body).await
+        }
     }
 }
 
-fn query_fail(method: &Method, path: &str, fail: QueryFail) -> Response {
+fn classify(path: &str) -> Target {
+    let Some(rest) = path.strip_prefix("/rest/v1") else {
+        return Target::Outside;
+    };
+    if !rest.is_empty() && !rest.starts_with('/') {
+        return Target::Outside;
+    }
+    let mut parts = Vec::new();
+    for segment in rest.split('/') {
+        if segment.is_empty() {
+            continue;
+        }
+        let name = path_decode(segment);
+        if name.is_empty() || name.contains('\0') || name.contains('/') {
+            return Target::Invalid;
+        }
+        parts.push(name);
+    }
+    match parts.as_slice() {
+        [] => Target::Root,
+        [name] => Target::Relation(name.clone()),
+        [rpc, _] if rpc == "rpc" => Target::Rpc,
+        _ => Target::Invalid,
+    }
+}
+
+async fn root(state: &RestState, method: &Method, headers: &HeaderMap) -> Response {
+    let session = match session(state, headers.get(header::AUTHORIZATION)) {
+        Ok(session) => session,
+        Err(response) => return *response,
+    };
+    let schema = match negotiated_schema(method, headers) {
+        Ok(schema) => schema,
+        Err(response) => return *response,
+    };
+    match *method {
+        Method::GET => {
+            // megabase:unit rest:route:GET /rest/v1/
+            serve_openapi(state, &session, &schema, false, headers).await
+        }
+        Method::HEAD => {
+            // megabase:unit rest:route:HEAD /rest/v1/
+            serve_openapi(state, &session, &schema, true, headers).await
+        }
+        Method::OPTIONS => {
+            // megabase:unit rest:route:OPTIONS /rest/v1/
+            options_response("OPTIONS,GET,HEAD")
+        }
+        _ => pgrst(
+            StatusCode::METHOD_NOT_ALLOWED,
+            "PGRST117",
+            &format!("Unsupported HTTP method: {method}"),
+            None,
+            None,
+        ),
+    }
+}
+
+async fn serve_openapi(
+    state: &RestState,
+    session: &Session,
+    schema: &str,
+    headers_only: bool,
+    headers: &HeaderMap,
+) -> Response {
+    let Some(pool) = state.pool.as_ref() else {
+        return database_unavailable();
+    };
+    document(pool, schema, session, headers_only, headers).await
+}
+
+async fn relation_route(
+    state: &RestState,
+    method: &Method,
+    uri: &axum::http::Uri,
+    headers: &HeaderMap,
+    relation: &str,
+    body: &[u8],
+) -> Response {
+    let path = uri.path();
+    let session = match session(state, headers.get(header::AUTHORIZATION)) {
+        Ok(session) => session,
+        Err(response) => return *response,
+    };
+    let schema = match negotiated_schema(method, headers) {
+        Ok(schema) => schema,
+        Err(response) => return *response,
+    };
+    if method == Method::OPTIONS {
+        // megabase:unit rest:route:OPTIONS /rest/v1/{relation}
+        return relation_options(state, &schema, relation, session.anon).await;
+    }
+    if !matches!(
+        method,
+        &Method::GET
+            | &Method::HEAD
+            | &Method::POST
+            | &Method::PUT
+            | &Method::PATCH
+            | &Method::DELETE
+    ) {
+        return pgrst(
+            StatusCode::METHOD_NOT_ALLOWED,
+            "PGRST117",
+            &format!("Unsupported HTTP method: {method}"),
+            None,
+            None,
+        );
+    }
+    let raw = uri.query().unwrap_or("");
+    let query = match parse_resource_query(method, path, raw) {
+        Ok(query) => query,
+        Err(response) => return *response,
+    };
+    if let Some(unit) = reject_prefer(headers.get("prefer")) {
+        return unimplemented_unit(method, path, unit);
+    }
+    if let Some(unit) = reject_accept(headers.get(header::ACCEPT)) {
+        return unimplemented_unit(method, path, unit);
+    }
+    if method == Method::GET && headers.get(header::RANGE).is_some() {
+        return not_implemented(method, path);
+    }
+    let pool = state.pool.as_ref();
+    match *method {
+        Method::GET => {
+            // megabase:unit rest:route:GET /rest/v1/{relation}
+            let Some(pool) = pool else {
+                return database_unavailable();
+            };
+            read_relation(pool, &schema, relation, &session, &query, false).await
+        }
+        Method::HEAD => {
+            // megabase:unit rest:route:HEAD /rest/v1/{relation}
+            let Some(pool) = pool else {
+                return database_unavailable();
+            };
+            read_relation(pool, &schema, relation, &session, &query, true).await
+        }
+        Method::POST => {
+            // megabase:unit rest:route:POST /rest/v1/{relation}
+            mutate(
+                pool,
+                &schema,
+                relation,
+                &session,
+                method,
+                &query,
+                body,
+                headers.get(header::CONTENT_TYPE),
+            )
+            .await
+        }
+        Method::PUT => {
+            // megabase:unit rest:route:PUT /rest/v1/{relation}
+            mutate(
+                pool,
+                &schema,
+                relation,
+                &session,
+                method,
+                &query,
+                body,
+                headers.get(header::CONTENT_TYPE),
+            )
+            .await
+        }
+        Method::PATCH => {
+            // megabase:unit rest:route:PATCH /rest/v1/{relation}
+            mutate(
+                pool,
+                &schema,
+                relation,
+                &session,
+                method,
+                &query,
+                body,
+                headers.get(header::CONTENT_TYPE),
+            )
+            .await
+        }
+        Method::DELETE => {
+            // megabase:unit rest:route:DELETE /rest/v1/{relation}
+            mutate(
+                pool,
+                &schema,
+                relation,
+                &session,
+                method,
+                &query,
+                body,
+                headers.get(header::CONTENT_TYPE),
+            )
+            .await
+        }
+        _ => not_implemented(method, path),
+    }
+}
+
+fn parse_resource_query(
+    method: &Method,
+    path: &str,
+    raw: &str,
+) -> Result<crate::params::ReadQuery, Box<Response>> {
+    match parse_get_query(raw) {
+        Ok(query) if query.handled() || query_is_blank(raw) => Ok(query),
+        Ok(_) => Err(Box::new(not_implemented(method, path))),
+        Err(fail) => Err(Box::new(query_fail(method, path, fail))),
+    }
+}
+
+fn query_is_blank(raw: &str) -> bool {
+    raw.split('&').all(|part| part.is_empty())
+}
+
+fn negotiated_schema(method: &Method, headers: &HeaderMap) -> Result<String, Box<Response>> {
+    let name = if matches!(
+        method,
+        &Method::POST | &Method::PUT | &Method::PATCH | &Method::DELETE
+    ) {
+        "content-profile"
+    } else {
+        "accept-profile"
+    };
+    let Some(profile) = header_text(headers, name) else {
+        return Ok("public".to_string());
+    };
+    if !EXPOSED_SCHEMAS.contains(&profile.as_str()) {
+        return Err(Box::new(pgrst(
+            StatusCode::NOT_ACCEPTABLE,
+            "PGRST106",
+            &format!("Invalid schema: {profile}"),
+            None,
+            Some("Only the following schemas are exposed: public, graphql_public"),
+        )));
+    }
+    Ok(profile)
+}
+
+pub(crate) fn database_unavailable() -> Response {
+    pgrst(
+        StatusCode::SERVICE_UNAVAILABLE,
+        "PGRST000",
+        "Database connection error.",
+        Some("DATABASE_URL is unset"),
+        None,
+    )
+}
+
+async fn relation_options(state: &RestState, schema: &str, relation: &str, anon: bool) -> Response {
+    let Some(pool) = state.pool.as_ref() else {
+        return database_unavailable();
+    };
+    let mut tx = match begin(pool).await {
+        Ok(tx) => tx,
+        Err(response) => return *response,
+    };
+    let privileges: Option<(bool, bool, bool, bool)> = match sqlx::query_as(
+        "SELECT
+            (
+              c.relkind IN ('r', 'p')
+              OR (
+                c.relkind IN ('v', 'f')
+                AND (pg_relation_is_updatable(c.oid::regclass, true) & 8) = 8
+              )
+            ),
+            (
+              c.relkind IN ('r', 'p')
+              OR (
+                c.relkind IN ('v', 'f')
+                AND (pg_relation_is_updatable(c.oid::regclass, true) & 4) = 4
+              )
+            ),
+            (
+              c.relkind IN ('r', 'p')
+              OR (
+                c.relkind IN ('v', 'f')
+                AND (pg_relation_is_updatable(c.oid::regclass, true) & 16) = 16
+              )
+            ),
+            EXISTS (
+              SELECT 1 FROM pg_constraint AS k
+              WHERE k.conrelid = c.oid AND k.contype = 'p'
+            )
+         FROM pg_class AS c
+         JOIN pg_namespace AS n ON n.oid = c.relnamespace
+         WHERE n.nspname = $1
+           AND c.relname = $2
+           AND c.relkind IN ('r', 'p', 'v', 'm', 'f')
+           AND NOT c.relispartition",
+    )
+    .bind(schema)
+    .bind(relation)
+    .fetch_optional(&mut *tx)
+    .await
+    {
+        Ok(row) => row,
+        Err(error) => return query_failure(&error, anon),
+    };
+    let Some((insertable, updatable, deletable, has_pk)) = privileges else {
+        return table_not_found(schema, relation);
+    };
+    let mut allow = vec!["OPTIONS", "GET", "HEAD"];
+    if insertable {
+        allow.push("POST");
+    }
+    if insertable && updatable && has_pk {
+        allow.push("PUT");
+    }
+    if updatable {
+        allow.push("PATCH");
+    }
+    if deletable {
+        allow.push("DELETE");
+    }
+    options_response(&allow.join(","))
+}
+
+fn options_response(allow: &str) -> Response {
+    let mut response = Response::builder()
+        .status(StatusCode::OK)
+        .body(axum::body::Body::empty())
+        .unwrap_or_else(|_| Response::new(axum::body::Body::empty()));
+    if let Ok(value) = HeaderValue::from_str(allow) {
+        response.headers_mut().insert(header::ALLOW, value);
+    }
+    response.headers_mut().insert(
+        header::ACCESS_CONTROL_ALLOW_ORIGIN,
+        HeaderValue::from_static("*"),
+    );
+    response
+}
+
+#[cfg(test)]
+fn relation_name(path: &str) -> Option<String> {
+    match classify(path) {
+        Target::Relation(name) => Some(name),
+        _ => None,
+    }
+}
+
+pub(crate) fn query_fail(method: &Method, path: &str, fail: QueryFail) -> Response {
     match fail {
         QueryFail::Parse { message, details } => pgrst(
             StatusCode::BAD_REQUEST,
@@ -103,27 +428,15 @@ fn query_fail(method: &Method, path: &str, fail: QueryFail) -> Response {
     }
 }
 
-fn relation_name(path: &str) -> Option<String> {
-    let rest = path.strip_prefix("/rest/v1/")?;
-    if rest.is_empty() || rest.contains('/') {
-        return None;
-    }
-    let name = path_decode(rest);
-    if name.is_empty() || name.contains('/') || name.contains('\0') {
-        return None;
-    }
-    Some(name)
-}
-
-struct Session {
-    role: String,
-    claims: String,
+pub(crate) struct Session {
+    pub(crate) role: String,
+    pub(crate) claims: String,
     /// `true` when the role is the anon role. PostgREST uses that to choose
     /// 401 versus 403 for `42501`.
-    anon: bool,
+    pub(crate) anon: bool,
 }
 
-fn session(
+pub(crate) fn session(
     state: &RestState,
     authorization: Option<&axum::http::HeaderValue>,
 ) -> Result<Session, Box<Response>> {
@@ -198,7 +511,7 @@ fn jwt_failure(error: &JwtError) -> Response {
 }
 
 /// `Err` is a coverage unit id. An empty string means the concrete path.
-fn reject_accept(value: Option<&axum::http::HeaderValue>) -> Option<&'static str> {
+pub(crate) fn reject_accept(value: Option<&axum::http::HeaderValue>) -> Option<&'static str> {
     let value = header_str(value)?;
     let first = value.split(',').next()?.trim();
     if first.is_empty() {
@@ -283,7 +596,7 @@ fn header_text(headers: &HeaderMap, name: &str) -> Option<String> {
         .map(str::to_string)
 }
 
-fn unimplemented_unit(method: &Method, path: &str, unit: &str) -> Response {
+pub(crate) fn unimplemented_unit(method: &Method, path: &str, unit: &str) -> Response {
     if unit.is_empty() {
         not_implemented(method, path)
     } else {
@@ -295,11 +608,32 @@ fn not_implemented(method: &Method, path: &str) -> Response {
     MegabaseNotImplemented::new(crate::COMPONENT, format!("{method} {path}")).into_response()
 }
 
-async fn read_rows(
+async fn read_relation(
     pool: &sqlx::PgPool,
+    schema: &str,
     relation: &str,
     session: &Session,
     read: &crate::params::ReadQuery,
+    headers_only: bool,
+) -> Response {
+    let http_method = if headers_only { "HEAD" } else { "GET" };
+    match read_rows(pool, schema, relation, session, read, http_method).await {
+        Ok((count, body, offset)) => {
+            let mut response = json_rows(offset, count, if headers_only { "" } else { &body });
+            profile_header(&mut response, schema);
+            response
+        }
+        Err(error) => *error,
+    }
+}
+
+async fn read_rows(
+    pool: &sqlx::PgPool,
+    schema: &str,
+    relation: &str,
+    session: &Session,
+    read: &crate::params::ReadQuery,
+    http_method: &str,
 ) -> Result<(i64, String, i64), Box<Response>> {
     let mut tx = pool
         .begin()
@@ -312,55 +646,19 @@ async fn read_rows(
         .execute(&mut *tx)
         .await
         .map_err(|error| Box::new(query_failure(&error, session.anon)))?;
-    let exists: bool = sqlx::query_scalar(
-        "SELECT EXISTS(
-            SELECT 1 FROM pg_class AS c
-            JOIN pg_namespace AS n ON n.oid = c.relnamespace
-            WHERE n.nspname = 'public'
-              AND c.relname = $1
-              AND c.relkind IN ('r', 'p', 'v', 'm', 'f')
-        )",
-    )
-    .bind(relation)
-    .fetch_one(&mut *tx)
-    .await
-    .map_err(|error| Box::new(query_failure(&error, session.anon)))?;
+    let exists = relation_exists(&mut tx, schema, relation, session.anon).await?;
     if !exists {
-        return Err(Box::new(pgrst(
-            StatusCode::NOT_FOUND,
-            "PGRST205",
-            &format!("Could not find the table 'public.{relation}' in the schema cache"),
-            None,
-            None,
-        )));
+        return Err(Box::new(table_not_found(schema, relation)));
     }
-    let columns: Vec<(String, String)> = sqlx::query_as(COLUMN_TYPES_SQL)
-        .bind(relation)
-        .fetch_all(&mut *tx)
-        .await
-        .map_err(|error| Box::new(query_failure(&error, session.anon)))?;
+    let columns = load_columns(&mut tx, schema, relation, session.anon).await?;
     let column_types: Vec<(&str, &str)> = columns
         .iter()
         .map(|(name, pg_type)| (name.as_str(), pg_type.as_str()))
         .collect();
-    let built = build_read_sql(relation, read, &column_types)
+    let built = build_read_sql(schema, relation, read, &column_types)
         .map_err(|error| Box::new(unsafe_type(&error)))?;
     let request_path = format!("/{relation}");
-    sqlx::query(
-        "SELECT set_config('role', $1, true),
-                set_config('request.jwt.claims', $2, true),
-                set_config('request.method', $3, true),
-                set_config('request.path', $4, true),
-                set_config('search_path', $5, true)",
-    )
-    .bind(&session.role)
-    .bind(&session.claims)
-    .bind("GET")
-    .bind(&request_path)
-    .bind("public")
-    .execute(&mut *tx)
-    .await
-    .map_err(|error| Box::new(query_failure(&error, session.anon)))?;
+    set_request_context(&mut tx, session, http_method, &request_path, schema).await?;
     let mut query = sqlx::query_as::<sqlx::Postgres, (i64, String)>(&built.sql);
     for param in &built.params {
         query = query.bind(param);
@@ -381,13 +679,105 @@ const COLUMN_TYPES_SQL: &str = "SELECT a.attname::text, format_type(a.atttypid, 
          FROM pg_attribute AS a
          JOIN pg_class AS c ON c.oid = a.attrelid
          JOIN pg_namespace AS n ON n.oid = c.relnamespace
-         WHERE n.nspname = 'public'
-           AND c.relname = $1
+         WHERE n.nspname = $1
+           AND c.relname = $2
            AND a.attnum > 0
            AND NOT a.attisdropped
          ORDER BY a.attnum";
 
-fn unsafe_type(error: &UnsafeType) -> Response {
+/// Open a transaction. A connect failure is `PGRST000`.
+pub(crate) async fn begin(
+    pool: &sqlx::PgPool,
+) -> Result<sqlx::Transaction<'_, sqlx::Postgres>, Box<Response>> {
+    pool.begin()
+        .await
+        .map_err(|error| Box::new(connect_failure(&error)))
+}
+
+/// `SET LOCAL` role, JWT claims, method, path, and `search_path`.
+pub(crate) async fn set_request_context(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    session: &Session,
+    method: &str,
+    request_path: &str,
+    schema: &str,
+) -> Result<(), Box<Response>> {
+    sqlx::query(
+        "SELECT set_config('role', $1, true),
+                set_config('request.jwt.claims', $2, true),
+                set_config('request.method', $3, true),
+                set_config('request.path', $4, true),
+                set_config('search_path', $5, true)",
+    )
+    .bind(&session.role)
+    .bind(&session.claims)
+    .bind(method)
+    .bind(request_path)
+    .bind(schema)
+    .execute(&mut **tx)
+    .await
+    .map_err(|error| Box::new(query_failure(&error, session.anon)))?;
+    Ok(())
+}
+
+/// `true` when `schema.relation` is a table, view, or foreign table in the cache.
+pub(crate) async fn relation_exists(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    schema: &str,
+    relation: &str,
+    anon: bool,
+) -> Result<bool, Box<Response>> {
+    sqlx::query_scalar(
+        "SELECT EXISTS(
+            SELECT 1 FROM pg_class AS c
+            JOIN pg_namespace AS n ON n.oid = c.relnamespace
+            WHERE n.nspname = $1
+              AND c.relname = $2
+              AND c.relkind IN ('r', 'p', 'v', 'm', 'f')
+              AND NOT c.relispartition
+        )",
+    )
+    .bind(schema)
+    .bind(relation)
+    .fetch_one(&mut **tx)
+    .await
+    .map_err(|error| Box::new(query_failure(&error, anon)))
+}
+
+/// Column names and `format_type(atttypid, NULL)` in `attnum` order.
+pub(crate) async fn load_columns(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    schema: &str,
+    relation: &str,
+    anon: bool,
+) -> Result<Vec<(String, String)>, Box<Response>> {
+    sqlx::query_as(COLUMN_TYPES_SQL)
+        .bind(schema)
+        .bind(relation)
+        .fetch_all(&mut **tx)
+        .await
+        .map_err(|error| Box::new(query_failure(&error, anon)))
+}
+
+pub(crate) fn table_not_found(schema: &str, relation: &str) -> Response {
+    pgrst(
+        StatusCode::NOT_FOUND,
+        "PGRST205",
+        &format!("Could not find the table '{schema}.{relation}' in the schema cache"),
+        None,
+        None,
+    )
+}
+
+pub(crate) fn profile_header(response: &mut Response, schema: &str) {
+    if let Ok(value) = HeaderValue::from_str(schema) {
+        response
+            .headers_mut()
+            .insert(HeaderName::from_static("content-profile"), value);
+    }
+}
+
+pub(crate) fn unsafe_type(error: &UnsafeType) -> Response {
     tracing::error!(error = %error, "rest filter cast rejected");
     pgrst(
         StatusCode::INTERNAL_SERVER_ERROR,
@@ -409,7 +799,7 @@ fn connect_failure(error: &sqlx::Error) -> Response {
     )
 }
 
-fn query_failure(error: &sqlx::Error, anon: bool) -> Response {
+pub(crate) fn query_failure(error: &sqlx::Error, anon: bool) -> Response {
     if let Some(db) = error.as_database_error() {
         let code = db
             .code()
@@ -503,7 +893,7 @@ fn json_rows(offset: i64, count: i64, body: &str) -> Response {
 ///
 /// `lower` is the offset. `upper` is `offset + count - 1`. An empty page,
 /// or a lower bound past the upper bound, is `*/*` (`RangeQuery.contentRangeH`).
-fn content_range(offset: i64, count: i64) -> String {
+pub(crate) fn content_range(offset: i64, count: i64) -> String {
     if count <= 0 {
         return "*/*".to_string();
     }
@@ -513,7 +903,7 @@ fn content_range(offset: i64, count: i64) -> String {
     }
 }
 
-fn pgrst(
+pub(crate) fn pgrst(
     status: StatusCode,
     code: &str,
     message: &str,
@@ -622,12 +1012,20 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn bare_get_stays_501() {
+    async fn bare_get_reaches_the_pool() {
         let app = router(RestState::from_config(&Config::default()));
         let (status, body, _) = send(app, get("/rest/v1/todos")).await;
-        assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
-        assert_eq!(body["unit"], "GET /rest/v1/todos");
-        assert_eq!(body["code"], "MEGABASE_NOT_IMPLEMENTED");
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(body["code"], "PGRST000");
+        assert!(body["unit"].is_null());
+    }
+
+    #[tokio::test]
+    async fn blank_query_reaches_the_pool() {
+        let app = router(RestState::from_config(&Config::default()));
+        let (status, body, _) = send(app, get("/rest/v1/todos?&&&")).await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(body["code"], "PGRST000");
     }
 
     #[tokio::test]
@@ -852,7 +1250,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn other_methods_stay_501() {
+    async fn empty_post_is_pgrst102() {
         let app = router(RestState::from_config(&Config::default()));
         let request = Request::builder()
             .method("POST")
@@ -860,7 +1258,219 @@ mod tests {
             .body(Body::empty())
             .unwrap();
         let (status, body, _) = send(app, request).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(body["code"], "PGRST102");
+        assert_eq!(body["message"], "Empty or invalid json");
+    }
+
+    #[tokio::test]
+    async fn root_options_lists_read_methods() {
+        let app = router(RestState::from_config(&Config::default()));
+        let request = Request::builder()
+            .method("OPTIONS")
+            .uri("/rest/v1/")
+            .body(Body::empty())
+            .unwrap();
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response
+                .headers()
+                .get(header::ALLOW)
+                .and_then(|value| value.to_str().ok()),
+            Some("OPTIONS,GET,HEAD")
+        );
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        assert!(bytes.is_empty());
+    }
+
+    #[tokio::test]
+    async fn root_post_is_pgrst117() {
+        let app = router(RestState::from_config(&Config::default()));
+        let request = Request::builder()
+            .method("POST")
+            .uri("/rest/v1/")
+            .body(Body::from("{}"))
+            .unwrap();
+        let (status, body, _) = send(app, request).await;
+        assert_eq!(status, StatusCode::METHOD_NOT_ALLOWED);
+        assert_eq!(body["code"], "PGRST117");
+    }
+
+    #[tokio::test]
+    async fn root_get_without_pool_is_503() {
+        let app = router(RestState::from_config(&Config::default()));
+        let (status, body, _) = send(app, get("/rest/v1/")).await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(body["code"], "PGRST000");
+    }
+
+    #[tokio::test]
+    async fn put_without_filters_is_pgrst105() {
+        let app = router(RestState::from_config(&Config::default()));
+        let request = Request::builder()
+            .method("PUT")
+            .uri("/rest/v1/todos")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(r#"{"id":1}"#))
+            .unwrap();
+        let (status, body, _) = send(app, request).await;
+        assert_eq!(status, StatusCode::METHOD_NOT_ALLOWED);
+        assert_eq!(body["code"], "PGRST105");
+    }
+
+    #[tokio::test]
+    async fn write_object_accept_is_501() {
+        let app = router(RestState::from_config(&Config::default()));
+        let request = Request::builder()
+            .method("POST")
+            .uri("/rest/v1/todos")
+            .header(header::ACCEPT, "application/vnd.pgrst.object+json")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(r#"{"id":1}"#))
+            .unwrap();
+        let (status, body, _) = send(app, request).await;
         assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
-        assert_eq!(body["unit"], "POST /rest/v1/todos");
+        assert_eq!(
+            body["unit"],
+            "rest:media-type:application/vnd.pgrst.object+json"
+        );
+    }
+
+    #[tokio::test]
+    async fn head_object_accept_is_501() {
+        let app = router(RestState::from_config(&Config::default()));
+        let request = Request::builder()
+            .method("HEAD")
+            .uri("/rest/v1/todos")
+            .header(header::ACCEPT, "application/vnd.pgrst.object+json")
+            .body(Body::empty())
+            .unwrap();
+        let (status, body, _) = send(app, request).await;
+        assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
+        assert_eq!(
+            body["unit"],
+            "rest:media-type:application/vnd.pgrst.object+json"
+        );
+    }
+
+    #[tokio::test]
+    async fn patch_limit_stays_501() {
+        let app = router(RestState::from_config(&Config::default()));
+        let request = Request::builder()
+            .method("PATCH")
+            .uri("/rest/v1/todos?limit=1")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from("{}"))
+            .unwrap();
+        let (status, body, _) = send(app, request).await;
+        assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
+        assert_eq!(body["code"], "MEGABASE_NOT_IMPLEMENTED");
+        assert_eq!(body["unit"], "PATCH /rest/v1/todos");
+    }
+
+    #[tokio::test]
+    async fn delete_offset_stays_501() {
+        let app = router(RestState::from_config(&Config::default()));
+        let request = Request::builder()
+            .method("DELETE")
+            .uri("/rest/v1/todos?id=eq.1&offset=2")
+            .body(Body::empty())
+            .unwrap();
+        let (status, body, _) = send(app, request).await;
+        assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
+        assert_eq!(body["unit"], "DELETE /rest/v1/todos");
+    }
+
+    #[tokio::test]
+    async fn put_limit_is_pgrst114() {
+        let app = router(RestState::from_config(&Config::default()));
+        let request = Request::builder()
+            .method("PUT")
+            .uri("/rest/v1/todos?id=eq.1&limit=1")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from("{}"))
+            .unwrap();
+        let (status, body, _) = send(app, request).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(body["code"], "PGRST114");
+    }
+
+    #[tokio::test]
+    async fn mismatched_json_keys_are_pgrst102() {
+        let app = router(RestState::from_config(&Config::default()));
+        let request = Request::builder()
+            .method("POST")
+            .uri("/rest/v1/todos")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(r#"[{"id":1},{"title":"a"}]"#))
+            .unwrap();
+        let (status, body, _) = send(app, request).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(body["message"], "All object keys must match");
+    }
+
+    #[tokio::test]
+    async fn unknown_content_type_is_pgrst102() {
+        let app = router(RestState::from_config(&Config::default()));
+        let request = Request::builder()
+            .method("POST")
+            .uri("/rest/v1/todos")
+            .header(header::CONTENT_TYPE, "application/x-custom")
+            .body(Body::from("{}"))
+            .unwrap();
+        let (status, body, _) = send(app, request).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(body["code"], "PGRST102");
+        assert_eq!(
+            body["message"],
+            "Content-Type not acceptable: application/x-custom"
+        );
+    }
+
+    #[tokio::test]
+    async fn deep_path_is_pgrst125() {
+        let app = router(RestState::from_config(&Config::default()));
+        let (status, body, _) = send(app, get("/rest/v1/todos/extra")).await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        assert_eq!(body["code"], "PGRST125");
+    }
+
+    #[tokio::test]
+    async fn hidden_schema_is_pgrst106() {
+        let app = router(RestState::from_config(&Config::default()));
+        let request = Request::builder()
+            .uri("/rest/v1/todos")
+            .header("accept-profile", "secret")
+            .body(Body::empty())
+            .unwrap();
+        let (status, body, _) = send(app, request).await;
+        assert_eq!(status, StatusCode::NOT_ACCEPTABLE);
+        assert_eq!(body["code"], "PGRST106");
+        assert_eq!(
+            body["hint"],
+            "Only the following schemas are exposed: public, graphql_public"
+        );
+    }
+
+    #[tokio::test]
+    async fn rpc_stays_501() {
+        let app = router(RestState::from_config(&Config::default()));
+        let (status, body, _) = send(app, get("/rest/v1/rpc/add_numbers")).await;
+        assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
+        assert_eq!(body["unit"], "GET /rest/v1/rpc/add_numbers");
+    }
+
+    #[tokio::test]
+    async fn delete_without_pool_is_503() {
+        let app = router(RestState::from_config(&Config::default()));
+        let request = Request::builder()
+            .method("DELETE")
+            .uri("/rest/v1/todos?id=eq.1")
+            .body(Body::empty())
+            .unwrap();
+        let (status, body, _) = send(app, request).await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(body["code"], "PGRST000");
     }
 }
