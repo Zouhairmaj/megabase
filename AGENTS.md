@@ -51,7 +51,18 @@ git push -u origin HEAD
 PR checks: **Build, MSRV 1.89, Coverage check, Protected paths, Container
 image, Judge, Conventional Commits title, Fuzz, cargo-vet, cargo-machete,
 cargo-hack**. GitHub does not enforce them yet.
-Treat every one as required anyway.
+Treat every one as required anyway. Judge shards on a pull request
+follow `.github/actions/pr-paths`: `crates/megabase-auth` runs
+`Judge (auth)`, `megabase-rest` runs `Judge (rest)`, and storage,
+realtime, and meta match the same way. Other shard checks succeed
+without starting the stack. Shared inputs (gateway `megabase-server`,
+`megabase-core`, the `megabase` binary, root `Cargo.toml` /
+`Cargo.lock`, `judge/**`, `.github/**`, Dockerfiles, and compose
+files) and any unclassifiable path run every shard. Push to `main`
+and `workflow_dispatch` run every shard. Add a line to
+`COMPONENT_SHARDS` in that action when functions, studio, or pooler
+gets `judge/cases/<shard>.toml`; until then those crates run every
+shard. See [Pull request checks](docs/contributing.md#pull-request-checks).
 
 Compiling jobs wrap rustc with sccache. Pushes and same-repository pull
 requests store compiler artifacts in the R2 bucket from `SCCACHE_BUCKET`
@@ -61,7 +72,7 @@ job still passes. `Swatinem/rust-cache` caches the Cargo registry and git
 database only. CI tests are `cargo nextest` (`.config/nextest.toml`
 profile `ci`); doctests stay `cargo test --doc`. Codecov runs nextest
 and doctest coverage with `cargo +nightly llvm-cov`. See
-[0034](docs/decisions/0034-ci-sccache-r2.md).
+[0035](docs/decisions/0035-ci-sccache-r2.md).
 
 `fuzz/` is a standalone cargo-fuzz workspace (excluded from the root
 workspace). Targets: `jwt` (`megabase-core` HS256 + `bearer_token`),

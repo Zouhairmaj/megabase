@@ -6,18 +6,22 @@ Extends the root `AGENTS.md`; it does not relax it.
   ```bash
   cargo run --manifest-path site/Cargo.toml --release -- --repo-root . --out _site
   cargo fmt --manifest-path site/Cargo.toml -- --check
-  cargo clippy --manifest-path site/Cargo.toml -- -D warnings
+  cargo clippy --manifest-path site/Cargo.toml --all-targets --locked -- -D warnings
   cargo audit --file site/Cargo.lock
   ```
-  CI does not lint it, so run fmt/clippy yourself. `[lints.rust]`
-  forbids `unsafe_code` here because this crate cannot inherit
+  `[lints.rust]` forbids `unsafe_code` here because this crate cannot inherit
   `[workspace.lints]`. Scorecard/OSV,
   `just audit`, and the CI `cargo-audit` matrix all scan
-  `site/Cargo.lock`. Keep `resvg` on the harfrust/skrifa stack (0.48+);
+  `site/Cargo.lock`. The CI matrix still audits that lockfile when a
+  pull request changes a site-generator input; the workspace lockfile
+  leg is skipped on a site-only diff. Push to `main` audits both.
+  Keep `resvg` on the harfrust/skrifa stack (0.48+);
   do not regress to rustybuzz or ttf-parser (RUSTSEC-2026-0206,
   RUSTSEC-2026-0192).
-- `pages.yml` builds the site on push to `main` (and
-  `workflow_dispatch`) and does not deploy that build. It checks out
+- `pages.yml` lints, tests, and builds the site on pull requests that
+  change a generator input, and on push to `main` and `workflow_dispatch`.
+  A pull request that does not change those paths reports **Generate site**
+  as success without building. The workflow does not deploy that build. It checks out
   the event SHA only, does not download Judge output, and saves the
   default-branch Rust cache on pushes to `main`. Deploying that
   checkout would publish the regression baseline over the live score.

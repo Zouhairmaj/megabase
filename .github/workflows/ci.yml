@@ -27,88 +27,153 @@ env:
   SCCACHE_BUCKET_NAME: ${{ vars.SCCACHE_BUCKET }}
   SCCACHE_ENDPOINT_URL: ${{ vars.SCCACHE_ENDPOINT }}
 
+# Pull requests consult .github/actions/pr-paths before the expensive jobs.
+# Those jobs keep their check names. server=false succeeds without compiling.
+# Any other value, including empty, runs the job. A failed path-filter job
+# also runs the job (always() && !cancelled()). Push and workflow_dispatch
+# set server=true (main and release lockfile dispatch stay on the full suite).
+
 jobs:
-  build:
-    name: Build
+  # Classify the diff once. Push and workflow_dispatch set server=true.
+  # A site-only pull request sets server=false. Jobs still run and report
+  # their existing names as success, so a required check does not stay pending.
+  changes:
+    name: Path filter
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    outputs:
+      site: ${{ steps.paths.outputs.site }}
+      server: ${{ steps.paths.outputs.server }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
+          fetch-depth: 1
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+      - id: paths
+        uses: ./.github/actions/pr-paths
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    needs: changes
+    if: always() && !cancelled()
+    permissions:
+      contents: read
+    steps:
+      - name: Not applicable
+        if: needs.changes.result == 'success' && needs.changes.outputs.server == 'false'
+        run: echo "Site-only pull request. This check reports success without running."
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
+        uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
         with:
           toolchain: stable
           components: rustfmt, clippy
-      - uses: ./.github/actions/sccache
-      - uses: ./.github/actions/rust-cache
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
+        uses: ./.github/actions/sccache
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
+        uses: ./.github/actions/rust-cache
         with:
           key: mold
-      - uses: ./.github/actions/linux-mold
-      - run: cargo fmt --all -- --check
-      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
-      - uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
+        uses: ./.github/actions/linux-mold
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
+        run: cargo fmt --all -- --check
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
+        uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
         with:
           tool: cargo-nextest
-      - run: cargo nextest run --workspace --locked --profile ci
-      - run: cargo test --doc --workspace --locked
-      - run: cargo build --release --locked -p megabase -p megabase-judge --bin megabase --bin megabase-healthcheck
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
+        run: cargo nextest run --workspace --locked --profile ci
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
+        run: cargo test --doc --workspace --locked
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
+        run: cargo build --release --locked -p megabase -p megabase-judge --bin megabase --bin megabase-healthcheck
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: megabase
           path: |
             target/release/megabase
             target/release/megabase-healthcheck
       - name: sccache stats
-        if: always()
+        if: always() && !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.server != 'false')
         run: sccache --show-stats
 
   msrv:
     name: MSRV 1.89
     runs-on: ubuntu-latest
+    needs: changes
+    if: always() && !cancelled()
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Not applicable
+        if: needs.changes.result == 'success' && needs.changes.outputs.server == 'false'
+        run: echo "Site-only pull request. This check reports success without running."
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@d77020bf130f2e8c39c025bf9c4c3a445fe2b9fa # 1.89.0
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
+        uses: dtolnay/rust-toolchain@d77020bf130f2e8c39c025bf9c4c3a445fe2b9fa # 1.89.0
         with:
           toolchain: 1.89.0
-      - uses: ./.github/actions/sccache
-      - uses: ./.github/actions/rust-cache
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
+        uses: ./.github/actions/sccache
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
+        uses: ./.github/actions/rust-cache
         with:
           key: mold
-      - uses: ./.github/actions/linux-mold
-      - run: cargo check --locked -p megabase -p megabase-core -p megabase-server
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
+        uses: ./.github/actions/linux-mold
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
+        run: cargo check --locked -p megabase -p megabase-core -p megabase-server
       - name: sccache stats
-        if: always()
+        if: always() && !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.server != 'false')
         run: sccache --show-stats
 
   coverage:
     name: Coverage check
     runs-on: ubuntu-latest
+    needs: changes
+    if: always() && !cancelled()
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Not applicable
+        if: needs.changes.result == 'success' && needs.changes.outputs.server == 'false'
+        run: echo "Site-only pull request. This check reports success without running."
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           submodules: recursive
           fetch-depth: 1
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
+        uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
         with:
           toolchain: stable
-      - uses: ./.github/actions/sccache
-      - uses: ./.github/actions/rust-cache
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
+        uses: ./.github/actions/sccache
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
+        uses: ./.github/actions/rust-cache
         with:
           key: mold
-      - uses: ./.github/actions/linux-mold
-      - run: cargo run --locked -p megabase-coverage -- verify-pins
-      - run: cargo run --locked -p megabase-coverage -- check
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
+        uses: ./.github/actions/linux-mold
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
+        run: cargo run --locked -p megabase-coverage -- verify-pins
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
+        run: cargo run --locked -p megabase-coverage -- check
       - name: sccache stats
-        if: always()
+        if: always() && !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.server != 'false')
         run: sccache --show-stats
 
   guard:
@@ -148,13 +213,20 @@ jobs:
   cargo-deny:
     name: cargo-deny
     runs-on: ubuntu-latest
+    needs: changes
+    if: always() && !cancelled()
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Not applicable
+        if: needs.changes.result == 'success' && needs.changes.outputs.server == 'false'
+        run: echo "Site-only pull request. This check reports success without running."
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
-      - uses: ./.github/actions/dockerhub-login
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
+        uses: ./.github/actions/dockerhub-login
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
@@ -162,17 +234,22 @@ jobs:
       # rust:1.85.0-alpine from Docker Hub and 429s on unauthenticated pulls.
       # --all-features matches that action's default arguments. This job
       # does not build an image; login still runs when the token is set.
-      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
+        uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
         with:
           toolchain: stable
-      - uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
+        uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
         with:
           tool: cargo-deny
-      - run: cargo deny --all-features check advisories licenses bans sources
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
+        run: cargo deny --all-features check advisories licenses bans sources
 
   cargo-audit:
     name: cargo-audit
     runs-on: ubuntu-latest
+    needs: changes
+    if: always() && !cancelled()
     permissions:
       contents: read
     strategy:
@@ -183,75 +260,113 @@ jobs:
         lockfile:
           - Cargo.lock
           - site/Cargo.lock
+    # Workspace Cargo.lock is unchanged on a site-only diff, so that leg
+    # passes through. site/Cargo.lock can change whenever site=true, so
+    # that leg still audits. A failed path-filter job audits both.
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Not applicable
+        if: needs.changes.result == 'success' && needs.changes.outputs.server == 'false' && (matrix.lockfile != 'site/Cargo.lock' || needs.changes.outputs.site != 'true')
+        run: echo "This lockfile is unchanged by the pull request. cargo-audit reports success without scanning it."
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false' || (matrix.lockfile == 'site/Cargo.lock' && needs.changes.outputs.site == 'true')
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false' || (matrix.lockfile == 'site/Cargo.lock' && needs.changes.outputs.site == 'true')
+        uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
         with:
           toolchain: stable
-      - uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false' || (matrix.lockfile == 'site/Cargo.lock' && needs.changes.outputs.site == 'true')
+        uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
         with:
           tool: cargo-audit
-      - run: cargo audit --file ${{ matrix.lockfile }}
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false' || (matrix.lockfile == 'site/Cargo.lock' && needs.changes.outputs.site == 'true')
+        run: cargo audit --file ${{ matrix.lockfile }}
 
   # Imported audits (Mozilla, Google, Bytecode Alliance) plus exemptions
   # for everything else. --locked does not fetch new imports.
   cargo-vet:
     name: cargo-vet
     runs-on: ubuntu-latest
+    needs: changes
+    if: always() && !cancelled()
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Not applicable
+        if: needs.changes.result == 'success' && needs.changes.outputs.server == 'false'
+        run: echo "Site-only pull request. This check reports success without running."
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
+        uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
         with:
           toolchain: stable
-      - uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
+        uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
         with:
           tool: cargo-vet@0.10.2
-      - run: cargo vet --locked
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
+        run: cargo vet --locked
 
   # cargo-udeps needs nightly. cargo-machete is the stable check.
   # Paths are ours only; vendor/ is the frozen spec.
   cargo-machete:
     name: cargo-machete
     runs-on: ubuntu-latest
+    needs: changes
+    if: always() && !cancelled()
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Not applicable
+        if: needs.changes.result == 'success' && needs.changes.outputs.server == 'false'
+        run: echo "Site-only pull request. This check reports success without running."
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
+        uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
         with:
           toolchain: stable
-      - uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
+        uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
         with:
           tool: cargo-machete@0.9.2
-      - run: cargo machete crates tools judge site fuzz
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
+        run: cargo machete crates tools judge site fuzz
 
   # --each-feature rebuilds a crate once per feature. Skip crates that
   # declare none so this stays cheap.
   cargo-hack:
     name: cargo-hack
     runs-on: ubuntu-latest
+    needs: changes
+    if: always() && !cancelled()
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Not applicable
+        if: needs.changes.result == 'success' && needs.changes.outputs.server == 'false'
+        run: echo "Site-only pull request. This check reports success without running."
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
+        uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
         with:
           toolchain: stable
-      - uses: ./.github/actions/sccache
-      - uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
+        uses: ./.github/actions/sccache
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
+        uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
         with:
           tool: cargo-hack@0.6.45
-      - name: Check each feature of crates that declare one
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
+        name: Check each feature of crates that declare one
         run: |
           set -euo pipefail
           meta="$(mktemp)"
@@ -276,33 +391,46 @@ jobs:
           done
           cargo hack check --locked --each-feature "${args[@]}"
       - name: sccache stats
-        if: always()
+        if: always() && !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.server != 'false')
         run: sccache --show-stats
 
   llvm-cov:
     name: Codecov
     runs-on: ubuntu-latest
+    needs: changes
+    if: always() && !cancelled()
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Not applicable
+        if: needs.changes.result == 'success' && needs.changes.outputs.server == 'false'
+        run: echo "Site-only pull request. This check reports success without running."
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
+        uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
         with:
           toolchain: stable
           components: llvm-tools-preview
-      - uses: ./.github/actions/sccache
-      - uses: ./.github/actions/rust-cache
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
+        uses: ./.github/actions/sccache
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
+        uses: ./.github/actions/rust-cache
         with:
           key: llvm-cov-mold
-      - uses: ./.github/actions/linux-mold
-      - uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
+        uses: ./.github/actions/linux-mold
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
+        uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
         with:
           tool: cargo-llvm-cov,cargo-nextest
-      - name: Install nightly for llvm-cov doctests
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
+        name: Install nightly for llvm-cov doctests
         run: rustup toolchain install nightly --profile minimal --component llvm-tools-preview
-      - name: Generate lcov.info
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
+        name: Generate lcov.info
         run: |
           set -euo pipefail
           # --doc and report --doctests need nightly (-Z persist-doctests).
@@ -311,36 +439,46 @@ jobs:
           cargo +nightly llvm-cov --no-report --workspace --locked nextest
           cargo +nightly llvm-cov --no-report --workspace --locked --doc
           cargo +nightly llvm-cov report --doctests --lcov --output-path lcov.info
-      - name: Upload to Codecov
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
+        name: Upload to Codecov
         uses: codecov/codecov-action@0fb7174895f61a3b6b78fc075e0cd60383518dac # v5.5.3
         with:
           files: lcov.info
           fail_ci_if_error: false
           token: ${{ secrets.CODECOV_TOKEN }}
       - name: sccache stats
-        if: always()
+        if: always() && !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.server != 'false')
         run: sccache --show-stats
 
   image:
     name: Container image
     runs-on: ubuntu-latest
+    needs: changes
+    if: always() && !cancelled()
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Not applicable
+        if: needs.changes.result == 'success' && needs.changes.outputs.server == 'false'
+        run: echo "Site-only pull request. This check reports success without running."
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
-      - uses: ./.github/actions/dockerhub-login
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
+        uses: ./.github/actions/dockerhub-login
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
       # Compiles inside Docker. sccache is not installed in the image:
       # R2 keys would be a second credential path, and fork PRs have none.
-      # Runner jobs above use sccache. See docs/decisions/0034-ci-sccache-r2.md.
-      - run: docker build -t megabase:ci .
-      - run: |
+      # Runner jobs above use sccache. See docs/decisions/0035-ci-sccache-r2.md.
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
+        run: docker build -t megabase:ci .
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
+        run: |
           docker run -d --name megabase-ci -p 8000:8000 megabase:ci
-          for i in $(seq 1 30); do
+          for _ in $(seq 1 30); do
             if curl -fsS http://127.0.0.1:8000/_megabase/health; then
               exit 0
             fi

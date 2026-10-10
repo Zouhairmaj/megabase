@@ -813,7 +813,7 @@ jobs:
             type=raw,value=${{ env.TAG }}
             type=raw,value=${{ steps.version.outputs.version }}
       # Compiles inside Docker. sccache stays on the runner jobs
-      # (docs/decisions/0034-ci-sccache-r2.md).
+      # (docs/decisions/0035-ci-sccache-r2.md).
       - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         id: image
         with:

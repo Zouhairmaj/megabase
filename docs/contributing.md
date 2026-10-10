@@ -53,6 +53,80 @@ SQLX_OFFLINE=false DATABASE_URL=postgres://… cargo sqlx prepare --workspace --
 Commit the `.sqlx` files the command writes. A CI `cargo sqlx prepare --check`
 step would live in `.github/` and needs its own `review/*` pull request.
 
+## Pull request checks
+
+Protected paths and Conventional Commits title run on every pull request.
+
+The other workflows call `.github/actions/pr-paths` instead of `paths` /
+`paths-ignore` on the trigger. A workflow that never starts leaves a
+required check at "Expected — waiting". Each job keeps its check name.
+When the diff does not apply, the job's first step succeeds and the
+remaining steps are skipped, so the check is success. An empty output
+runs the job. An empty diff, a failed base fetch, or a failed
+path-filter job (checkout or action error) runs the full suite. A
+skipped job is not used as a success for that case.
+
+A diff is **site-only** when every path is `site/**`, `devlog/**`,
+`MANIFESTO.md`, `HUMAN_LOG.md`, or anything under `docs/**` except
+`docs/COMPATIBILITY.md` and `docs/epics/**` (coverage-tool output).
+A site-only pull request does not compile the server. These checks
+report success without their usual work: Build, MSRV 1.89, Coverage
+check, Container image, Judge, the `cargo-fuzz` matrix, Bencher,
+cargo-deny, cargo-vet, cargo-machete, cargo-hack, and Codecov. The
+`cargo-audit` matrix still scans `site/Cargo.lock` when the diff
+changes a site-generator input, because that lockfile can change on a
+site-only pull request. The workspace `Cargo.lock` leg reports success
+without scanning. A pull request that changes neither the server nor a
+site-generator input (for example `docs/decisions/` only) reports both
+legs as success without scanning. Push to `main` audits both lockfiles.
+
+**Generate site** (`pages.yml`) runs when a path is a generator input:
+`site/**`, `devlog/**`, `MANIFESTO.md`, `HUMAN_LOG.md`, the workspace
+`Cargo.toml` (the version badge), a top-level `docs/*.md` file,
+`coverage/summary.json`, `coverage/units.json`,
+`coverage/badge-coverage.json`, `coverage/badge-conformance.json`,
+`coverage/judge-results.json`, `coverage/judge-history.json`,
+`coverage/treemap.svg`, or `coverage/treemap-light.svg`. That job
+formats, lints (`clippy -D warnings`), tests, and builds `site/`.
+`Cargo.toml` and the `coverage/` inputs are not site-only, so those
+diffs also run the server suite. A pull request with none of those
+paths (for example `docs/decisions/` alone) reports Generate site as
+success without building.
+
+**Judge shards** (`judge.yml`) use the same classification. A pull
+request that only changes one component crate runs that shard and the
+other shard checks succeed without starting the reference stack:
+
+| Crate | Shard |
+|---|---|
+| `crates/megabase-auth` | `Judge (auth)` |
+| `crates/megabase-rest` | `Judge (rest)` |
+| `crates/megabase-storage` | `Judge (storage)` |
+| `crates/megabase-realtime` | `Judge (realtime)` |
+| `crates/megabase-meta` | `Judge (meta)` |
+
+Two component crates run those two shards. Shared inputs run every
+shard: `crates/megabase-server` (the gateway), `crates/megabase-core`,
+the `crates/megabase` binary, root `Cargo.toml` and `Cargo.lock`,
+`judge/**`, `.github/**`, `coverage/judge-results.json` (the baseline
+the harness reads), and any Dockerfile or compose file. A path that is
+none of those and is not site content, `docs/**`, `coverage/**`,
+`README.md`, or `PROGRESS.md` is unclassifiable and also runs every
+shard. No component crate and no shared input (for example a site-only
+diff, or `docs/decisions/` alone) skips the Judge build. The mapping
+is the `COMPONENT_SHARDS` list in `.github/actions/pr-paths`. Add a
+line when `functions`, `studio`, or `pooler` gets
+`judge/cases/<shard>.toml`. Until that file exists, those crates run
+every shard.
+
+A diff that touches both a site path and a server path runs both
+suites. Push to `main`, the fuzz schedule, the hidden judge, Scorecard,
+Release, and `workflow_dispatch` (including release lockfile sync) are
+not filtered and run every Judge shard.
+
+CodeQL is GitHub code scanning default setup. There is no `codeql.yml`,
+so this filter does not skip it.
+
 ## Fuzzing
 
 OpenSSF Scorecard's Fuzzing check treats a Rust repo as fuzzed when a `*.rs`
@@ -80,9 +154,9 @@ cargo +nightly fuzz list
 ```
 
 `.github/workflows/fuzz.yml` runs each target for 60 seconds on pull
-requests and 600 seconds by default on a nightly schedule and
-`workflow_dispatch` (the `seconds` input can override that duration).
-A crash uploads `fuzz/artifacts/`. Seed inputs live in `fuzz/corpus/<target>/`.
+requests that are not site-only, and 600 seconds by default on a nightly
+schedule and `workflow_dispatch` (the `seconds` input can override that
+duration). A crash uploads `fuzz/artifacts/`. Seed inputs live in `fuzz/corpus/<target>/`.
 Do not commit `fuzz/target/`, `fuzz/artifacts/`, or `fuzz/coverage/`.
 
 ## Design
@@ -91,7 +165,7 @@ Mockups live in the [Kite identity file](https://kite.new/p/megabase-identity). 
 
 ## Supply chain
 
-Megabase owns two Rust lockfiles: the workspace `Cargo.lock` and `site/Cargo.lock` (the static generator is a standalone crate). `just audit` and the CI `cargo-audit` matrix each run `cargo audit --file` once per owned lockfile. A workspace-only `cargo audit` misses `site/`. There is no advisory ignore. Cargo still records optional `sqlx-mysql` in the workspace lockfile when only the postgres feature is on; `[patch.crates-io]` replaces that crate with `third_party/sqlx-mysql`, which leaves the `rsa` feature off so RUSTSEC-2023-0071 is not in the lockfile ([0033](decisions/0033-sqlx-mysql-rsa.md)). OpenSSF Scorecard's OSV check walks every `Cargo.lock` in the tree, including `site/`.
+Megabase owns two Rust lockfiles: the workspace `Cargo.lock` and `site/Cargo.lock` (the static generator is a standalone crate). `just audit` and the CI `cargo-audit` matrix each run `cargo audit --file` once per owned lockfile. A workspace-only `cargo audit` misses `site/`. A site-only pull request audits `site/Cargo.lock` when the change affects a site-generator input, and skips the workspace leg; every push to `main` audits both lockfiles. There is no advisory ignore. Cargo still records optional `sqlx-mysql` in the workspace lockfile when only the postgres feature is on; `[patch.crates-io]` replaces that crate with `third_party/sqlx-mysql`, which leaves the `rsa` feature off so RUSTSEC-2023-0071 is not in the lockfile ([0033](decisions/0033-sqlx-mysql-rsa.md)). OpenSSF Scorecard's OSV check walks every `Cargo.lock` in the tree, including `site/`.
 
 Lockfiles under `vendor/` belong to the pinned upstream spec. Agents never edit them ([ADR 0003](adr/0003-protected-paths.md)). Report issues in those trees upstream; do not add an OSV ignore unless a Scorecard finding is only in `vendor/` and cannot be fixed without bumping a pin.
 
@@ -101,7 +175,7 @@ Lockfiles under `vendor/` belong to the pinned upstream spec. Agents never edit 
 
 ## CI
 
-Compiling jobs use sccache ([0034](decisions/0034-ci-sccache-r2.md)).
+Compiling jobs use sccache ([0035](decisions/0035-ci-sccache-r2.md)).
 Same-repository runs write the R2 bucket named by `SCCACHE_BUCKET`.
 Fork pull requests have no repository secrets, so sccache uses its local
 disk and the job still passes. `Swatinem/rust-cache` caches the registry
