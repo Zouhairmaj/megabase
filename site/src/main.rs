@@ -9,6 +9,7 @@
 //!   cargo run --manifest-path site/Cargo.toml -- --repo-root . --out _site
 
 mod chrome;
+mod counts;
 mod devlog;
 mod docs;
 mod html;
@@ -280,6 +281,7 @@ struct SiteData<'a> {
     roadmap_md: Option<&'a str>,
     sha: &'a str,
     date: &'a str,
+    counts: &'a counts::PublicCounts,
 }
 
 fn build(
@@ -308,6 +310,7 @@ fn build(
     let site_docs = docs::load(repo_root)?;
     let sha = git_sha7(repo_root);
     let date = build_date();
+    let counts = counts::PublicCounts::load(repo_root);
     let roadmap_md = fs::read_to_string(repo_root.join("docs/ROADMAP.md")).ok();
     let data = SiteData {
         metrics,
@@ -317,6 +320,7 @@ fn build(
         roadmap_md: roadmap_md.as_deref(),
         sha: &sha,
         date: &date,
+        counts: &counts,
     };
 
     for page in PAGES {
@@ -521,7 +525,7 @@ fn content(
     data: &SiteData<'_>,
 ) -> io::Result<String> {
     Ok(match page.kind {
-        Kind::Home => pages::home(paths, data.metrics),
+        Kind::Home => pages::home(paths, data.metrics, data.counts),
         Kind::Manifesto => {
             let md = fs::read_to_string(repo_root.join("MANIFESTO.md"))?;
             let article = manifesto::render(&md, data.metrics);
@@ -960,7 +964,11 @@ mod tests {
         assert!(!home.contains("BUILT BY AGENTS"));
         assert!(!home.contains("Units passing the judge"));
         assert!(home.contains("https://analytics.ahrefs.com/analytics.js"));
-        assert!(home.contains("NOTHING PASSES YET"));
+        assert!(home.contains("SUPABASE COVERAGE →"));
+        assert!(home.contains("TOTAL COMMITS ↗"));
+        assert!(home.contains("TOTAL PRS ↗"));
+        assert!(!home.contains("NOTHING PASSES YET"));
+        assert!(!home.contains("READ THE MANIFESTO"));
         assert!(!home.contains("footer-measure"));
         let status = fs::read_to_string(out.join("status/index.html")).unwrap();
         assert!(!status.contains("db-dither.js"));
