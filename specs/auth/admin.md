@@ -386,8 +386,11 @@ true).
 targets `id`, `aud`, `role`, `app_metadata`, `created_at`, `updated_at`,
 `confirmed_at`, `email_confirmed_at`, `phone_confirmed_at`, `email_verified`,
 `phone_verified`, `banned_until`, and `is_super_admin` are rejected.
-URLs must be HTTPS and must not resolve to loopback, private, link-local,
-multicast, or unspecified addresses. `pkce_enabled` defaults true, `enabled`
+URLs must be HTTPS. The host is the authority after the last `@`
+(Go `url.URL.Hostname`); a `\` or space in that host is rejected. The host
+must not be localhost, and name lookup (non-blocking, 5 second timeout)
+must not return loopback, private, link-local, multicast, or unspecified
+addresses. `pkce_enabled` defaults true, `enabled`
 defaults true, `email_optional` defaults false. Empty maps are stored as `{}`.
 Client secret is stored in plaintext when database encryption is disabled
 (the default).
@@ -398,7 +401,8 @@ Client secret is stored in plaintext when database encryption is disabled
 `Could not parse request body as JSON: {go message}` (empty body is
 `unexpected end of JSON input`). Bad type: `provider_type must be either 'oauth2' or 'oidc'`.
 Duplicate identifier: 400 `conflict`
-`A custom OAuth provider with this identifier already exists`.
+`A custom OAuth provider with this identifier already exists`
+(upstream `NewBadRequestError`, HTTP 400 with error code `conflict`, not 409).
 OIDC create validates, then returns 400 `validation_failed`
 `OIDC discovery from {quoted url} failed: OIDC discovery fetch is not available`.
 Discovery over HTTPS needs a TLS client that is not on the dependency allow
@@ -419,7 +423,8 @@ header, else `Referer`, else `GOTRUE_SITE_URL` (default
 `http://localhost:3000`); a valid body `redirect_to` wins. External URL
 default is `http://localhost:8000/auth/v1`. Mailer paths default to
 `/auth/v1/verify`. OTP length defaults to 6 (clamped 6–10). Secure email
-change defaults on.
+change defaults on. Reading `/dev/urandom` for the OTP or the generated
+signup password fails the request when that device is unavailable.
 
 **Output.** `200` the user object plus `action_link`, `email_otp`,
 `hashed_token`, `verification_type`, and `redirect_to`. The link query is
@@ -443,7 +448,8 @@ duplicate new email: 422 `email_exists`
 `A user with this email address has already been registered`.
 `email_change_current` with secure email change off: 400
 `Enable secure email change to generate link for current email`.
-Body larger than 1 MiB: 413 `request_entity_too_large`.
+Body larger than 1 MiB: 413 `request_entity_too_large`. Random-byte
+failure: 500 `unexpected_failure` `failed to generate random bytes`.
 
 ---
 

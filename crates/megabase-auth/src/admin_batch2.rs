@@ -14,8 +14,7 @@
 //! Issue #7 admin reads and creates.
 
 use std::collections::BTreeMap;
-use std::net::ToSocketAddrs;
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
 use axum::{
     body::Bytes,
@@ -44,6 +43,8 @@ use crate::state::AuthState;
 const AUTH_PREFIX: &str = "/auth/v1";
 const USER_NOT_FOUND: &str = "User not found";
 const DUPLICATE_EMAIL: &str = "A user with this email address has already been registered";
+/// Bound for `tokio::net::lookup_host` so a slow resolver cannot stall a worker.
+const OAUTH_DNS_TIMEOUT: Duration = Duration::from_secs(5);
 
 // megabase:unit auth:route:GET /auth/v1/admin/users
 pub(crate) async fn list_users(
@@ -307,7 +308,7 @@ pub(crate) async fn generate_link(
         match link_type.as_str() {
             "magiclink" => {
                 link_type = "signup".into();
-                params.password = generate_password();
+                params.password = generate_password()?;
             }
             "recovery" | "email_change_current" | "email_change_new" => {
                 return Err(AuthError::not_found(
@@ -321,7 +322,7 @@ pub(crate) async fn generate_link(
     if link_type == "signup" && user_id.is_none() {
         check_signup_password(&state, &params.password)?;
     }
-    let otp = generate_otp(state.otp_length);
+    let otp = generate_otp(state.otp_length)?;
     let hashed = token_hash(&params.email, &otp);
     let mut tx = db
         .begin()
@@ -809,12 +810,12 @@ async fn hash_password(password: &str) -> Result<String, AuthError> {
         .map_err(|_| AuthError::internal("Database error creating user"))
 }
 
-fn generate_password() -> String {
+fn generate_password() -> Result<String, AuthError> {
     const LOWER: &[u8] = b"abcdefghijklmnopqrstuvwxyz";
     const UPPER: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ";
     const DIGITS: &[u8] = b"0123456789";
     const SYMBOLS: &[u8] = b"~!@#$%^&*()_+`-={}|[]\\:\"<>?,./";
-    let bytes = random_bytes(64).unwrap_or_else(|_| vec![0x41; 64]);
+    let bytes = random_bytes(64)?;
     let mut chars = Vec::with_capacity(64);
     for (i, byte) in bytes.iter().enumerate() {
         let alphabet = if i < 10 {
@@ -828,18 +829,18 @@ fn generate_password() -> String {
         };
         chars.push(alphabet[(*byte as usize) % alphabet.len()] as char);
     }
-    chars.into_iter().collect()
+    Ok(chars.into_iter().collect())
 }
 
-fn generate_otp(digits: usize) -> String {
+fn generate_otp(digits: usize) -> Result<String, AuthError> {
     let digits = digits.clamp(6, 10);
-    let bytes = random_bytes(8).unwrap_or_else(|_| vec![1, 2, 3, 4, 5, 6, 7, 8]);
+    let bytes = random_bytes(8)?;
     let mut value = 0u64;
     for byte in bytes {
         value = value.wrapping_mul(256).wrapping_add(u64::from(byte));
     }
     let upper = 10u64.pow(digits as u32);
-    format!("{:0width$}", value % upper, width = digits)
+    Ok(format!("{:0width$}", value % upper, width = digits))
 }
 
 pub(crate) fn token_hash(email: &str, otp: &str) -> String {
@@ -941,25 +942,20 @@ struct UrlParts {
     port: String,
 }
 
+// Go `net/url` `Hostname` and `Port`: the host is the authority after the last
+// `@`. Only an all-digit port is split off. `\` and space in that host are
+// rejected so they cannot hide the real authority.
 fn url_parts(raw: &str) -> Result<UrlParts, ()> {
     let (scheme, rest) = raw.split_once("://").ok_or(())?;
     if scheme.is_empty() || rest.is_empty() {
         return Err(());
     }
     let hostport = rest.split(['/', '?', '#']).next().unwrap_or(rest);
-    let (host, port) = if let Some(host) = hostport.strip_prefix('[') {
-        let (host, port) = host.split_once(']').ok_or(())?;
-        let port = port.strip_prefix(':').unwrap_or("");
-        (host.to_string(), port.to_string())
-    } else if let Some((host, port)) = hostport.rsplit_once(':') {
-        if host.contains(':') {
-            (hostport.to_string(), String::new())
-        } else {
-            (host.to_string(), port.to_string())
-        }
-    } else {
-        (hostport.to_string(), String::new())
-    };
+    let hostport = hostport.rsplit_once('@').map_or(hostport, |(_, host)| host);
+    if hostport.is_empty() || hostport.chars().any(|ch| ch == '\\' || ch == ' ') {
+        return Err(());
+    }
+    let (host, port) = split_host_port(hostport)?;
     if host.is_empty() {
         return Err(());
     }
@@ -968,6 +964,36 @@ fn url_parts(raw: &str) -> Result<UrlParts, ()> {
         host,
         port,
     })
+}
+
+fn split_host_port(hostport: &str) -> Result<(String, String), ()> {
+    if let Some(rest) = hostport.strip_prefix('[') {
+        let (host, after) = rest.split_once(']').ok_or(())?;
+        if host.is_empty() {
+            return Err(());
+        }
+        let port = if let Some(port) = after.strip_prefix(':') {
+            if port.is_empty() || !port.bytes().all(|byte| byte.is_ascii_digit()) {
+                return Err(());
+            }
+            port
+        } else if after.is_empty() {
+            ""
+        } else {
+            return Err(());
+        };
+        return Ok((host.to_string(), port.to_string()));
+    }
+    if let Some((host, port)) = hostport.rsplit_once(':') {
+        if !host.is_empty()
+            && !host.contains(':')
+            && !port.is_empty()
+            && port.bytes().all(|byte| byte.is_ascii_digit())
+        {
+            return Ok((host.to_string(), port.to_string()));
+        }
+    }
+    Ok((hostport.to_string(), String::new()))
 }
 
 fn is_loopback_host(host: &str) -> bool {
@@ -1941,7 +1967,7 @@ async fn create_custom_provider(
     validate_auth_params(params.authorization_params.as_ref())?;
     validate_attribute_mapping(params.attribute_mapping.as_ref())?;
     validate_claims(params.custom_claims_allowlist.as_deref())?;
-    validate_custom_urls(params)?;
+    validate_custom_urls(params).await?;
     if params.provider_type == "oidc" {
         let url = discovery_url(params);
         // `skip_nonce_check` is stored only after a successful OIDC discovery fetch.
@@ -1963,7 +1989,11 @@ async fn create_custom_provider(
     .await
     .map_err(|_| AuthError::internal("Error checking for existing provider"))?;
     if existing.is_some() {
-        return Err(AuthError::conflict(
+        // v2.197.0 `adminCustomOAuthProviderCreate` uses `NewBadRequestError`
+        // (HTTP 400, error code `conflict`), not `NewConflictError` (HTTP 409).
+        return Err(AuthError::new(
+            400,
+            "conflict",
             "A custom OAuth provider with this identifier already exists",
         ));
     }
@@ -2151,7 +2181,7 @@ fn validate_claims(allowlist: Option<&[String]>) -> Result<(), AuthError> {
     Ok(())
 }
 
-fn validate_custom_urls(params: &CustomParams) -> Result<(), AuthError> {
+async fn validate_custom_urls(params: &CustomParams) -> Result<(), AuthError> {
     let mut urls = Vec::new();
     if params.provider_type == "oidc" {
         urls.push(params.issuer.as_str());
@@ -2172,7 +2202,7 @@ fn validate_custom_urls(params: &CustomParams) -> Result<(), AuthError> {
     }
     for url in urls {
         if !url.is_empty() {
-            validate_oauth_url(url)?;
+            validate_oauth_url(url).await?;
         }
     }
     Ok(())
@@ -2192,7 +2222,7 @@ fn discovery_url(params: &CustomParams) -> String {
     )
 }
 
-pub(crate) fn validate_oauth_url(url: &str) -> Result<(), AuthError> {
+pub(crate) async fn validate_oauth_url(url: &str) -> Result<(), AuthError> {
     let parts = url_parts(url).map_err(|_| AuthError::validation(400, "Invalid URL format"))?;
     if parts.scheme != "https" {
         return Err(AuthError::validation(400, "URL must use HTTPS"));
@@ -2211,9 +2241,15 @@ pub(crate) fn validate_oauth_url(url: &str) -> Result<(), AuthError> {
             "URL cannot point to localhost or loopback addresses",
         ));
     }
-    let addrs = (host.as_str(), 443u16)
-        .to_socket_addrs()
-        .map_err(|_| AuthError::validation(400, "Unable to resolve hostname"))?;
+    // `lookup_host` is the non-blocking equivalent of `net.LookupIP`. Port 443
+    // is only the required service argument; the check uses the resolved IPs.
+    let addrs = tokio::time::timeout(
+        OAUTH_DNS_TIMEOUT,
+        tokio::net::lookup_host((host.as_str(), 443u16)),
+    )
+    .await
+    .map_err(|_| AuthError::validation(400, "Unable to resolve hostname"))?
+    .map_err(|_| AuthError::validation(400, "Unable to resolve hostname"))?;
     for addr in addrs {
         validate_ip(addr.ip())?;
     }
@@ -2427,10 +2463,100 @@ mod tests {
         assert_eq!(err, "redirect_uris is required");
     }
 
-    #[test]
-    fn https_is_required_for_custom_urls() {
-        let err = validate_oauth_url("http://example.com/auth").unwrap_err();
+    #[tokio::test]
+    async fn https_is_required_for_custom_urls() {
+        let err = validate_oauth_url("http://example.com/auth")
+            .await
+            .unwrap_err();
         assert_eq!(err.message, "URL must use HTTPS");
+    }
+
+    #[test]
+    fn url_parts_use_the_host_after_userinfo() {
+        let loopback = url_parts("https://a.com:443@127.0.0.1/").unwrap();
+        assert_eq!(loopback.scheme, "https");
+        assert_eq!(loopback.host, "127.0.0.1");
+        assert_eq!(loopback.port, "");
+
+        let evil = url_parts("http://localhost:80@evil.com").unwrap();
+        assert_eq!(evil.host, "evil.com");
+        assert_eq!(evil.port, "");
+
+        let evil_port = url_parts("http://localhost:1@evil.com/cb").unwrap();
+        assert_eq!(evil_port.host, "evil.com");
+        assert_eq!(evil_port.port, "");
+
+        let v6 = url_parts("http://user@[::1]:8080/cb").unwrap();
+        assert_eq!(v6.host, "::1");
+        assert_eq!(v6.port, "8080");
+
+        let disguised = url_parts("https://evil.com\\@127.0.0.1/").unwrap();
+        assert_eq!(disguised.host, "127.0.0.1");
+        assert!(url_parts(r"https://127.0.0.1\evil.com/").is_err());
+        assert!(url_parts("https://exa mple.com/").is_err());
+    }
+
+    #[test]
+    fn redirect_checks_ignore_userinfo() {
+        assert!(!redirect_ok(
+            "http://localhost:3000",
+            "http://localhost:80@evil.com"
+        ));
+        assert!(!redirect_ok(
+            "http://localhost:3000",
+            "http://localhost:1@evil.com"
+        ));
+        assert!(redirect_ok(
+            "https://127.0.0.1",
+            "https://a.com:443@127.0.0.1/"
+        ));
+        assert!(!redirect_ok(
+            "http://localhost:3000",
+            r"http://localhost\evil.com/cb"
+        ));
+    }
+
+    #[test]
+    fn redirect_uri_uses_the_host_after_userinfo() {
+        let evil = validate_redirect_uri("http://localhost:80@evil.com").unwrap_err();
+        assert_eq!(evil, "HTTP scheme only allowed for localhost");
+        let other = validate_redirect_uri("http://localhost:1@evil.com").unwrap_err();
+        assert_eq!(other, "HTTP scheme only allowed for localhost");
+        validate_redirect_uri("https://a.com:443@127.0.0.1/").unwrap();
+        validate_redirect_uri("http://a.com:443@127.0.0.1/").unwrap();
+        validate_redirect_uri("http://user@[::1]/cb").unwrap();
+    }
+
+    #[tokio::test]
+    async fn oauth_url_rejects_userinfo_loopback_without_dns() {
+        let err = validate_oauth_url("https://a.com:443@127.0.0.1/")
+            .await
+            .unwrap_err();
+        assert_eq!(
+            err.message,
+            "URL cannot point to localhost or loopback addresses"
+        );
+        assert_eq!(err.status, 400);
+        let spaced = validate_oauth_url("https://exa mple.com/")
+            .await
+            .unwrap_err();
+        assert_eq!(spaced.message, "Invalid URL format");
+        let link_local = validate_oauth_url("https://169.254.169.254/latest")
+            .await
+            .unwrap_err();
+        assert_eq!(
+            link_local.message,
+            "URL cannot resolve to link-local addresses"
+        );
+    }
+
+    #[test]
+    fn generated_otp_and_password_come_from_urandom() {
+        let password = generate_password().unwrap();
+        assert_eq!(password.len(), 64);
+        let otp = generate_otp(6).unwrap();
+        assert_eq!(otp.len(), 6);
+        assert!(otp.chars().all(|ch| ch.is_ascii_digit()));
     }
 
     #[test]

@@ -74,10 +74,6 @@ impl AuthError {
         Self::new(500, "unexpected_failure", message)
     }
 
-    pub fn conflict(message: impl Into<String>) -> Self {
-        Self::new(409, "conflict", message)
-    }
-
     pub fn unprocessable(error_code: &'static str, message: impl Into<String>) -> Self {
         Self::new(422, error_code, message)
     }
