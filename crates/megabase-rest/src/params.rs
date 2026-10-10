@@ -1659,7 +1659,14 @@ pub(crate) fn build_read_sql(
                     };
                     let target = quote_ident(&embed.name);
                     let cond = join_condition(rel, &relation_ident, &target);
-                    push_embed(&mut select_sql, &mut params, &schema_ident, embed, rel, &cond);
+                    push_embed(
+                        &mut select_sql,
+                        &mut params,
+                        &schema_ident,
+                        embed,
+                        rel,
+                        &cond,
+                    );
                     if embed.inner {
                         exists.push(format!(
                             "EXISTS (SELECT 1 FROM {schema_ident}.{target} WHERE {cond})"
@@ -2168,7 +2175,11 @@ mod tests {
             parse_get_query("select=notes!fk(body)").unwrap_err(),
             QueryFail::Route
         ));
-        for empty in ["select=id,notes()", "select=notes!inner()", "select=notes( )"] {
+        for empty in [
+            "select=id,notes()",
+            "select=notes!inner()",
+            "select=notes( )",
+        ] {
             assert!(matches!(
                 parse_get_query(empty).unwrap_err(),
                 QueryFail::Route
@@ -2205,7 +2216,10 @@ mod tests {
             sql.contains("\"notes\".\"user_id\" = \"profiles\".\"id\""),
             "{sql}"
         );
-        assert!(sql.contains("AND EXISTS") || sql.contains("WHERE EXISTS"), "{sql}");
+        assert!(
+            sql.contains("AND EXISTS") || sql.contains("WHERE EXISTS"),
+            "{sql}"
+        );
     }
 
     #[test]
@@ -2304,8 +2318,14 @@ mod tests {
         assert!(!sql.sql.contains("\"todos\".\"id\","));
 
         let query = parse_get_query("body=eq.victim-secret') or true--&select=body").unwrap();
-        let sql = build_read_sql("public", "notes", &query, &[("body", "text")], &HashMap::new())
-            .unwrap();
+        let sql = build_read_sql(
+            "public",
+            "notes",
+            &query,
+            &[("body", "text")],
+            &HashMap::new(),
+        )
+        .unwrap();
         assert_eq!(sql.params, vec!["victim-secret') or true--"]);
         assert!(!sql.sql.contains("victim-secret"));
     }

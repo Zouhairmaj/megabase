@@ -2,12 +2,12 @@
   "schema": 1,
   "totals": {
     "units": 1024,
-    "implemented": 121,
-    "tested": 87,
+    "implemented": 123,
+    "tested": 89,
     "conformant": 0
   },
   "percent": {
-    "coverage": 11.8,
+    "coverage": 12.0,
     "conformance": 0.0,
     "done": 0.0
   },
@@ -316,8 +316,8 @@
     },
     "rest": {
       "units": 93,
-      "implemented": 50,
-      "tested": 27,
+      "implemented": 52,
+      "tested": 29,
       "conformant": 0,
       "groups": {
         "aggregates": {
@@ -328,8 +328,8 @@
         },
         "embedding": {
           "units": 2,
-          "implemented": 0,
-          "tested": 0,
+          "implemented": 2,
+          "tested": 2,
           "conformant": 0
         },
         "filtering": {
@@ -627,6 +627,8 @@
     "auth:verify-type:invite": "tested",
     "auth:verify-type:recovery": "tested",
     "auth:verify-type:signup": "tested",
+    "rest:embed-join:inner": "tested",
+    "rest:embed-join:left": "tested",
     "rest:filter-operator:adj": "implemented",
     "rest:filter-operator:all": "implemented",
     "rest:filter-operator:any": "implemented",
