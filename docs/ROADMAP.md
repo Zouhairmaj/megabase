@@ -109,7 +109,7 @@ Protected paths, Judge) stays green. That commit is pushed with the token the tr
 selected.
 `RELEASE_PLEASE_TOKEN` is used only when that probe can create a git
 tree, so the push starts workflows. A fine-grained PAT owned by
-`megabase-agent` cannot:
+`megabase-agent` cannot write this public repository.
 [GitHub's token docs](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens)
 say only a classic PAT has write access to a public repository owned by
 another personal account, including for a collaborator. The secret has to be a classic PAT with
@@ -128,10 +128,15 @@ the push was retried with `GITHUB_TOKEN`, or the commit was not pushed. If that 
 default branch, which checks out the lockfile SHA and reports Build,
 Codecov, Bencher, Protected paths, and Judge via the Checks API.
 `GITHUB_TOKEN` is allowed to create `workflow_dispatch` runs. The
-lockfile job then polls until those five names have started on that
-SHA, not merely until any check run exists. The window is 60 attempts
-of 6s by default (about six minutes) and is configurable via
-`LOCKFILE_CHECK_ATTEMPTS` and `LOCKFILE_CHECK_SLEEP_SECONDS`. PR titles use `chore: release ${version}` (no `main` scope);
+lockfile job then polls until Build, Codecov, Bencher, and Protected
+paths have check runs on that SHA, and until Judge has started. A check
+named `Judge` or `Judge (<service>)` counts as Judge. The aggregate job
+named `Judge` starts only after the matrix jobs finish, so the wait
+does not require that name. `Judge build` and `Judge services` do not
+count. The window is 180 attempts of 6s by default (about eighteen
+minutes) and is configurable via `LOCKFILE_CHECK_ATTEMPTS` and
+`LOCKFILE_CHECK_SLEEP_SECONDS`
+([0026](decisions/0026-lockfile-judge-matrix-checks.md)). PR titles use `chore: release ${version}` (no `main` scope);
 `semantic-pr.yml` also allows scope `main` as a fallback.
 `bootstrap-sha` is the Phase 0 merge (`7aa41e8`, exclusive): commits
 before it (`Day 0`, `[phase0]`, `[brand]`) are not conventional and
