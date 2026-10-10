@@ -1244,7 +1244,7 @@ dependencies = [
 
 [[package]]
 name = "megabase"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "megabase-core",
  "megabase-server",
@@ -1254,7 +1254,7 @@ dependencies = [
 
 [[package]]
 name = "megabase-auth"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "axum",
  "base64 0.22.1",
@@ -1277,7 +1277,7 @@ dependencies = [
 
 [[package]]
 name = "megabase-backlog"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "anyhow",
  "serde",
@@ -1286,7 +1286,7 @@ dependencies = [
 
 [[package]]
 name = "megabase-core"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "axum",
  "base64 0.22.1",
@@ -1300,7 +1300,7 @@ dependencies = [
 
 [[package]]
 name = "megabase-coverage"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "anyhow",
  "regex",
@@ -1311,7 +1311,7 @@ dependencies = [
 
 [[package]]
 name = "megabase-functions"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "axum",
  "megabase-core",
@@ -1319,7 +1319,7 @@ dependencies = [
 
 [[package]]
 name = "megabase-guard"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "anyhow",
  "serde",
@@ -1329,7 +1329,7 @@ dependencies = [
 
 [[package]]
 name = "megabase-judge"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -1347,7 +1347,7 @@ dependencies = [
 
 [[package]]
 name = "megabase-meta"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "axum",
  "megabase-core",
@@ -1355,7 +1355,7 @@ dependencies = [
 
 [[package]]
 name = "megabase-pooler"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "axum",
  "megabase-core",
@@ -1363,7 +1363,7 @@ dependencies = [
 
 [[package]]
 name = "megabase-realtime"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "axum",
  "megabase-core",
@@ -1371,7 +1371,7 @@ dependencies = [
 
 [[package]]
 name = "megabase-rest"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "axum",
  "megabase-core",
@@ -1386,7 +1386,7 @@ dependencies = [
 
 [[package]]
 name = "megabase-server"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "axum",
  "criterion",
@@ -1409,7 +1409,7 @@ dependencies = [
 
 [[package]]
 name = "megabase-storage"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "axum",
  "megabase-core",
@@ -1417,7 +1417,7 @@ dependencies = [
 
 [[package]]
 name = "megabase-studio"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "axum",
  "megabase-core",
