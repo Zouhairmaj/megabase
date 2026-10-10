@@ -45,7 +45,11 @@ ignore = true
 
 [bans]
 multiple-versions = "warn"
-wildcards = "allow"
+# Wildcard version requirements are denied.
+wildcards = "deny"
+# Path and workspace dependencies without explicit version requirements are
+# treated as wildcards by cargo-deny; allow them so internal crate references pass.
+allow-wildcard-paths = true
 allow-workspace = true
 allow = [
     "aho-corasick",
