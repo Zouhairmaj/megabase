@@ -51,12 +51,39 @@ async fn send(
     path: &str,
     authorization: Option<&str>,
 ) -> (StatusCode, Value, axum::http::HeaderMap) {
+    send_body(state, method, path, authorization, None).await
+}
+
+async fn send_json(
+    state: AuthState,
+    method: &str,
+    path: &str,
+    authorization: Option<&str>,
+    json: &str,
+) -> (StatusCode, Value, axum::http::HeaderMap) {
+    send_body(state, method, path, authorization, Some(json)).await
+}
+
+async fn send_body(
+    state: AuthState,
+    method: &str,
+    path: &str,
+    authorization: Option<&str>,
+    json: Option<&str>,
+) -> (StatusCode, Value, axum::http::HeaderMap) {
     let mut builder = Request::builder().method(method).uri(path);
     if let Some(token) = authorization {
         builder = builder.header("Authorization", format!("Bearer {token}"));
     }
+    let body = match json {
+        Some(json) => {
+            builder = builder.header("content-type", "application/json");
+            Body::from(json.to_string())
+        }
+        None => Body::empty(),
+    };
     let response = router_with_state(state)
-        .oneshot(builder.body(Body::empty()).unwrap())
+        .oneshot(builder.body(body).unwrap())
         .await
         .unwrap();
     let status = response.status();
@@ -103,6 +130,31 @@ const ADMIN_ROUTES: &[(&str, &str)] = &[
         "DELETE",
         "/auth/v1/admin/users/11111111-1111-1111-1111-111111111111/passkeys/22222222-2222-2222-2222-222222222222",
     ),
+    ("GET", "/auth/v1/admin/users"),
+    (
+        "GET",
+        "/auth/v1/admin/users/11111111-1111-1111-1111-111111111111",
+    ),
+    (
+        "GET",
+        "/auth/v1/admin/users/11111111-1111-1111-1111-111111111111/factors",
+    ),
+    (
+        "GET",
+        "/auth/v1/admin/users/11111111-1111-1111-1111-111111111111/passkeys",
+    ),
+    ("GET", "/auth/v1/admin/sso/providers"),
+    (
+        "GET",
+        "/auth/v1/admin/sso/providers/11111111-1111-1111-1111-111111111111",
+    ),
+    (
+        "GET",
+        "/auth/v1/admin/oauth/clients/11111111-1111-1111-1111-111111111111",
+    ),
+    ("POST", "/auth/v1/admin/generate_link"),
+    ("POST", "/auth/v1/admin/custom-providers"),
+    ("POST", "/auth/v1/admin/oauth/clients"),
 ];
 
 #[tokio::test]
@@ -129,6 +181,12 @@ async fn admin_anon_is_403_not_admin() {
         "/auth/v1/admin/audit",
         "/auth/v1/admin/custom-providers",
         "/auth/v1/admin/oauth/clients",
+        "/auth/v1/admin/users",
+        "/auth/v1/admin/users/11111111-1111-1111-1111-111111111111",
+        "/auth/v1/admin/users/11111111-1111-1111-1111-111111111111/factors",
+        "/auth/v1/admin/users/11111111-1111-1111-1111-111111111111/passkeys",
+        "/auth/v1/admin/sso/providers",
+        "/auth/v1/admin/sso/providers/11111111-1111-1111-1111-111111111111",
     ] {
         let (status, body, _) = send(state(), "GET", path, Some(&demo_anon())).await;
         assert_eq!(status, StatusCode::FORBIDDEN, "{path}");
@@ -144,6 +202,8 @@ async fn oauth_clients_service_role_is_feature_disabled() {
             "DELETE",
             "/auth/v1/admin/oauth/clients/11111111-1111-1111-1111-111111111111",
         ),
+        ("GET", "/auth/v1/admin/oauth/clients/not-a-uuid"),
+        ("POST", "/auth/v1/admin/oauth/clients"),
     ] {
         let (status, body, _) = send(state(), method, path, Some(&demo_service())).await;
         assert_eq!(status, StatusCode::NOT_FOUND, "{method} {path}");
@@ -160,7 +220,7 @@ async fn custom_oauth_can_be_disabled() {
     });
     let (status, body, _) = send(
         state,
-        "GET",
+        "POST",
         "/auth/v1/admin/custom-providers",
         Some(&demo_service()),
     )
@@ -192,29 +252,14 @@ async fn unimplemented_auth_paths_stay_501() {
 async fn unimplemented_methods_on_registered_admin_paths_are_501() {
     for (method, path, unit) in [
         (
-            "POST",
-            "/auth/v1/admin/custom-providers",
-            "POST /auth/v1/admin/custom-providers",
-        ),
-        (
             "PUT",
             "/auth/v1/admin/custom-providers/custom:example",
             "PUT /auth/v1/admin/custom-providers/custom:example",
         ),
         (
-            "GET",
-            "/auth/v1/admin/users/11111111-1111-1111-1111-111111111111",
-            "GET /auth/v1/admin/users/11111111-1111-1111-1111-111111111111",
-        ),
-        (
             "PUT",
             "/auth/v1/admin/sso/providers/11111111-1111-1111-1111-111111111111",
             "PUT /auth/v1/admin/sso/providers/11111111-1111-1111-1111-111111111111",
-        ),
-        (
-            "POST",
-            "/auth/v1/admin/oauth/clients",
-            "POST /auth/v1/admin/oauth/clients",
         ),
     ] {
         let (status, body, _) = send(state(), method, path, Some(&demo_service())).await;
@@ -380,4 +425,221 @@ async fn oauth_clients_enabled_without_database_is_500() {
     .await;
     assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
     assert_gotrue_error(&body, 500, "unexpected_failure", "Database error");
+}
+
+#[tokio::test]
+async fn admin_users_reject_bad_page_and_sort_before_db() {
+    let (status, body, _) = send(
+        state(),
+        "GET",
+        "/auth/v1/admin/users?page=nope",
+        Some(&demo_service()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_gotrue_error(
+        &body,
+        400,
+        "validation_failed",
+        "Bad Pagination Parameters: strconv.ParseUint: parsing \"nope\": invalid syntax",
+    );
+
+    let (status, body, _) = send(
+        state(),
+        "GET",
+        "/auth/v1/admin/users?sort=email%20desc",
+        Some(&demo_service()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_gotrue_error(
+        &body,
+        400,
+        "validation_failed",
+        "Bad Sort Parameters: bad field for sort 'email'",
+    );
+}
+
+#[tokio::test]
+async fn admin_user_reads_reject_non_uuid_before_db() {
+    for path in [
+        "/auth/v1/admin/users/not-a-uuid",
+        "/auth/v1/admin/users/not-a-uuid/factors",
+        "/auth/v1/admin/users/not-a-uuid/passkeys",
+    ] {
+        let (status, body, _) = send(state(), "GET", path, Some(&demo_service())).await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{path}");
+        assert_gotrue_error(&body, 404, "validation_failed", "user_id must be an UUID");
+    }
+}
+
+#[tokio::test]
+async fn get_sso_provider_rejects_non_uuid_before_db() {
+    let (status, body, _) = send(
+        state(),
+        "GET",
+        "/auth/v1/admin/sso/providers/not-a-uuid",
+        Some(&demo_service()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_gotrue_error(
+        &body,
+        404,
+        "sso_provider_not_found",
+        "SSO Identity Provider not found",
+    );
+}
+
+#[tokio::test]
+async fn generate_link_validates_email_and_json_before_db() {
+    let (status, body, _) = send_json(
+        state(),
+        "POST",
+        "/auth/v1/admin/generate_link",
+        Some(&demo_service()),
+        "{}",
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_gotrue_error(
+        &body,
+        400,
+        "validation_failed",
+        "An email address is required",
+    );
+
+    let (status, body, _) = send_json(
+        state(),
+        "POST",
+        "/auth/v1/admin/generate_link",
+        Some(&demo_service()),
+        r#"{"type":"magiclink","email":"not-an-email"}"#,
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_gotrue_error(
+        &body,
+        400,
+        "validation_failed",
+        "Unable to validate email address: invalid format",
+    );
+
+    let (status, body, _) = send_json(
+        state(),
+        "POST",
+        "/auth/v1/admin/generate_link",
+        Some(&demo_service()),
+        "",
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_gotrue_error(
+        &body,
+        400,
+        "bad_json",
+        "Could not parse request body as JSON: unexpected end of JSON input",
+    );
+}
+
+#[tokio::test]
+async fn post_oauth_client_validation_when_enabled() {
+    let disabled = send_json(
+        state(),
+        "POST",
+        "/auth/v1/admin/oauth/clients",
+        Some(&demo_service()),
+        "not-json",
+    )
+    .await;
+    assert_eq!(disabled.0, StatusCode::NOT_FOUND);
+    assert_gotrue_error(
+        &disabled.1,
+        404,
+        "feature_disabled",
+        "OAuth server is disabled",
+    );
+
+    let enabled = AuthState::from_lookup(|key| match key {
+        "JWT_SECRET" => Some(DEMO_SECRET.into()),
+        "GOTRUE_OAUTH_SERVER_ENABLED" => Some("true".into()),
+        _ => None,
+    });
+    let (status, body, _) = send_json(
+        enabled,
+        "POST",
+        "/auth/v1/admin/oauth/clients",
+        Some(&demo_service()),
+        "not-json",
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_gotrue_error(&body, 400, "bad_json", "Invalid JSON body");
+
+    let enabled = AuthState::from_lookup(|key| match key {
+        "JWT_SECRET" => Some(DEMO_SECRET.into()),
+        "GOTRUE_OAUTH_SERVER_ENABLED" => Some("true".into()),
+        _ => None,
+    });
+    let (status, body, _) = send_json(
+        enabled,
+        "POST",
+        "/auth/v1/admin/oauth/clients",
+        Some(&demo_service()),
+        "{}",
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_gotrue_error(
+        &body,
+        400,
+        "validation_failed",
+        "400: redirect_uris is required",
+    );
+}
+
+#[tokio::test]
+async fn post_custom_provider_validates_before_db() {
+    let (status, body, _) = send_json(
+        state(),
+        "POST",
+        "/auth/v1/admin/custom-providers",
+        Some(&demo_service()),
+        r#"{"provider_type":"saml"}"#,
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_gotrue_error(
+        &body,
+        400,
+        "validation_failed",
+        "provider_type must be either 'oauth2' or 'oidc'",
+    );
+
+    let (status, body, _) = send_json(
+        state(),
+        "POST",
+        "/auth/v1/admin/custom-providers",
+        Some(&demo_service()),
+        r#"{"provider_type":"oauth2","identifier":"example","name":"Example","client_id":"id","client_secret":"secret","authorization_url":"https://example.com","token_url":"https://example.com","userinfo_url":"https://example.com"}"#,
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_gotrue_error(
+        &body,
+        400,
+        "validation_failed",
+        "identifier must start with 'custom:' prefix, e.g. 'custom:example'",
+    );
+
+    let (status, body, _) = send_json(
+        state(),
+        "POST",
+        "/auth/v1/admin/custom-providers",
+        Some(&demo_service()),
+        r#"{"provider_type":"oauth2","identifier":"custom:example","name":"Example","client_id":"id","client_secret":"secret","authorization_url":"http://example.com/auth","token_url":"https://example.com/token","userinfo_url":"https://example.com/user"}"#,
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_gotrue_error(&body, 400, "validation_failed", "URL must use HTTPS");
 }
