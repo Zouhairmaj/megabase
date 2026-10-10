@@ -224,12 +224,15 @@ mod tests {
         let a = json!({"role": "anon", "sub": "u1", "iat": 1, "exp": 2, "jti": "a"});
         let b = json!({"role": "anon", "sub": "u1", "iat": 10, "exp": 20, "jti": "b"});
         assert_eq!(text(&token(&a)), text(&token(&b)));
-        assert_eq!(text(&token(&a)), text(&token(&json!({"role": "anon", "sub": "u1"}))));
+        let bare = json!({"role": "anon", "sub": "u1"});
+        assert_eq!(text(&token(&a)), text(&token(&bare)));
     }
 
     #[test]
     fn jwt_amr_timestamps_do_not_matter_but_methods_do() {
-        let amr = |method: &str, ts: i64| json!({"role": "anon", "amr": [{"method": method, "timestamp": ts}]});
+        let amr = |method: &str, ts: i64| {
+            json!({"role": "anon", "amr": [{"method": method, "timestamp": ts}]})
+        };
         assert_eq!(
             text(&token(&amr("password", 100))),
             text(&token(&amr("password", 101)))
