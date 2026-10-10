@@ -2,12 +2,12 @@
   "schema": 1,
   "totals": {
     "units": 1024,
-    "implemented": 140,
+    "implemented": 143,
     "tested": 88,
     "conformant": 0
   },
   "percent": {
-    "coverage": 13.7,
+    "coverage": 14.0,
     "conformance": 0.0,
     "done": 0.0
   },
@@ -316,7 +316,7 @@
     },
     "rest": {
       "units": 93,
-      "implemented": 61,
+      "implemented": 64,
       "tested": 28,
       "conformant": 0,
       "groups": {
@@ -340,7 +340,7 @@
         },
         "logic": {
           "units": 3,
-          "implemented": 0,
+          "implemented": 3,
           "tested": 0,
           "conformant": 0
         },
@@ -668,6 +668,9 @@
     "rest:filter-operator:sl": "tested",
     "rest:filter-operator:sr": "tested",
     "rest:filter-operator:wfts": "tested",
+    "rest:logic-operator:and": "implemented",
+    "rest:logic-operator:not": "implemented",
+    "rest:logic-operator:or": "implemented",
     "rest:media-type:*/*": "implemented",
     "rest:media-type:application/json": "implemented",
     "rest:media-type:application/openapi+json": "implemented",
