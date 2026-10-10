@@ -4,6 +4,13 @@ All notable changes to Megabase are documented in this file.
 The format is produced by [release-please](https://github.com/googleapis/release-please).
 Sections: Features, Bug Fixes, Performance, Conformance/judge, Documentation.
 
+## [0.1.10](https://github.com/Zouhairmaj/megabase/compare/v0.1.9...v0.1.10) (2026-10-10)
+
+
+### Features
+
+* **rest:** serve rpc routes ([91564b3](https://github.com/Zouhairmaj/megabase/commit/91564b36552d650491e89a817d6edf53f5eadaad))
+
 ## [0.1.9](https://github.com/Zouhairmaj/megabase/compare/v0.1.8...v0.1.9) (2026-10-10)
 
 
