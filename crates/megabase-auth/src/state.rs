@@ -65,11 +65,7 @@ impl AuthState {
             oauth_server_enabled: env_bool(lookup("GOTRUE_OAUTH_SERVER_ENABLED").as_deref(), false),
             custom_oauth_enabled: env_bool(lookup("GOTRUE_CUSTOM_OAUTH_ENABLED").as_deref(), true),
             admin_roles: admin_roles(&lookup),
-            site_url: first_nonempty(
-                &lookup,
-                &["GOTRUE_SITE_URL", "SITE_URL"],
-                "http://localhost:3000",
-            ),
+            site_url: config.site_url.clone(),
             uri_allow_list: uri_allow_list(&lookup),
             api_external_url: first_nonempty(
                 &lookup,
@@ -81,10 +77,7 @@ impl AuthState {
             mailer_recovery_path: mailer_path(&lookup, "RECOVERY"),
             mailer_email_change_path: mailer_path(&lookup, "EMAIL_CHANGE"),
             otp_length: otp_length(lookup("GOTRUE_MAILER_OTP_LENGTH").as_deref()),
-            secure_email_change: env_bool(
-                lookup("GOTRUE_MAILER_SECURE_EMAIL_CHANGE_ENABLED").as_deref(),
-                true,
-            ),
+            secure_email_change: config.secure_email_change,
             cursor_pagination: env_bool(
                 lookup("GOTRUE_EXPERIMENTAL_CURSOR_PAGINATION_ENABLED").as_deref(),
                 false,
@@ -109,7 +102,7 @@ impl AuthState {
             oauth_server_enabled: defaults.oauth_server_enabled,
             custom_oauth_enabled: defaults.custom_oauth_enabled,
             admin_roles: defaults.admin_roles,
-            site_url: defaults.site_url,
+            site_url: config.site_url.clone(),
             uri_allow_list: defaults.uri_allow_list,
             api_external_url: defaults.api_external_url,
             mailer_confirmation_path: defaults.mailer_confirmation_path,
@@ -117,7 +110,7 @@ impl AuthState {
             mailer_recovery_path: defaults.mailer_recovery_path,
             mailer_email_change_path: defaults.mailer_email_change_path,
             otp_length: defaults.otp_length,
-            secure_email_change: defaults.secure_email_change,
+            secure_email_change: config.secure_email_change,
             cursor_pagination: defaults.cursor_pagination,
             config,
             backend,
@@ -239,6 +232,15 @@ mod tests {
         assert!(state.oauth_server_enabled);
         assert!(!state.custom_oauth_enabled);
         assert_eq!(state.admin_roles.len(), 2);
+        let shared = AuthState::from_lookup(|key| match key {
+            "SITE_URL" => Some("https://app.example".into()),
+            "GOTRUE_MAILER_SECURE_EMAIL_CHANGE_ENABLED" => Some("f".into()),
+            _ => None,
+        });
+        assert_eq!(shared.site_url, shared.config.site_url);
+        assert_eq!(shared.site_url, "https://app.example");
+        assert!(!shared.secure_email_change);
+        assert!(!shared.config.secure_email_change);
     }
 
     #[test]

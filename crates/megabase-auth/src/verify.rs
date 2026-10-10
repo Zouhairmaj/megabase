@@ -73,7 +73,8 @@ pub(crate) async fn verify_get(
         redirect_to: String::new(),
     };
     let redirect = redirect_target(
-        &state.config.site_url,
+        &state.site_url,
+        &state.uri_allow_list,
         query_param(query, "redirect_to").as_deref(),
         headers
             .get(header::REFERER)
@@ -103,7 +104,7 @@ pub(crate) async fn verify_get(
         email: String::new(),
         aud: request_aud(&headers, &state.config),
         autoconfirm: state.config.mailer_autoconfirm,
-        secure_email_change: state.config.secure_email_change,
+        secure_email_change: state.secure_email_change,
         otp_exp_seconds: state.config.mailer_otp_exp_seconds,
     };
     match state.backend.verify(&request).await {
@@ -187,7 +188,7 @@ pub(crate) async fn verify_post(
         email: prepared.email,
         aud: request_aud(&headers, &state.config),
         autoconfirm: state.config.mailer_autoconfirm,
-        secure_email_change: state.config.secure_email_change,
+        secure_email_change: state.secure_email_change,
         otp_exp_seconds: state.config.mailer_otp_exp_seconds,
     };
     match state.backend.verify(&request).await {
@@ -466,72 +467,24 @@ fn html_escape(input: &str) -> String {
     out
 }
 
-fn redirect_target(site_url: &str, requested: Option<&str>, referer: Option<&str>) -> String {
-    if let Some(url) = requested.filter(|url| redirect_allowed(site_url, url)) {
-        return url.to_string();
+fn redirect_target(
+    site_url: &str,
+    allow: &[String],
+    requested: Option<&str>,
+    referer: Option<&str>,
+) -> String {
+    if let Some(url) = requested.filter(|url| redirect_allowed(site_url, url, allow)) {
+        return (*url).to_string();
     }
-    if let Some(url) = referer.filter(|url| redirect_allowed(site_url, url)) {
-        return url.to_string();
+    if let Some(url) = referer.filter(|url| redirect_allowed(site_url, url, allow)) {
+        return (*url).to_string();
     }
     site_url.to_string()
 }
 
-fn redirect_allowed(site: &str, candidate: &str) -> bool {
-    if candidate.is_empty() {
-        return false;
-    }
-    let Some(base) = parse_origin(site) else {
-        return false;
-    };
-    let Some(cand) = parse_origin(candidate) else {
-        return false;
-    };
-    if base.host.eq_ignore_ascii_case(&cand.host)
-        && base.scheme == cand.scheme
-        && (base.port == cand.port || is_loopback_host(&cand.host))
-    {
-        return true;
-    }
-    matches!(cand.host.as_str(), "127.0.0.1" | "::1")
-}
-
-struct Origin {
-    scheme: String,
-    host: String,
-    port: String,
-}
-
-fn parse_origin(url: &str) -> Option<Origin> {
-    let (scheme, rest) = url.split_once("://")?;
-    if scheme.is_empty() {
-        return None;
-    }
-    let authority = rest.split(['/', '?', '#']).next().unwrap_or(rest);
-    if authority.is_empty() {
-        return None;
-    }
-    let (host, port) = if let Some(rest) = authority.strip_prefix('[') {
-        let (host, after) = rest.split_once(']')?;
-        let port = after.strip_prefix(':').unwrap_or("");
-        (host.to_string(), port.to_string())
-    } else if let Some((host, port)) = authority.rsplit_once(':') {
-        if host.contains(':') {
-            (authority.to_string(), String::new())
-        } else {
-            (host.to_string(), port.to_string())
-        }
-    } else {
-        (authority.to_string(), String::new())
-    };
-    Some(Origin {
-        scheme: scheme.to_ascii_lowercase(),
-        host,
-        port,
-    })
-}
-
-fn is_loopback_host(host: &str) -> bool {
-    host.eq_ignore_ascii_case("localhost") || host == "127.0.0.1" || host == "::1"
+fn redirect_allowed(site: &str, candidate: &str, allow: &[String]) -> bool {
+    // An allow-list pattern this port cannot compile is not a match.
+    crate::admin_batch2::redirect_ok(site, candidate, allow).unwrap_or(false)
 }
 
 #[cfg(test)]
@@ -590,6 +543,20 @@ mod tests {
         let html = format!("<a href=\"{}\">See Other</a>.\n\n", html_escape(&url));
         assert!(html.contains("&amp;"));
         assert!(html.ends_with(".\n\n"));
+    }
+
+    #[test]
+    fn userinfo_redirect_falls_back_and_allow_list_is_honored() {
+        let site = "http://localhost:3000";
+        assert_eq!(
+            redirect_target(site, &[], Some("http://127.0.0.1:1@evil.com/"), None),
+            site
+        );
+        let allow = vec!["https://app.example.com/*".to_string()];
+        assert_eq!(
+            redirect_target(site, &allow, Some("https://app.example.com/welcome"), None),
+            "https://app.example.com/welcome"
+        );
     }
 
     #[tokio::test]

@@ -900,7 +900,7 @@ fn email_ok(email: &str) -> bool {
 /// `generate_link` fails with this when an allow-list pattern uses syntax this
 /// build does not evaluate (`[`, `]`, `{`, `}`, or a dangling `\`).
 #[derive(Debug)]
-struct RedirectAllowListUnsupported;
+pub(crate) struct RedirectAllowListUnsupported;
 
 pub(crate) enum GenerateLinkError {
     Auth(AuthError),
@@ -968,7 +968,7 @@ fn link_referrer(
 }
 
 /// GoTrue `IsRedirectURLValid` (`internal/utilities/request.go`).
-fn redirect_ok(
+pub(crate) fn redirect_ok(
     site_url: &str,
     redirect: &str,
     allow: &[String],

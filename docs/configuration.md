@@ -67,7 +67,7 @@ anonymous off, `disable_signup` false, mailer autoconfirm on (the judge
 overlay has no mail server), phone autoconfirm on, SMS provider empty,
 SAML and passkeys off, audience and role `authenticated`, expiry 3600
 seconds, issuer `http://localhost:8000/auth/v1`, password minimum 6,
-`GOTRUE_SITE_URL` `http://localhost:3000`, mailer OTP expiry 86400 seconds,
+`GOTRUE_SITE_URL` or `SITE_URL` `http://localhost:3000`, mailer OTP expiry 86400 seconds,
 secure email change on. Bool
 overrides accept Go's `1`/`t`/`true`/`0`/`f`/`false`.
 `GOTRUE_PASSWORD_MIN_LENGTH` below 6 is raised to 6. External OAuth

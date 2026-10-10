@@ -39,8 +39,8 @@ pub struct AuthConfig {
     pub jwt_exp_seconds: i64,
     pub jwt_issuer: String,
     pub password_min_length: usize,
-    /// `GOTRUE_SITE_URL`. Implicit verify redirects land here when
-    /// `redirect_to` is missing or not allowed.
+    /// `GOTRUE_SITE_URL`, or `SITE_URL` when that is unset. Implicit verify
+    /// redirects land here when `redirect_to` is missing or not allowed.
     pub site_url: String,
     /// `GOTRUE_MAILER_OTP_EXP` in seconds. `0` is raised to one day, matching
     /// GoTrue's startup default.
@@ -184,6 +184,7 @@ impl AuthConfig {
             password_min_length: password_min,
             site_url: lookup("GOTRUE_SITE_URL")
                 .filter(|value| !value.is_empty())
+                .or_else(|| lookup("SITE_URL").filter(|value| !value.is_empty()))
                 .unwrap_or(defaults.site_url),
             mailer_otp_exp_seconds: otp_exp,
             secure_email_change: optional_bool(
@@ -302,6 +303,24 @@ mod tests {
         assert_eq!(config.jwt_exp_seconds, 120);
         assert_eq!(config.sms_provider, "twilio");
         assert!(config.saml_private_key_next_configured);
+    }
+
+    #[test]
+    fn site_url_prefers_gotrue_name_and_secure_change_accepts_f() {
+        let from_site = AuthConfig::from_lookup(|key| {
+            (key == "SITE_URL").then(|| "https://app.example".into())
+        })
+        .unwrap();
+        assert_eq!(from_site.site_url, "https://app.example");
+        let both = AuthConfig::from_lookup(|key| match key {
+            "GOTRUE_SITE_URL" => Some("https://gotrue.example".into()),
+            "SITE_URL" => Some("https://site.example".into()),
+            "GOTRUE_MAILER_SECURE_EMAIL_CHANGE_ENABLED" => Some("f".into()),
+            _ => None,
+        })
+        .unwrap();
+        assert_eq!(both.site_url, "https://gotrue.example");
+        assert!(!both.secure_email_change);
     }
 
     #[test]

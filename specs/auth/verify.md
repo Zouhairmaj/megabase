@@ -33,11 +33,14 @@ the credit header required by AGENTS.md.
 Both methods take `type` (`signup`, `invite`, `recovery`, `email_change`).
 
 GET reads `token` and `redirect_to` from the query. `token` is stored as the
-token hash (GoTrue copies it onto `token_hash`). `redirect_to` is kept only
-when it matches the site URL (same scheme and host; loopback may use another
-port) or is a loopback IP. Otherwise the redirect is `GOTRUE_SITE_URL`
-(`http://localhost:3000` when unset). The `Referer` header is the next
-fallback.
+token hash (GoTrue copies it onto `token_hash`). The redirect target is the
+first allowed URL among `redirect_to`, the `Referer` header, and the site URL.
+The site URL is `GOTRUE_SITE_URL`, or `SITE_URL` when that is unset
+(`http://localhost:3000` when both are unset). A candidate is allowed when it
+matches the site (same scheme and host; loopback may use another port), is a
+loopback IP, or matches `GOTRUE_URI_ALLOW_LIST` (`ADDITIONAL_REDIRECT_URLS`
+when that list is unset). The host is the authority after any userinfo, so
+`http://127.0.0.1:1@evil.com/` is not loopback.
 
 POST reads a JSON object: `type`, `token`, `token_hash`, `email`, `phone`,
 `redirect_to`. Exactly one of `token` and `token_hash` is set. With `token`,
