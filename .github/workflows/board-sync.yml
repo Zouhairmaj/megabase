@@ -88,9 +88,8 @@ jobs:
 
             function negatedClose(text, index) {
               const prefix = text.slice(Math.max(0, index - 40), index);
-              return /(?:(?:\b(?:do|does)n['\u2019]t|\b(?:can|won)['\u2019]t|\bcannot|\bnot)\s+)$/i.test(
-                prefix
-              );
+              // Any "n't" contraction (don't, can't, wouldn't), plus not/cannot.
+              return /(?:\b(?:[a-z]+n['\u2019]t|cannot|not)\s+)$/i.test(prefix);
             }
 
             function norm(name) {
