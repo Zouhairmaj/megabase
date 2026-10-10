@@ -76,8 +76,21 @@ jobs:
               if (!text) return out;
               closeRe.lastIndex = 0;
               let m;
-              while ((m = closeRe.exec(text))) out.push(Number(m[1]));
+              while ((m = closeRe.exec(text))) {
+                // GitHub does not treat a negated keyword as closing
+                // ("does not close #209"). PR #210 used that phrase, so
+                // board-sync loaded release PR #209 and the Status job failed.
+                if (negatedClose(text, m.index)) continue;
+                out.push(Number(m[1]));
+              }
               return out;
+            }
+
+            function negatedClose(text, index) {
+              const prefix = text.slice(Math.max(0, index - 40), index);
+              return /(?:(?:\b(?:do|does|can)n['\u2019]t|\bwon['\u2019]t|\bcannot|\bnot)\s+)$/i.test(
+                prefix
+              );
             }
 
             function norm(name) {
@@ -146,31 +159,82 @@ jobs:
               return { id: project.id, number: project.number, title: project.title, fieldId: field.id, options };
             }
 
+            // Pull requests share the issue number space but are not Issues.
+            // `issue(number:)` then errors NOT_FOUND ("Could not resolve to an
+            // Issue") and actions/github-script fails the job. Release PR #209
+            // did that on run 38032583909. Load either node and skip when it
+            // is not an Issue so infra and release-please PRs stay green.
             async function loadIssue(number) {
-              const data = await github.graphql(
-                `query($owner: String!, $name: String!, $number: Int!) {
-                  repository(owner: $owner, name: $name) {
-                    issue(number: $number) {
-                      id
-                      number
-                      state
-                      assignees(first: 10) { nodes { login } }
-                      labels(first: 40) { nodes { name } }
-                      projectItems(first: 30) {
-                        nodes {
+              let data;
+              try {
+                data = await github.graphql(
+                  `query($owner: String!, $name: String!, $number: Int!) {
+                    repository(owner: $owner, name: $name) {
+                      issueOrPullRequest(number: $number) {
+                        __typename
+                        ... on Issue {
                           id
-                          project { id title }
-                          fieldValueByName(name: "Status") {
-                            ... on ProjectV2ItemFieldSingleSelectValue { name }
+                          number
+                          state
+                          assignees(first: 10) { nodes { login } }
+                          labels(first: 40) { nodes { name } }
+                          projectItems(first: 30) {
+                            nodes {
+                              id
+                              project { id title }
+                              fieldValueByName(name: "Status") {
+                                ... on ProjectV2ItemFieldSingleSelectValue { name }
+                              }
+                            }
                           }
                         }
                       }
                     }
-                  }
-                }`,
-                { owner, name: repo, number }
-              );
-              return data.repository.issue;
+                  }`,
+                  { owner, name: repo, number }
+                );
+              } catch (err) {
+                if (isUnresolvedNumber(err)) {
+                  core.warning(
+                    `#${number} is not an Issue; skipping Status update`
+                  );
+                  return null;
+                }
+                throw err;
+              }
+              const node = data.repository?.issueOrPullRequest;
+              if (!node || node.__typename !== "Issue") {
+                core.warning(
+                  `#${number} is not an Issue; skipping Status update`
+                );
+                return null;
+              }
+              return node;
+            }
+
+            function isUnresolvedNumber(err) {
+              const errors = [];
+              if (err && Array.isArray(err.errors)) errors.push(...err.errors);
+              const responseErrors =
+                err && err.response && Array.isArray(err.response.errors)
+                  ? err.response.errors
+                  : [];
+              errors.push(...responseErrors);
+              const unresolved =
+                /Could not resolve to an (?:Issue|issue or pull request)/;
+              if (
+                errors.some(
+                  (e) =>
+                    e &&
+                    e.type === "NOT_FOUND" &&
+                    typeof e.message === "string" &&
+                    unresolved.test(e.message)
+                )
+              ) {
+                return true;
+              }
+              const msg = err && err.message ? String(err.message) : "";
+              return unresolved.test(msg);
             }
 
             async function loadOpenPulls() {
@@ -285,10 +349,7 @@ jobs:
 
             async function applyIssue(project, number, openPulls) {
               const issue = await loadIssue(number);
-              if (!issue) {
-                core.warning(`Issue #${number} not found`);
-                return;
-              }
+              if (!issue) return;
               const closed = issue.state === "CLOSED";
               const blocked = (issue.labels?.nodes || []).some(
                 (l) => l.name === "blocked"
