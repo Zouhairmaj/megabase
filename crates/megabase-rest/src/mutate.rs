@@ -79,9 +79,9 @@ pub(crate) async fn mutate(
         };
         return unimplemented_unit(method, &format!("/rest/v1/{relation}"), unit);
     }
-    // Aggregates in `select=` shape a `RETURNING` projection, which is not
-    // served. Ignoring them would hide the request instead of answering 501.
-    if query.has_aggregate() {
+    // Embeds and aggregates in `select=` shape a `RETURNING` projection, which
+    // is not served. Ignoring them would hide the request instead of answering 501.
+    if query.has_aggregate() || !query.embed_names().is_empty() {
         return unimplemented_unit(method, &format!("/rest/v1/{relation}"), "");
     }
     if matches!(kind, Kind::Upsert) && query.limits_rows() {
