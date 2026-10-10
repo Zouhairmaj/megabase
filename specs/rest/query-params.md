@@ -57,7 +57,9 @@ expressions as [filtering](filtering.md), including nested calls.
 `200` with a JSON array and `Content-Type: application/json; charset=utf-8`.
 `Content-Range` is `{offset}-{offset+count-1}/*`. An empty page is `*/*`.
 `select=*` and a missing select return every column. A list returns those
-columns, in that order, with aliases and casts applied. `columns` and
+columns, in that order, with aliases and casts applied. A JSON path with no
+alias is named after its last key. An index uses the previous key, or the
+column name when the path has no key (`Plan.hs` `addAliases`). `columns` and
 `on_conflict` do not project or constrain the read. `order` appends
 `ASC`, `DESC`, `NULLS FIRST`, or `NULLS LAST` only when the term asked for
 them. `limit=0` returns no rows. A nonzero `offset` without `limit` is

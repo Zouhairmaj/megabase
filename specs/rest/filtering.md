@@ -88,10 +88,12 @@ applies.
 ## Outputs
 
 Status 200. `Content-Type` is `application/json; charset=utf-8`. The body is
-`json_agg` of the matching rows, or `[]`. Column order is `attnum` order.
-`Content-Range` is `0-{n-1}/*` when `n > 0`, and `*/*` when the array is
-empty. The count is `pg_catalog.count` of the aggregated rows, not a second
-parse of the JSON body. There is no `ORDER BY` unless a later unit adds `order`.
+a JSON array of the matching rows, or `[]`. Column order is `attnum` order
+when `select` is `*` or omitted. A `select` list returns those columns.
+`Content-Range` is `{offset}-{offset+count-1}/*` when the page is not empty,
+and `*/*` when it is. With no `offset`, the start is 0. `order` adds
+`ORDER BY`. A horizontal filter alone does not. The count is the number of
+rows in the page.
 
 ## Errors
 

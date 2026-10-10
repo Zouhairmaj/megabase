@@ -1621,9 +1621,40 @@ fn push_select_field(
     } else {
         sql.push_str(&expr);
     }
-    if let Some(alias) = &field.alias {
+    if let Some(alias) = output_alias(field) {
         sql.push_str(" AS ");
         sql.push_str(&quote_ident(alias));
+    }
+}
+
+/// Alias PostgREST adds when the client did not (`Plan.hs` `addAliases`).
+///
+/// A JSON path uses the last key. An index uses the previous key, or the
+/// column name when the path has none. An explicit alias wins.
+fn output_alias(field: &SelectField) -> Option<&str> {
+    if let Some(alias) = &field.alias {
+        return Some(alias);
+    }
+    let last = field.json.last()?;
+    match json_operand(last) {
+        JsonOperand::Key(key) => Some(key),
+        JsonOperand::Index(_) => Some(
+            field
+                .json
+                .iter()
+                .rev()
+                .find_map(|step| match json_operand(step) {
+                    JsonOperand::Key(key) => Some(key.as_str()),
+                    JsonOperand::Index(_) => None,
+                })
+                .unwrap_or(field.column.as_str()),
+        ),
+    }
+}
+
+fn json_operand(step: &JsonStep) -> &JsonOperand {
+    match step {
+        JsonStep::Arrow(operand) | JsonStep::TwoArrow(operand) => operand,
     }
 }
 
@@ -2054,5 +2085,21 @@ mod tests {
     fn on_conflict_parser_is_used() {
         let names = parse_on_conflict_names("id").unwrap();
         assert_eq!(names, vec!["id".to_string()]);
+    }
+
+    #[test]
+    fn json_select_uses_the_last_key_as_the_alias() {
+        let query =
+            parse_get_query("select=data->a,data->>b::text,data->1,data->1->mycol->>2").unwrap();
+        let sql = build_read_sql("todos", &query, &[]).unwrap();
+        assert!(sql.sql.contains("\"todos\".\"data\"->$1 AS \"a\""));
+        assert!(sql
+            .sql
+            .contains("CAST( \"todos\".\"data\"->>$2 AS text ) AS \"b\""));
+        assert!(sql.sql.contains("\"todos\".\"data\"->$3::int AS \"data\""));
+        assert!(sql
+            .sql
+            .contains("\"todos\".\"data\"->$4::int->$5->>$6::int AS \"mycol\""));
+        assert_eq!(sql.params, vec!["a", "b", "+1", "+1", "mycol", "+2"]);
     }
 }
