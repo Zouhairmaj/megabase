@@ -32,8 +32,10 @@ required by AGENTS.md.
 ## Inputs
 
 `GET /rest/v1/{relation}` with a query string. `{relation}` is one path
-segment in schema `public`. `+` in the query is a space. `%HH` is
-percent-decoded.
+segment in schema `public`. `+` in the query is a space. `+` in the path
+stays `+`. `%HH` is percent-decoded only when both characters are hex
+digits. `%+1` is not an escape: the query keeps a literal `%` and then
+treats `+` as a space.
 
 Each `column=operator.value` pair is a filter. Served shapes:
 
@@ -41,19 +43,20 @@ Each `column=operator.value` pair is a filter. Served shapes:
 |---|---|
 | `eq.value`, `gt.value`, `gte.value` | `"relation"."col" op ($n::text)::column_type` |
 | `ilike.pattern` | `ilike`, every `*` in the pattern becomes `%` |
-| `cs.value`, `cd.value`, `adj.value` | `@>`, `<@`, `-|-` |
+| `cs.value`, `cd.value`, `adj.value` | `@>`, `<@`, `-\|-` |
 | `fts.terms`, `fts(language).terms` | `@@ to_tsquery` with an optional regconfig |
 | `op(any).value`, `op(all).value` | the same operator with `ANY` or `ALL` and `column_type[]` |
 
 `op` in the last row is one of `eq`, `gt`, `gte`, `ilike`. Repeated filters
 are `AND`. Values are bound parameters. The column is qualified with the
-relation name. The column type is `format_type` from `pg_catalog` after a
-bound lookup of the relation. A column that is not in the catalog is still
-quoted and sent, so PostgreSQL reports `42703`.
+relation name. The column type is `format_type(atttypid, NULL)` from
+`pg_catalog` after a bound lookup of the relation, so a `varchar(n)` or
+`numeric(p,s)` cast does not apply the typmod. A column that is not in the
+catalog is still quoted and sent, so PostgreSQL reports `42703`.
 
 A bearer token is verified with `JWT_SECRET` when `Authorization` is a
 bearer token. No `Authorization` header uses role `anon` and claims
-`{"role":"anon"}`. The transaction sets `role`, `request.jwt.claims`,
+`{"role":"anon"}`. The transaction is `READ ONLY`. It sets `role`, `request.jwt.claims`,
 `request.method` (`GET`), `request.path` (`/{relation}`), and `search_path`
 (`public`) with `set_config(..., true)` before the read, so row security
 applies.
@@ -63,7 +66,8 @@ applies.
 Status 200. `Content-Type` is `application/json; charset=utf-8`. The body is
 `json_agg` of the matching rows, or `[]`. Column order is `attnum` order.
 `Content-Range` is `0-{n-1}/*` when `n > 0`, and `*/*` when the array is
-empty. There is no `ORDER BY` unless a later unit adds `order`.
+empty. The count is `pg_catalog.count` of the aggregated rows, not a second
+parse of the JSON body. There is no `ORDER BY` unless a later unit adds `order`.
 
 ## Errors
 

@@ -15,7 +15,7 @@ use serde_json::{Map, Value};
 use crate::filter::{
     parse_filter_value, predicate_sql, quote_ident, BoundFilter, ParsedFilter, UnsafeType,
 };
-use crate::query::{classify_query, percent_decode};
+use crate::query::{classify_query, path_decode};
 use crate::RestState;
 
 const JSON_UTF8: &str = "application/json; charset=utf-8";
@@ -98,7 +98,7 @@ async fn dispatch(
         );
     };
     match read_rows(pool, &relation, &session, &served).await {
-        Ok(body) => json_rows(&body),
+        Ok((count, body)) => json_rows(count, &body),
         Err(error) => *error,
     }
 }
@@ -108,7 +108,7 @@ fn relation_name(path: &str) -> Option<String> {
     if rest.is_empty() || rest.contains('/') {
         return None;
     }
-    let name = percent_decode(rest);
+    let name = path_decode(rest);
     if name.is_empty() || name.contains('/') || name.contains('\0') {
         return None;
     }
@@ -308,11 +308,18 @@ async fn read_rows(
     relation: &str,
     session: &Session,
     filters: &[Served<'_>],
-) -> Result<String, Box<Response>> {
+) -> Result<(i64, String), Box<Response>> {
     let mut tx = pool
         .begin()
         .await
         .map_err(|error| Box::new(connect_failure(&error)))?;
+    // PostgREST `WrappedReadPlan` uses `SQL.Read`: a read-only transaction.
+    // Isolation stays the session default. Forcing `READ COMMITTED` would
+    // ignore a role `default_transaction_isolation` that upstream honors.
+    sqlx::query("SET TRANSACTION READ ONLY")
+        .execute(&mut *tx)
+        .await
+        .map_err(|error| Box::new(query_failure(&error, session.anon)))?;
     let exists: bool = sqlx::query_scalar(
         "SELECT EXISTS(
             SELECT 1 FROM pg_class AS c
@@ -335,21 +342,11 @@ async fn read_rows(
             None,
         )));
     }
-    let columns: Vec<(String, String)> = sqlx::query_as(
-        "SELECT a.attname::text, format_type(a.atttypid, a.atttypmod)
-         FROM pg_attribute AS a
-         JOIN pg_class AS c ON c.oid = a.attrelid
-         JOIN pg_namespace AS n ON n.oid = c.relnamespace
-         WHERE n.nspname = 'public'
-           AND c.relname = $1
-           AND a.attnum > 0
-           AND NOT a.attisdropped
-         ORDER BY a.attnum",
-    )
-    .bind(relation)
-    .fetch_all(&mut *tx)
-    .await
-    .map_err(|error| Box::new(query_failure(&error, session.anon)))?;
+    let columns: Vec<(String, String)> = sqlx::query_as(COLUMN_TYPES_SQL)
+        .bind(relation)
+        .fetch_all(&mut *tx)
+        .await
+        .map_err(|error| Box::new(query_failure(&error, session.anon)))?;
     let mut bound = Vec::with_capacity(filters.len());
     for filter in filters {
         let pg_type = columns
@@ -385,25 +382,38 @@ async fn read_rows(
     .map_err(|error| Box::new(query_failure(&error, session.anon)))?;
     let relation_ident = quote_ident(relation);
     let sql = format!(
-        "SELECT coalesce(json_agg(_postgrest_t), '[]'::json)::text \
+        "SELECT pg_catalog.count(_postgrest_t), \
+         coalesce(json_agg(_postgrest_t), '[]'::json)::text \
          FROM (SELECT {relation_ident}.* FROM {schema}.{relation_ident} \
          WHERE {predicate}) _postgrest_t",
         schema = quote_ident("public"),
         predicate = predicate.sql,
     );
-    let mut query = sqlx::query_scalar::<sqlx::Postgres, String>(&sql);
+    let mut query = sqlx::query_as::<sqlx::Postgres, (i64, String)>(&sql);
     for param in &predicate.params {
         query = query.bind(param);
     }
-    let body = query
+    let row = query
         .fetch_one(&mut *tx)
         .await
         .map_err(|error| Box::new(query_failure(&error, session.anon)))?;
     tx.commit()
         .await
         .map_err(|error| Box::new(query_failure(&error, session.anon)))?;
-    Ok(body)
+    Ok(row)
 }
+
+/// Column names and base types. `NULL` typmod matches an unknown literal:
+/// `varchar(5)` and `numeric(10,2)` must not truncate or round the value.
+const COLUMN_TYPES_SQL: &str = "SELECT a.attname::text, format_type(a.atttypid, NULL)
+         FROM pg_attribute AS a
+         JOIN pg_class AS c ON c.oid = a.attrelid
+         JOIN pg_namespace AS n ON n.oid = c.relnamespace
+         WHERE n.nspname = 'public'
+           AND c.relname = $1
+           AND a.attnum > 0
+           AND NOT a.attisdropped
+         ORDER BY a.attnum";
 
 fn unsafe_type(error: &UnsafeType) -> Response {
     tracing::error!(error = %error, "rest filter cast rejected");
@@ -504,10 +514,8 @@ fn sanitize(text: &str) -> String {
     }
 }
 
-fn json_rows(body: &str) -> Response {
-    let len = serde_json::from_str::<Vec<Value>>(body)
-        .map(|rows| rows.len())
-        .unwrap_or(0);
+fn json_rows(count: i64, body: &str) -> Response {
+    let len = usize::try_from(count).unwrap_or(0);
     let range = if len == 0 {
         "*/*".to_string()
     } else {
@@ -583,6 +591,35 @@ mod tests {
 
     fn get(path: &str) -> Request<Body> {
         Request::builder().uri(path).body(Body::empty()).unwrap()
+    }
+
+    #[test]
+    fn relation_name_keeps_a_plus_in_the_path() {
+        assert_eq!(relation_name("/rest/v1/a+b").as_deref(), Some("a+b"));
+        assert_eq!(relation_name("/rest/v1/a%2Bb").as_deref(), Some("a+b"));
+        assert_eq!(relation_name("/rest/v1/a%20b").as_deref(), Some("a b"));
+    }
+
+    #[test]
+    fn column_types_drop_typmod() {
+        assert!(COLUMN_TYPES_SQL.contains("format_type(a.atttypid, NULL)"));
+        assert!(!COLUMN_TYPES_SQL.contains("atttypmod"));
+    }
+
+    #[test]
+    fn content_range_uses_the_sql_count() {
+        let response = json_rows(2, "not json");
+        let range = response
+            .headers()
+            .get(header::CONTENT_RANGE)
+            .and_then(|value| value.to_str().ok());
+        assert_eq!(range, Some("0-1/*"));
+        let empty = json_rows(0, "[]");
+        let range = empty
+            .headers()
+            .get(header::CONTENT_RANGE)
+            .and_then(|value| value.to_str().ok());
+        assert_eq!(range, Some("*/*"));
     }
 
     #[test]

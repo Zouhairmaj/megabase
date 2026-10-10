@@ -84,32 +84,35 @@ fn reserved_unit(key: &str) -> Option<&'static str> {
     }
 }
 
-/// Decode a query component the way `parseQueryReplacePlus` does.
+/// Decode a query component the way `parseQueryReplacePlus True` does.
 pub(crate) fn percent_decode(raw: &str) -> String {
+    decode_component(raw, true)
+}
+
+/// Decode one path segment the way `urlDecode False` does.
+///
+/// `+` stays `+`. Only two ASCII hex digits after `%` are an escape.
+pub(crate) fn path_decode(raw: &str) -> String {
+    decode_component(raw, false)
+}
+
+fn decode_component(raw: &str, plus_is_space: bool) -> String {
     let bytes = raw.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());
     let mut index = 0;
     while index < bytes.len() {
         match bytes[index] {
-            b'+' => {
+            b'+' if plus_is_space => {
                 out.push(b' ');
                 index += 1;
             }
-            b'%' if index + 2 < bytes.len() => {
-                let hex = &bytes[index + 1..index + 3];
-                match std::str::from_utf8(hex)
-                    .ok()
-                    .and_then(|text| u8::from_str_radix(text, 16).ok())
-                {
-                    Some(byte) => {
-                        out.push(byte);
-                        index += 3;
-                    }
-                    None => {
-                        out.push(b'%');
-                        index += 1;
-                    }
-                }
+            b'%' if index + 2 < bytes.len()
+                && bytes[index + 1].is_ascii_hexdigit()
+                && bytes[index + 2].is_ascii_hexdigit() =>
+            {
+                let byte = (hex_value(bytes[index + 1]) << 4) | hex_value(bytes[index + 2]);
+                out.push(byte);
+                index += 3;
             }
             byte => {
                 out.push(byte);
@@ -118,6 +121,15 @@ pub(crate) fn percent_decode(raw: &str) -> String {
         }
     }
     String::from_utf8_lossy(&out).into_owned()
+}
+
+fn hex_value(byte: u8) -> u8 {
+    match byte {
+        b'0'..=b'9' => byte - b'0',
+        b'a'..=b'f' => byte - b'a' + 10,
+        b'A'..=b'F' => byte - b'A' + 10,
+        _ => 0,
+    }
 }
 
 /// Operator outcomes for one query string.
@@ -175,6 +187,18 @@ mod tests {
     fn decodes_plus_and_percent() {
         let query = classify_query("title=ilike.a%2Bb+c");
         assert_eq!(query.filters[0].value, "ilike.a+b c");
+    }
+
+    #[test]
+    fn percent_escape_requires_two_hex_digits() {
+        // `from_str_radix` would accept the `+` as a sign. http-types does not.
+        assert_eq!(percent_decode("%+1"), "% 1");
+        assert_eq!(percent_decode("%+F"), "% F");
+        assert_eq!(percent_decode("%2F"), "/");
+        assert_eq!(percent_decode("%GG"), "%GG");
+        assert_eq!(path_decode("a+b"), "a+b");
+        assert_eq!(path_decode("%+1"), "%+1");
+        assert_eq!(path_decode("a%20b"), "a b");
     }
 
     #[test]

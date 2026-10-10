@@ -91,7 +91,7 @@ stay out of traces, a 150-second timeout (504), and a 50 MiB body limit (413)
 unless the variables above override them. `Bytes` and `Json` use that same cap. A panic catch
 returns JSON `{"code":"internal_error","message":"internal error"}` without
 the panic text. SIGINT and SIGTERM stop the listener. In-flight requests may
-finish for 10 seconds, then the Auth pool closes.
+finish for 10 seconds, then the Auth and REST pools close.
 
 ## Checked SQL
 
