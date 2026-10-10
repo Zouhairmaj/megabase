@@ -59,6 +59,15 @@ fn jwt_claims(token: &Captures<'_>) -> String {
             for key in VOLATILE_CLAIMS {
                 map.remove(*key);
             }
+            // Each `amr` entry carries the session's creation time; keep its
+            // method and structure.
+            if let Some(Value::Array(entries)) = map.get_mut("amr") {
+                for entry in entries {
+                    if let Value::Object(entry) = entry {
+                        entry.remove("timestamp");
+                    }
+                }
+            }
             format!("<jwt:{}>", Value::Object(map))
         }
         _ => "<jwt>".to_string(),
@@ -216,6 +225,19 @@ mod tests {
         let b = json!({"role": "anon", "sub": "u1", "iat": 10, "exp": 20, "jti": "b"});
         assert_eq!(text(&token(&a)), text(&token(&b)));
         assert_eq!(text(&token(&a)), text(&token(&json!({"role": "anon", "sub": "u1"}))));
+    }
+
+    #[test]
+    fn jwt_amr_timestamps_do_not_matter_but_methods_do() {
+        let amr = |method: &str, ts: i64| json!({"role": "anon", "amr": [{"method": method, "timestamp": ts}]});
+        assert_eq!(
+            text(&token(&amr("password", 100))),
+            text(&token(&amr("password", 101)))
+        );
+        assert_ne!(
+            text(&token(&amr("password", 100))),
+            text(&token(&amr("otp", 100)))
+        );
     }
 
     #[test]
