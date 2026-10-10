@@ -47,7 +47,15 @@ jobs:
           git config user.name "megabase-agent"
           git config user.email "megabase-agent@users.noreply.github.com"
           if [ "$IS_PR" = "true" ]; then
-            gh pr checkout "$ISSUE_NUMBER"
+            # Only same-repository branches (no forks); the trigger is
+            # restricted to megabase-agent, who owns those branches.
+            head_repo=$(gh pr view "$ISSUE_NUMBER" --json headRepository,headRepositoryOwner --jq '.headRepositoryOwner.login + "/" + .headRepository.name')
+            if [ "$head_repo" != "$GITHUB_REPOSITORY" ]; then
+              echo "::error::Refusing to run on a fork PR ($head_repo)"; exit 1
+            fi
+            branch=$(gh pr view "$ISSUE_NUMBER" --json headRefName --jq .headRefName)
+            git fetch origin "refs/heads/${branch}:refs/heads/${branch}"
+            git switch "$branch"
           else
             # Protected-path issues start on review/gemini-*; others on gemini-*.
             if [ "$PROTECTED" = "true" ]; then prefix="review/gemini-"; else prefix="gemini-"; fi
