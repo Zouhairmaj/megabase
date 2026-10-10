@@ -10,6 +10,15 @@ rust-version.workspace = true
 [dependencies]
 megabase-core = { workspace = true }
 axum = { workspace = true }
+serde_json = { workspace = true }
+sqlx = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tokio-postgres = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tower = { workspace = true }
 
 [lints]
 workspace = true

@@ -63,7 +63,7 @@ of the root workspace) with three targets:
 |---|---|
 | `jwt` | `megabase-core` HS256 `verify_at` and `bearer_token` |
 | `gateway_http` | gateway request-target parse and Kong prefix matching |
-| `rest_query` | stub walker for PostgREST query strings (filter parsing is not implemented yet) |
+| `rest_query` | PostgREST query walker and the served horizontal-filter parser (`interpret_query`); both stay panic-free |
 
 Needs a nightly toolchain and `cargo-fuzz` 0.13.2 (the root
 `rust-toolchain.toml` is stable; pass `+nightly`):
