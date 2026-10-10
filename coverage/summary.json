@@ -2,12 +2,12 @@
   "schema": 1,
   "totals": {
     "units": 1024,
-    "implemented": 139,
+    "implemented": 143,
     "tested": 89,
     "conformant": 0
   },
   "percent": {
-    "coverage": 13.6,
+    "coverage": 14.0,
     "conformance": 0.0,
     "done": 0.0
   },
@@ -316,7 +316,7 @@
     },
     "rest": {
       "units": 93,
-      "implemented": 60,
+      "implemented": 64,
       "tested": 29,
       "conformant": 0,
       "groups": {
@@ -352,7 +352,7 @@
         },
         "ordering": {
           "units": 4,
-          "implemented": 0,
+          "implemented": 4,
           "tested": 0,
           "conformant": 0
         },
@@ -673,6 +673,10 @@
     "rest:logic-operator:and": "implemented",
     "rest:logic-operator:not": "implemented",
     "rest:logic-operator:or": "implemented",
+    "rest:order-modifier:asc": "implemented",
+    "rest:order-modifier:desc": "implemented",
+    "rest:order-modifier:nullsfirst": "implemented",
+    "rest:order-modifier:nullslast": "implemented",
     "rest:query-param:and": "tested",
     "rest:query-param:columns": "tested",
     "rest:query-param:limit": "tested",
