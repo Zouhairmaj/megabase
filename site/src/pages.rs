@@ -8,6 +8,11 @@ use crate::metrics::{self, CatalogRow, Metrics, CATALOG};
 use crate::treemap;
 use crate::GITHUB;
 
+/// Standalone conformance percentages stay on [`Metrics`].
+/// Set this to `true` to show them again in the home status panel,
+/// the home treemap header, and the status-page stat card.
+const SHOW_CONFORMANCE_PERCENT: bool = false;
+
 pub fn home(paths: &Paths, metrics: &Metrics) -> String {
     let treemap = treemap_block(metrics);
     let status_panel = status_panel(metrics);
@@ -154,12 +159,7 @@ fn treemap_block(metrics: &Metrics) -> String {
         .passing
         .map(metrics::comma)
         .unwrap_or_else(|| "—".into());
-    let pct = metrics.conformance_label();
-    let head = if metrics.has_data() {
-        format!("SUPABASE COMPONENTS: {pct} CONFORMANT ({passing}/{total})")
-    } else {
-        "SUPABASE COMPONENTS".into()
-    };
+    let head = treemap_head(metrics, SHOW_CONFORMANCE_PERCENT);
     let foot_left = if metrics.has_data() {
         format!("{total} units extracted from pinned upstream source · {passing} conformant")
     } else {
@@ -228,16 +228,55 @@ fn status_panel(metrics: &Metrics) -> String {
   <div class="legend-inline status-panel-legend">{legend}</div>
   <dl>
     <div><dt>Units passing the judge</dt><dd>{passing}</dd></div>
-    <div><dt>Coverage · Conformance</dt><dd>{coverage}</dd></div>
+    <div><dt>{coverage_label}</dt><dd>{coverage}</dd></div>
     <div><dt>Current stage</dt><dd class="accent">{stage}</dd></div>
   </dl>
 </aside>"#,
         alt = esc(&treemap::panel_alt(metrics)),
         passing = esc(&metrics.passing_total_label()),
-        coverage = esc(&metrics.coverage_conformance_label()),
+        coverage_label = coverage_row_label(SHOW_CONFORMANCE_PERCENT),
+        coverage = esc(&coverage_row_value(metrics, SHOW_CONFORMANCE_PERCENT)),
         stage = esc(&metrics.stage),
         legend = four_state_legend_inline(),
     )
+}
+
+fn treemap_head(metrics: &Metrics, show_conformance: bool) -> String {
+    if !metrics.has_data() {
+        return "SUPABASE COMPONENTS".into();
+    }
+    let total = metrics
+        .total
+        .map(metrics::comma)
+        .unwrap_or_else(|| "—".into());
+    let passing = metrics
+        .passing
+        .map(metrics::comma)
+        .unwrap_or_else(|| "—".into());
+    if show_conformance {
+        format!(
+            "SUPABASE COMPONENTS: {} CONFORMANT ({passing}/{total})",
+            metrics.conformance_label()
+        )
+    } else {
+        format!("SUPABASE COMPONENTS: {passing} / {total} UNITS PASS")
+    }
+}
+
+fn coverage_row_label(show_conformance: bool) -> &'static str {
+    if show_conformance {
+        "Coverage · Conformance"
+    } else {
+        "Coverage"
+    }
+}
+
+fn coverage_row_value(metrics: &Metrics, show_conformance: bool) -> String {
+    if show_conformance {
+        metrics.coverage_conformance_label()
+    } else {
+        metrics.coverage_label()
+    }
 }
 
 struct LevelSpec {
@@ -298,28 +337,42 @@ const LEVELS: &[LevelSpec] = &[
     },
 ];
 
-fn hero_kicker_desktop(metrics: &Metrics) -> String {
-    match metrics.passing {
-        Some(n) if n > 0 => format!(
-            "{} · {} {} PASS · BUILT BY AGENTS, IN PUBLIC",
-            metrics.stage_short.to_ascii_uppercase(),
-            metrics::comma(n),
-            if n == 1 { "UNIT" } else { "UNITS" }
-        ),
-        _ => "DAY 0 · NOTHING PASSES YET · BUILT BY AGENTS, IN PUBLIC".into(),
+fn status_metric_class(show_conformance: bool) -> &'static str {
+    if show_conformance {
+        "metric-grid"
+    } else {
+        "metric-grid metric-grid-3"
     }
 }
 
-fn hero_kicker_mobile(metrics: &Metrics) -> String {
+fn conformance_metric(metrics: &Metrics, show_conformance: bool) -> String {
+    if !show_conformance {
+        return String::new();
+    }
+    format!(
+        r#"<div class="metric"><p class="muted">Conformance</p><p class="stat-xl">{}</p></div>"#,
+        esc(&metrics.conformance_label())
+    )
+}
+
+fn units_pass_kicker(metrics: &Metrics) -> Option<String> {
     match metrics.passing {
-        Some(n) if n > 0 => format!(
+        Some(n) if n > 0 => Some(format!(
             "{} · {} {} PASS",
             metrics.stage_short.to_ascii_uppercase(),
             metrics::comma(n),
             if n == 1 { "UNIT" } else { "UNITS" }
-        ),
-        _ => "DAY 0 · PHASE 0".into(),
+        )),
+        _ => None,
     }
+}
+
+fn hero_kicker_desktop(metrics: &Metrics) -> String {
+    units_pass_kicker(metrics).unwrap_or_else(|| "DAY 0 · NOTHING PASSES YET".into())
+}
+
+fn hero_kicker_mobile(metrics: &Metrics) -> String {
+    units_pass_kicker(metrics).unwrap_or_else(|| "DAY 0 · PHASE 0".into())
 }
 
 fn level_scope_counts(metrics: &Metrics, level: u8) -> Option<(usize, usize)> {
@@ -622,10 +675,10 @@ pub fn status(paths: &Paths, metrics: &Metrics) -> String {
     <p class="kicker">LIVE STATUS · DAY 0 · {stage}</p>
     <h1 class="display-sm">Where the experiment stands.</h1>
     <p class="lede">Every number on this page is generated at build time from files in the repository. If a file is missing the cell is an em dash, never a made-up total.</p>
-    <div class="metric-grid">
+    <div class="{metric_class}">
       <div class="metric"><p class="muted">Units done</p><p class="stat-xl">{passing}</p></div>
       <div class="metric"><p class="muted">Coverage</p><p class="stat-xl">{coverage}</p></div>
-      <div class="metric"><p class="muted">Conformance</p><p class="stat-xl">{conformance}</p></div>
+      {conformance_card}
       <div class="metric"><p class="muted">Human interventions</p><p class="stat-xl">{humans}</p></div>
     </div>
   </header>
@@ -664,9 +717,10 @@ pub fn status(paths: &Paths, metrics: &Metrics) -> String {
   </section>
 </main>"#,
         stage = esc(&metrics.stage_short),
+        metric_class = status_metric_class(SHOW_CONFORMANCE_PERCENT),
         passing = esc(&metrics.passing_total_label()),
         coverage = esc(&metrics.coverage_label()),
-        conformance = esc(&metrics.conformance_label()),
+        conformance_card = conformance_metric(metrics, SHOW_CONFORMANCE_PERCENT),
         humans = esc(&metrics.human_interventions_label()),
         units_headline = esc(&units_headline),
         units_sub = esc(&units_sub),
@@ -984,12 +1038,70 @@ mod tests {
     #[test]
     fn hero_claim_follows_live_passing_count() {
         let live = live_progress();
-        assert!(hero_kicker_desktop(&live).contains("2 UNITS PASS"));
+        assert_eq!(hero_kicker_desktop(&live), "PHASE 0 · 2 UNITS PASS");
+        assert_eq!(hero_kicker_mobile(&live), "PHASE 0 · 2 UNITS PASS");
+        assert!(!hero_kicker_desktop(&live).contains("BUILT BY AGENTS"));
+        assert!(!hero_kicker_mobile(&live).contains("BUILT BY AGENTS"));
         assert!(!hero_kicker_desktop(&live).contains("NOTHING PASSES YET"));
-        assert!(hero_kicker_desktop(&Metrics::placeholder()).contains("NOTHING PASSES YET"));
+        assert_eq!(
+            hero_kicker_desktop(&Metrics::placeholder()),
+            "DAY 0 · NOTHING PASSES YET"
+        );
         assert_eq!(
             hero_kicker_mobile(&Metrics::placeholder()),
             "DAY 0 · PHASE 0"
+        );
+    }
+
+    #[test]
+    fn standalone_conformance_percent_is_one_flag() {
+        let mut live = live_progress();
+        live.coverage = Some(40.0);
+        assert_eq!(live.conformance_label(), "40.0%");
+        assert_eq!(live.coverage_conformance_label(), "40.0% · 40.0%");
+
+        assert_eq!(coverage_row_label(false), "Coverage");
+        assert_eq!(coverage_row_value(&live, false), "40.0%");
+        assert_eq!(
+            treemap_head(&live, false),
+            "SUPABASE COMPONENTS: 2 / 5 UNITS PASS"
+        );
+        assert_eq!(status_metric_class(false), "metric-grid metric-grid-3");
+        assert!(conformance_metric(&live, false).is_empty());
+
+        assert_eq!(coverage_row_label(true), "Coverage · Conformance");
+        assert_eq!(coverage_row_value(&live, true), "40.0% · 40.0%");
+        assert_eq!(
+            treemap_head(&live, true),
+            "SUPABASE COMPONENTS: 40.0% CONFORMANT (2/5)"
+        );
+        assert_eq!(status_metric_class(true), "metric-grid");
+        assert!(conformance_metric(&live, true).contains(r#"<p class="muted">Conformance</p>"#));
+
+        let home = home(&Paths::home(false), &live);
+        let status_html = status(&Paths::nested("status", false), &live);
+        assert!(home.contains("<dt>Coverage</dt><dd>40.0%</dd>"));
+        assert!(!home.contains("Coverage · Conformance"));
+        assert!(home.contains("SUPABASE COMPONENTS: 2 / 5 UNITS PASS"));
+        assert!(!home.contains("% CONFORMANT"));
+        assert!(home.contains("Units passing the judge"));
+        assert!(status_html.contains(r#"class="metric-grid metric-grid-3""#));
+        assert!(!status_html.contains(r#"<p class="muted">Conformance</p>"#));
+        assert!(status_html.contains(r#"<p class="muted">Units done</p>"#));
+        assert!(status_html.contains(r#"<p class="muted">Coverage</p>"#));
+        assert!(status_html.contains(r#"<p class="muted">Human interventions</p>"#));
+        let css = include_str!("../static/styles.css");
+        assert!(
+            css.contains(".metric-grid-3 {\n  grid-template-columns: repeat(3, 1fr);\n}"),
+            "desktop status cards share three equal columns"
+        );
+        let mobile = css
+            .split("@media (max-width: 900px)")
+            .nth(1)
+            .expect("stacked breakpoint");
+        assert!(
+            mobile.contains(".metric-grid.metric-grid-3 {\n    display: grid;\n    grid-template-columns: 1fr 1fr;"),
+            "mobile status cards wrap two-up so three cards do not leave a fourth cell"
         );
     }
 
