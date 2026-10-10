@@ -1,14 +1,16 @@
 //! Supabase Auth-compatible API (`/auth/v1`) for Megabase.
 //!
 //! Target behavior: Supabase Auth, vendor/auth (MIT), pinned in `vendor/`.
-//! Issue #6 serves the first `/auth/v1/admin` GET/DELETE batch. Issue #15
-//! serves health, settings, autoconfirm email signup, and logout. Issue #17
-//! serves `POST /token` for the password and refresh-token grants. Every
-//! other Auth path returns `MEGABASE_NOT_IMPLEMENTED`. Database objects
-//! listed in `specs/auth/database.md` are installed when `DATABASE_URL` is
-//! set.
+//! Issue #6 serves the first `/auth/v1/admin` GET/DELETE batch. Issue #7
+//! serves the admin user, SSO, OAuth client, custom-provider, and
+//! generate-link reads and creates in that epic. Issue #15 serves health,
+//! settings, autoconfirm email signup, and logout. Issue #17 serves
+//! `POST /token` for the password and refresh-token grants. Every other
+//! Auth path returns `MEGABASE_NOT_IMPLEMENTED`. Database objects listed
+//! in `specs/auth/database.md` are installed when `DATABASE_URL` is set.
 
 mod admin;
+mod admin_batch2;
 mod config;
 mod error;
 mod http;

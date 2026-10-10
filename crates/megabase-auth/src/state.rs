@@ -17,6 +17,20 @@ pub struct AuthState {
     pub oauth_server_enabled: bool,
     pub custom_oauth_enabled: bool,
     pub admin_roles: Vec<String>,
+    /// `SITE_URL` / `GOTRUE_SITE_URL`. Reference stack default `http://localhost:3000`.
+    pub site_url: String,
+    /// `GOTRUE_URI_ALLOW_LIST`, or `ADDITIONAL_REDIRECT_URLS` when that is unset.
+    /// Comma-separated redirect globs. Empty when neither variable is set.
+    pub uri_allow_list: Vec<String>,
+    /// `API_EXTERNAL_URL`. Reference stack default `http://localhost:8000/auth/v1`.
+    pub api_external_url: String,
+    pub mailer_confirmation_path: String,
+    pub mailer_invite_path: String,
+    pub mailer_recovery_path: String,
+    pub mailer_email_change_path: String,
+    pub otp_length: usize,
+    pub secure_email_change: bool,
+    pub cursor_pagination: bool,
     /// Signup and settings flags. Unset `GOTRUE_*` follows the reference stack.
     pub config: AuthConfig,
     /// Shared Auth pool. `try_from_env` leaves this empty. `megabase_server::run`
@@ -50,6 +64,30 @@ impl AuthState {
             oauth_server_enabled: env_bool(lookup("GOTRUE_OAUTH_SERVER_ENABLED").as_deref(), false),
             custom_oauth_enabled: env_bool(lookup("GOTRUE_CUSTOM_OAUTH_ENABLED").as_deref(), true),
             admin_roles: admin_roles(&lookup),
+            site_url: first_nonempty(
+                &lookup,
+                &["GOTRUE_SITE_URL", "SITE_URL"],
+                "http://localhost:3000",
+            ),
+            uri_allow_list: uri_allow_list(&lookup),
+            api_external_url: first_nonempty(
+                &lookup,
+                &["API_EXTERNAL_URL", "GOTRUE_API_EXTERNAL_URL"],
+                "http://localhost:8000/auth/v1",
+            ),
+            mailer_confirmation_path: mailer_path(&lookup, "CONFIRMATION"),
+            mailer_invite_path: mailer_path(&lookup, "INVITE"),
+            mailer_recovery_path: mailer_path(&lookup, "RECOVERY"),
+            mailer_email_change_path: mailer_path(&lookup, "EMAIL_CHANGE"),
+            otp_length: otp_length(lookup("GOTRUE_MAILER_OTP_LENGTH").as_deref()),
+            secure_email_change: env_bool(
+                lookup("GOTRUE_MAILER_SECURE_EMAIL_CHANGE_ENABLED").as_deref(),
+                true,
+            ),
+            cursor_pagination: env_bool(
+                lookup("GOTRUE_EXPERIMENTAL_CURSOR_PAGINATION_ENABLED").as_deref(),
+                false,
+            ),
             config,
             backend: Backend::none(),
         })
@@ -70,6 +108,16 @@ impl AuthState {
             oauth_server_enabled: defaults.oauth_server_enabled,
             custom_oauth_enabled: defaults.custom_oauth_enabled,
             admin_roles: defaults.admin_roles,
+            site_url: defaults.site_url,
+            uri_allow_list: defaults.uri_allow_list,
+            api_external_url: defaults.api_external_url,
+            mailer_confirmation_path: defaults.mailer_confirmation_path,
+            mailer_invite_path: defaults.mailer_invite_path,
+            mailer_recovery_path: defaults.mailer_recovery_path,
+            mailer_email_change_path: defaults.mailer_email_change_path,
+            otp_length: defaults.otp_length,
+            secure_email_change: defaults.secure_email_change,
+            cursor_pagination: defaults.cursor_pagination,
             config,
             backend,
         }
@@ -96,6 +144,48 @@ fn admin_roles(lookup: &impl Fn(&str) -> Option<String>) -> Vec<String> {
                 .map(|s| (*s).to_string())
                 .collect()
         })
+}
+
+fn first_nonempty(
+    lookup: &impl Fn(&str) -> Option<String>,
+    keys: &[&str],
+    default: &str,
+) -> String {
+    keys.iter()
+        .find_map(|key| lookup(key).filter(|value| !value.is_empty()))
+        .unwrap_or_else(|| default.to_string())
+}
+
+fn mailer_path(lookup: &impl Fn(&str) -> Option<String>, name: &str) -> String {
+    let gotrue = format!("GOTRUE_MAILER_URLPATHS_{name}");
+    let docker = format!("MAILER_URLPATHS_{name}");
+    first_nonempty(
+        lookup,
+        &[gotrue.as_str(), docker.as_str()],
+        "/auth/v1/verify",
+    )
+}
+
+fn uri_allow_list(lookup: &impl Fn(&str) -> Option<String>) -> Vec<String> {
+    let raw = lookup("GOTRUE_URI_ALLOW_LIST")
+        .filter(|value| !value.trim().is_empty())
+        .or_else(|| lookup("ADDITIONAL_REDIRECT_URLS").filter(|value| !value.trim().is_empty()));
+    raw.map(|value| {
+        value
+            .split(',')
+            .map(str::trim)
+            .filter(|pattern| !pattern.is_empty())
+            .map(str::to_string)
+            .collect()
+    })
+    .unwrap_or_default()
+}
+
+fn otp_length(raw: Option<&str>) -> usize {
+    match raw.and_then(|value| value.parse::<usize>().ok()) {
+        Some(length) if (6..=10).contains(&length) => length,
+        _ => 6,
+    }
 }
 
 fn env_bool(raw: Option<&str>, default: bool) -> bool {
@@ -125,6 +215,16 @@ mod tests {
         assert!(!state.is_admin_role(Some("anon")));
         assert!(state.config.mailer_autoconfirm);
         assert!(state.config.email_enabled);
+        assert_eq!(state.site_url, "http://localhost:3000");
+        assert!(state.uri_allow_list.is_empty());
+        assert_eq!(state.api_external_url, "http://localhost:8000/auth/v1");
+        assert_eq!(state.mailer_confirmation_path, "/auth/v1/verify");
+        assert_eq!(state.mailer_invite_path, "/auth/v1/verify");
+        assert_eq!(state.mailer_recovery_path, "/auth/v1/verify");
+        assert_eq!(state.mailer_email_change_path, "/auth/v1/verify");
+        assert_eq!(state.otp_length, 6);
+        assert!(state.secure_email_change);
+        assert!(!state.cursor_pagination);
     }
 
     #[test]
@@ -138,5 +238,25 @@ mod tests {
         assert!(state.oauth_server_enabled);
         assert!(!state.custom_oauth_enabled);
         assert_eq!(state.admin_roles.len(), 2);
+    }
+
+    #[test]
+    fn uri_allow_list_prefers_gotrue_name() {
+        let from_gotrue = AuthState::from_lookup(|key| match key {
+            "GOTRUE_URI_ALLOW_LIST" => {
+                Some(" https://app.example/** , http://localhost:3000 ".into())
+            }
+            "ADDITIONAL_REDIRECT_URLS" => Some("https://other.example/**".into()),
+            _ => None,
+        });
+        assert_eq!(
+            from_gotrue.uri_allow_list,
+            ["https://app.example/**", "http://localhost:3000"]
+        );
+        let from_docker = AuthState::from_lookup(|key| match key {
+            "ADDITIONAL_REDIRECT_URLS" => Some("https://preview.example/**".into()),
+            _ => None,
+        });
+        assert_eq!(from_docker.uri_allow_list, ["https://preview.example/**"]);
     }
 }
