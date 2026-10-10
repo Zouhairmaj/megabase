@@ -4,6 +4,13 @@ All notable changes to Megabase are documented in this file.
 The format is produced by [release-please](https://github.com/googleapis/release-please).
 Sections: Features, Bug Fixes, Performance, Conformance/judge, Documentation.
 
+## [0.1.14](https://github.com/Zouhairmaj/megabase/compare/v0.1.13...v0.1.14) (2026-10-10)
+
+
+### Features
+
+* **rest:** serve select aggregate functions ([#254](https://github.com/Zouhairmaj/megabase/issues/254)) ([f62a8bd](https://github.com/Zouhairmaj/megabase/commit/f62a8bd126bbab3f5edcb98c7dd8f7ea0589c38f))
+
 ## [0.1.13](https://github.com/Zouhairmaj/megabase/compare/v0.1.12...v0.1.13) (2026-10-10)
 
 

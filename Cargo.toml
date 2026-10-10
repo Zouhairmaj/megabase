@@ -33,7 +33,7 @@ default-members = [
 ]
 
 [workspace.package]
-version = "0.1.13"
+version = "0.1.14"
 edition = "2021"
 license = "Apache-2.0"
 repository = "https://github.com/Zouhairmaj/megabase"
@@ -69,16 +69,16 @@ criterion = { version = "0.5", default-features = false, features = ["cargo_benc
 # Internal crates carry an explicit version so they are not wildcard
 # requirements for cargo-deny. release-please bumps each one (see
 # release-please-config.json) together with `workspace.package.version`.
-megabase-core = { path = "crates/megabase-core", version = "0.1.11" }
-megabase-server = { path = "crates/megabase-server", version = "0.1.11" }
-megabase-rest = { path = "crates/megabase-rest", version = "0.1.11" }
-megabase-auth = { path = "crates/megabase-auth", version = "0.1.11" }
-megabase-realtime = { path = "crates/megabase-realtime", version = "0.1.11" }
-megabase-storage = { path = "crates/megabase-storage", version = "0.1.11" }
-megabase-functions = { path = "crates/megabase-functions", version = "0.1.11" }
-megabase-pooler = { path = "crates/megabase-pooler", version = "0.1.11" }
-megabase-meta = { path = "crates/megabase-meta", version = "0.1.11" }
-megabase-studio = { path = "crates/megabase-studio", version = "0.1.11" }
+megabase-core = { path = "crates/megabase-core", version = "0.1.14" }
+megabase-server = { path = "crates/megabase-server", version = "0.1.14" }
+megabase-rest = { path = "crates/megabase-rest", version = "0.1.14" }
+megabase-auth = { path = "crates/megabase-auth", version = "0.1.14" }
+megabase-realtime = { path = "crates/megabase-realtime", version = "0.1.14" }
+megabase-storage = { path = "crates/megabase-storage", version = "0.1.14" }
+megabase-functions = { path = "crates/megabase-functions", version = "0.1.14" }
+megabase-pooler = { path = "crates/megabase-pooler", version = "0.1.14" }
+megabase-meta = { path = "crates/megabase-meta", version = "0.1.14" }
+megabase-studio = { path = "crates/megabase-studio", version = "0.1.14" }
 
 # Product crates do not use `unsafe`. site/ repeats this lint locally
 # because it is excluded from the workspace. fuzz/ does not: the libfuzzer
