@@ -209,8 +209,10 @@ Physically impossible for the agent (repository settings or credentials):
       token cannot update repository settings (HTTP 403
       `Resource not accessible by integration`). #207's body now
       contains `BEGIN_COMMIT_OVERRIDE` /
-      `END_COMMIT_OVERRIDE` so release-please can take the pull request
-      title. Do not pass a different `--subject` on `gh pr merge --squash`.
+      `feat(rest): add imatch, in, is, like, lt, and not filters (#207)` /
+      `END_COMMIT_OVERRIDE`, so release-please records that subject and
+      links #207. Do not pass a different `--subject` on
+      `gh pr merge --squash`.
 - [ ] Update GOAL.md §10 and §11 so the decisions record is
       `docs/decisions/`, matching this file and
       [decision 0020](docs/decisions/0020-one-file-per-decision.md).

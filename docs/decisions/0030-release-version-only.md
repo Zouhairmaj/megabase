@@ -33,5 +33,7 @@ had one commit. conventional-commits-parser rejects that subject, so
 release-please omitted it from 0.1.5. The repository setting has to
 become `PR_TITLE` (human-only; the token got HTTP 403). #207's body
 contains `BEGIN_COMMIT_OVERRIDE` /
-`feat(rest): add imatch, in, is, like, lt, and not filters` /
-`END_COMMIT_OVERRIDE` so the next release-please run records that title.
+`feat(rest): add imatch, in, is, like, lt, and not filters (#207)` /
+`END_COMMIT_OVERRIDE`. The `(#207)` is the issue reference
+release-please prints beside the commit. The 0.1.5 changelog uses that
+subject.
