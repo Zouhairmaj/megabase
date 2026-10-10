@@ -4,6 +4,9 @@
 //! published performance claim. They call `create_router`, so the production
 //! HTTP layers are inside the sample. CI parses the default Criterion text
 //! output with the `rust_criterion` adapter (`cargo bench --bench health`).
+//! Bencher stores that run's point estimate. Fifty samples over three
+//! seconds keep one internal outlier from moving the estimate. The alert
+//! is a t-test on recent runs (`docs/decisions/0027-bencher-ttest-latency.md`).
 
 use std::hint::black_box;
 use std::time::Duration;
@@ -26,9 +29,11 @@ use tower::ServiceExt;
 fn gateway(c: &mut Criterion) {
     let rt = Runtime::new().expect("tokio runtime");
     let mut group = c.benchmark_group("gateway");
-    group.sample_size(10);
-    group.warm_up_time(Duration::from_millis(200));
-    group.measurement_time(Duration::from_secs(1));
+    // Bencher keeps one estimate per run. A short sample lets a single
+    // outlier move that estimate even when the function is stable.
+    group.sample_size(50);
+    group.warm_up_time(Duration::from_secs(1));
+    group.measurement_time(Duration::from_secs(3));
 
     let health_router = create_router();
     group.bench_function("GET /_megabase/health", |b| {
