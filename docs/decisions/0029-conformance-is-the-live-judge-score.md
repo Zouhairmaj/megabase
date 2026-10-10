@@ -55,10 +55,13 @@ The live Judge publication is the only conformance score.
 
 ## Consequences
 
-The release job waits for Judge on the release commit when the history
-file does not yet contain that SHA. Tags from before the history file
-exist have no conformance delta until a later release has a publication
-for both commits. Passes that exist only in the live run are not
+The release job waits for Judge only when the release commit is the
+push that opened the release. An older tag uses one lookup. Tags from
+before the history file exists have no conformance delta until a later
+release has a publication for both commits. A history download that is
+not HTTP 404 fails the job. An empty history file is written only when
+`gh-pages` has none, so a transient error cannot replace earlier runs
+under `force_orphan`. Passes that exist only in the live run are not
 regressions until a commit records them in the baseline. That recording
 stays a deliberate change to `coverage/judge-results.json`, not a
 side effect of generating the status block.

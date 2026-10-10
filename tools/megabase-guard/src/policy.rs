@@ -174,11 +174,25 @@ fn pending_items(body: &str) -> Vec<&str> {
     if trimmed.is_empty() {
         return Vec::new();
     }
-    trimmed
-        .split("\n\n")
-        .map(|item| item.trim_matches('\n'))
-        .filter(|item| !item.is_empty())
-        .collect()
+    // A blank line inside an item is not a new item. The next item starts
+    // at `- **Date**` after a blank line.
+    let mut items = Vec::new();
+    let mut start = 0;
+    let mut search_from = 0;
+    while let Some(rel) = trimmed[search_from..].find("\n\n- **Date**") {
+        let split_at = search_from + rel;
+        let item = trimmed[start..split_at].trim_matches('\n');
+        if !item.is_empty() {
+            items.push(item);
+        }
+        start = split_at + 2;
+        search_from = start;
+    }
+    let last = trimmed[start..].trim_matches('\n');
+    if !last.is_empty() {
+        items.push(last);
+    }
+    items
 }
 
 fn pending_shrink_ends_at_item_boundary(old_pending: &str, new_pending: &str) -> bool {
@@ -627,6 +641,14 @@ mod tests {
         assert_eq!(
             evaluate(&[modified("HUMAN_LOG.md", &before, &rewritten)], &c).len(),
             1
+        );
+        let spaced =
+            "- **Date**: 2026-10-09\n- **Action**: pages\n\nSame item, second paragraph.\n";
+        let before_spaced = format!("{header}{spaced}\n{second}{rest}");
+        let after_spaced = format!("{header}{second}{rest}");
+        assert!(
+            is_human_log_review_ok(&before_spaced, &after_spaced),
+            "a blank line inside a dated item stays part of that item"
         );
     }
 

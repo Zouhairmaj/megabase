@@ -127,9 +127,18 @@ jobs:
             echo "Judge SHA is not a commit id" >&2
             exit 1
           fi
-          if ! curl --retry 3 --retry-delay 2 -fsSL -o /tmp/judge-history.json \
-            "https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/gh-pages/coverage/judge-history.json"; then
+          # Empty history only on 404. Any other failure must not publish:
+          # force_orphan would replace every earlier run.
+          history_url="https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/gh-pages/coverage/judge-history.json"
+          code="$(curl --retry 3 --retry-delay 2 -sS -o /tmp/judge-history.json -w '%{http_code}' "$history_url" || true)"
+          if [ "$code" = "404" ]; then
             echo '{"schema":1,"runs":[]}' > /tmp/judge-history.json
+          elif [ "$code" != "200" ]; then
+            echo "judge history download failed: HTTP ${code:-none}" >&2
+            exit 1
+          elif ! jq -e '.schema == 1 and (.runs | type == "array")' /tmp/judge-history.json >/dev/null; then
+            echo "judge history is not schema 1" >&2
+            exit 1
           fi
           cargo run --locked -p megabase-coverage -- judge-history \
             /tmp/judge-history.json "$JUDGE_SHA" coverage/judge-results.json \

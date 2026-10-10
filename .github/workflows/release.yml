@@ -351,9 +351,18 @@ jobs:
           TAG: ${{ needs.release-please.outputs.tag_name }}
         run: |
           set -euo pipefail
-          if ! curl --retry 3 --retry-delay 2 -fsSL -o /tmp/judge-history.json \
-            "https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/gh-pages/coverage/judge-history.json"; then
+          # Empty history only on 404. A transient failure must not look
+          # like "no publication" and drop a real delta.
+          history_url="https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/gh-pages/coverage/judge-history.json"
+          code="$(curl --retry 3 --retry-delay 2 -sS -o /tmp/judge-history.json -w '%{http_code}' "$history_url" || true)"
+          if [ "$code" = "404" ]; then
             echo '{"schema":1,"runs":[]}' > /tmp/judge-history.json
+          elif [ "$code" != "200" ]; then
+            echo "judge history download failed: HTTP ${code:-none}" >&2
+            exit 1
+          elif ! jq -e '.schema == 1 and (.runs | type == "array")' /tmp/judge-history.json >/dev/null; then
+            echo "judge history is not schema 1" >&2
+            exit 1
           fi
           from_history() {
             jq -r --arg s "$1" '([.runs[] | select(.sha == $s)][0] // empty) as $r | if $r == null or $r == "" then empty else "\($r.percent) \($r.passing) \($r.cases)" end' /tmp/judge-history.json
@@ -425,8 +434,14 @@ jobs:
           }
           git show "${TAG}:coverage/summary.json" > /tmp/cur.json
           CUR_SHA="$(git rev-parse "${TAG}^{commit}")"
+          # Wait only for this push. release-please can open notes for an
+          # older tag; that SHA will not gain a Judge run on this commit.
+          CUR_MODE=once
+          if [ "$CUR_SHA" = "$GITHUB_SHA" ]; then
+            CUR_MODE=wait
+          fi
           CUR_CONF=""
-          if CUR_CONF="$(measure "$CUR_SHA" wait)"; then
+          if CUR_CONF="$(measure "$CUR_SHA" "$CUR_MODE")"; then
             :
           else
             CUR_CONF=""
