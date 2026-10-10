@@ -163,7 +163,13 @@ jobs:
         with:
           tool: cargo-llvm-cov,cargo-nextest
       - name: Generate lcov.info
-        run: cargo llvm-cov nextest --workspace --locked --lcov --output-path lcov.info --doctests
+        run: |
+          set -euo pipefail
+          # nextest does not run doctests. The second command covers them,
+          # and the report merges both. Same sequence as cargo-llvm-cov's CI.
+          cargo llvm-cov --no-report --workspace --locked nextest
+          cargo llvm-cov --no-report --workspace --locked --doc
+          cargo llvm-cov report --doctests --lcov --output-path lcov.info
       - name: Upload to Codecov
         uses: codecov/codecov-action@0fb7174895f61a3b6b78fc075e0cd60383518dac # v5.5.3
         with:

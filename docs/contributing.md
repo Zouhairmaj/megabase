@@ -112,8 +112,9 @@ CI runs workspace tests with `cargo nextest` (`cargo-nextest` from
 `taiki-e/install-action`). Profile `ci` in `.config/nextest.toml` retries
 a failed test twice, prints every attempt, and fails the job if the test
 never passes or exceeds three 60s slow-timeout periods. Doctests stay on
-`cargo test --doc`. Codecov runs `cargo llvm-cov nextest --doctests`.
-Local `just test` remains `cargo test`.
+`cargo test --doc`. Codecov runs `cargo llvm-cov --no-report nextest`, then
+`cargo llvm-cov --no-report --doc`, then `cargo llvm-cov report --doctests`,
+because nextest does not run doctests. Local `just test` remains `cargo test`.
 
 ## What a human does
 
