@@ -1472,6 +1472,16 @@ mod tests {
         assert!(!out.join("cost/index.html").exists());
         let sitemap = fs::read_to_string(out.join("sitemap.xml")).unwrap();
         assert!(!sitemap.to_ascii_lowercase().contains("cost"));
+        let manifesto = fs::read_to_string(out.join("manifesto/index.html")).unwrap();
+        assert!(manifesto.contains("the loop and the logs, in real time"));
+        assert!(!manifesto.contains("token spend"));
+        assert!(!manifesto.contains("tokens and money spent"));
+        let human_log = fs::read_to_string(out.join("human-log/index.html")).unwrap();
+        assert!(
+            human_log.contains("2026-10-10"),
+            "the human log page records the owner decision"
+        );
+        assert!(human_log.contains("token spend"));
         let mut hits = Vec::new();
         collect_cost_hits(&out, &out, &mut hits);
         let _ = fs::remove_dir_all(&out);
@@ -1494,6 +1504,11 @@ mod tests {
             if !(name.ends_with(".html") || name == "sitemap.xml") {
                 continue;
             }
+            let rel = path.strip_prefix(root).unwrap_or(&path);
+            // The intervention log quotes the owner decision. Other pages do not.
+            if rel == Path::new("human-log/index.html") {
+                continue;
+            }
             let text = fs::read_to_string(&path).unwrap();
             let lower = text.to_ascii_lowercase();
             for needle in [
@@ -1506,14 +1521,27 @@ mod tests {
                 "token usage",
                 "token spend",
             ] {
-                if let Some(idx) = find_term(&lower, needle) {
-                    let rel = path.strip_prefix(root).unwrap_or(&path);
+                let mut from = 0;
+                while let Some(rel_idx) = find_term(&lower[from..], needle) {
+                    let idx = from + rel_idx;
+                    from = idx + needle.len();
+                    // bcrypt's work factor is "cost 10". That is not spend copy.
+                    if needle == "cost" {
+                        let rest = text[idx + needle.len()..].trim_start();
+                        let bytes = rest.as_bytes();
+                        let work_factor = bytes.starts_with(b"10")
+                            && bytes.get(2).is_none_or(|b| !b.is_ascii_digit());
+                        if work_factor {
+                            continue;
+                        }
+                    }
                     let end = (idx + 80).min(text.len());
                     hits.push(format!(
                         "{}: {needle:?} …{}…",
                         rel.display(),
                         &text[idx..end]
                     ));
+                    break;
                 }
             }
         }

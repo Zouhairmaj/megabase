@@ -209,6 +209,18 @@ Physically impossible for the agent (repository settings or credentials):
       `docs/decisions/`, matching this file and
       [decision 0020](docs/decisions/0020-one-file-per-decision.md).
       GOAL.md is human-owned. Agents do not edit it to close that gap.
+- [ ] Create the Actions environment `judge-hidden` and the held-out
+      seed (issue #114, [decision 0029](docs/decisions/0029-judge-hidden-suite.md)).
+      Settings → Environments → New environment → `judge-hidden`.
+      Deployment branches: **main** only. Do not require reviewers
+      (the Monday schedule would wait). Add environment secret
+      `MEGABASE_JUDGE_HIDDEN_SEED` (`openssl rand -base64 48`).
+      Optionally seal extra cases with `megabase-judge hidden-seal`
+      and store the ciphertext as environment secret
+      `MEGABASE_JUDGE_HIDDEN_CASES`. Do not create either value as a
+      repository secret. Do not add the **Hidden judge** workflow to
+      required pull-request checks. Procedure:
+      [`judge/README.md`](judge/README.md#held-out-suite).
 
 Log each of these in `HUMAN_LOG.md` when it is done. The delegation of
 decisions itself is a human intervention to log.
