@@ -256,11 +256,13 @@ pub fn is_cargo_toml_version_bump_only(before: &str, after: &str) -> bool {
     }
 }
 
-/// True when `after` matches `before` except quoted `version = "..."` lines.
+/// True when `after` matches `before` except workspace package versions.
 ///
-/// Unquoted `version = 3` (the lockfile format) is not a package version.
-/// Checksums, dependency lists, and added or removed packages still differ
-/// after masking, so they fail.
+/// A `[[package]]` block with no `source` line is a path member. Only its
+/// quoted `version = "..."` line is masked. Registry packages keep their
+/// version and checksum. The unquoted lockfile format `version` is not a
+/// package version. Checksums, dependency lists, and added or removed
+/// packages still differ after masking, so they fail.
 pub fn is_cargo_lock_versions_only(before: &str, after: &str) -> bool {
     before != after && mask_lockfile_versions(before) == mask_lockfile_versions(after)
 }
@@ -290,7 +292,30 @@ fn mask_workspace_package_version(text: &str) -> Option<String> {
 
 fn mask_lockfile_versions(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
+    let mut block = String::new();
+    let mut in_package = false;
     for_each_line(text, |body, ending| {
+        if body.trim() == "[[package]]" {
+            flush_lock_block(&block, in_package, &mut out);
+            block.clear();
+            in_package = true;
+        }
+        block.push_str(body);
+        block.push_str(ending);
+    });
+    flush_lock_block(&block, in_package, &mut out);
+    out
+}
+
+fn flush_lock_block(block: &str, in_package: bool, out: &mut String) {
+    if block.is_empty() {
+        return;
+    }
+    if !in_package || lock_block_has_source(block) {
+        out.push_str(block);
+        return;
+    }
+    for_each_line(block, |body, ending| {
         if let Some(masked) = mask_quoted_version_line(body) {
             out.push_str(&masked);
             out.push_str(ending);
@@ -299,7 +324,21 @@ fn mask_lockfile_versions(text: &str) -> String {
             out.push_str(ending);
         }
     });
-    out
+}
+
+/// Registry and git packages set `source`. Path workspace members do not.
+fn lock_block_has_source(block: &str) -> bool {
+    let mut found = false;
+    for_each_line(block, |body, _| {
+        let trimmed = body.trim_start();
+        if trimmed
+            .strip_prefix("source")
+            .is_some_and(|rest| rest.trim_start().starts_with('='))
+        {
+            found = true;
+        }
+    });
+    found
 }
 
 fn for_each_line(text: &str, mut visit: impl FnMut(&str, &str)) {
@@ -372,7 +411,7 @@ pub fn evaluate(changes: &[Change], ctx: &Context) -> Vec<String> {
                 continue;
             }
             violations.push(format!(
-                "{path}: release-please branches may only change CHANGELOG.md, .release-please-manifest.json, the [workspace.package] version in Cargo.toml, quoted version lines in Cargo.lock, and delete release-as from {RELEASE_PLEASE_CONFIG}"
+                "{path}: release-please branches may only change CHANGELOG.md, .release-please-manifest.json, the [workspace.package] version in Cargo.toml, workspace package versions in Cargo.lock, and delete release-as from {RELEASE_PLEASE_CONFIG}"
             ));
             continue;
         }
@@ -578,7 +617,7 @@ edition = \"2021\"
 hmac = \"0.12\"
 ";
     const LOCK_OLD: &str = "\
-version = 3
+version = 4
 
 [[package]]
 name = \"megabase\"
@@ -587,10 +626,11 @@ version = \"0.1.4\"
 [[package]]
 name = \"chacha20\"
 version = \"0.10.0\"
+source = \"registry+https://github.com/rust-lang/crates.io-index\"
 checksum = \"abc\"
 ";
     const LOCK_NEW: &str = "\
-version = 3
+version = 4
 
 [[package]]
 name = \"megabase\"
@@ -599,6 +639,7 @@ version = \"0.1.5\"
 [[package]]
 name = \"chacha20\"
 version = \"0.10.0\"
+source = \"registry+https://github.com/rust-lang/crates.io-index\"
 checksum = \"abc\"
 ";
 
@@ -650,15 +691,24 @@ checksum = \"abc\"
             evaluate(&[modified("Cargo.lock", LOCK_OLD, &checksum)], &c).len(),
             1
         );
+        let registry_version = LOCK_NEW.replace(
+            "name = \"chacha20\"\nversion = \"0.10.0\"",
+            "name = \"chacha20\"\nversion = \"0.11.0\"",
+        );
+        assert!(!is_cargo_lock_versions_only(LOCK_OLD, &registry_version));
+        assert_eq!(
+            evaluate(&[modified("Cargo.lock", LOCK_OLD, &registry_version)], &c).len(),
+            1
+        );
         let dropped_pkg = LOCK_NEW.replace(
-            "[[package]]\nname = \"chacha20\"\nversion = \"0.10.0\"\nchecksum = \"abc\"\n",
+            "[[package]]\nname = \"chacha20\"\nversion = \"0.10.0\"\nsource = \"registry+https://github.com/rust-lang/crates.io-index\"\nchecksum = \"abc\"\n",
             "",
         );
         assert_eq!(
             evaluate(&[modified("Cargo.lock", LOCK_OLD, &dropped_pkg)], &c).len(),
             1
         );
-        let format_bump = LOCK_OLD.replace("version = 3", "version = 4");
+        let format_bump = LOCK_OLD.replace("version = 4", "version = 5");
         assert!(!is_cargo_lock_versions_only(LOCK_OLD, &format_bump));
         assert!(is_cargo_lock_versions_only(LOCK_OLD, LOCK_NEW));
         assert!(!is_cargo_lock_versions_only(LOCK_OLD, LOCK_OLD));

@@ -173,7 +173,7 @@ fn run() -> Result<bool> {
     let release_please = policy::is_release_please(&ctx);
     if release_please {
         eprintln!(
-            "release-please exception active: branch `{}` may change CHANGELOG.md, .release-please-manifest.json, the [workspace.package] version in Cargo.toml, quoted version lines in Cargo.lock, and delete release-as from release-please-config.json",
+            "release-please exception active: branch `{}` may change CHANGELOG.md, .release-please-manifest.json, the [workspace.package] version in Cargo.toml, workspace package versions in Cargo.lock, and delete release-as from release-please-config.json",
             ctx.head_ref
         );
     }

@@ -16,7 +16,7 @@ bootstrap exception applies solely to branch
 `cursor/phase-0-bootstrap-121c` when the merge base has none of
 `vendor.toml`, `judge/`, or vendor gitlinks. The full condition is in
 [ADR 0003](../adr/0003-protected-paths.md). `release-please--branches--*` may change only `CHANGELOG.md`,
-`.release-please-manifest.json`, the `[workspace.package]` version in `Cargo.toml`, quoted version lines in `Cargo.lock`, and delete
+`.release-please-manifest.json`, the `[workspace.package]` version in `Cargo.toml`, workspace package versions in `Cargo.lock`, and delete
 `release-as` from `release-please-config.json`. `review/*` may append or
 complete `HUMAN_LOG.md` Pending items (grows must start a new `- ` item;
 shrinks must end at a `- **Date**` item) and grow the Completed section.

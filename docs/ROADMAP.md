@@ -110,8 +110,10 @@ older `main` tree and then commit onto a newer SHA, so the cached
 lockfile job restores `Cargo.toml` from the merge-base with the default
 branch, sets only `[workspace.package].version` from
 `.release-please-manifest.json`, runs `cargo update -w`, and commits
-`Cargo.toml` and `Cargo.lock` when those version fields changed.
-`megabase-guard` rejects any other edit in those files. `--locked` CI
+`Cargo.toml` and `Cargo.lock` when `[workspace.package] version` or a
+workspace package version in `Cargo.lock` changed. `megabase-guard`
+rejects any other edit in those files, including a registry package
+version. `--locked` CI
 (Build, Codecov, Bencher, Protected paths, Judge) stays green. That
 commit is pushed with the token the tree probe selected.
 `RELEASE_PLEASE_TOKEN` is used only when that probe can create a git
