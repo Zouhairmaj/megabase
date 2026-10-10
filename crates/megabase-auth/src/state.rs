@@ -21,8 +21,8 @@ pub struct AuthState {
     pub config: AuthConfig,
     /// Shared Auth pool. `try_from_env` leaves this empty. `megabase_server::run`
     /// replaces it with `Backend::connect` before `router_with_state`, and
-    /// closes it on shutdown. Signup, logout, and admin routes use that pool.
-    /// `router()` does not connect.
+    /// closes it on shutdown. Signup, logout, the password and refresh-token
+    /// grants, and admin routes use that pool. `router()` does not connect.
     pub backend: Backend,
 }
 

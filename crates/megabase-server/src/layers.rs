@@ -144,21 +144,26 @@ where
     }
 
     fn call(&mut self, req: Request<ReqBody>) -> Self::Future {
-        let timeout = self.timeout;
         DeadlineFuture {
             inner: self.inner.call(req),
-            deadline: tokio::time::Instant::now() + timeout,
+            // `Instant` addition panics when the sum is not representable.
+            // A timeout that large is treated as no deadline.
+            deadline: request_deadline(self.timeout),
             sleep: None,
             status: self.status,
         }
     }
 }
 
+fn request_deadline(timeout: Duration) -> Option<tokio::time::Instant> {
+    tokio::time::Instant::now().checked_add(timeout)
+}
+
 pin_project! {
     struct DeadlineFuture<F> {
         #[pin]
         inner: F,
-        deadline: tokio::time::Instant,
+        deadline: Option<tokio::time::Instant>,
         sleep: Option<std::pin::Pin<Box<tokio::time::Sleep>>>,
         status: StatusCode,
     }
@@ -179,9 +184,12 @@ where
         if let std::task::Poll::Ready(result) = this.inner.poll(cx) {
             return std::task::Poll::Ready(result);
         }
+        let Some(deadline) = *this.deadline else {
+            return std::task::Poll::Pending;
+        };
         let sleep = this
             .sleep
-            .get_or_insert_with(|| Box::pin(tokio::time::sleep_until(*this.deadline)));
+            .get_or_insert_with(|| Box::pin(tokio::time::sleep_until(deadline)));
         if sleep.as_mut().poll(cx).is_ready() {
             let mut response = Response::new(ResBody::default());
             *response.status_mut() = *this.status;
@@ -221,6 +229,12 @@ mod tests {
             .map(|name| name.to_string())
             .collect();
         assert_eq!(names, ["authorization", "cookie", "apikey"]);
+    }
+
+    #[test]
+    fn an_unrepresentable_timeout_is_not_a_deadline() {
+        assert!(request_deadline(Duration::MAX).is_none());
+        assert!(request_deadline(Duration::from_millis(150_000)).is_some());
     }
 
     #[tokio::test]

@@ -225,27 +225,38 @@ async fn serve_until_drained(
 }
 
 async fn shutdown_signal() {
-    let ctrl_c = async {
-        if let Err(error) = tokio::signal::ctrl_c().await {
-            tracing::error!(%error, "failed to listen for ctrl-c");
-        }
-    };
+    let ctrl_c = async { tokio::signal::ctrl_c().await };
     #[cfg(unix)]
     let terminate = async {
         match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
-            Ok(mut signal) => {
-                signal.recv().await;
-            }
-            Err(error) => {
-                tracing::error!(%error, "failed to listen for SIGTERM");
-            }
+            Ok(mut signal) => match signal.recv().await {
+                Some(()) => Ok(()),
+                None => Err(std::io::Error::other("SIGTERM listener closed")),
+            },
+            Err(error) => Err(error),
         }
     };
     #[cfg(not(unix))]
-    let terminate = std::future::pending::<()>();
+    let terminate = std::future::pending::<std::io::Result<()>>();
+    first_delivered_signal(ctrl_c, terminate).await;
+}
+
+/// A listener that fails stays pending so the other signal can still stop
+/// the process. Completing on the error would shut the server down at startup.
+async fn first_delivered_signal(
+    ctrl_c: impl std::future::Future<Output = std::io::Result<()>>,
+    terminate: impl std::future::Future<Output = std::io::Result<()>>,
+) {
     tokio::select! {
-        () = ctrl_c => {}
-        () = terminate => {}
+        result = ctrl_c => hold_unless_delivered(result, "ctrl-c").await,
+        result = terminate => hold_unless_delivered(result, "SIGTERM").await,
+    }
+}
+
+async fn hold_unless_delivered(result: std::io::Result<()>, name: &str) {
+    if let Err(error) = result {
+        tracing::error!(%error, "failed to listen for {name}");
+        std::future::pending::<()>().await;
     }
 }
 
@@ -334,5 +345,29 @@ mod tests {
             elapsed < std::time::Duration::from_secs(2),
             "drain waited {elapsed:?}"
         );
+    }
+
+    #[tokio::test]
+    async fn a_failed_signal_listener_does_not_finish_shutdown() {
+        let failed = async { Err(std::io::Error::other("listener failed")) };
+        let other = std::future::pending::<std::io::Result<()>>();
+        let finished = tokio::time::timeout(
+            std::time::Duration::from_millis(50),
+            first_delivered_signal(failed, other),
+        )
+        .await;
+        assert!(finished.is_err());
+    }
+
+    #[tokio::test]
+    async fn a_delivered_signal_finishes_shutdown() {
+        let delivered = async { Ok(()) };
+        let other = std::future::pending::<std::io::Result<()>>();
+        tokio::time::timeout(
+            std::time::Duration::from_millis(50),
+            first_delivered_signal(delivered, other),
+        )
+        .await
+        .expect("a delivered signal completes shutdown");
     }
 }
