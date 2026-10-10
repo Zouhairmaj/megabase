@@ -148,28 +148,48 @@ fn pending_grow_starts_at_item_boundary(old_pending: &str, new_pending: &str) ->
 }
 
 /// Drop whole `- **Date**` items anywhere in Pending. Items that remain
-/// must be unchanged, in the same order. An edited item is not a drop.
+/// must be unchanged, in the same order, with the same separators between
+/// them. An edited item is not a drop. Extra blank lines between kept
+/// items are not a drop.
 fn pending_only_drops_dated_items(old_pending: &str, new_pending: &str) -> bool {
     let old_items = pending_items(old_pending);
     let new_items = pending_items(new_pending);
     if new_items.len() >= old_items.len() {
         return false;
     }
-    let mut kept = 0;
+    let mut kept: Vec<&PendingItem<'_>> = Vec::new();
     let mut dropped = false;
     for item in &old_items {
-        if kept < new_items.len() && new_items[kept] == *item {
-            kept += 1;
-        } else if item.starts_with("- **Date**") {
+        if kept.len() < new_items.len() && new_items[kept.len()].text == item.text {
+            kept.push(item);
+        } else if item.text.starts_with("- **Date**") {
             dropped = true;
         } else {
             return false;
         }
     }
-    kept == new_items.len() && dropped
+    if kept.len() != new_items.len() || !dropped {
+        return false;
+    }
+    let mut expected = String::new();
+    for (i, item) in kept.iter().enumerate() {
+        if i > 0 {
+            expected.push_str("\n\n");
+        }
+        expected.push_str(item.raw);
+    }
+    new_pending.trim_matches('\n') == expected
 }
 
-fn pending_items(body: &str) -> Vec<&str> {
+struct PendingItem<'a> {
+    /// Item text without surrounding newlines, used for equality.
+    text: &'a str,
+    /// Item bytes between separators, including a blank line that belonged
+    /// to the gap before the next `- **Date**` marker.
+    raw: &'a str,
+}
+
+fn pending_items(body: &str) -> Vec<PendingItem<'_>> {
     let trimmed = body.trim_matches('\n');
     if trimmed.is_empty() {
         return Vec::new();
@@ -181,16 +201,18 @@ fn pending_items(body: &str) -> Vec<&str> {
     let mut search_from = 0;
     while let Some(rel) = trimmed[search_from..].find("\n\n- **Date**") {
         let split_at = search_from + rel;
-        let item = trimmed[start..split_at].trim_matches('\n');
-        if !item.is_empty() {
-            items.push(item);
+        let raw = &trimmed[start..split_at];
+        let text = raw.trim_matches('\n');
+        if !text.is_empty() {
+            items.push(PendingItem { text, raw });
         }
         start = split_at + 2;
         search_from = start;
     }
-    let last = trimmed[start..].trim_matches('\n');
-    if !last.is_empty() {
-        items.push(last);
+    let raw = &trimmed[start..];
+    let text = raw.trim_matches('\n');
+    if !text.is_empty() {
+        items.push(PendingItem { text, raw });
     }
     items
 }
@@ -707,6 +729,11 @@ mod tests {
         assert!(
             is_human_log_review_ok(&before_spaced, &after_spaced),
             "a blank line inside a dated item stays part of that item"
+        );
+        let extra_gap = format!("{header}{second}\n\n{third}{rest}");
+        assert!(
+            !is_human_log_review_ok(&before, &extra_gap),
+            "an added blank line between kept items is not a drop"
         );
     }
 

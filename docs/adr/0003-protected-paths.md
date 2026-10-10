@@ -80,7 +80,8 @@ cannot land CI or judge changes through a release PR.
 `review/*` may append items under `## Pending` in `HUMAN_LOG.md`
 (a grow whose added suffix starts a new `- ` item) and may drop whole
 Pending items that start with `- **Date**`, including an earlier item
-when the items that stay are unchanged and in the same order. It may
+when the items that stay are unchanged, in the same order, and still
+separated by the same blank lines. It may
 also shrink a suffix that ends at a complete Pending item whose removed
 suffix starts with `- **Date**`. It may grow the Completed section
 (replace the empty-log placeholder, or append after existing completed
