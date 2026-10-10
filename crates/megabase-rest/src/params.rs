@@ -20,7 +20,7 @@ pub(crate) enum QueryFail {
     Parse { message: String, details: String },
     /// `PGRST108` for an `order`, `limit`, `offset`, `and`, or `or` on a resource that is not embedded.
     NotEmbedded { resource: String },
-    /// A select aggregate whose unit is not served yet.
+    /// A select unit that is not served yet.
     Unimplemented(&'static str),
     /// An embed, spread, or JSON-path filter. The route unit stays 501.
     Route,
@@ -50,6 +50,15 @@ impl ReadQuery {
             columns: None,
             on_conflict: None,
             handled: false,
+        }
+    }
+
+    /// `true` when `select` applies an aggregate function.
+    #[must_use]
+    pub(crate) fn has_aggregate(&self) -> bool {
+        match &self.select {
+            SelectList::Star => false,
+            SelectList::Fields(fields) => fields.iter().any(|field| field.agg.is_some()),
         }
     }
 
@@ -119,6 +128,30 @@ struct SelectField {
     alias: Option<String>,
     json: Vec<JsonStep>,
     cast: Option<String>,
+    agg: Option<Aggregate>,
+    agg_cast: Option<String>,
+}
+
+/// `AggregateFunction` in `ApiRequest/Types.hs`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Aggregate {
+    Sum,
+    Avg,
+    Count,
+    Max,
+    Min,
+}
+
+impl Aggregate {
+    fn sql(self) -> &'static str {
+        match self {
+            Self::Sum => "SUM",
+            Self::Avg => "AVG",
+            Self::Count => "COUNT",
+            Self::Max => "MAX",
+            Self::Min => "MIN",
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -650,6 +683,7 @@ fn parse_select(input: &str) -> Result<ParsedSelect, PErr> {
         && fields[0].alias.is_none()
         && fields[0].json.is_empty()
         && fields[0].cast.is_none()
+        && fields[0].agg.is_none()
     {
         return Ok(ParsedSelect::Ready(SelectList::Star));
     }
@@ -761,57 +795,73 @@ fn parse_field_select<'a>(at: &mut At<'a>) -> Result<SelectItem, PErr> {
                 alias: None,
                 json: Vec::new(),
                 cast: None,
+                agg: None,
+                agg_cast: None,
             }));
         }
         return Err(char_err(&next, "\")\", \",\" or end of input"));
     }
     let alias = optional_alias(at)?;
+    // megabase:unit rest:aggregate:count
     if at.starts_with("count()") {
         *at = bump_str(at, "count()");
-        let cast = optional_cast(at)?;
-        let _ = cast;
-        return Ok(SelectItem::Defer(QueryFail::Unimplemented(
-            "rest:aggregate:count",
-        )));
+        let agg_cast = optional_cast(at)?;
+        if !matches!(at.peek(), None | Some(',' | ')')) {
+            return Err(char_err(at, "\")\", \",\" or end of input"));
+        }
+        return Ok(SelectItem::Field(SelectField {
+            column: "*".to_string(),
+            alias,
+            json: Vec::new(),
+            cast: None,
+            agg: Some(Aggregate::Count),
+            agg_cast,
+        }));
     }
     let (name, next) = parse_field_name(at)?;
     *at = next;
     let json = parse_json_path(at)?;
     let cast = optional_cast(at)?;
+    let mut agg = None;
     if at.peek() == Some('.') {
         let after = at.bump('.');
-        if let Some(unit) = aggregate_unit(&after) {
-            *at = bump_str(&after, unit.0);
-            let _ = optional_cast(at)?;
-            return Ok(SelectItem::Defer(QueryFail::Unimplemented(unit.1)));
+        if let Some((token, function)) = aggregate_function(&after) {
+            *at = bump_str(&after, token);
+            agg = Some(function);
         }
     }
+    let agg_cast = if agg.is_some() {
+        optional_cast(at)?
+    } else {
+        None
+    };
     if !matches!(at.peek(), None | Some(',' | ')')) {
         return Err(char_err(at, "\")\", \",\" or end of input"));
-    }
-    if let Some(cast) = &cast {
-        if !cast_ok(cast) {
-            return Err(char_err(at, "letter or digit"));
-        }
     }
     Ok(SelectItem::Field(SelectField {
         column: name,
         alias,
         json,
         cast,
+        agg,
+        agg_cast,
     }))
 }
 
-fn aggregate_unit<'a>(at: &At<'a>) -> Option<(&'static str, &'static str)> {
-    for (token, unit) in [
-        ("sum()", "rest:aggregate:sum"),
-        ("avg()", "rest:aggregate:avg"),
-        ("count()", "rest:aggregate:count"),
-        ("max()", "rest:aggregate:max"),
-        ("min()", "rest:aggregate:min"),
+fn aggregate_function<'a>(at: &At<'a>) -> Option<(&'static str, Aggregate)> {
+    // megabase:unit rest:aggregate:sum
+    // megabase:unit rest:aggregate:avg
+    // megabase:unit rest:aggregate:max
+    // megabase:unit rest:aggregate:min
+    for (token, function) in [
+        ("sum()", Aggregate::Sum),
+        ("avg()", Aggregate::Avg),
+        ("count()", Aggregate::Count),
+        ("max()", Aggregate::Max),
+        ("min()", Aggregate::Min),
     ] {
         if at.starts_with(token) {
-            return Some((token, unit));
+            return Some((token, function));
         }
     }
     None
@@ -1580,7 +1630,8 @@ pub(crate) fn build_read_sql(
     let schema = quote_ident(schema);
     let mut select_sql = String::new();
     // megabase:unit rest:query-param:select
-    push_select(&mut select_sql, &mut params, &relation_ident, &query.select);
+    let select = expand_star(&query.select, column_types);
+    push_select(&mut select_sql, &mut params, &relation_ident, &select);
     let mut inner = format!("SELECT {select_sql} FROM {schema}.{relation_ident}");
     if !query.filters.is_empty() || !query.logic.is_empty() {
         inner.push_str(" WHERE ");
@@ -1593,6 +1644,7 @@ pub(crate) fn build_read_sql(
             column_types,
         )?;
     }
+    push_group(&mut inner, &mut params, &relation_ident, &select);
     if !query.orders.is_empty() {
         inner.push(' ');
         // megabase:unit rest:query-param:order
@@ -1618,6 +1670,59 @@ pub(crate) fn build_read_sql(
         params,
         offset,
     })
+}
+
+/// `*` next to an aggregate becomes the table's columns, so `GROUP BY` can
+/// name them (`Plan.hs` expands it the same way).
+fn expand_star(select: &SelectList, column_types: &[(&str, &str)]) -> SelectList {
+    let SelectList::Fields(fields) = select else {
+        return select.clone();
+    };
+    let aggregated = fields.iter().any(|field| field.agg.is_some());
+    if !aggregated || column_types.is_empty() {
+        return select.clone();
+    }
+    let mut expanded = Vec::with_capacity(fields.len());
+    for field in fields {
+        if field.column == "*" && field.agg.is_none() {
+            for (name, _) in column_types {
+                expanded.push(SelectField {
+                    column: (*name).to_string(),
+                    alias: None,
+                    json: Vec::new(),
+                    cast: None,
+                    agg: None,
+                    agg_cast: None,
+                });
+            }
+        } else {
+            expanded.push(field.clone());
+        }
+    }
+    SelectList::Fields(expanded)
+}
+
+/// `GROUP BY` over the non-aggregated fields (`SqlFragment.hs` `groupF`).
+fn push_group(sql: &mut String, params: &mut Vec<String>, relation: &str, select: &SelectList) {
+    let SelectList::Fields(fields) = select else {
+        return;
+    };
+    if fields.iter().all(|field| field.agg.is_none()) {
+        return;
+    }
+    let mut first = true;
+    for field in fields.iter().filter(|field| field.agg.is_none()) {
+        sql.push_str(if first { " GROUP BY " } else { ", " });
+        first = false;
+        if let Some(alias) = output_alias(field) {
+            sql.push_str(&quote_ident(alias));
+        } else {
+            sql.push_str(relation);
+            sql.push('.');
+            sql.push_str(&quote_ident(&field.column));
+            push_json(sql, params, &field.json);
+        }
+    }
 }
 
 fn push_select(sql: &mut String, params: &mut Vec<String>, relation: &str, select: &SelectList) {
@@ -1654,14 +1759,15 @@ fn push_select_field(
         push_json(&mut expr, params, &field.json);
     }
     if let Some(cast) = &field.cast {
-        sql.push_str("CAST( ");
-        sql.push_str(&expr);
-        sql.push_str(" AS ");
-        sql.push_str(cast);
-        sql.push_str(" )");
-    } else {
-        sql.push_str(&expr);
+        expr = format!("CAST( {expr} AS {cast} )");
     }
+    if let Some(agg) = field.agg {
+        expr = format!("{}({expr})", agg.sql());
+        if let Some(cast) = &field.agg_cast {
+            expr = format!("CAST( {expr} AS {cast} )");
+        }
+    }
+    sql.push_str(&expr);
     if let Some(alias) = output_alias(field) {
         sql.push_str(" AS ");
         sql.push_str(&quote_ident(alias));
@@ -1675,6 +1781,9 @@ fn push_select_field(
 fn output_alias(field: &SelectField) -> Option<&str> {
     if let Some(alias) = &field.alias {
         return Some(alias);
+    }
+    if field.agg.is_some() {
+        return None;
     }
     let last = field.json.last()?;
     match json_operand(last) {
@@ -2028,10 +2137,7 @@ mod tests {
             parse_get_query("select=notes!inner(body)").unwrap_err(),
             QueryFail::Unimplemented("rest:embed-join:inner")
         ));
-        assert!(matches!(
-            parse_get_query("select=id.count()").unwrap_err(),
-            QueryFail::Unimplemented("rest:aggregate:count")
-        ));
+        assert!(parse_get_query("select=id.count()").unwrap().has_aggregate());
         let err = parse_get_query("select=notes(body)&id=nope").unwrap_err();
         assert!(matches!(err, QueryFail::Parse { .. }));
     }
@@ -2135,6 +2241,34 @@ mod tests {
         let sql = build_read_sql("public", "notes", &query, &[("body", "text")]).unwrap();
         assert_eq!(sql.params, vec!["victim-secret') or true--"]);
         assert!(!sql.sql.contains("victim-secret"));
+    }
+
+    #[test]
+    fn aggregates_build_functions_casts_and_group_by() {
+        let query = parse_get_query("select=count(),n:amount.sum()::text,kind&amount=gt.1").unwrap();
+        assert!(query.has_aggregate());
+        let sql = build_read_sql("public", "t", &query, &[("amount", "integer")]).unwrap();
+        assert!(sql.sql.contains(
+            "SELECT COUNT(\"t\".*), CAST( SUM(\"t\".\"amount\") AS text ) AS \"n\", \"t\".\"kind\" \
+             FROM \"public\".\"t\" WHERE"
+        ));
+        assert!(sql.sql.contains(" GROUP BY \"t\".\"kind\""));
+
+        let query = parse_get_query("select=a.avg(),b.max(),c.min(),k:d::int.sum()::bigint").unwrap();
+        let sql = build_read_sql("public", "t", &query, &[]).unwrap();
+        assert!(sql.sql.contains(
+            "AVG(\"t\".\"a\"), MAX(\"t\".\"b\"), MIN(\"t\".\"c\"), \
+             CAST( SUM(CAST( \"t\".\"d\" AS int )) AS bigint ) AS \"k\""
+        ));
+        assert!(!sql.sql.contains("GROUP BY"));
+
+        let query = parse_get_query("select=*,id.count()").unwrap();
+        let sql = build_read_sql("public", "t", &query, &[("id", "integer"), ("v", "text")]).unwrap();
+        assert!(sql.sql.contains("GROUP BY \"t\".\"id\", \"t\".\"v\""));
+        assert!(matches!(
+            parse_get_query("select=id.count()x").unwrap_err(),
+            QueryFail::Parse { .. }
+        ));
     }
 
     #[test]

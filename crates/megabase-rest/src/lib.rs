@@ -34,6 +34,7 @@ pub const COMPONENT: &str = "rest";
 pub struct RestState {
     pool: Option<sqlx::PgPool>,
     jwt: Option<Arc<Hs256>>,
+    aggregates: bool,
 }
 
 impl RestState {
@@ -44,7 +45,11 @@ impl RestState {
     #[must_use]
     pub fn from_config(config: &Config) -> Self {
         let jwt = config.jwt_hs256().ok().map(Arc::new);
-        Self { pool: None, jwt }
+        Self {
+            pool: None,
+            jwt,
+            aggregates: config.db_aggregates_enabled,
+        }
     }
 
     /// Attach a pool opened by [`connect`].
