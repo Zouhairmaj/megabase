@@ -5,8 +5,9 @@
 //! `POST`, `PATCH`, `PUT`, and `DELETE` on `/rest/v1/{relation}`.
 //!
 //! Default `Prefer` is `return=minimal`: creates answer `201` with an empty
-//! body, and the other mutations answer `204`. `Prefer` itself stays
-//! unimplemented. Values are bound. Names are `quote_ident` after a catalog
+//! body, and the other mutations answer `204`. `Prefer` `resolution`,
+//! `missing`, `handling` and `max-affected` apply (`specs/rest/prefer.md`);
+//! `return`, `tx`, `timezone` and `count` stay unimplemented. Values are bound. Names are `quote_ident` after a catalog
 //! lookup.
 
 use std::collections::BTreeSet;
@@ -17,6 +18,7 @@ use serde_json::Value;
 
 use crate::filter::{quote_ident, sql_type_name};
 use crate::params::{where_clause, ReadQuery};
+use crate::prefer::{set_applied, Count, Missing, Prefer, Resolution, Scope};
 use crate::read::{
     self, begin, content_range, load_columns, pgrst, query_failure, relation_exists,
     set_request_context, table_not_found, unimplemented_unit, unsafe_type, Session,
@@ -49,6 +51,7 @@ pub(crate) async fn mutate(
     session: &Session,
     method: &Method,
     query: &ReadQuery,
+    prefer: &Prefer,
     body: &[u8],
     content_type: Option<&HeaderValue>,
 ) -> Response {
@@ -67,6 +70,15 @@ pub(crate) async fn mutate(
             );
         }
     };
+    // A counted write needs the `Content-Range` total, which is not served.
+    if let Some(count) = prefer.count {
+        let unit = match count {
+            Count::Exact => "rest:prefer:count=exact",
+            Count::Planned => "rest:prefer:count=planned",
+            Count::Estimated => "rest:prefer:count=estimated",
+        };
+        return unimplemented_unit(method, &format!("/rest/v1/{relation}"), unit);
+    }
     // Aggregates in `select=` shape a `RETURNING` projection, which is not
     // served. Ignoring them would hide the request instead of answering 501.
     if query.has_aggregate() {
@@ -163,7 +175,9 @@ pub(crate) async fn mutate(
         );
     }
 
-    let pk = if matches!(kind, Kind::Upsert) {
+    let pk = if matches!(kind, Kind::Upsert)
+        || (matches!(kind, Kind::Create) && prefer.resolution.is_some())
+    {
         match primary_key(&mut tx, schema, relation, session.anon).await {
             Ok(pk) => pk,
             Err(response) => return *response,
@@ -182,6 +196,35 @@ pub(crate) async fn mutate(
             );
         }
     }
+
+    // megabase:unit rest:prefer:resolution=merge-duplicates
+    // megabase:unit rest:prefer:resolution=ignore-duplicates
+    // `Plan.hs` `mutatePlan`: `on_conflict` wins over the primary key.
+    let conflict: Vec<String> = match (&kind, prefer.resolution) {
+        (Kind::Create, Some(_)) => query
+            .conflict_columns()
+            .map_or_else(|| pk.clone(), <[String]>::to_vec),
+        _ => Vec::new(),
+    };
+    // megabase:unit rest:prefer:missing=default
+    // megabase:unit rest:prefer:missing=null
+    // `missing=null` is the plain `json_to_record` behavior.
+    let defaults = if prefer.missing == Some(Missing::Default)
+        && matches!(kind, Kind::Create | Kind::Update)
+        && !keys.is_empty()
+    {
+        match column_defaults(&mut tx, schema, relation, &keys, session.anon).await {
+            Ok(defaults) => defaults,
+            Err(response) => return *response,
+        }
+    } else {
+        Vec::new()
+    };
+    let options = WriteOptions {
+        resolution: prefer.resolution,
+        conflict: &conflict,
+        defaults: &defaults,
+    };
 
     let built = match kind {
         Kind::Update if keys.is_empty() => MutationSql {
@@ -212,6 +255,7 @@ pub(crate) async fn mutate(
                 &column_types,
                 &pk,
                 eq_filters.as_deref().unwrap_or(&[]),
+                &options,
             ) {
                 Ok(sql) => sql,
                 Err(response) => return *response,
@@ -251,10 +295,85 @@ pub(crate) async fn mutate(
             None,
         );
     }
+    // megabase:unit rest:prefer:max-affected=*
+    // `MainTx.hs` `failExceedsMaxAffectedPref`: only under `handling=strict`.
+    // Dropping the transaction rolls the write back.
+    if let (Some(limit), Kind::Update | Kind::Delete) = (prefer.strict_max_affected(), &kind) {
+        if count > limit {
+            drop(tx);
+            return pgrst(
+                StatusCode::BAD_REQUEST,
+                "PGRST124",
+                "Query result exceeds max-affected preference constraint",
+                Some(&format!("The query affects {count} rows")),
+                None,
+            );
+        }
+    }
     if let Err(error) = tx.commit().await {
         return query_failure(&error, session.anon);
     }
-    mutation_response(&kind, count, schema)
+    let mut response = mutation_response(&kind, count, schema);
+    let applied = prefer.applied(Scope {
+        resolution: matches!(kind, Kind::Create) && !conflict.is_empty(),
+        missing: matches!(kind, Kind::Create | Kind::Update),
+        count: false,
+        max_affected: matches!(kind, Kind::Update | Kind::Delete),
+    });
+    set_applied(&mut response, applied);
+    response
+}
+
+/// Per-request write switches taken from `Prefer` and `on_conflict`.
+struct WriteOptions<'a> {
+    resolution: Option<Resolution>,
+    /// `ON CONFLICT` target of a `POST`. Empty means no clause.
+    conflict: &'a [String],
+    /// `(column, default expression)` for `missing=default`.
+    defaults: &'a [(String, String)],
+}
+
+/// Defaults of `keys` from the catalog (`cfDefault`). The expressions come
+/// from `pg_get_expr`, never from the request.
+async fn column_defaults(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    schema: &str,
+    relation: &str,
+    keys: &[String],
+    anon: bool,
+) -> Result<Vec<(String, String)>, Box<Response>> {
+    let rows: Vec<(String, String)> = sqlx::query_as(
+        "SELECT a.attname::text, pg_get_expr(d.adbin, d.adrelid)
+         FROM pg_attribute AS a
+         JOIN pg_class AS c ON c.oid = a.attrelid
+         JOIN pg_namespace AS n ON n.oid = c.relnamespace
+         JOIN pg_attrdef AS d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
+         WHERE n.nspname = $1
+           AND c.relname = $2
+           AND a.attnum > 0
+           AND NOT a.attisdropped
+           AND a.attgenerated = ''
+         ORDER BY a.attnum",
+    )
+    .bind(schema)
+    .bind(relation)
+    .fetch_all(&mut **tx)
+    .await
+    .map_err(|error| Box::new(query_failure(&error, anon)))?;
+    Ok(rows
+        .into_iter()
+        .filter(|(name, _)| keys.contains(name))
+        .collect())
+}
+
+/// `quote_literal` for a catalog column name.
+fn quote_literal(text: &str) -> String {
+    let escaped = text.replace('\'', "''");
+    if text.contains('\\') {
+        format!("E'{}'", escaped.replace('\\', "\\\\"))
+    } else {
+        format!("'{escaped}'")
+    }
 }
 
 struct MutationSql {
@@ -293,6 +412,7 @@ fn write_sql(
     column_types: &[(&str, &str)],
     pk: &[String],
     eq_filters: &[(String, String)],
+    options: &WriteOptions<'_>,
 ) -> Result<MutationSql, Box<Response>> {
     let mut params = Vec::new();
     params.push(payload.raw.clone());
@@ -322,7 +442,32 @@ fn write_sql(
         } else {
             "json_to_recordset"
         };
-        format!("{source}(${body_index}::json) AS pgrst_body({typed})")
+        if options.defaults.is_empty() {
+            format!("{source}(${body_index}::json) AS pgrst_body({typed})")
+        } else {
+            // `SqlFragment.fromJsonBodyF` with `includeDefaults`: the column
+            // defaults sit under the payload keys.
+            let defs = options
+                .defaults
+                .iter()
+                .map(|(name, expr)| format!("{}, {expr}", quote_literal(name)))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let body = if payload.object {
+                format!("jsonb_build_object({defs}) || ${body_index}::jsonb")
+            } else {
+                format!(
+                    "(SELECT jsonb_agg(jsonb_build_object({defs}) || elem) \
+                     FROM jsonb_array_elements(${body_index}::jsonb) AS elem)"
+                )
+            };
+            let source = if payload.object {
+                "jsonb_to_record"
+            } else {
+                "jsonb_to_recordset"
+            };
+            format!("{source}({body}) AS pgrst_body({typed})")
+        }
     };
 
     let qualified = format!("{}.{}", quote_ident(schema), quote_ident(relation));
@@ -364,6 +509,28 @@ fn write_sql(
                         })
                         .collect::<Vec<_>>()
                         .join(", ");
+                    sql.push_str(&sets);
+                }
+            }
+            if let (Kind::Create, Some(resolution), false) =
+                (kind, options.resolution, options.conflict.is_empty())
+            {
+                // `WHERE true` keeps `ON` from reading as a join condition.
+                sql.push_str(" WHERE true ON CONFLICT (");
+                sql.push_str(&quote_list(options.conflict));
+                sql.push_str(") ");
+                if keys.is_empty() || resolution == Resolution::Ignore {
+                    sql.push_str("DO NOTHING");
+                } else {
+                    let sets = keys
+                        .iter()
+                        .map(|name| {
+                            let ident = quote_ident(name);
+                            format!("{ident} = EXCLUDED.{ident}")
+                        })
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    sql.push_str("DO UPDATE SET ");
                     sql.push_str(&sets);
                 }
             }
@@ -699,6 +866,11 @@ mod tests {
             &[],
             &[],
             &[],
+            &WriteOptions {
+                resolution: None,
+                conflict: &[],
+                defaults: &[],
+            },
         )
         .expect("sql");
         assert!(
@@ -708,6 +880,86 @@ mod tests {
         );
         assert!(built.sql.contains("VALUES (1)"));
         assert_eq!(built.params, vec!["{}".to_string()]);
+    }
+
+    fn create_sql(options: &WriteOptions<'_>, object: bool) -> String {
+        let query = parse_get_query("").expect("query");
+        let payload = Payload {
+            raw: "{}".to_string(),
+            object,
+            keys: vec!["id".to_string(), "title".to_string()],
+        };
+        let keys = payload.keys.clone();
+        write_sql(
+            "public",
+            "todos",
+            &Kind::Create,
+            &keys,
+            &payload,
+            &query,
+            &[("id", "bigint"), ("title", "text")],
+            &[],
+            &[],
+            options,
+        )
+        .expect("sql")
+        .sql
+    }
+
+    #[test]
+    fn resolution_builds_on_conflict() {
+        let conflict = ["id".to_string()];
+        let merge = create_sql(
+            &WriteOptions {
+                resolution: Some(Resolution::Merge),
+                conflict: &conflict,
+                defaults: &[],
+            },
+            false,
+        );
+        assert!(merge.contains(
+            "WHERE true ON CONFLICT (\"id\") DO UPDATE SET \"id\" = EXCLUDED.\"id\", \"title\" = EXCLUDED.\"title\""
+        ));
+        let ignore = create_sql(
+            &WriteOptions {
+                resolution: Some(Resolution::Ignore),
+                conflict: &conflict,
+                defaults: &[],
+            },
+            false,
+        );
+        assert!(ignore.contains("ON CONFLICT (\"id\") DO NOTHING"));
+        let plain = create_sql(
+            &WriteOptions {
+                resolution: None,
+                conflict: &[],
+                defaults: &[],
+            },
+            false,
+        );
+        assert!(!plain.contains("ON CONFLICT"));
+    }
+
+    #[test]
+    fn missing_default_layers_column_defaults_under_the_payload() {
+        let defaults = [("title".to_string(), "'untitled'::text".to_string())];
+        let options = WriteOptions {
+            resolution: None,
+            conflict: &[],
+            defaults: &defaults,
+        };
+        let object = create_sql(&options, true);
+        assert!(object.contains(
+            "jsonb_to_record(jsonb_build_object('title', 'untitled'::text) || $1::jsonb)"
+        ));
+        let array = create_sql(&options, false);
+        assert!(array.contains("jsonb_to_recordset((SELECT jsonb_agg(jsonb_build_object('title'"));
+    }
+
+    #[test]
+    fn quote_literal_escapes() {
+        assert_eq!(quote_literal("a'b"), "'a''b'");
+        assert_eq!(quote_literal("a\\b"), "E'a\\\\b'");
     }
 
     #[test]
@@ -732,6 +984,11 @@ mod tests {
             &[("a$1", "text"), ("title", "text")],
             &[],
             &[],
+            &WriteOptions {
+                resolution: None,
+                conflict: &[],
+                defaults: &[],
+            },
         )
         .expect("sql");
         assert!(
