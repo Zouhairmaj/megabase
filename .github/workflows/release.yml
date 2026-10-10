@@ -214,6 +214,11 @@ jobs:
               exit "$push_code"
             fi
             echo "Push denied for the checkout token; retrying with GITHUB_TOKEN (contents: write)."
+            # actions/checkout stores AUTHORIZATION in
+            # http.https://github.com/.extraheader. Replacing origin does
+            # not remove that header, so the denied token would still be
+            # sent. Drop it, then authenticate the retry with GH_TOKEN only.
+            git config --local --unset-all "http.https://github.com/.extraheader" || true
             git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
             git push origin "HEAD:refs/heads/${BRANCH}"
             pushed_with="github"

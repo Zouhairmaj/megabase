@@ -140,9 +140,11 @@ Physically impossible for the agent (repository settings or credentials):
       probe had already fallen back to `GITHUB_TOKEN`: the lockfile
       checkout on `main` still used the secret, which authenticates as
       `megabase-agent`. The lockfile checkout uses the probe's token, and
-      a push that is still denied retries with the job `GITHUB_TOKEN`
-      (`contents: write`). It does not keep the `megabase-agent`
-      identity. The push changed only `Cargo.lock`, so this is not
+      a push that is still denied drops the checkout authorization
+      header (`http.https://github.com/.extraheader`) and retries with
+      the job `GITHUB_TOKEN` (`contents: write`). Replacing `origin`
+      alone would still send the denied token. It does not keep the
+      `megabase-agent` identity. The push changed only `Cargo.lock`, so this is not
       Workflows permission. Run 38003872424 failed the same way on
       [Create a release](https://docs.github.com/rest/releases/releases#create-a-release)
       after pull request #144 merged. Classic PAT equivalent: `repo`.
