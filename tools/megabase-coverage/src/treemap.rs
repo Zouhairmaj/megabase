@@ -256,7 +256,7 @@ pub enum Heading {
     Title(String),
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Theme {
     Dark,
     Light,
@@ -404,11 +404,7 @@ fn draw_badge(
     let lw = (glyphs::measure(REGULAR, label, size, 0.0) + pad * 2.0).ceil();
     let vw = (glyphs::measure(REGULAR, value, size, 0.0) + pad * 2.0).ceil();
     let w = lw + vw;
-    let value_fg = if value_bg == pal.conformant {
-        pal.bg
-    } else {
-        pal.name
-    };
+    let value_fg = readable_text_on(value_bg);
     let _ = write!(
         svg,
         r##"<rect x="{x:.1}" y="{y:.1}" width="{w:.1}" height="{h:.1}" rx="3" fill="{card}"/>"##,
@@ -428,6 +424,41 @@ fn draw_badge(
     glyphs::write_text(svg, REGULAR, label, x + pad, ty, size, pal.muted, 0.0);
     glyphs::write_text(svg, REGULAR, value, x + lw + pad, ty, size, value_fg, 0.0);
     w
+}
+
+/// Dark ink used on bright fills (brand dark background).
+const INK_DARK: &str = "#0F1114";
+/// Light ink used on dark fills.
+const INK_LIGHT: &str = "#FFFFFF";
+
+fn relative_luminance(hex: &str) -> f64 {
+    let h = hex.trim_start_matches('#');
+    let ch = |i: usize| {
+        let c =
+            f64::from(u8::from_str_radix(h.get(i..i + 2).unwrap_or("00"), 16).unwrap_or(0)) / 255.0;
+        if c <= 0.039_28 {
+            c / 12.92
+        } else {
+            ((c + 0.055) / 1.055).powf(2.4)
+        }
+    };
+    0.2126 * ch(0) + 0.7152 * ch(2) + 0.0722 * ch(4)
+}
+
+/// WCAG 2.x contrast ratio between two `#RRGGBB` colours.
+fn contrast_ratio(a: &str, b: &str) -> f64 {
+    let (la, lb) = (relative_luminance(a), relative_luminance(b));
+    let (hi, lo) = if la > lb { (la, lb) } else { (lb, la) };
+    (hi + 0.05) / (lo + 0.05)
+}
+
+/// Pick dark or light ink, whichever contrasts more with `bg`.
+fn readable_text_on(bg: &str) -> &'static str {
+    if contrast_ratio(INK_DARK, bg) >= contrast_ratio(INK_LIGHT, bg) {
+        INK_DARK
+    } else {
+        INK_LIGHT
+    }
 }
 
 fn metric_badge_color(pal: &Palette, percent: f64) -> &'static str {
@@ -869,6 +900,21 @@ pub fn render(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn badge_text_meets_wcag_aa_on_every_badge_fill() {
+        for theme in [Theme::Dark, Theme::Light] {
+            let pal = theme.palette();
+            for bg in [pal.not_started, pal.implemented, pal.tested, pal.conformant] {
+                let fg = super::readable_text_on(bg);
+                let r = super::contrast_ratio(fg, bg);
+                assert!(r >= 4.5, "{theme:?}: {fg} on {bg} = {r:.2}");
+            }
+            assert!(super::contrast_ratio(pal.muted, pal.card) >= 4.5);
+        }
+        assert_eq!(super::readable_text_on("#005441"), "#FFFFFF");
+        assert_eq!(super::readable_text_on("#00D892"), "#0F1114");
+    }
+
     use super::*;
     use crate::model::Source;
     use std::collections::BTreeMap;
