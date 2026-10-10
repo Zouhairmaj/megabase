@@ -377,7 +377,7 @@ pub(crate) async fn create_user(
     let mut phone = String::new();
     if !email_in.is_empty() {
         email = validate_admin_email(&email_in)?;
-        if email_exists(&db, &email, &aud).await? {
+        if email_exists(&db, &email, &aud, None).await? {
             return Err(AuthError::unprocessable(
                 "email_exists",
                 "A user with this email address has already been registered",
@@ -388,16 +388,7 @@ pub(crate) async fn create_user(
     }
     if !phone_in.is_empty() {
         phone = validate_phone(&phone_in)?;
-        let found = sqlx::query_as::<_, (Uuid,)>(
-            "SELECT id FROM auth.users WHERE instance_id = $1 AND phone = $2 AND aud = $3 AND is_sso_user = false LIMIT 1",
-        )
-        .bind(nil_instance())
-        .bind(&phone)
-        .bind(&aud)
-        .fetch_optional(&db)
-        .await
-        .map_err(db_err("Database error checking phone"))?;
-        if found.is_some() {
+        if phone_exists(&db, &phone, &aud, None).await? {
             return Err(AuthError::unprocessable(
                 "phone_exists",
                 "Phone number already registered by another user",
@@ -543,14 +534,43 @@ pub(crate) async fn create_user(
     Ok(json_ok(&user))
 }
 
-async fn email_exists(db: &sqlx::PgPool, email: &str, aud: &str) -> Result<bool, AuthError> {
+/// Another user in `aud` holds `phone`; `exclude` is the user being updated.
+async fn phone_exists(
+    db: &sqlx::PgPool,
+    phone: &str,
+    aud: &str,
+    exclude: Option<Uuid>,
+) -> Result<bool, AuthError> {
+    let found = sqlx::query_as::<_, (Uuid,)>(
+        "SELECT id FROM auth.users
+         WHERE instance_id = $1 AND phone = $2 AND aud = $3 AND is_sso_user = false
+           AND ($4::uuid IS NULL OR id <> $4) LIMIT 1",
+    )
+    .bind(nil_instance())
+    .bind(phone)
+    .bind(aud)
+    .bind(exclude)
+    .fetch_optional(db)
+    .await
+    .map_err(db_err("Database error checking phone"))?;
+    Ok(found.is_some())
+}
+
+/// Another user in `aud` holds `email`; `exclude` is the user being updated.
+async fn email_exists(
+    db: &sqlx::PgPool,
+    email: &str,
+    aud: &str,
+    exclude: Option<Uuid>,
+) -> Result<bool, AuthError> {
     let fail = db_err("Database error checking email");
     let via_identity = sqlx::query_as::<_, (Uuid,)>(
         "SELECT u.id FROM auth.identities i JOIN auth.users u ON u.id = i.user_id
-         WHERE i.email = $1 AND u.aud = $2 LIMIT 1",
+         WHERE i.email = $1 AND u.aud = $2 AND ($3::uuid IS NULL OR u.id <> $3) LIMIT 1",
     )
     .bind(email)
     .bind(aud)
+    .bind(exclude)
     .fetch_optional(db)
     .await
     .map_err(fail)?;
@@ -560,11 +580,13 @@ async fn email_exists(db: &sqlx::PgPool, email: &str, aud: &str) -> Result<bool,
     let fail = db_err("Database error checking email");
     let found = sqlx::query_as::<_, (Uuid,)>(
         "SELECT id FROM auth.users
-         WHERE instance_id = $1 AND LOWER(email) = $2 AND aud = $3 AND is_sso_user = false LIMIT 1",
+         WHERE instance_id = $1 AND LOWER(email) = $2 AND aud = $3 AND is_sso_user = false
+           AND ($4::uuid IS NULL OR id <> $4) LIMIT 1",
     )
     .bind(nil_instance())
     .bind(email)
     .bind(aud)
+    .bind(exclude)
     .fetch_optional(db)
     .await
     .map_err(fail)?;
@@ -577,6 +599,7 @@ async fn email_exists(db: &sqlx::PgPool, email: &str, aud: &str) -> Result<bool,
 
 #[derive(Debug, sqlx::FromRow)]
 struct UserState {
+    aud: String,
     is_anonymous: bool,
     raw_app_meta_data: Option<Value>,
     raw_user_meta_data: Option<Value>,
@@ -593,7 +616,7 @@ pub(crate) async fn update_user(
     let id = parse_user_id(&user_id)?;
     let db = pool(&state)?;
     let current = sqlx::query_as::<_, UserState>(
-        "SELECT is_anonymous, raw_app_meta_data, raw_user_meta_data
+        "SELECT aud, is_anonymous, raw_app_meta_data, raw_user_meta_data
          FROM auth.users WHERE instance_id = $1 AND id = $2",
     )
     .bind(nil_instance())
@@ -607,10 +630,24 @@ pub(crate) async fn update_user(
         Some(raw) => validate_admin_email(raw)?,
         None => String::new(),
     };
+    if !email.is_empty() && email_exists(&db, &email, &current.aud, Some(id)).await? {
+        return Err(AuthError::unprocessable(
+            "email_exists",
+            "A user with this email address has already been registered",
+        )
+        .into());
+    }
     let phone = match params.phone.as_deref().filter(|p| !p.is_empty()) {
         Some(raw) => validate_phone(raw)?,
         None => String::new(),
     };
+    if !phone.is_empty() && phone_exists(&db, &phone, &current.aud, Some(id)).await? {
+        return Err(AuthError::unprocessable(
+            "phone_exists",
+            "Phone number already registered by another user",
+        )
+        .into());
+    }
     let ban = parse_ban(params.ban_duration.as_deref())?;
     let mut password_hash: Option<Option<String>> = None;
     if let Some(password) = params.password.as_deref() {
@@ -1106,8 +1143,9 @@ pub(crate) async fn create_sso_provider(
     let domains = params.domains.clone().unwrap_or_default();
     for domain in &domains {
         if let Some(owner) = domain_owner(&db, domain).await? {
-            return Err(AuthError::validation(
+            return Err(AuthError::new(
                 400,
+                "sso_domain_already_exists",
                 format!(
                     "SSO Domain '{domain}' is already assigned to an SSO identity provider ({owner})"
                 ),
@@ -1124,7 +1162,7 @@ pub(crate) async fn create_sso_provider(
          VALUES ($1, $2, $3, NOW(), NOW())",
     )
     .bind(provider_id)
-    .bind(params.resource_id.as_deref())
+    .bind(params.resource_id.as_deref().and_then(empty_as_none))
     .bind(params.disabled)
     .execute(&mut *tx)
     .await
@@ -1208,8 +1246,9 @@ pub(crate) async fn update_sso_provider(
     if !params.xml().is_empty() || !params.url().is_empty() {
         if let Some((raw_xml, entity)) = params.metadata()? {
             if entity != saml.entity_id {
-                return Err(AuthError::validation(
+                return Err(AuthError::new(
                     400,
+                    "saml_entity_id_mismatch",
                     format!(
                         "SAML Metadata can be updated only if the EntityID matches for the provider; expected '{}' but got '{}'",
                         saml.entity_id, entity
@@ -1239,8 +1278,9 @@ pub(crate) async fn update_sso_provider(
         match domain_owner(&db, domain).await? {
             Some(owner) if owner == provider_id => keep.push(domain),
             Some(owner) => {
-                return Err(AuthError::validation(
+                return Err(AuthError::new(
                     400,
+                    "sso_domain_already_exists",
                     format!("SSO domain '{domain}' already assigned to another provider ({owner})"),
                 )
                 .into())
@@ -1657,17 +1697,18 @@ pub(crate) async fn update_custom_provider(
     headers: HeaderMap,
     Path(identifier): Path<String>,
     body: Bytes,
-) -> Result<Response, AuthError> {
+) -> Reply {
     require_admin(&state, &headers)?;
     require_custom_oauth(&state)?;
     if identifier.is_empty() {
-        return Err(AuthError::validation(400, "identifier is required"));
+        return Err(AuthError::validation(400, "identifier is required").into());
     }
     if !identifier.starts_with("custom:") {
         return Err(AuthError::validation(
             400,
             format!("identifier must start with 'custom:' prefix, e.g. 'custom:{identifier}'"),
-        ));
+        )
+        .into());
     }
     let update: CustomUpdate = params(&body)?;
     validate_auth_params(update.authorization_params.as_ref())?;
@@ -1747,20 +1788,8 @@ pub(crate) async fn update_custom_provider(
             }
         }
     }
-    if oidc && (nonempty(&update.issuer).is_some() || update.discovery_url.is_some()) {
-        let url = row.discovery_url.clone().unwrap_or_else(|| {
-            format!(
-                "{}/.well-known/openid-configuration",
-                row.issuer.as_deref().unwrap_or("").trim_end_matches('/')
-            )
-        });
-        return Err(AuthError::validation(
-            400,
-            format!(
-                "OIDC discovery from {} failed: OIDC discovery fetch is not available",
-                go_quote(&url)
-            ),
-        ));
+    if oidc && (nonempty(&update.issuer).is_some() || nonempty(&update.discovery_url).is_some()) {
+        return Err(not_impl("custom-provider:oidc_discovery"));
     }
     let secret = nonempty(&update.client_secret);
     sqlx::query(

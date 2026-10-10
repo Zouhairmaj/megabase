@@ -534,7 +534,8 @@ base64 raw URL secret replaces the SHA-256 hash and is returned once.
 Only supplied fields change (`updateProviderFromParams`); OIDC scopes keep
 `openid` first; URLs pass the HTTPS and address checks of create. For an OIDC
 provider an `issuer` or `discovery_url` change needs discovery, which this
-build cannot fetch (400 `OIDC discovery from … failed`). Returns the provider.
+build cannot fetch, so a non-empty change answers 501
+`MEGABASE_NOT_IMPLEMENTED`. Returns the provider.
 
 ---
 
