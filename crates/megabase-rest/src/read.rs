@@ -7,6 +7,8 @@
 //! Relation and column names come from `pg_catalog` after a bound lookup,
 //! then `quote_ident`.
 
+use std::collections::HashMap;
+
 use axum::body::Bytes;
 use axum::extract::{OriginalUri, State};
 use axum::http::{header, HeaderMap, HeaderName, HeaderValue, Method, StatusCode};
@@ -18,7 +20,7 @@ use serde_json::{Map, Value};
 use crate::filter::UnsafeType;
 use crate::mutate::mutate;
 use crate::openapi::document;
-use crate::params::{build_read_sql, parse_get_query, QueryFail};
+use crate::params::{build_read_sql, parse_get_query, QueryFail, Relationship};
 use crate::query::path_decode;
 use crate::RestState;
 
@@ -642,6 +644,8 @@ async fn read_relation(
     }
 }
 
+// megabase:unit rest:embed-join:left
+// megabase:unit rest:embed-join:inner
 async fn read_rows(
     pool: &sqlx::PgPool,
     schema: &str,
@@ -670,7 +674,15 @@ async fn read_rows(
         .iter()
         .map(|(name, pg_type)| (name.as_str(), pg_type.as_str()))
         .collect();
-    let built = build_read_sql(schema, relation, read, &column_types)
+    let mut rels = HashMap::new();
+    for name in read.embed_names() {
+        if rels.contains_key(name) {
+            continue;
+        }
+        let rel = load_relationship(&mut tx, schema, relation, name, session.anon).await?;
+        rels.insert(name.to_string(), rel);
+    }
+    let built = build_read_sql(schema, relation, read, &column_types, &rels)
         .map_err(|error| Box::new(unsafe_type(&error)))?;
     let request_path = format!("/{relation}");
     set_request_context(&mut tx, session, http_method, &request_path, schema).await?;
@@ -686,6 +698,70 @@ async fn read_rows(
         .await
         .map_err(|error| Box::new(query_failure(&error, session.anon)))?;
     Ok((row.0, row.1, built.offset))
+}
+
+/// Foreign keys between two tables of one schema, in either direction.
+const RELATIONSHIPS_SQL: &str = "SELECT (c.relname = $2) AS from_root,
+         ARRAY(SELECT a.attname::text FROM unnest(con.conkey) WITH ORDINALITY AS k(num, ord)
+               JOIN pg_attribute AS a ON a.attrelid = con.conrelid AND a.attnum = k.num
+               ORDER BY k.ord),
+         ARRAY(SELECT a.attname::text FROM unnest(con.confkey) WITH ORDINALITY AS k(num, ord)
+               JOIN pg_attribute AS a ON a.attrelid = con.confrelid AND a.attnum = k.num
+               ORDER BY k.ord)
+         FROM pg_constraint AS con
+         JOIN pg_class AS c ON c.oid = con.conrelid
+         JOIN pg_namespace AS n ON n.oid = c.relnamespace
+         JOIN pg_class AS f ON f.oid = con.confrelid
+         JOIN pg_namespace AS fnn ON fnn.oid = f.relnamespace
+         WHERE con.contype = 'f'
+           AND n.nspname = $1 AND fnn.nspname = $1
+           AND ((c.relname = $2 AND f.relname = $3) OR (c.relname = $3 AND f.relname = $2))";
+
+/// Find the one foreign key that links `relation` and the embedded `target`.
+///
+/// No match is `PGRST200`. A self-reference or several candidate keys stay 501.
+async fn load_relationship(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    schema: &str,
+    relation: &str,
+    target: &str,
+    anon: bool,
+) -> Result<Relationship, Box<Response>> {
+    let rows: Vec<(bool, Vec<String>, Vec<String>)> = sqlx::query_as(RELATIONSHIPS_SQL)
+        .bind(schema)
+        .bind(relation)
+        .bind(target)
+        .fetch_all(&mut **tx)
+        .await
+        .map_err(|error| Box::new(query_failure(&error, anon)))?;
+    match rows.as_slice() {
+        [] => Err(Box::new(pgrst(
+            StatusCode::BAD_REQUEST,
+            "PGRST200",
+            &format!(
+                "Could not find a relationship between '{relation}' and '{target}' in the schema cache"
+            ),
+            Some(&format!(
+                "Searched for a foreign key relationship between '{relation}' and '{target}' in the schema '{schema}', but no matches were found."
+            )),
+            None,
+        ))),
+        [(from_root, key, referenced)] if relation != target => {
+            let (root_columns, target_columns) = if *from_root {
+                (key.clone(), referenced.clone())
+            } else {
+                (referenced.clone(), key.clone())
+            };
+            Ok(Relationship {
+                to_many: !*from_root,
+                root_columns,
+                target_columns,
+            })
+        }
+        _ => Err(Box::new(
+            MegabaseNotImplemented::new(crate::COMPONENT, "rest:embed-join:left").into_response(),
+        )),
+    }
 }
 
 /// Column names and base types. `NULL` typmod matches an unknown literal:
@@ -1148,17 +1224,17 @@ mod tests {
     #[tokio::test]
     async fn embed_select_is_route_501() {
         let app = router(RestState::from_config(&Config::default()));
-        let (status, body, _) = send(app, get("/rest/v1/todos?select=notes(body)")).await;
+        let (status, body, _) = send(app, get("/rest/v1/todos?select=notes!fk(body)")).await;
         assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
         assert_eq!(body["unit"], "GET /rest/v1/todos");
     }
 
     #[tokio::test]
-    async fn inner_embed_is_501() {
+    async fn inner_embed_needs_a_database() {
         let app = router(RestState::from_config(&Config::default()));
         let (status, body, _) = send(app, get("/rest/v1/todos?select=notes!inner(body)")).await;
-        assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
-        assert_eq!(body["unit"], "rest:embed-join:inner");
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(body["code"], "PGRST000");
     }
 
     #[tokio::test]

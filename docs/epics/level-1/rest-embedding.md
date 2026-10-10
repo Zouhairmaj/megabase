@@ -10,5 +10,5 @@ Specs go in `specs/rest/<unit>.md` (GOAL.md section 5). Mark served code with `/
 
 | State | Unit id | Upstream source |
 |---|---|---|
-| ⬜ | `rest:embed-join:inner` | [src/library/PostgREST/ApiRequest/QueryParams.hs:657](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/ApiRequest/QueryParams.hs#L657) |
-| ⬜ | `rest:embed-join:left` | [src/library/PostgREST/ApiRequest/QueryParams.hs:656](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/ApiRequest/QueryParams.hs#L656) |
+| 🟩 | `rest:embed-join:inner` | [src/library/PostgREST/ApiRequest/QueryParams.hs:657](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/ApiRequest/QueryParams.hs#L657) |
+| 🟩 | `rest:embed-join:left` | [src/library/PostgREST/ApiRequest/QueryParams.hs:656](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/ApiRequest/QueryParams.hs#L656) |

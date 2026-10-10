@@ -89,7 +89,7 @@ Implemented and tested counts come from markers and `judge/cases/`. Live conform
 | Component | Group | Level | Units | Implemented | Tested |
 |---|---|---|---:|---:|---:|
 | REST | aggregates | 1 | 5 | 0 | 0 |
-| REST | embedding | 1 | 2 | 0 | 0 |
+| REST | embedding | 1 | 2 | 2 | 2 |
 | REST | filtering | 1 | 28 | 28 | 13 |
 | REST | logic | 1 | 3 | 0 | 0 |
 | REST | media-types | 1 | 13 | 0 | 0 |
