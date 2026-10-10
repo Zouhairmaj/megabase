@@ -91,8 +91,10 @@ above override them, and a panic catch that returns JSON
 
 Auth reads and writes use `sqlx::query!` and `sqlx::query_as!`. The workspace
 compiles them from the committed `.sqlx` cache (`SQLX_OFFLINE=true` in
-`.cargo/config.toml`), so CI does not need a database. Regenerating the cache
-needs Postgres with the Auth schema installed and a matching `DATABASE_URL`:
+`.cargo/config.toml`), so CI does not need a database. The container image
+copies `.sqlx` and `.cargo` and sets `SQLX_OFFLINE` for the same reason.
+Regenerating the cache needs Postgres with the Auth schema installed and a
+matching `DATABASE_URL`:
 
 ```shell
 SQLX_OFFLINE=false DATABASE_URL=postgres://… cargo sqlx prepare --workspace -- --all-targets

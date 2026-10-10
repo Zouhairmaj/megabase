@@ -1,8 +1,9 @@
 //! Trivial gateway benches so the Bencher pipeline has a real Criterion signal.
 //!
 //! These are smoke measurements (liveness + one Kong-prefixed route), not a
-//! published performance claim. CI parses the default Criterion text output
-//! with the `rust_criterion` adapter (`cargo bench --bench health`).
+//! published performance claim. They call `create_router`, so the production
+//! HTTP layers are inside the sample. CI parses the default Criterion text
+//! output with the `rust_criterion` adapter (`cargo bench --bench health`).
 
 use std::hint::black_box;
 use std::time::Duration;

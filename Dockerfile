@@ -10,9 +10,14 @@
 FROM public.ecr.aws/docker/library/rust:1.89-slim-bookworm@sha256:d7fc7de78bb8c1469933aeecbf801314d30d7d6e9f0578bba4cfa285bfa37fe6 AS build
 WORKDIR /src
 COPY Cargo.toml Cargo.lock ./
+# Offline sqlx query metadata. `.cargo/config.toml` sets SQLX_OFFLINE; the
+# ENV keeps the build offline even if that file is not consulted.
+COPY .cargo .cargo
+COPY .sqlx .sqlx
 COPY crates crates
 COPY tools tools
 COPY judge/harness judge/harness
+ENV SQLX_OFFLINE=true
 RUN cargo build --release --locked -p megabase -p megabase-judge --bin megabase --bin megabase-healthcheck
 
 FROM public.ecr.aws/docker/library/debian:bookworm-slim@sha256:7c7b2c966bc9ee8cedfeef67e0e279108992c77681fa595db4a9d65c06ccc587
