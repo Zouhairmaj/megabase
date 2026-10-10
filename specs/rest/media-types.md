@@ -20,7 +20,8 @@ Content negotiation via `Accept` and `Content-Type`. Template:
 ## Behavior
 
 All comma-separated `Accept` entries are considered. Entries with `q=0` are
-dropped; the entry with the highest `q` wins and ties go to the more specific entry (a wildcard loses, `nulls=stripped` wins), then header order.
+dropped; the entry with the highest `q` wins. Ties go to a concrete type over a
+wildcard, then to `nulls=stripped`, then to header order.
 
 | Accept | Served | Response `Content-Type` |
 |---|---|---|

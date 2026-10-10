@@ -576,7 +576,7 @@ pub(crate) enum ReadShape {
 /// `nulls=stripped`. Entries rank by `q` (default 1, `q=0` dropped); ties go to
 /// the more specific entry (no wildcard, `nulls=stripped`), then header order.
 fn preferred_accept(value: Option<&axum::http::HeaderValue>) -> Option<(String, bool)> {
-    let mut best: Option<(f32, i32, String, bool)> = None;
+    let mut best: Option<(f32, (bool, bool), String, bool)> = None;
     for entry in header_str(value)?.split(',') {
         let mut pieces = entry.split(';');
         let essence = pieces.next().unwrap_or("").trim().to_ascii_lowercase();
@@ -598,7 +598,8 @@ fn preferred_accept(value: Option<&axum::http::HeaderValue>) -> Option<(String, 
         if quality <= 0.0 {
             continue;
         }
-        let specificity = i32::from(stripped) - i32::from(essence.contains('*'));
+        // Concrete beats wildcard first, then `nulls=stripped`.
+        let specificity = (!essence.contains('*'), stripped);
         let better = best.as_ref().is_none_or(|(top, top_specificity, _, _)| {
             quality > *top || (quality == *top && specificity > *top_specificity)
         });
@@ -1421,6 +1422,11 @@ mod tests {
         assert_eq!(
             shape("application/vnd.pgrst.object+json, application/vnd.pgrst.object+json;nulls=stripped"),
             Some(ReadShape::ObjectStripped)
+        );
+        // A concrete type outranks a stripped wildcard.
+        assert_eq!(
+            shape("*/*;nulls=stripped, application/vnd.pgrst.object+json"),
+            Some(ReadShape::Object)
         );
     }
 
