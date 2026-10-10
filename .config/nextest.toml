@@ -1,5 +1,5 @@
-# Nextest selects `ci` when the CI environment variable is set.
-# GitHub Actions sets CI=true. The Build job also passes `--profile ci`.
+# Nextest does not pick this profile from the CI environment variable.
+# CI jobs select it with `--profile ci`.
 #
 # retries = 2 runs a failed test up to three times. Nextest prints each
 # attempt (TRY n). A test that never passes fails the job. A test that
