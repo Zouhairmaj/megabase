@@ -4,6 +4,14 @@ All notable changes to Megabase are documented in this file.
 The format is produced by [release-please](https://github.com/googleapis/release-please).
 Sections: Features, Bug Fixes, Performance, Conformance/judge, Documentation.
 
+## [0.1.18](https://github.com/Zouhairmaj/megabase/compare/v0.1.17...v0.1.18) (2026-10-10)
+
+
+### Features
+
+* **rest:** serve prefer return, timezone and tx ([#269](https://github.com/Zouhairmaj/megabase/issues/269)) ([79ee905](https://github.com/Zouhairmaj/megabase/commit/79ee9057c7767ffc80a3b365f6b72371ba5db8d9))
+* **rest:** serve text/csv and reject text/plain, text/xml on relations ([#266](https://github.com/Zouhairmaj/megabase/issues/266)) ([56f7a40](https://github.com/Zouhairmaj/megabase/commit/56f7a40ed0d9db3b7df777429a6c636d5691faf9))
+
 ## [0.1.17](https://github.com/Zouhairmaj/megabase/compare/v0.1.16...v0.1.17) (2026-10-10)
 
 
