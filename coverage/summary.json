@@ -2,12 +2,12 @@
   "schema": 1,
   "totals": {
     "units": 1024,
-    "implemented": 46,
-    "tested": 44,
+    "implemented": 49,
+    "tested": 47,
     "conformant": 0
   },
   "percent": {
-    "coverage": 4.5,
+    "coverage": 4.8,
     "conformance": 0.0,
     "done": 0.0
   },
@@ -18,8 +18,8 @@
   "components": {
     "auth": {
       "units": 152,
-      "implemented": 46,
-      "tested": 44,
+      "implemented": 49,
+      "tested": 47,
       "conformant": 0,
       "groups": {
         "admin": {
@@ -78,8 +78,8 @@
         },
         "token": {
           "units": 6,
-          "implemented": 0,
-          "tested": 0,
+          "implemented": 3,
+          "tested": 3,
           "conformant": 0
         },
         "user": {
@@ -556,6 +556,8 @@
     }
   },
   "units": {
+    "auth:grant-type:password": "tested",
+    "auth:grant-type:refresh_token": "tested",
     "auth:route:DELETE /auth/v1/admin/custom-providers/{identifier}": "tested",
     "auth:route:DELETE /auth/v1/admin/oauth/clients/{client_id}": "tested",
     "auth:route:DELETE /auth/v1/admin/sso/providers/{idp_id}": "tested",
@@ -570,6 +572,7 @@
     "auth:route:GET /auth/v1/settings": "tested",
     "auth:route:POST /auth/v1/logout": "tested",
     "auth:route:POST /auth/v1/signup": "tested",
+    "auth:route:POST /auth/v1/token": "tested",
     "auth:sql-function:auth.email()": "tested",
     "auth:sql-function:auth.jwt()": "tested",
     "auth:sql-function:auth.role()": "tested",
