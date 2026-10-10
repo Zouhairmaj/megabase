@@ -127,7 +127,8 @@ Same URL layout as the Supabase gateway ([ADR 0002](adr/0002-gateway-layout.md))
 
 Routes that are not served yet answer HTTP 501 with
 `code: MEGABASE_NOT_IMPLEMENTED`. Served Auth admin routes and Auth health,
-settings, autoconfirm email signup, logout, and the password and
-refresh-token grants on `POST /auth/v1/token` are the exception.
+settings, autoconfirm email signup, logout, the password and refresh-token
+grants on `POST /auth/v1/token`, and `GET`/`POST /auth/v1/verify` for the
+signup, invite, recovery, and email-change types are the exception.
 
 How to build or run the container image is in [Install](install.md).

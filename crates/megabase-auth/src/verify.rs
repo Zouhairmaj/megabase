@@ -72,17 +72,22 @@ pub(crate) async fn verify_get(
         phone: String::new(),
         redirect_to: String::new(),
     };
-    let redirect = redirect_target(
+    if let Err(error) = validate_get(&params) {
+        return error.into_response();
+    }
+    let redirect = match redirect_target(
         &state.site_url,
         &state.uri_allow_list,
         query_param(query, "redirect_to").as_deref(),
         headers
             .get(header::REFERER)
             .and_then(|value| value.to_str().ok()),
-    );
-    if let Err(error) = validate_get(&params) {
-        return error.into_response();
-    }
+    ) {
+        Ok(url) => url,
+        Err(()) => {
+            return MegabaseNotImplemented::new(COMPONENT, "GOTRUE_URI_ALLOW_LIST").into_response();
+        }
+    };
     if params.token.starts_with("pkce_") {
         return MegabaseNotImplemented::new(COMPONENT, UNIT_PKCE).into_response();
     }
@@ -472,19 +477,31 @@ fn redirect_target(
     allow: &[String],
     requested: Option<&str>,
     referer: Option<&str>,
-) -> String {
-    if let Some(url) = requested.filter(|url| redirect_allowed(site_url, url, allow)) {
-        return (*url).to_string();
+) -> Result<String, ()> {
+    if let Some(url) = take_allowed(site_url, allow, requested)? {
+        return Ok(url);
     }
-    if let Some(url) = referer.filter(|url| redirect_allowed(site_url, url, allow)) {
-        return (*url).to_string();
+    if let Some(url) = take_allowed(site_url, allow, referer)? {
+        return Ok(url);
     }
-    site_url.to_string()
+    Ok(site_url.to_string())
 }
 
-fn redirect_allowed(site: &str, candidate: &str, allow: &[String]) -> bool {
-    // An allow-list pattern this port cannot compile is not a match.
-    crate::admin_batch2::redirect_ok(site, candidate, allow).unwrap_or(false)
+fn take_allowed(
+    site: &str,
+    allow: &[String],
+    candidate: Option<&str>,
+) -> Result<Option<String>, ()> {
+    let Some(candidate) = candidate else {
+        return Ok(None);
+    };
+    match crate::admin_batch2::redirect_ok(site, candidate, allow) {
+        Ok(true) => Ok(Some(candidate.to_string())),
+        Ok(false) => Ok(None),
+        // Same 501 as admin generate-link: the pattern is configured, and
+        // guessing that it does not match would drop a redirect GoTrue accepts.
+        Err(crate::admin_batch2::RedirectAllowListUnsupported) => Err(()),
+    }
 }
 
 #[cfg(test)]
@@ -549,14 +566,21 @@ mod tests {
     fn userinfo_redirect_falls_back_and_allow_list_is_honored() {
         let site = "http://localhost:3000";
         assert_eq!(
-            redirect_target(site, &[], Some("http://127.0.0.1:1@evil.com/"), None),
+            redirect_target(site, &[], Some("http://127.0.0.1:1@evil.com/"), None).unwrap(),
             site
         );
         let allow = vec!["https://app.example.com/*".to_string()];
         assert_eq!(
-            redirect_target(site, &allow, Some("https://app.example.com/welcome"), None),
+            redirect_target(site, &allow, Some("https://app.example.com/welcome"), None).unwrap(),
             "https://app.example.com/welcome"
         );
+        assert!(redirect_target(
+            site,
+            &["https://app.example/[id]".to_string()],
+            Some("https://app.example/cb"),
+            None,
+        )
+        .is_err());
     }
 
     #[tokio::test]

@@ -40,7 +40,9 @@ The site URL is `GOTRUE_SITE_URL`, or `SITE_URL` when that is unset
 matches the site (same scheme and host; loopback may use another port), is a
 loopback IP, or matches `GOTRUE_URI_ALLOW_LIST` (`ADDITIONAL_REDIRECT_URLS`
 when that list is unset). The host is the authority after any userinfo, so
-`http://127.0.0.1:1@evil.com/` is not loopback.
+`http://127.0.0.1:1@evil.com/` is not loopback. An allow-list pattern this
+port cannot compile (`[`, `]`, `{`, `}`, or a dangling `\`) is HTTP 501
+`GOTRUE_URI_ALLOW_LIST` instead of a guessed site-URL fallback.
 
 POST reads a JSON object: `type`, `token`, `token_hash`, `email`, `phone`,
 `redirect_to`. Exactly one of `token` and `token_hash` is set. With `token`,
