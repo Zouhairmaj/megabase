@@ -136,17 +136,22 @@ Physically impossible for the agent (repository settings or credentials):
       (that endpoint's fine-grained permission is Contents write),
       then Sync Cargo.lock's `git push` failed with
       `Permission to Zouhairmaj/megabase.git denied to megabase-agent`.
-      The push changed only `Cargo.lock`, so this is not Workflows
-      permission. Run 38003872424 failed the same way on
+      Run 38008795223 (`acf5bee`) repeated that push 403 after the tree
+      probe had already fallen back to `GITHUB_TOKEN`: the lockfile
+      checkout on `main` still used the secret, which authenticates as
+      `megabase-agent`.       The lockfile checkout uses the probe's token, and a push that is
+      still denied retries with the job `GITHUB_TOKEN`
+      (`contents: write`). It does not keep the `megabase-agent`
+      identity. The push changed only `Cargo.lock`, so this is not
+      Workflows permission. Run 38003872424 failed the same way on
       [Create a release](https://docs.github.com/rest/releases/releases#create-a-release)
       after pull request #144 merged. Classic PAT equivalent: `repo`.
       The tree probe and the release commit only add
       `.release-please-manifest.json`, `CHANGELOG.md`, and `Cargo.toml`
       on top of `base_tree`. The workflow falls back to `GITHUB_TOKEN`
       only on HTTP 403 or 404 from that tree call (not a rate limit).
-      The lockfile push uses the token the probe selected. A fallback
-      push does not start `push` workflows, so the job dispatches the
-      required checks.
+      A `GITHUB_TOKEN` push does not start `push` workflows, so the job
+      dispatches the required checks.
 - [ ] Allow `github-actions` to publish GitHub Releases / tags on `main`
 - [ ] Enforce CODEOWNERS
 - [x] Coverage commits on `main` are not used. Shields JSON is

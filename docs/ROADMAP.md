@@ -108,11 +108,12 @@ member versions drifted, so `--locked` CI (Build, Codecov, Bencher,
 Protected paths, Judge) stays green. That commit is pushed with the token the tree probe
 selected.
 `RELEASE_PLEASE_TOKEN` is used only when that probe can create a git
-tree, so the push starts workflows. Otherwise the push uses
-`GITHUB_TOKEN`, which does not trigger `push`/`pull_request`
-workflows. Token permissions are under Human-only actions in
-`PROGRESS.md`. When the probe did not select the secret, or the
-lockfile commit was not pushed, the lockfile job `workflow_dispatch`es
+tree, so the push starts workflows. Otherwise, and when that push is
+denied, the push uses `GITHUB_TOKEN`, which does not trigger
+`push`/`pull_request` workflows. Token permissions are under
+Human-only actions in `PROGRESS.md`. When the probe did not select
+the secret, the push was retried with `GITHUB_TOKEN`, or the lockfile
+commit was not pushed, the lockfile job `workflow_dispatch`es
 CI, Bencher, and Judge on the release branch
 (native check runs on that SHA). If that ref's workflow files lack
 `workflow_dispatch`, it dispatches **Lockfile required checks** on the
