@@ -432,3 +432,84 @@ units = ["rest:query-param:on_conflict", "rest:query-param:select", "rest:query-
 method = "GET"
 path = "/rest/v1/todos?on_conflict=id&select=id&order=id"
 
+[[case]]
+id = "rest.media-type.csv.get"
+description = "text/csv on a relation GET returns CSV"
+units = ["rest:media-type:text/csv"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?order=id"
+headers = { Accept = "text/csv" }
+
+[[case]]
+id = "rest.media-type.csv.filtered"
+description = "text/csv honours select, filter, order and limit"
+units = ["rest:media-type:text/csv"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?select=id,title&id=gte.1&order=id.desc&limit=2"
+headers = { Accept = "text/csv" }
+
+[[case]]
+id = "rest.media-type.csv.head"
+description = "text/csv on HEAD has the CSV headers and no body"
+units = ["rest:media-type:text/csv"]
+[[case.step]]
+method = "HEAD"
+path = "/rest/v1/todos?order=id"
+headers = { Accept = "text/csv" }
+
+[[case]]
+id = "rest.media-type.plain.get"
+description = "text/plain on a relation is 406 PGRST107"
+units = ["rest:media-type:text/plain"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos"
+headers = { Accept = "text/plain" }
+
+[[case]]
+id = "rest.media-type.plain.head"
+description = "text/plain on a relation HEAD is 406"
+units = ["rest:media-type:text/plain"]
+[[case.step]]
+method = "HEAD"
+path = "/rest/v1/todos"
+headers = { Accept = "text/plain" }
+
+[[case]]
+id = "rest.media-type.plain.mixed"
+description = "text/plain with a handled fallback picks the handled type"
+units = ["rest:media-type:text/plain"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?order=id"
+headers = { Accept = "text/plain, application/json" }
+
+[[case]]
+id = "rest.media-type.xml.get"
+description = "text/xml on a relation is 406 PGRST107"
+units = ["rest:media-type:text/xml"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos"
+headers = { Accept = "text/xml" }
+
+[[case]]
+id = "rest.media-type.xml.head"
+description = "text/xml on a relation HEAD is 406"
+units = ["rest:media-type:text/xml"]
+[[case.step]]
+method = "HEAD"
+path = "/rest/v1/todos"
+headers = { Accept = "text/xml" }
+
+[[case]]
+id = "rest.media-type.xml.mixed"
+description = "text/xml with a handled fallback picks the handled type"
+units = ["rest:media-type:text/xml"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?order=id"
+headers = { Accept = "text/xml, application/json" }
+
