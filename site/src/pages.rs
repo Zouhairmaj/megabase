@@ -876,7 +876,7 @@ pub fn devlog_index(paths: &Paths, entries: &[devlog::Entry]) -> String {
   <header class="page-hero">
     <p class="kicker">DEVLOG · ONE SHORT ENTRY PER DAY</p>
     <h1 class="display-sm">What the agents did today, written for humans.</h1>
-    <p class="lede">Each entry is a file in devlog/YYYY-MM-DD.md, written by the agents, published as-is. Until the first file lands this page stays empty rather than inventing a post.</p>
+    <p class="lede">Each entry is a file in devlog/YYYY-MM-DD.md, written by the agents and published as-is.</p>
   </header>
   <section class="band">{list}</section>
 </main>"#
