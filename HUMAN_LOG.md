@@ -59,6 +59,16 @@ Each entry should include:
 - **Files affected**: `MANIFESTO.md`, `GOAL.md`, site manifesto source
 
 - **Date**: 2026-10-10
+- **Action**: Zouhair completed the Phase 0 owner review. Decision: validée avec modifications (validated with modifications). Validated: vendor pins 1.1–1.9 except 1.7; 2.2–2.6; 2.7 (the judge fails on a regression, and level gates use totals); 2.8–2.10; 2.13; 3.1–3.4. Modifications, left as issues and not implemented in the log pull request: 1.7 pin the Studio image to the one named by `vendor/supabase/docker/docker-compose.yml` at supabase `v1.26.08` (`supabase/studio:2026.08.03-sha-022b374`) — #198; 2.1 add a minimum number of judge cases per unit and require the hidden suite (#114) before Level 1 can be validated — #199; 2.11 and 2.12 set cargo-deny `[bans] wildcards` to `deny` — #200; 3.5 JWT normalisation must decode tokens and compare claims (`role`, `aud`, `sub`, `aal`, `amr`, and the rest), ignoring only `iat`, `exp` and identifiers — #201; 3.6 database side-effect checks add ACLs, column defaults and RLS policies — #202; 4.x the public display emphasises progress per level rather than a global percentage — #203. Item 3.9: “Require review from Code Owners” stays on. Corrections recorded with the review: `vendor.toml` was created on 2026-10-09 during Phase 0 bootstrap and has not been modified since; `CODEOWNERS` exists at the repository root and was not enforced when pull request #1 merged.
+- **Reason**: GOAL.md section 6 requires one human review of Phase 0, recorded in this file. The bootstrap is accepted with the follow-ups above. Those follow-ups stay open; this entry does not implement them. The log pull request still needs the code owner’s approval.
+- **Files affected**: `HUMAN_LOG.md`, `PROGRESS.md`. GitHub issues #198, #199, #200, #201, #202, #203.
+
+- **Date**: 2026-10-10
+- **Action**: On 2026-10-10 the owner chose: `enforce_admins` disabled, code-owner review kept, owner-approved protected pull requests merged by admin bypass on an explicit chat instruction.
+- **Reason**: Code-owner review stays required on protected paths. Turning off “Include administrators” lets the owner merge a pull request they have already approved when they say so in chat.
+- **Files affected**: GitHub branch protection on `main` (not in git)
+
+- **Date**: 2026-10-10
 - **Action**: Set GitHub Pages → Build and deployment → Source to GitHub Actions. The site is live at megabase.sh. `GET /repos/Zouhairmaj/megabase/pages` returns `build_type: workflow` and `html_url: https://megabase.sh/`.
 - **Reason**: The pending item said Pages was not enabled (`GET /pages` was 404). That is no longer true. `pages.yml` no longer deploys the baseline site over that publication.
 - **Files affected**: GitHub Pages settings (not in git)
