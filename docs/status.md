@@ -21,8 +21,9 @@ The table below is generated, not typed. Open [Status](/status/) for the treemap
 
 The denominator is `coverage/units.json`. Implemented units are those with a
 `// megabase:unit` marker. Auth SQL objects, the first admin GET/DELETE
-routes, health, settings, autoconfirm email signup, and logout carry
-markers. Other HTTP routes are still 501.
+routes, health, settings, autoconfirm email signup, logout, and the
+password and refresh-token grants carry markers. Other HTTP routes are
+still 501.
 
 > [!NOTE]
 > Conformant 0 with a real denominator is still honest. Inventing a mockup total is not.
