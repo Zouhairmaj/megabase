@@ -4,6 +4,13 @@ All notable changes to Megabase are documented in this file.
 The format is produced by [release-please](https://github.com/googleapis/release-please).
 Sections: Features, Bug Fixes, Performance, Conformance/judge, Documentation.
 
+## [0.1.6](https://github.com/Zouhairmaj/megabase/compare/v0.1.5...v0.1.6) (2026-10-10)
+
+
+### Bug Fixes
+
+* **ci:** tolerate non-issue PRs in board-sync ([#212](https://github.com/Zouhairmaj/megabase/issues/212)) ([3c9bad5](https://github.com/Zouhairmaj/megabase/commit/3c9bad5bd6024b8854bbe858a811718402075ee5))
+
 ## [0.1.5](https://github.com/Zouhairmaj/megabase/compare/v0.1.4...v0.1.5) (2026-10-10)
 
 
