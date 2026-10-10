@@ -81,10 +81,14 @@ struct Gateway {
     fallback: Router,
 }
 
-fn component_router(component: &str, auth: &megabase_auth::AuthState) -> Router {
+fn component_router(
+    component: &str,
+    auth: &megabase_auth::AuthState,
+    rest: &megabase_rest::RestState,
+) -> Router {
     match component {
         megabase_auth::COMPONENT => megabase_auth::router_with_state(auth.clone()),
-        megabase_rest::COMPONENT => megabase_rest::router(),
+        megabase_rest::COMPONENT => megabase_rest::router(rest.clone()),
         megabase_realtime::COMPONENT => megabase_realtime::router(),
         megabase_storage::COMPONENT => megabase_storage::router(),
         megabase_functions::COMPONENT => megabase_functions::router(),
@@ -111,15 +115,24 @@ pub fn create_router_with(auth: &megabase_auth::AuthState) -> Router {
 
 /// Gateway plus the production tower-http stack from `config`.
 pub fn create_router_from(auth: &megabase_auth::AuthState, config: &Config) -> Router {
-    apply_http_layers(assemble(auth), config)
+    let rest = megabase_rest::RestState::from_config(config);
+    create_router_with_rest(auth, config, &rest)
 }
 
-fn assemble(auth: &megabase_auth::AuthState) -> Router {
+fn create_router_with_rest(
+    auth: &megabase_auth::AuthState,
+    config: &Config,
+    rest: &megabase_rest::RestState,
+) -> Router {
+    apply_http_layers(assemble(auth, rest), config)
+}
+
+fn assemble(auth: &megabase_auth::AuthState, rest: &megabase_rest::RestState) -> Router {
     let gateway = Gateway {
         routes: Arc::new(
             GATEWAY_ROUTES
                 .iter()
-                .map(|(prefix, component)| (*prefix, component_router(component, auth)))
+                .map(|(prefix, component)| (*prefix, component_router(component, auth, rest)))
                 .collect(),
         ),
         fallback: megabase_studio::router(),
@@ -170,17 +183,26 @@ pub async fn run(config: Config) -> std::io::Result<()> {
     } else {
         info!("DATABASE_URL unset; skipping auth schema install");
     }
+    let mut rest = megabase_rest::RestState::from_config(&config);
+    if let Some(url) = config.database_url.as_deref() {
+        info!("connecting rest pool");
+        let pool = megabase_rest::connect(url)
+            .await
+            .map_err(std::io::Error::other)?;
+        rest = rest.with_pool(pool);
+    }
     let addr = config.bind_address();
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     info!("megabase listening on {}", listener.local_addr()?);
     serve_until_drained(
         listener,
-        create_router_from(&auth, &config),
+        create_router_with_rest(&auth, &config, &rest),
         shutdown_signal(),
         SHUTDOWN_DRAIN,
     )
     .await?;
     auth.backend.close().await;
+    rest.close().await;
     info!("megabase stopped");
     Ok(())
 }

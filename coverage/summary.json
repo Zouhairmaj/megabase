@@ -2,12 +2,12 @@
   "schema": 1,
   "totals": {
     "units": 1024,
-    "implemented": 65,
-    "tested": 48,
+    "implemented": 75,
+    "tested": 50,
     "conformant": 0
   },
   "percent": {
-    "coverage": 6.3,
+    "coverage": 7.3,
     "conformance": 0.0,
     "done": 0.0
   },
@@ -316,8 +316,8 @@
     },
     "rest": {
       "units": 93,
-      "implemented": 0,
-      "tested": 0,
+      "implemented": 10,
+      "tested": 2,
       "conformant": 0,
       "groups": {
         "aggregates": {
@@ -334,8 +334,8 @@
         },
         "filtering": {
           "units": 28,
-          "implemented": 0,
-          "tested": 0,
+          "implemented": 10,
+          "tested": 2,
           "conformant": 0
         },
         "logic": {
@@ -620,6 +620,16 @@
     "auth:verify-type:email_change": "implemented",
     "auth:verify-type:invite": "implemented",
     "auth:verify-type:recovery": "implemented",
-    "auth:verify-type:signup": "implemented"
+    "auth:verify-type:signup": "implemented",
+    "rest:filter-operator:adj": "implemented",
+    "rest:filter-operator:all": "implemented",
+    "rest:filter-operator:any": "implemented",
+    "rest:filter-operator:cd": "implemented",
+    "rest:filter-operator:cs": "implemented",
+    "rest:filter-operator:eq": "tested",
+    "rest:filter-operator:fts": "implemented",
+    "rest:filter-operator:gt": "tested",
+    "rest:filter-operator:gte": "implemented",
+    "rest:filter-operator:ilike": "implemented"
   }
 }

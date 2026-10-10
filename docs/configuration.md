@@ -16,14 +16,14 @@ other names. There is no `.env.example` in this tree; the judge uses
 | --- | --- |
 | MEGABASE_HOST | Bind address. Default `0.0.0.0`. |
 | MEGABASE_PORT | HTTP port. Default `8000`. |
-| DATABASE_URL | PostgreSQL connection string. PostgreSQL stays external; Megabase does not bundle it. When set, startup installs the Auth SQL objects listed in [`specs/auth/database.md`](../specs/auth/database.md) (idempotent DDL, 30-second deadline) and opens one sqlx pool (10 connections, 30-second acquire). Signup, logout, verify, the password and refresh-token grants on `POST /auth/v1/token`, and served admin routes share that pool. SIGINT and SIGTERM close that pool after the drain described under HTTP limits. Omit it to skip schema install (the HTTP server still starts; admin, signup, logout, verify, and those token grants then return 500). The judge sets this to the dedicated `megabase` database (`just judge-up` / CI), never to the official stack's `postgres` database. |
+| DATABASE_URL | PostgreSQL connection string. PostgreSQL stays external; Megabase does not bundle it. When set, startup installs the Auth SQL objects listed in [`specs/auth/database.md`](../specs/auth/database.md) (idempotent DDL, 30-second deadline) and opens two sqlx pools (10 connections each, 30-second acquire): one for Auth and one for REST horizontal filters. Signup, logout, verify, the password and refresh-token grants on `POST /auth/v1/token`, and served admin routes share the Auth pool. `GET /rest/v1/{relation}` filters in [`specs/rest/filtering.md`](../specs/rest/filtering.md) use the REST pool. SIGINT and SIGTERM close both pools after the drain described under HTTP limits. Omit it to skip schema install (the HTTP server still starts; admin, signup, logout, verify, and those token grants then return 500, and a served REST filter returns 503). The judge sets this to the dedicated `megabase` database (`just judge-up` / CI), never to the official stack's `postgres` database. |
 | MEGABASE_HTTP_TIMEOUT_MS | Whole-request deadline in milliseconds. Default `150000`, the functions `read_timeout` in `vendor/supabase/docker/volumes/api/kong.yml`. `0` and non-integers abort startup. A request that exceeds it returns 504. |
 | MEGABASE_REQUEST_BODY_LIMIT_BYTES | Maximum request body in bytes. Default `52428800`, `FILE_SIZE_LIMIT` in `vendor/supabase/docker/docker-compose.yml`. A non-integer aborts startup. A larger body returns 413. |
 | JWT_SECRET | HS256 secret for verifying and signing JWTs (same name as the self-hosted demo stack). Raw UTF-8 bytes, not base64, and not a default. Omit it and the process still starts so `/_megabase/health` and `GET /auth/v1/health` work; verification and signing then fail with `Server lacks JWT secret`. Email signup then returns 500 `Server lacks JWT secret` and does not insert a user. A present value shorter than 32 bytes, including empty, aborts startup before listen: `JWT_SECRET is N bytes; HMAC-SHA-256 keys shorter than 32 bytes are disabled`. Length is bytes, not an entropy check. Required for `/auth/v1/admin` (a missing Bearer token is still 401). |
 | GOTRUE_JWT_ADMIN_ROLES | Comma-separated JWT `role` values that may call `/auth/v1/admin`. When unset, `service_role,supabase_admin`, same as GoTrue. An empty value falls back to that pair. Signup settings do not use this allow-list. |
 | GOTRUE_OAUTH_SERVER_ENABLED | GoTrue flag. Default `false`. When false, admin OAuth client routes return 404 `feature_disabled`. |
 | GOTRUE_CUSTOM_OAUTH_ENABLED | GoTrue flag. Default `true`. When false, admin custom-provider routes return 404 `feature_disabled`. |
-| GOTRUE_URI_ALLOW_LIST | Comma-separated redirect globs for `POST /auth/v1/admin/generate_link`. `*` and `?` do not cross `.` or `/`; `**` does. When this is unset or blank, `ADDITIONAL_REDIRECT_URLS` is used instead. A pattern with an unescaped `[` `]` `{` or `}` is not implemented: a redirect that must be checked against it returns 501. |
+| GOTRUE_URI_ALLOW_LIST | Comma-separated redirect globs for `POST /auth/v1/admin/generate_link` and `GET /auth/v1/verify`. `*` and `?` do not cross `.` or `/`; `**` does. When this is unset or blank, `ADDITIONAL_REDIRECT_URLS` is used instead. A pattern with an unescaped `[` `]` `{` or `}` is not implemented: a redirect that must be checked against it returns 501. |
 
 ## JWT verification
 
@@ -55,8 +55,10 @@ and email-change types. Invite, recover, resend, and reauthenticate return
 501 with their unit id. Magic link, SMS, phone change, the `email` OTP
 type, and PKCE on verify do too. The admin routes in
 [`specs/auth/admin.md`](../specs/auth/admin.md) return GoTrue statuses.
-Every other `/auth/v1` path, and all of REST, returns 501
-`MEGABASE_NOT_IMPLEMENTED`.
+Every other `/auth/v1` path returns 501 `MEGABASE_NOT_IMPLEMENTED`.
+`GET /rest/v1/{relation}` serves the horizontal filters in
+[`specs/rest/filtering.md`](../specs/rest/filtering.md). Every other REST
+route returns 501 `MEGABASE_NOT_IMPLEMENTED`.
 
 Signup, logout, verify, and the password and refresh-token grants need `DATABASE_URL` (the Auth SQL from
 [`specs/auth/database.md`](../specs/auth/database.md)) and `JWT_SECRET`
@@ -94,7 +96,7 @@ stay out of traces, a 150-second timeout (504), and a 50 MiB body limit (413)
 unless the variables above override them. `Bytes` and `Json` use that same cap. A panic catch
 returns JSON `{"code":"internal_error","message":"internal error"}` without
 the panic text. SIGINT and SIGTERM stop the listener. In-flight requests may
-finish for 10 seconds, then the Auth pool closes.
+finish for 10 seconds, then the Auth and REST pools close.
 
 ## Checked SQL
 
