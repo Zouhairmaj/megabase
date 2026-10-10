@@ -121,21 +121,45 @@ jobs:
         if: steps.match.outputs.match == 'true'
         env:
           JUDGE_SHA: ${{ github.event.workflow_run.head_sha }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           if [[ ! "$JUDGE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
             echo "Judge SHA is not a commit id" >&2
             exit 1
           fi
-          # Empty history only on 404. Any other failure must not publish:
-          # force_orphan would replace every earlier run.
-          history_url="https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/gh-pages/coverage/judge-history.json"
-          code="$(curl --retry 3 --retry-delay 2 -sS -o /tmp/judge-history.json -w '%{http_code}' "$history_url" || true)"
+          # Absence is a 404 from the git tree on gh-pages. The raw CDN
+          # can 404 while that file still exists; writing an empty history
+          # and then force_orphan would drop every earlier run. Judge
+          # artifacts expire in a day, so that loss cannot be rebuilt.
+          # Any other status or a transport error fails before publish.
+          history_url="https://api.github.com/repos/${GITHUB_REPOSITORY}/contents/coverage/judge-history.json?ref=gh-pages"
+          code=""
+          attempt=1
+          while [ "$attempt" -le 3 ]; do
+            code="$(curl --retry 3 --retry-delay 2 -sS \
+              -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H "Accept: application/vnd.github.raw" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              -o /tmp/judge-history.json \
+              -w '%{http_code}' \
+              "$history_url" || true)"
+            if [ "$code" = "200" ]; then
+              break
+            fi
+            if [ "$code" != "404" ]; then
+              echo "judge history download failed: HTTP ${code:-none}" >&2
+              exit 1
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              break
+            fi
+            echo "judge history is not in the gh-pages tree yet (attempt ${attempt}/3)" >&2
+            sleep $((attempt * 2))
+            attempt=$((attempt + 1))
+          done
           if [ "$code" = "404" ]; then
             echo '{"schema":1,"runs":[]}' > /tmp/judge-history.json
-          elif [ "$code" != "200" ]; then
-            echo "judge history download failed: HTTP ${code:-none}" >&2
-            exit 1
           elif ! jq -e '.schema == 1 and (.runs | type == "array")' /tmp/judge-history.json >/dev/null; then
             echo "judge history is not schema 1" >&2
             exit 1

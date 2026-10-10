@@ -621,6 +621,28 @@ units = ["{get_id}"]
             "pages-badges must record the live score for release notes"
         );
         assert!(
+            badges.contains(
+                "api.github.com/repos/${GITHUB_REPOSITORY}/contents/coverage/judge-history.json?ref=gh-pages"
+            ),
+            "absence is a 404 from the gh-pages git tree, not the raw CDN"
+        );
+        assert!(
+            badges.contains("[ \"$code\" = \"404\" ]"),
+            "an empty history is written only when the contents API says the file is absent"
+        );
+        assert!(
+            badges.contains("judge history download failed"),
+            "any other fetch failure must fail the job before force_orphan"
+        );
+        assert!(
+            !badges.contains("raw.githubusercontent.com"),
+            "a raw CDN 404 must not be treated as a missing history file"
+        );
+        assert!(
+            !badges.contains("if ! curl"),
+            "a failed curl must not fall through to an empty history"
+        );
+        assert!(
             !pages.contains("judge-results"),
             "the cached Pages build must not download the Judge artifact"
         );
