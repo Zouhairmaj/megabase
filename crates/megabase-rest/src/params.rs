@@ -1687,8 +1687,9 @@ pub(crate) fn build_read_sql_as(
              (SELECT json_object_keys(r)::text AS k FROM \
              (SELECT row_to_json(hh) AS r FROM _megabase_src AS hh LIMIT 1) s) a) \
              || E'\\n' || \
-             coalesce((SELECT string_agg(substring(t::text, 2, length(t::text) - 2), E'\\n') \
-             FROM _megabase_src AS t), '')"
+             coalesce((SELECT string_agg(x.line, E'\\n' ORDER BY x.rn) FROM \
+             (SELECT substring(t::text, 2, length(t::text) - 2) AS line, \
+             row_number() OVER () AS rn FROM _megabase_src AS t) x), '')"
         )
     } else {
         format!(
