@@ -185,25 +185,17 @@ async fn relation_route(
     if let Some(unit) = reject_prefer(headers.get("prefer")) {
         return unimplemented_unit(method, path, unit);
     }
-    let mut csv = false;
-    if matches!(*method, Method::GET | Method::HEAD) {
-        match negotiate_read(headers.get(header::ACCEPT)) {
-            ReadAccept::Csv => csv = true,
-            ReadAccept::NotAcceptable(types) => {
-                return pgrst(
-                    StatusCode::NOT_ACCEPTABLE,
-                    "PGRST107",
-                    &format!("None of these media types are available: {types}"),
-                    None,
-                    None,
-                );
-            }
-            ReadAccept::Json => {}
-            ReadAccept::Other(unit) => return unimplemented_unit(method, path, unit),
+    let shape = if matches!(*method, Method::GET | Method::HEAD) {
+        match negotiate_read(method, path, headers.get(header::ACCEPT)) {
+            Ok(shape) => shape,
+            Err(response) => return *response,
         }
-    } else if let Some(unit) = reject_accept(headers.get(header::ACCEPT)) {
-        return unimplemented_unit(method, path, unit);
-    }
+    } else {
+        if let Some(unit) = reject_accept(headers.get(header::ACCEPT)) {
+            return unimplemented_unit(method, path, unit);
+        }
+        None
+    };
     if method == Method::GET && headers.get(header::RANGE).is_some() {
         return not_implemented(method, path);
     }
@@ -220,8 +212,11 @@ async fn relation_route(
                 relation,
                 &session,
                 &query,
-                state.aggregates,
-                ReadShape::new(false, csv),
+                ReadMode {
+                    aggregates: state.aggregates,
+                    headers_only: false,
+                    shape,
+                },
             )
             .await
         }
@@ -236,8 +231,11 @@ async fn relation_route(
                 relation,
                 &session,
                 &query,
-                state.aggregates,
-                ReadShape::new(true, csv),
+                ReadMode {
+                    aggregates: state.aggregates,
+                    headers_only: true,
+                    shape,
+                },
             )
             .await
         }
@@ -558,69 +556,77 @@ fn jwt_failure(error: &JwtError) -> Response {
     response
 }
 
-/// Outcome of `Accept` negotiation for a relation read.
-enum ReadAccept {
-    /// `application/json`, `*/*`, `application/*`, or no `Accept`.
-    Json,
-    /// `text/csv`: the builtin CSV handler.
-    Csv,
-    /// Every accepted type lacks a handler on a table or view (PGRST107).
-    NotAcceptable(String),
-    /// A media type served upstream but not here; carries its unit id.
-    Other(&'static str),
-}
-
-/// Pick the first accepted media type with a handler, as `negotiateContent`
-/// does: entries are ordered by `q` (stable, `q=0` dropped) and types without
-/// a handler are skipped. `text/plain` and `text/xml` have none for a table or
-/// view, because no custom aggregate is registered.
-fn negotiate_read(value: Option<&axum::http::HeaderValue>) -> ReadAccept {
+/// Negotiate the body shape of a `GET`/`HEAD` relation read from `Accept`.
+///
+/// Types with no handler on a table or view are skipped, as `negotiateContent`
+/// does: `text/plain` and `text/xml` (no custom aggregate is registered) and
+/// types PostgREST does not know. The rest go to [`ReadShape::from_accept`] and
+/// [`reject_accept`]. When nothing is left the answer is 406 `PGRST107`, also
+/// for a header whose every type has `q=0`. `Ok(None)` is plain JSON.
+fn negotiate_read(
+    method: &Method,
+    path: &str,
+    value: Option<&axum::http::HeaderValue>,
+) -> Result<Option<ReadShape>, Box<Response>> {
     let Some(text) = header_str(value) else {
-        return ReadAccept::Json;
+        return Ok(None);
     };
-    let listed: Vec<(f32, &str)> = text
+    let listed: Vec<&str> = text
         .split(',')
         .map(str::trim)
         .filter(|part| !part.is_empty())
-        .map(|part| (quality(part), part))
         .collect();
-    let mut entries: Vec<(f32, &str)> = listed.iter().copied().filter(|(q, _)| *q > 0.0).collect();
-    // A header whose every type has `q=0` accepts nothing: 406, not JSON.
-    if entries.is_empty() && !listed.is_empty() {
-        let types: Vec<&str> = listed
-            .iter()
-            .map(|(_, part)| part.split(';').next().unwrap_or("").trim())
-            .collect();
-        return ReadAccept::NotAcceptable(types.join(", ").to_ascii_lowercase());
-    }
-    entries.sort_by(|a, b| b.0.total_cmp(&a.0));
+    let mut kept: Vec<&str> = Vec::new();
     let mut skipped: Vec<String> = Vec::new();
-    for (_, part) in entries {
+    for part in listed.iter().copied().filter(|part| quality(part) > 0.0) {
         let essence = part
             .split(';')
             .next()
             .unwrap_or("")
             .trim()
             .to_ascii_lowercase();
-        match essence.as_str() {
-            // megabase:unit rest:media-type:text/csv
-            "text/csv" => return ReadAccept::Csv,
-            // megabase:unit rest:media-type:text/plain
-            // megabase:unit rest:media-type:text/xml
-            "text/plain" | "text/xml" => skipped.push(essence),
-            _ => match accept_unit(part) {
-                None => return ReadAccept::Json,
-                // A type the pinned PostgREST serves: not ours yet.
-                Some(unit) if !unit.is_empty() => return ReadAccept::Other(unit),
-                // Unknown to PostgREST as well: no handler, keep looking.
-                Some(_) => skipped.push(essence),
-            },
+        // megabase:unit rest:media-type:text/plain
+        // megabase:unit rest:media-type:text/xml
+        let unknown = axum::http::HeaderValue::from_str(part)
+            .is_ok_and(|entry| reject_accept(Some(&entry)) == Some(""));
+        if matches!(essence.as_str(), "text/plain" | "text/xml") || unknown {
+            skipped.push(essence);
+        } else {
+            kept.push(part);
         }
     }
-    if skipped.is_empty() {
-        ReadAccept::Json
-    } else {
-        ReadAccept::NotAcceptable(skipped.join(", "))
+    if kept.is_empty() {
+        if listed.is_empty() {
+            return Ok(None);
+        }
+        let types = if skipped.is_empty() {
+            // Every type has `q=0`: nothing is acceptable.
+            listed
+                .iter()
+                .map(|part| part.split(';').next().unwrap_or("").trim())
+                .collect::<Vec<_>>()
+                .join(", ")
+                .to_ascii_lowercase()
+        } else {
+            skipped.join(", ")
+        };
+        return Err(Box::new(pgrst(
+            StatusCode::NOT_ACCEPTABLE,
+            "PGRST107",
+            &format!("None of these media types are available: {types}"),
+            None,
+            None,
+        )));
+    }
+    let Ok(kept) = axum::http::HeaderValue::from_str(&kept.join(", ")) else {
+        return Ok(None);
+    };
+    if let Some(shape) = ReadShape::from_accept(Some(&kept)) {
+        return Ok(Some(shape));
+    }
+    match reject_accept(Some(&kept)) {
+        Some(unit) => Err(Box::new(unimplemented_unit(method, path, unit))),
+        None => Ok(None),
     }
 }
 
@@ -638,46 +644,135 @@ fn quality(part: &str) -> f32 {
         .map_or(1.0, |q| q.clamp(0.0, 1.0))
 }
 
-/// Method and body format of a relation read.
+/// How a GET or HEAD read runs and what it returns.
 #[derive(Clone, Copy)]
-struct ReadShape {
+struct ReadMode {
+    aggregates: bool,
     headers_only: bool,
-    csv: bool,
+    shape: Option<ReadShape>,
+}
+
+/// Response shape negotiated from `Accept` on GET and HEAD reads.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ReadShape {
+    Object,
+    ObjectStripped,
+    ArrayStripped,
+    /// `text/csv`: the builtin `asCsvF` handler.
+    Csv,
+}
+
+/// The preferred `Accept` entry: its lowercase essence and whether it carries
+/// `nulls=stripped`. Entries rank by `q` (default 1, `q=0` dropped); ties go to
+/// the more specific entry (no wildcard, `nulls=stripped`), then header order.
+fn preferred_accept(value: Option<&axum::http::HeaderValue>) -> Option<(String, bool)> {
+    let mut best: Option<(f32, (bool, bool), String, bool)> = None;
+    for entry in header_str(value)?.split(',') {
+        let mut pieces = entry.split(';');
+        let essence = pieces.next().unwrap_or("").trim().to_ascii_lowercase();
+        if essence.is_empty() {
+            continue;
+        }
+        let mut stripped = false;
+        let mut quality = 1.0_f32;
+        for param in pieces {
+            let compact: String = param.split_whitespace().collect();
+            let param = compact.as_str();
+            if param.eq_ignore_ascii_case("nulls=stripped") {
+                stripped = true;
+            } else if let Some((name, number)) = param.split_once('=') {
+                if name.trim().eq_ignore_ascii_case("q") {
+                    quality = number.trim().parse().unwrap_or(1.0);
+                }
+            }
+        }
+        if quality <= 0.0 {
+            continue;
+        }
+        // Concrete beats wildcard first, then `nulls=stripped`.
+        let specificity = (!essence.contains('*'), stripped);
+        let better = best.as_ref().is_none_or(|(top, top_specificity, _, _)| {
+            quality > *top || (quality == *top && specificity > *top_specificity)
+        });
+        if better {
+            best = Some((quality, specificity, essence, stripped));
+        }
+    }
+    best.map(|(_, _, essence, stripped)| (essence, stripped))
+}
+
+/// The 406 `PGRST116` error for a singular read that matched `rows` rows.
+fn singular_check(rows: i64) -> Result<(), Box<Response>> {
+    if rows == 1 {
+        return Ok(());
+    }
+    Err(Box::new(pgrst(
+        StatusCode::NOT_ACCEPTABLE,
+        "PGRST116",
+        "Cannot coerce the result to a single JSON object",
+        Some(&format!("The result contains {rows} rows")),
+        None,
+    )))
 }
 
 impl ReadShape {
-    fn new(headers_only: bool, csv: bool) -> Self {
-        Self { headers_only, csv }
+    /// The preferred `Accept` entry, when it names one of the shaped JSON types.
+    pub(crate) fn from_accept(value: Option<&axum::http::HeaderValue>) -> Option<Self> {
+        let (essence, stripped) = preferred_accept(value)?;
+        match (essence.as_str(), stripped) {
+            // megabase:unit rest:media-type:application/vnd.pgrst.object+json
+            ("application/vnd.pgrst.object+json" | "application/vnd.pgrst.object", false) => {
+                Some(Self::Object)
+            }
+            // megabase:unit rest:media-type:application/vnd.pgrst.object+json;nulls=stripped
+            ("application/vnd.pgrst.object+json" | "application/vnd.pgrst.object", true) => {
+                Some(Self::ObjectStripped)
+            }
+            // megabase:unit rest:media-type:application/vnd.pgrst.array+json;nulls=stripped
+            ("application/vnd.pgrst.array+json" | "application/vnd.pgrst.array", true) => {
+                Some(Self::ArrayStripped)
+            }
+            // megabase:unit rest:media-type:text/csv
+            ("text/csv", _) => Some(Self::Csv),
+            _ => None,
+        }
+    }
+
+    fn singular(self) -> bool {
+        matches!(self, Self::Object | Self::ObjectStripped)
+    }
+
+    fn stripped(self) -> bool {
+        matches!(self, Self::ObjectStripped | Self::ArrayStripped)
+    }
+
+    /// `MediaType.hs` `toContentType`: the mime plus `; charset=utf-8`.
+    fn content_type(self) -> &'static str {
+        match self {
+            Self::Object => "application/vnd.pgrst.object+json; charset=utf-8",
+            Self::ObjectStripped => {
+                "application/vnd.pgrst.object+json;nulls=stripped; charset=utf-8"
+            }
+            Self::ArrayStripped => "application/vnd.pgrst.array+json;nulls=stripped; charset=utf-8",
+            Self::Csv => "text/csv; charset=utf-8",
+        }
     }
 }
 
 /// `Err` is a coverage unit id. An empty string means the concrete path.
 pub(crate) fn reject_accept(value: Option<&axum::http::HeaderValue>) -> Option<&'static str> {
-    let value = header_str(value)?;
-    let first = value.split(',').next()?.trim();
-    if first.is_empty() {
-        return None;
-    }
-    accept_unit(first)
-}
-
-/// Unit id for one `Accept` entry: `None` is served, `Some("")` is unknown.
-fn accept_unit(first: &str) -> Option<&'static str> {
-    let mut pieces = first.split(';');
-    let essence = pieces.next()?.trim().to_ascii_lowercase();
-    let nulls_stripped = pieces.any(|param| {
-        let compact: String = param.split_whitespace().collect();
-        compact.eq_ignore_ascii_case("nulls=stripped")
-    });
+    let (essence, nulls_stripped) = preferred_accept(value)?;
     match essence.as_str() {
+        // megabase:unit rest:media-type:*/*
+        // megabase:unit rest:media-type:application/json
         "*/*" | "application/json" | "application/*" => None,
-        "application/vnd.pgrst.object+json" if nulls_stripped => {
+        "application/vnd.pgrst.object+json" | "application/vnd.pgrst.object" if nulls_stripped => {
             Some("rest:media-type:application/vnd.pgrst.object+json;nulls=stripped")
         }
-        "application/vnd.pgrst.object+json" => {
+        "application/vnd.pgrst.object+json" | "application/vnd.pgrst.object" => {
             Some("rest:media-type:application/vnd.pgrst.object+json")
         }
-        "application/vnd.pgrst.array+json" if nulls_stripped => {
+        "application/vnd.pgrst.array+json" | "application/vnd.pgrst.array" if nulls_stripped => {
             Some("rest:media-type:application/vnd.pgrst.array+json;nulls=stripped")
         }
         // Plain alias of `application/json` upstream.
@@ -765,18 +860,16 @@ async fn read_relation(
     relation: &str,
     session: &Session,
     read: &crate::params::ReadQuery,
-    aggregates: bool,
-    shape: ReadShape,
+    mode: ReadMode,
 ) -> Response {
-    let ReadShape { headers_only, csv } = shape;
-    match read_rows(pool, schema, relation, session, read, aggregates, shape).await {
+    match read_rows(pool, schema, relation, session, read, mode).await {
         Ok((count, body, offset)) => {
-            let body = if headers_only { "" } else { &body };
-            let mut response = if csv {
-                csv_rows(offset, count, body)
-            } else {
-                json_rows(offset, count, body)
-            };
+            let mut response = json_rows(
+                offset,
+                count,
+                if mode.headers_only { "" } else { &body },
+                mode.shape.map_or(JSON_UTF8, ReadShape::content_type),
+            );
             profile_header(&mut response, schema);
             response
         }
@@ -792,10 +885,13 @@ async fn read_rows(
     relation: &str,
     session: &Session,
     read: &crate::params::ReadQuery,
-    aggregates: bool,
-    shape: ReadShape,
+    mode: ReadMode,
 ) -> Result<(i64, String, i64), Box<Response>> {
-    let ReadShape { headers_only, csv } = shape;
+    let ReadMode {
+        aggregates,
+        headers_only,
+        shape,
+    } = mode;
     let http_method = if headers_only { "HEAD" } else { "GET" };
     let mut tx = pool
         .begin()
@@ -842,18 +938,42 @@ async fn read_rows(
         let rel = load_relationship(&mut tx, schema, relation, name, session.anon).await?;
         rels.insert(name.to_string(), rel);
     }
-    let built = build_read_sql_as(schema, relation, read, &column_types, &rels, csv)
-        .map_err(|error| Box::new(unsafe_type(&error)))?;
+    let built = build_read_sql_as(
+        schema,
+        relation,
+        read,
+        &column_types,
+        &rels,
+        shape == Some(ReadShape::Csv),
+    )
+    .map_err(|error| Box::new(unsafe_type(&error)))?;
     let request_path = format!("/{relation}");
     set_request_context(&mut tx, session, http_method, &request_path, schema).await?;
     let mut query = sqlx::query_as::<sqlx::Postgres, (i64, String)>(&built.sql);
     for param in &built.params {
         query = query.bind(param);
     }
-    let row = query
+    let mut row = query
         .fetch_one(&mut *tx)
         .await
         .map_err(|error| Box::new(query_failure(&error, session.anon)))?;
+    // CSV is built in SQL (`asCsvF`); only the JSON shapes are post-processed.
+    if let Some(shape) = shape.filter(|shape| *shape != ReadShape::Csv) {
+        if shape.singular() {
+            singular_check(row.0)?;
+        }
+        // Shaping stays in Postgres so key order and number text are kept.
+        let sql = match (shape.singular(), shape.stripped()) {
+            (true, true) => "SELECT json_strip_nulls(($1::json)->0)::text",
+            (true, false) => "SELECT (($1::json)->0)::text",
+            (false, _) => "SELECT json_strip_nulls($1::json)::text",
+        };
+        row.1 = sqlx::query_scalar(sql)
+            .bind(&row.1)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(|error| Box::new(query_failure(&error, session.anon)))?;
+    }
     tx.commit()
         .await
         .map_err(|error| Box::new(query_failure(&error, session.anon)))?;
@@ -1143,25 +1263,12 @@ fn sanitize(text: &str) -> String {
     }
 }
 
-fn json_rows(offset: i64, count: i64, body: &str) -> Response {
+fn json_rows(offset: i64, count: i64, body: &str, content_type: &'static str) -> Response {
     let range = content_range(offset, count);
     (
         StatusCode::OK,
         [
-            (header::CONTENT_TYPE, JSON_UTF8),
-            (header::CONTENT_RANGE, range.as_str()),
-        ],
-        body.to_string(),
-    )
-        .into_response()
-}
-
-fn csv_rows(offset: i64, count: i64, body: &str) -> Response {
-    let range = content_range(offset, count);
-    (
-        StatusCode::OK,
-        [
-            (header::CONTENT_TYPE, "text/csv; charset=utf-8"),
+            (header::CONTENT_TYPE, content_type),
             (header::CONTENT_RANGE, range.as_str()),
         ],
         body.to_string(),
@@ -1259,19 +1366,19 @@ mod tests {
 
     #[test]
     fn content_range_uses_the_sql_count() {
-        let response = json_rows(0, 2, "not json");
+        let response = json_rows(0, 2, "not json", JSON_UTF8);
         let range = response
             .headers()
             .get(header::CONTENT_RANGE)
             .and_then(|value| value.to_str().ok());
         assert_eq!(range, Some("0-1/*"));
-        let empty = json_rows(0, 0, "[]");
+        let empty = json_rows(0, 0, "[]", JSON_UTF8);
         let range = empty
             .headers()
             .get(header::CONTENT_RANGE)
             .and_then(|value| value.to_str().ok());
         assert_eq!(range, Some("*/*"));
-        let shifted = json_rows(1, 1, "[{}]");
+        let shifted = json_rows(1, 1, "[{}]", JSON_UTF8);
         let range = shifted
             .headers()
             .get(header::CONTENT_RANGE)
@@ -1462,20 +1569,100 @@ mod tests {
         assert_eq!(body["code"], "PGRST301");
     }
 
+    #[test]
+    fn read_shape_decodes_accept() {
+        let hv = |text: &'static str| Some(HeaderValue::from_static(text));
+        let shape = |text: &'static str| ReadShape::from_accept(hv(text).as_ref());
+        assert_eq!(
+            shape("application/vnd.pgrst.object+json"),
+            Some(ReadShape::Object)
+        );
+        assert_eq!(
+            shape("application/vnd.pgrst.object+json;nulls=stripped"),
+            Some(ReadShape::ObjectStripped)
+        );
+        assert_eq!(
+            shape("application/vnd.pgrst.array+json;nulls=stripped"),
+            Some(ReadShape::ArrayStripped)
+        );
+        assert_eq!(shape("application/json"), None);
+        assert_eq!(shape("application/vnd.pgrst.array+json"), None);
+        assert_eq!(ReadShape::from_accept(None), None);
+        assert_eq!(
+            shape("application/vnd.pgrst.object"),
+            Some(ReadShape::Object)
+        );
+    }
+
+    #[test]
+    fn read_shape_ranks_accept_by_quality() {
+        let hv = |text: &'static str| Some(HeaderValue::from_static(text));
+        let shape = |text: &'static str| ReadShape::from_accept(hv(text).as_ref());
+        assert_eq!(
+            shape("application/json;q=0.1, application/vnd.pgrst.object+json;q=0.9"),
+            Some(ReadShape::Object)
+        );
+        assert_eq!(
+            shape("application/vnd.pgrst.object+json;q=0.1, application/json"),
+            None
+        );
+        assert_eq!(
+            shape("application/vnd.pgrst.object+json;q=0, application/json"),
+            None
+        );
+    }
+
+    #[test]
+    fn read_shape_prefers_specific_entry_on_equal_quality() {
+        let hv = |text: &'static str| Some(HeaderValue::from_static(text));
+        let shape = |text: &'static str| ReadShape::from_accept(hv(text).as_ref());
+        assert_eq!(
+            shape("*/*, application/vnd.pgrst.object+json"),
+            Some(ReadShape::Object)
+        );
+        assert_eq!(
+            shape("application/vnd.pgrst.object+json, application/vnd.pgrst.object+json;nulls=stripped"),
+            Some(ReadShape::ObjectStripped)
+        );
+        // A concrete type outranks a stripped wildcard.
+        assert_eq!(
+            shape("*/*;nulls=stripped, application/vnd.pgrst.object+json"),
+            Some(ReadShape::Object)
+        );
+    }
+
+    #[test]
+    fn singular_check_requires_exactly_one_row() {
+        assert!(singular_check(1).is_ok());
+        for rows in [0, 2] {
+            let response = singular_check(rows).unwrap_err();
+            assert_eq!(response.status(), StatusCode::NOT_ACCEPTABLE);
+        }
+    }
+
+    #[test]
+    fn shaped_content_types() {
+        assert_eq!(
+            ReadShape::Object.content_type(),
+            "application/vnd.pgrst.object+json; charset=utf-8"
+        );
+        assert_eq!(
+            ReadShape::ArrayStripped.content_type(),
+            "application/vnd.pgrst.array+json;nulls=stripped; charset=utf-8"
+        );
+    }
+
     #[tokio::test]
-    async fn object_accept_is_501() {
+    async fn geo_json_accept_is_501() {
         let app = router(RestState::from_config(&Config::default()));
         let request = Request::builder()
-            .uri("/rest/v1/todos?id=eq.1")
-            .header(header::ACCEPT, "application/vnd.pgrst.object+json")
+            .uri("/rest/v1/todos")
+            .header(header::ACCEPT, "application/geo+json")
             .body(Body::empty())
             .unwrap();
         let (status, body, _) = send(app, request).await;
         assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
-        assert_eq!(
-            body["unit"],
-            "rest:media-type:application/vnd.pgrst.object+json"
-        );
+        assert_eq!(body["unit"], "rest:media-type:application/geo+json");
     }
 
     #[tokio::test]
@@ -1521,34 +1708,44 @@ mod tests {
 
     #[test]
     fn negotiation_picks_the_first_handled_type() {
-        let pick = |text: &'static str| negotiate_read(Some(&HeaderValue::from_static(text)));
+        let pick = |text: &'static str| {
+            negotiate_read(
+                &Method::GET,
+                "/todos",
+                Some(&HeaderValue::from_static(text)),
+            )
+        };
+        assert!(matches!(pick("text/xml, application/json"), Ok(None)));
         assert!(matches!(
-            pick("text/xml, application/json"),
-            ReadAccept::Json
+            pick("text/xml, text/csv"),
+            Ok(Some(ReadShape::Csv))
         ));
-        assert!(matches!(pick("text/xml, text/csv"), ReadAccept::Csv));
-        assert!(matches!(pick("application/geo+json"), ReadAccept::Other(_)));
         assert!(matches!(
             pick("application/x-unknown, text/csv"),
-            ReadAccept::Csv
+            Ok(Some(ReadShape::Csv))
         ));
         assert!(matches!(
             pick("application/json;q=0.1, text/csv;q=0.9"),
-            ReadAccept::Csv
+            Ok(Some(ReadShape::Csv))
         ));
+        assert!(matches!(pick("text/csv;q=0, application/json"), Ok(None)));
+        assert_eq!(
+            pick("application/geo+json").unwrap_err().status(),
+            StatusCode::NOT_IMPLEMENTED
+        );
+        assert_eq!(
+            pick("text/csv;q=0").unwrap_err().status(),
+            StatusCode::NOT_ACCEPTABLE
+        );
+        assert!(matches!(pick("application/vnd.pgrst.array+json"), Ok(None)));
+        assert_eq!(
+            pick("application/vnd.pgrst.array+json;nulls = stripped").unwrap(),
+            Some(ReadShape::ArrayStripped)
+        );
         assert!(matches!(
-            pick("text/csv;q=0, application/json"),
-            ReadAccept::Json
+            negotiate_read(&Method::GET, "/todos", None),
+            Ok(None)
         ));
-        assert!(matches!(
-            pick("text/csv;q=0"),
-            ReadAccept::NotAcceptable(types) if types == "text/csv"
-        ));
-        assert!(matches!(
-            pick("application/vnd.pgrst.array+json"),
-            ReadAccept::Json
-        ));
-        assert!(matches!(negotiate_read(None), ReadAccept::Json));
     }
 
     #[tokio::test]
@@ -1690,7 +1887,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn head_object_accept_is_501() {
+    async fn head_object_accept_is_not_501() {
         let app = router(RestState::from_config(&Config::default()));
         let request = Request::builder()
             .method("HEAD")
@@ -1699,11 +1896,8 @@ mod tests {
             .body(Body::empty())
             .unwrap();
         let (status, body, _) = send(app, request).await;
-        assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
-        assert_eq!(
-            body["unit"],
-            "rest:media-type:application/vnd.pgrst.object+json"
-        );
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(body["code"], "PGRST000");
     }
 
     #[tokio::test]

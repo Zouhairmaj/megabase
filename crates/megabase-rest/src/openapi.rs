@@ -94,6 +94,7 @@ fn openapi_media(headers: &HeaderMap) -> Result<&'static str, Box<Response>> {
         .trim()
         .to_ascii_lowercase();
     if essence == "application/openapi+json" {
+        // megabase:unit rest:media-type:application/openapi+json
         return Ok(OPENAPI_UTF8);
     }
     if let Some(unit) = read::reject_accept(Some(value)) {

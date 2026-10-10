@@ -2,12 +2,12 @@
   "schema": 1,
   "totals": {
     "units": 1024,
-    "implemented": 146,
-    "tested": 89,
+    "implemented": 152,
+    "tested": 90,
     "conformant": 0
   },
   "percent": {
-    "coverage": 14.3,
+    "coverage": 14.8,
     "conformance": 0.0,
     "done": 0.0
   },
@@ -316,8 +316,8 @@
     },
     "rest": {
       "units": 93,
-      "implemented": 67,
-      "tested": 29,
+      "implemented": 73,
+      "tested": 30,
       "conformant": 0,
       "groups": {
         "aggregates": {
@@ -346,8 +346,8 @@
         },
         "media-types": {
           "units": 13,
-          "implemented": 3,
-          "tested": 0,
+          "implemented": 9,
+          "tested": 1,
           "conformant": 0
         },
         "ordering": {
@@ -673,6 +673,12 @@
     "rest:logic-operator:and": "implemented",
     "rest:logic-operator:not": "implemented",
     "rest:logic-operator:or": "implemented",
+    "rest:media-type:*/*": "implemented",
+    "rest:media-type:application/json": "implemented",
+    "rest:media-type:application/openapi+json": "implemented",
+    "rest:media-type:application/vnd.pgrst.array+json;nulls=stripped": "implemented",
+    "rest:media-type:application/vnd.pgrst.object+json": "tested",
+    "rest:media-type:application/vnd.pgrst.object+json;nulls=stripped": "implemented",
     "rest:media-type:text/csv": "implemented",
     "rest:media-type:text/plain": "implemented",
     "rest:media-type:text/xml": "implemented",
