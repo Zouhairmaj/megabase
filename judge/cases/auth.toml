@@ -584,12 +584,12 @@ key = "service_role"
 
 [[case]]
 id = "auth.user.put-metadata"
-description = "PUT /user merges metadata and drops null keys"
+description = "PUT /user merges metadata, keeps untouched keys, and drops null keys"
 units = ["auth:route:PUT /auth/v1/user"]
 [[case.step]]
 method = "POST"
 path = "/auth/v1/signup"
-json = { email = "judge-put-{{run}}@example.com", password = "judge-password-1", data = { name = "Ada", drop = "me" } }
+json = { email = "judge-put-{{run}}@example.com", password = "judge-password-1", data = { name = "Ada", drop = "me", keep = "me" } }
 capture = { token = "/access_token" }
 [[case.step]]
 method = "PUT"
