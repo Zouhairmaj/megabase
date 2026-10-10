@@ -33,8 +33,20 @@ pub const BOOTSTRAP_BRANCH: &str = "cursor/phase-0-bootstrap-121c";
 pub const DECORATIVE_JS: &str = "site/static/db-dither.js";
 
 /// The one branch that may land the guard change and the `HUMAN_LOG.md`
-/// entry for [`DECORATIVE_JS`]. Further guard edits still need `review/*`.
+/// entry for [`DECORATIVE_JS`], and only while [`decorative_landing_open`]
+/// is still true for the base branch tip. Further guard edits need `review/*`.
 pub const DECORATIVE_JS_BRANCH: &str = "cursor/hero-dither-db-13b4";
+
+/// True when `base_policy` and `base_log` are the base branch tip and neither
+/// has recorded [`DECORATIVE_JS`] yet.
+///
+/// The guard reads those files from the base ref before resolving the merge
+/// base. After the landing merges, `main` names the path and the branch
+/// exception stays closed even if a later pull request is cut from older
+/// history.
+pub fn decorative_landing_open(base_policy: &str, base_log: &str) -> bool {
+    !base_policy.contains(DECORATIVE_JS) && !log_names_path(base_log, DECORATIVE_JS)
+}
 
 /// Source extensions of languages other than Rust (GOAL.md rule 1). SQL and
 /// configuration formats are allowed.
@@ -70,6 +82,10 @@ pub struct Context {
     pub human_log_size: Option<u64>,
     /// Errors from comparing vendor gitlinks with `vendor.toml` in the head tree.
     pub pin_errors: Vec<String>,
+    /// The base branch tip has not yet recorded the decorative-canvas landing.
+    /// False once that tip names [`DECORATIVE_JS`], so a reused branch cannot
+    /// edit `tools/megabase-guard/` again.
+    pub decorative_landing_open: bool,
 }
 
 fn matches(path: &str, patterns: &[&str]) -> bool {
@@ -475,10 +491,14 @@ fn release_please_config_ok(change: &Change) -> bool {
 }
 
 fn decorative_js_branch(ctx: &Context) -> bool {
-    ctx.head_ref == DECORATIVE_JS_BRANCH
+    ctx.decorative_landing_open && ctx.head_ref == DECORATIVE_JS_BRANCH
 }
 
-/// A Completed append on the decorative-JS branch that names the canvas path.
+/// One Completed append that names the canvas path.
+///
+/// `after` must start with every byte of `before`, so Pending and earlier
+/// Completed entries cannot change. The new suffix is a single `- **Date**`
+/// item. A base log that already names the path is not the initial landing.
 fn decorative_log_ok(change: &Change) -> bool {
     change.path == "HUMAN_LOG.md"
         && change.status == Status::Modified
@@ -486,12 +506,22 @@ fn decorative_log_ok(change: &Change) -> bool {
             .before
             .as_deref()
             .zip(change.after.as_deref())
-            .is_some_and(|(before, after)| {
-                is_human_log_review_ok(before, after)
-                    && completed_suffix(before, after).is_some_and(|added| {
-                        new_completed_entry(added) && log_names_path(added, DECORATIVE_JS)
-                    })
-            })
+            .is_some_and(|(before, after)| decorative_completed_append(before, after))
+}
+
+fn decorative_completed_append(before: &str, after: &str) -> bool {
+    if log_names_path(before, DECORATIVE_JS) {
+        return false;
+    }
+    let Some(suffix) = after.strip_prefix(before) else {
+        return false;
+    };
+    let body = suffix.trim_start_matches('\n');
+    if body.is_empty() || !body.starts_with("- **Date**") {
+        return false;
+    }
+    let rest = body.strip_prefix("- **Date**").unwrap_or(body);
+    !rest.contains("\n- **Date**") && log_names_path(body, DECORATIVE_JS)
 }
 
 fn diff_logs_decorative_js(changes: &[Change]) -> bool {
@@ -612,6 +642,7 @@ mod tests {
             base_is_pre_bootstrap: pre_bootstrap,
             human_log_size: Some(0),
             pin_errors: Vec::new(),
+            decorative_landing_open: false,
         }
     }
 
@@ -1093,7 +1124,8 @@ checksum = \"abc\"
         );
         let log = modified("HUMAN_LOG.md", &before, &after);
         let guard = modified("tools/megabase-guard/src/policy.rs", "old", "new");
-        let c = ctx(DECORATIVE_JS_BRANCH, false);
+        let mut c = ctx(DECORATIVE_JS_BRANCH, false);
+        c.decorative_landing_open = true;
         let landed = evaluate(&[log.clone(), guard.clone(), add(DECORATIVE_JS)], &c);
         assert!(landed.is_empty(), "{landed:?}");
         assert_eq!(
@@ -1129,8 +1161,73 @@ checksum = \"abc\"
             1
         );
         let other = ctx("cursor/other", false);
-        assert_eq!(evaluate(&[log, guard], &other).len(), 2);
+        assert_eq!(evaluate(&[log.clone(), guard.clone()], &other).len(), 2);
         assert!(evaluate(&[add(DECORATIVE_JS)], &other).is_empty());
+        let mut closed = ctx(DECORATIVE_JS_BRANCH, false);
+        closed.decorative_landing_open = false;
+        let reused = evaluate(&[log, guard], &closed);
+        assert_eq!(reused.len(), 2, "{reused:?}");
+        assert!(evaluate(&[add(DECORATIVE_JS)], &closed).is_empty());
+    }
+
+    #[test]
+    fn decorative_log_is_one_completed_append() {
+        let before = log_with_completed("- **Date**: 2026-10-09\n- **Action**: earlier\n");
+        let entry =
+            "\n- **Date**: 2026-10-10\n- **Action**: Owner approved `site/static/db-dither.js`.\n";
+        let mut c = ctx(DECORATIVE_JS_BRANCH, false);
+        c.decorative_landing_open = true;
+        let guard = modified("tools/megabase-guard/src/policy.rs", "old", "new");
+        let ok = modified("HUMAN_LOG.md", &before, &format!("{before}{entry}"));
+        let landed = evaluate(&[ok, guard.clone()], &c);
+        assert!(landed.is_empty(), "{landed:?}");
+        let dropped_pending =
+            before.replacen("- **Date**: 2026-10-09\n- **Action**: keep\n\n", "", 1);
+        assert!(
+            evaluate(
+                &[modified(
+                    "HUMAN_LOG.md",
+                    &before,
+                    &format!("{dropped_pending}{entry}")
+                )],
+                &c
+            )
+            .iter()
+            .any(|v| v.contains("human-owned")),
+            "dropping Pending is not the decorative append"
+        );
+        let two = format!("{before}{entry}\n- **Date**: 2026-10-11\n- **Action**: second\n");
+        assert!(evaluate(&[modified("HUMAN_LOG.md", &before, &two)], &c)
+            .iter()
+            .any(|v| v.contains("human-owned")));
+        let edited = before.replacen("earlier", "changed", 1);
+        assert!(evaluate(
+            &[modified(
+                "HUMAN_LOG.md",
+                &before,
+                &format!("{edited}{entry}")
+            )],
+            &c
+        )
+        .iter()
+        .any(|v| v.contains("human-owned")));
+        let already = log_with_completed(
+            "- **Date**: 2026-10-09\n- **Action**: earlier `site/static/db-dither.js`.\n",
+        );
+        let again = format!("{already}{entry}");
+        assert_eq!(
+            evaluate(&[modified("HUMAN_LOG.md", &already, &again), guard], &c).len(),
+            2
+        );
+        assert!(decorative_landing_open("fn main() {}", "# log\n"));
+        assert!(!decorative_landing_open(
+            "allow site/static/db-dither.js\n",
+            "# log\n"
+        ));
+        assert!(!decorative_landing_open(
+            "fn main() {}",
+            "named `site/static/db-dither.js`\n"
+        ));
     }
 
     #[test]

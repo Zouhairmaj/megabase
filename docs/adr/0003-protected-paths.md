@@ -112,11 +112,22 @@ as the site hero illustration. Product code stays Rust. The guard allows
 that exact path on any branch. A different extension, a different file,
 or a capitalised `.JS` name stays rejected.
 
-The branch `cursor/hero-dither-db-13b4` may also edit
-`tools/megabase-guard/` and append one Completed `HUMAN_LOG.md` entry,
-and only when that new entry names `` `site/static/db-dither.js` ``.
-`judge/`, `.github/`, `CODEOWNERS`, `GOAL.md` and `MANIFESTO.md` stay
-closed on that branch. After it merges, further guard edits still need
+The branch `cursor/hero-dither-db-13b4` may edit `tools/megabase-guard/`
+and append `HUMAN_LOG.md` only while that landing is open. The guard
+reads the base branch tip, before the merge base. The landing is open
+when that tip's guard source does not contain `site/static/db-dither.js`
+and its `HUMAN_LOG.md` does not name that path in backticks. After this
+pull request merges, `main` has both, and a later pull request that
+reuses the branch name — including one cut from older history — cannot
+edit the guard.
+
+The log change on that landing is one appended Completed entry. The new
+file must start with every byte of the old file. The suffix is a single
+`- **Date**` item that names `` `site/static/db-dither.js` ``. Pending
+and every earlier Completed entry stay byte-for-byte unchanged. Dropping
+a Pending item, editing an earlier entry, or appending a second item is
+rejected. `judge/`, `.github/`, `CODEOWNERS`, `GOAL.md` and
+`MANIFESTO.md` stay closed on that branch. Further guard edits need
 `review/*`.
 
 ## Consequences
