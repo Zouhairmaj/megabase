@@ -215,8 +215,15 @@ async fn relation_route(
     if let Some(unit) = prefer::unserved(headers) {
         return unimplemented_unit(method, path, unit);
     }
-    if let Some(unit) = reject_accept(headers.get(header::ACCEPT)) {
-        return unimplemented_unit(method, path, unit);
+    let shape = if matches!(*method, Method::GET | Method::HEAD) {
+        ReadShape::from_accept(headers.get(header::ACCEPT))
+    } else {
+        None
+    };
+    if shape.is_none() {
+        if let Some(unit) = reject_accept(headers.get(header::ACCEPT)) {
+            return unimplemented_unit(method, path, unit);
+        }
     }
     if method == Method::GET && headers.get(header::RANGE).is_some() {
         return not_implemented(method, path);
@@ -234,8 +241,11 @@ async fn relation_route(
                 relation,
                 &session,
                 &query,
-                state.aggregates,
-                false,
+                ReadMode {
+                    aggregates: state.aggregates,
+                    headers_only: false,
+                    shape,
+                },
             )
             .await
         }
@@ -250,8 +260,11 @@ async fn relation_route(
                 relation,
                 &session,
                 &query,
-                state.aggregates,
-                true,
+                ReadMode {
+                    aggregates: state.aggregates,
+                    headers_only: true,
+                    shape,
+                },
             )
             .await
         }
@@ -580,25 +593,129 @@ fn jwt_failure(error: &JwtError) -> Response {
     response
 }
 
+/// How a GET or HEAD read runs and what it returns.
+#[derive(Clone, Copy)]
+struct ReadMode {
+    aggregates: bool,
+    headers_only: bool,
+    shape: Option<ReadShape>,
+}
+
+/// Response shape negotiated from `Accept` on GET and HEAD reads.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ReadShape {
+    Object,
+    ObjectStripped,
+    ArrayStripped,
+}
+
+/// The preferred `Accept` entry: its lowercase essence and whether it carries
+/// `nulls=stripped`. Entries rank by `q` (default 1, `q=0` dropped); ties go to
+/// the more specific entry (no wildcard, `nulls=stripped`), then header order.
+fn preferred_accept(value: Option<&axum::http::HeaderValue>) -> Option<(String, bool)> {
+    let mut best: Option<(f32, (bool, bool), String, bool)> = None;
+    for entry in header_str(value)?.split(',') {
+        let mut pieces = entry.split(';');
+        let essence = pieces.next().unwrap_or("").trim().to_ascii_lowercase();
+        if essence.is_empty() {
+            continue;
+        }
+        let mut stripped = false;
+        let mut quality = 1.0_f32;
+        for param in pieces {
+            let param = param.trim();
+            if param.eq_ignore_ascii_case("nulls=stripped") {
+                stripped = true;
+            } else if let Some((name, number)) = param.split_once('=') {
+                if name.trim().eq_ignore_ascii_case("q") {
+                    quality = number.trim().parse().unwrap_or(1.0);
+                }
+            }
+        }
+        if quality <= 0.0 {
+            continue;
+        }
+        // Concrete beats wildcard first, then `nulls=stripped`.
+        let specificity = (!essence.contains('*'), stripped);
+        let better = best.as_ref().is_none_or(|(top, top_specificity, _, _)| {
+            quality > *top || (quality == *top && specificity > *top_specificity)
+        });
+        if better {
+            best = Some((quality, specificity, essence, stripped));
+        }
+    }
+    best.map(|(_, _, essence, stripped)| (essence, stripped))
+}
+
+/// The 406 `PGRST116` error for a singular read that matched `rows` rows.
+fn singular_check(rows: i64) -> Result<(), Box<Response>> {
+    if rows == 1 {
+        return Ok(());
+    }
+    Err(Box::new(pgrst(
+        StatusCode::NOT_ACCEPTABLE,
+        "PGRST116",
+        "Cannot coerce the result to a single JSON object",
+        Some(&format!("The result contains {rows} rows")),
+        None,
+    )))
+}
+
+impl ReadShape {
+    /// The preferred `Accept` entry, when it names one of the shaped JSON types.
+    pub(crate) fn from_accept(value: Option<&axum::http::HeaderValue>) -> Option<Self> {
+        let (essence, stripped) = preferred_accept(value)?;
+        match (essence.as_str(), stripped) {
+            // megabase:unit rest:media-type:application/vnd.pgrst.object+json
+            ("application/vnd.pgrst.object+json" | "application/vnd.pgrst.object", false) => {
+                Some(Self::Object)
+            }
+            // megabase:unit rest:media-type:application/vnd.pgrst.object+json;nulls=stripped
+            ("application/vnd.pgrst.object+json" | "application/vnd.pgrst.object", true) => {
+                Some(Self::ObjectStripped)
+            }
+            // megabase:unit rest:media-type:application/vnd.pgrst.array+json;nulls=stripped
+            ("application/vnd.pgrst.array+json" | "application/vnd.pgrst.array", true) => {
+                Some(Self::ArrayStripped)
+            }
+            _ => None,
+        }
+    }
+
+    fn singular(self) -> bool {
+        matches!(self, Self::Object | Self::ObjectStripped)
+    }
+
+    fn stripped(self) -> bool {
+        !matches!(self, Self::Object)
+    }
+
+    /// `MediaType.hs` `toContentType`: the mime plus `; charset=utf-8`.
+    fn content_type(self) -> &'static str {
+        match self {
+            Self::Object => "application/vnd.pgrst.object+json; charset=utf-8",
+            Self::ObjectStripped => {
+                "application/vnd.pgrst.object+json;nulls=stripped; charset=utf-8"
+            }
+            Self::ArrayStripped => "application/vnd.pgrst.array+json;nulls=stripped; charset=utf-8",
+        }
+    }
+}
+
 /// `Err` is a coverage unit id. An empty string means the concrete path.
 pub(crate) fn reject_accept(value: Option<&axum::http::HeaderValue>) -> Option<&'static str> {
-    let value = header_str(value)?;
-    let first = value.split(',').next()?.trim();
-    if first.is_empty() {
-        return None;
-    }
-    let mut pieces = first.split(';');
-    let essence = pieces.next()?.trim().to_ascii_lowercase();
-    let nulls_stripped = pieces.any(|param| param.trim().eq_ignore_ascii_case("nulls=stripped"));
+    let (essence, nulls_stripped) = preferred_accept(value)?;
     match essence.as_str() {
+        // megabase:unit rest:media-type:*/*
+        // megabase:unit rest:media-type:application/json
         "*/*" | "application/json" | "application/*" => None,
-        "application/vnd.pgrst.object+json" if nulls_stripped => {
+        "application/vnd.pgrst.object+json" | "application/vnd.pgrst.object" if nulls_stripped => {
             Some("rest:media-type:application/vnd.pgrst.object+json;nulls=stripped")
         }
-        "application/vnd.pgrst.object+json" => {
+        "application/vnd.pgrst.object+json" | "application/vnd.pgrst.object" => {
             Some("rest:media-type:application/vnd.pgrst.object+json")
         }
-        "application/vnd.pgrst.array+json" if nulls_stripped => {
+        "application/vnd.pgrst.array+json" | "application/vnd.pgrst.array" if nulls_stripped => {
             Some("rest:media-type:application/vnd.pgrst.array+json;nulls=stripped")
         }
         "application/geo+json" => Some("rest:media-type:application/geo+json"),
@@ -649,23 +766,16 @@ async fn read_relation(
     relation: &str,
     session: &Session,
     read: &crate::params::ReadQuery,
-    aggregates: bool,
-    headers_only: bool,
+    mode: ReadMode,
 ) -> Response {
-    let http_method = if headers_only { "HEAD" } else { "GET" };
-    match read_rows(
-        pool,
-        schema,
-        relation,
-        session,
-        read,
-        aggregates,
-        http_method,
-    )
-    .await
-    {
+    match read_rows(pool, schema, relation, session, read, mode).await {
         Ok((count, body, offset)) => {
-            let mut response = json_rows(offset, count, if headers_only { "" } else { &body });
+            let mut response = json_rows(
+                offset,
+                count,
+                if mode.headers_only { "" } else { &body },
+                mode.shape.map_or(JSON_UTF8, ReadShape::content_type),
+            );
             profile_header(&mut response, schema);
             response
         }
@@ -681,9 +791,14 @@ async fn read_rows(
     relation: &str,
     session: &Session,
     read: &crate::params::ReadQuery,
-    aggregates: bool,
-    http_method: &str,
+    mode: ReadMode,
 ) -> Result<(i64, String, i64), Box<Response>> {
+    let ReadMode {
+        aggregates,
+        headers_only,
+        shape,
+    } = mode;
+    let http_method = if headers_only { "HEAD" } else { "GET" };
     let mut tx = pool
         .begin()
         .await
@@ -737,10 +852,26 @@ async fn read_rows(
     for param in &built.params {
         query = query.bind(param);
     }
-    let row = query
+    let mut row = query
         .fetch_one(&mut *tx)
         .await
         .map_err(|error| Box::new(query_failure(&error, session.anon)))?;
+    if let Some(shape) = shape {
+        if shape.singular() {
+            singular_check(row.0)?;
+        }
+        // Shaping stays in Postgres so key order and number text are kept.
+        let sql = match (shape.singular(), shape.stripped()) {
+            (true, true) => "SELECT json_strip_nulls(($1::json)->0)::text",
+            (true, false) => "SELECT (($1::json)->0)::text",
+            (false, _) => "SELECT json_strip_nulls($1::json)::text",
+        };
+        row.1 = sqlx::query_scalar(sql)
+            .bind(&row.1)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(|error| Box::new(query_failure(&error, session.anon)))?;
+    }
     tx.commit()
         .await
         .map_err(|error| Box::new(query_failure(&error, session.anon)))?;
@@ -1032,12 +1163,12 @@ fn sanitize(text: &str) -> String {
     }
 }
 
-fn json_rows(offset: i64, count: i64, body: &str) -> Response {
+fn json_rows(offset: i64, count: i64, body: &str, content_type: &'static str) -> Response {
     let range = content_range(offset, count);
     (
         StatusCode::OK,
         [
-            (header::CONTENT_TYPE, JSON_UTF8),
+            (header::CONTENT_TYPE, content_type),
             (header::CONTENT_RANGE, range.as_str()),
         ],
         body.to_string(),
@@ -1135,19 +1266,19 @@ mod tests {
 
     #[test]
     fn content_range_uses_the_sql_count() {
-        let response = json_rows(0, 2, "not json");
+        let response = json_rows(0, 2, "not json", JSON_UTF8);
         let range = response
             .headers()
             .get(header::CONTENT_RANGE)
             .and_then(|value| value.to_str().ok());
         assert_eq!(range, Some("0-1/*"));
-        let empty = json_rows(0, 0, "[]");
+        let empty = json_rows(0, 0, "[]", JSON_UTF8);
         let range = empty
             .headers()
             .get(header::CONTENT_RANGE)
             .and_then(|value| value.to_str().ok());
         assert_eq!(range, Some("*/*"));
-        let shifted = json_rows(1, 1, "[{}]");
+        let shifted = json_rows(1, 1, "[{}]", JSON_UTF8);
         let range = shifted
             .headers()
             .get(header::CONTENT_RANGE)
@@ -1338,20 +1469,100 @@ mod tests {
         assert_eq!(body["code"], "PGRST301");
     }
 
+    #[test]
+    fn read_shape_decodes_accept() {
+        let hv = |text: &'static str| Some(HeaderValue::from_static(text));
+        let shape = |text: &'static str| ReadShape::from_accept(hv(text).as_ref());
+        assert_eq!(
+            shape("application/vnd.pgrst.object+json"),
+            Some(ReadShape::Object)
+        );
+        assert_eq!(
+            shape("application/vnd.pgrst.object+json;nulls=stripped"),
+            Some(ReadShape::ObjectStripped)
+        );
+        assert_eq!(
+            shape("application/vnd.pgrst.array+json;nulls=stripped"),
+            Some(ReadShape::ArrayStripped)
+        );
+        assert_eq!(shape("application/json"), None);
+        assert_eq!(shape("application/vnd.pgrst.array+json"), None);
+        assert_eq!(ReadShape::from_accept(None), None);
+        assert_eq!(
+            shape("application/vnd.pgrst.object"),
+            Some(ReadShape::Object)
+        );
+    }
+
+    #[test]
+    fn read_shape_ranks_accept_by_quality() {
+        let hv = |text: &'static str| Some(HeaderValue::from_static(text));
+        let shape = |text: &'static str| ReadShape::from_accept(hv(text).as_ref());
+        assert_eq!(
+            shape("application/json;q=0.1, application/vnd.pgrst.object+json;q=0.9"),
+            Some(ReadShape::Object)
+        );
+        assert_eq!(
+            shape("application/vnd.pgrst.object+json;q=0.1, application/json"),
+            None
+        );
+        assert_eq!(
+            shape("application/vnd.pgrst.object+json;q=0, application/json"),
+            None
+        );
+    }
+
+    #[test]
+    fn read_shape_prefers_specific_entry_on_equal_quality() {
+        let hv = |text: &'static str| Some(HeaderValue::from_static(text));
+        let shape = |text: &'static str| ReadShape::from_accept(hv(text).as_ref());
+        assert_eq!(
+            shape("*/*, application/vnd.pgrst.object+json"),
+            Some(ReadShape::Object)
+        );
+        assert_eq!(
+            shape("application/vnd.pgrst.object+json, application/vnd.pgrst.object+json;nulls=stripped"),
+            Some(ReadShape::ObjectStripped)
+        );
+        // A concrete type outranks a stripped wildcard.
+        assert_eq!(
+            shape("*/*;nulls=stripped, application/vnd.pgrst.object+json"),
+            Some(ReadShape::Object)
+        );
+    }
+
+    #[test]
+    fn singular_check_requires_exactly_one_row() {
+        assert!(singular_check(1).is_ok());
+        for rows in [0, 2] {
+            let response = singular_check(rows).unwrap_err();
+            assert_eq!(response.status(), StatusCode::NOT_ACCEPTABLE);
+        }
+    }
+
+    #[test]
+    fn shaped_content_types() {
+        assert_eq!(
+            ReadShape::Object.content_type(),
+            "application/vnd.pgrst.object+json; charset=utf-8"
+        );
+        assert_eq!(
+            ReadShape::ArrayStripped.content_type(),
+            "application/vnd.pgrst.array+json;nulls=stripped; charset=utf-8"
+        );
+    }
+
     #[tokio::test]
-    async fn object_accept_is_501() {
+    async fn geo_json_accept_is_501() {
         let app = router(RestState::from_config(&Config::default()));
         let request = Request::builder()
-            .uri("/rest/v1/todos?id=eq.1")
-            .header(header::ACCEPT, "application/vnd.pgrst.object+json")
+            .uri("/rest/v1/todos")
+            .header(header::ACCEPT, "application/geo+json")
             .body(Body::empty())
             .unwrap();
         let (status, body, _) = send(app, request).await;
         assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
-        assert_eq!(
-            body["unit"],
-            "rest:media-type:application/vnd.pgrst.object+json"
-        );
+        assert_eq!(body["unit"], "rest:media-type:application/geo+json");
     }
 
     #[tokio::test]
@@ -1493,7 +1704,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn head_object_accept_is_501() {
+    async fn head_object_accept_is_not_501() {
         let app = router(RestState::from_config(&Config::default()));
         let request = Request::builder()
             .method("HEAD")
@@ -1502,11 +1713,8 @@ mod tests {
             .body(Body::empty())
             .unwrap();
         let (status, body, _) = send(app, request).await;
-        assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
-        assert_eq!(
-            body["unit"],
-            "rest:media-type:application/vnd.pgrst.object+json"
-        );
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(body["code"], "PGRST000");
     }
 
     #[tokio::test]
