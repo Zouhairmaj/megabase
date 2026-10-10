@@ -1,8 +1,9 @@
 //! Trivial gateway benches so the Bencher pipeline has a real Criterion signal.
 //!
 //! These are smoke measurements (liveness + one Kong-prefixed route), not a
-//! published performance claim. CI parses the default Criterion text output
-//! with the `rust_criterion` adapter (`cargo bench --bench health`).
+//! published performance claim. They call `create_router`, so the production
+//! HTTP layers are inside the sample. CI parses the default Criterion text
+//! output with the `rust_criterion` adapter (`cargo bench --bench health`).
 
 use std::hint::black_box;
 use std::time::Duration;
@@ -10,6 +11,14 @@ use std::time::Duration;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use criterion::{criterion_group, criterion_main, Criterion};
+
+fn bench_config() -> Criterion {
+    // A restored `target/criterion/.../base` directory without `sample.json`
+    // makes Criterion log "Failed to access file" and exit the comparison.
+    // Bencher reads the timing lines, not that on-disk baseline.
+    let dir = std::env::temp_dir().join(format!("megabase-criterion-{}", std::process::id()));
+    Criterion::default().output_directory(&dir)
+}
 use megabase_server::{create_router, HEALTH_PATH};
 use tokio::runtime::Runtime;
 use tower::ServiceExt;
@@ -64,5 +73,9 @@ fn gateway(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, gateway);
+criterion_group! {
+    name = benches;
+    config = bench_config();
+    targets = gateway
+}
 criterion_main!(benches);

@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO auth.refresh_tokens (\n                instance_id, token, user_id, revoked, created_at, updated_at, session_id\n             ) VALUES (\n                $1::uuid, $2, $3, false, $4::timestamptz, $4::timestamptz, $5::uuid\n             )",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Varchar",
+        "Varchar",
+        "Timestamptz",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "5580bcae1764502c4be39fc925d1557beac9761a13dfc86bd11ba3f97f650f1f"
+}

@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT COUNT(*) AS count FROM auth.audit_log_entries\n                 WHERE instance_id = $1 AND payload->>'log_type' ILIKE $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "08a63f41eab7a13cff6b428f57dc6c870d82698c7219fbd74b9c7685c59e3bbb"
+}

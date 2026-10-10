@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO auth.audit_log_entries (instance_id, id, payload, created_at, ip_address)\n         VALUES ($1::uuid, $2::uuid, $3::json, $4::timestamptz, '')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Json",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "2dcbf22e34eb67c1849eec016f99bc34dbc438141b0d2a457b0fd5f9907c48b9"
+}

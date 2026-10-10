@@ -1,7 +1,16 @@
 use std::fmt;
+use std::time::Duration;
 
+use crate::ids::JwtSecret;
 use crate::jwt::MIN_JWT_SECRET_BYTES;
 use crate::Error;
+
+/// Kong `functions-v1` `read_timeout` in
+/// `vendor/supabase/docker/volumes/api/kong.yml` (milliseconds).
+pub const DEFAULT_HTTP_TIMEOUT: Duration = Duration::from_millis(150_000);
+
+/// `FILE_SIZE_LIMIT` in `vendor/supabase/docker/docker-compose.yml` (bytes).
+pub const DEFAULT_REQUEST_BODY_LIMIT: usize = 52_428_800;
 
 /// Runtime configuration, read from environment variables.
 #[derive(Clone, PartialEq, Eq)]
@@ -17,7 +26,13 @@ pub struct Config {
     /// start for health checks. A present value shorter than 32 bytes
     /// (including empty) is a configuration error. [`Self::jwt_hs256`] fails
     /// if it is missing.
-    pub jwt_secret: Option<String>,
+    pub jwt_secret: Option<JwtSecret>,
+    /// `MEGABASE_HTTP_TIMEOUT_MS`. Whole-request deadline. Default is Kong's
+    /// documented functions `read_timeout` ([`DEFAULT_HTTP_TIMEOUT`]).
+    pub http_timeout: Duration,
+    /// `MEGABASE_REQUEST_BODY_LIMIT_BYTES`. Default is the self-hosted
+    /// `FILE_SIZE_LIMIT` ([`DEFAULT_REQUEST_BODY_LIMIT`]).
+    pub request_body_limit: usize,
 }
 
 impl fmt::Debug for Config {
@@ -33,6 +48,8 @@ impl fmt::Debug for Config {
                 "jwt_secret",
                 &self.jwt_secret.as_ref().map(|_| "<redacted>"),
             )
+            .field("http_timeout", &self.http_timeout)
+            .field("request_body_limit", &self.request_body_limit)
             .finish()
     }
 }
@@ -44,6 +61,8 @@ impl Default for Config {
             port: 8000,
             database_url: None,
             jwt_secret: None,
+            http_timeout: DEFAULT_HTTP_TIMEOUT,
+            request_body_limit: DEFAULT_REQUEST_BODY_LIMIT,
         }
     }
 }
@@ -61,21 +80,38 @@ impl Config {
                 .map_err(|_| Error::Config(format!("MEGABASE_PORT is not a valid port: {raw}")))?,
             None => defaults.port,
         };
-        let jwt_secret = lookup("JWT_SECRET");
-        if let Some(secret) = jwt_secret.as_deref() {
-            // `str::len` is the UTF-8 byte length, which is the HMAC key size.
-            let len = secret.len();
-            if len < MIN_JWT_SECRET_BYTES {
-                return Err(Error::Config(format!(
-                    "JWT_SECRET is {len} bytes; HMAC-SHA-256 keys shorter than {MIN_JWT_SECRET_BYTES} bytes are disabled"
-                )));
+        let jwt_secret = match lookup("JWT_SECRET") {
+            Some(secret) => {
+                // `str::len` is the UTF-8 byte length, which is the HMAC key size.
+                let len = secret.len();
+                if len < MIN_JWT_SECRET_BYTES {
+                    return Err(Error::Config(format!(
+                        "JWT_SECRET is {len} bytes; HMAC-SHA-256 keys shorter than {MIN_JWT_SECRET_BYTES} bytes are disabled"
+                    )));
+                }
+                Some(JwtSecret::new(secret))
             }
-        }
+            None => None,
+        };
+        let http_timeout = match lookup("MEGABASE_HTTP_TIMEOUT_MS") {
+            Some(raw) => parse_millis(&raw)?,
+            None => defaults.http_timeout,
+        };
+        let request_body_limit = match lookup("MEGABASE_REQUEST_BODY_LIMIT_BYTES") {
+            Some(raw) => raw.parse().map_err(|_| {
+                Error::Config(format!(
+                    "MEGABASE_REQUEST_BODY_LIMIT_BYTES is not a valid byte count: {raw}"
+                ))
+            })?,
+            None => defaults.request_body_limit,
+        };
         Ok(Self {
             host: lookup("MEGABASE_HOST").unwrap_or(defaults.host),
             port,
             database_url: lookup("DATABASE_URL"),
             jwt_secret,
+            http_timeout,
+            request_body_limit,
         })
     }
 
@@ -92,11 +128,25 @@ impl Config {
     /// [`crate::jwt::JwtError::SecretTooShort`]. Megabase never invents a
     /// default secret. [`Self::from_env`] rejects a short secret before listen.
     pub fn jwt_hs256(&self) -> crate::Result<crate::jwt::Hs256> {
-        match self.jwt_secret.as_deref() {
+        match self.jwt_secret.as_ref() {
             Some(secret) if !secret.is_empty() => Ok(crate::jwt::Hs256::new(secret.as_bytes())?),
             _ => Err(crate::jwt::JwtError::SecretMissing.into()),
         }
     }
+}
+
+fn parse_millis(raw: &str) -> crate::Result<Duration> {
+    let millis: u64 = raw.parse().map_err(|_| {
+        Error::Config(format!(
+            "MEGABASE_HTTP_TIMEOUT_MS is not a valid millisecond count: {raw}"
+        ))
+    })?;
+    if millis == 0 {
+        return Err(Error::Config(
+            "MEGABASE_HTTP_TIMEOUT_MS must be greater than 0".into(),
+        ));
+    }
+    Ok(Duration::from_millis(millis))
 }
 
 #[cfg(test)]
@@ -134,7 +184,12 @@ mod tests {
     fn jwt_secret_from_env() {
         let secret = "your-super-secret-jwt-token-with-at-least-32-characters-long";
         let config = Config::from_lookup(|k| (k == "JWT_SECRET").then(|| secret.into())).unwrap();
-        assert_eq!(config.jwt_secret.as_deref(), Some(secret));
+        assert_eq!(
+            config.jwt_secret.as_ref().map(JwtSecret::as_str),
+            Some(secret)
+        );
+        assert_eq!(config.http_timeout, DEFAULT_HTTP_TIMEOUT);
+        assert_eq!(config.request_body_limit, DEFAULT_REQUEST_BODY_LIMIT);
         assert!(config.jwt_hs256().is_ok());
     }
 
@@ -146,7 +201,7 @@ mod tests {
             Error::Jwt(crate::jwt::JwtError::SecretMissing)
         ));
         let empty = Config {
-            jwt_secret: Some(String::new()),
+            jwt_secret: Some(JwtSecret::new(String::new())),
             ..Config::default()
         };
         assert!(matches!(
@@ -184,7 +239,7 @@ mod tests {
     #[test]
     fn hand_built_short_secret_cannot_verify() {
         let short = Config {
-            jwt_secret: Some("a".repeat(31)),
+            jwt_secret: Some(JwtSecret::new("a".repeat(31))),
             ..Config::default()
         };
         assert!(matches!(
@@ -197,12 +252,39 @@ mod tests {
     fn debug_redacts_secrets() {
         let config = Config {
             database_url: Some("postgres://user:password@localhost/db".into()),
-            jwt_secret: Some("b".repeat(MIN_JWT_SECRET_BYTES)),
+            jwt_secret: Some(JwtSecret::new("b".repeat(MIN_JWT_SECRET_BYTES))),
             ..Config::default()
         };
         let rendered = format!("{config:?}");
         assert!(rendered.contains("<redacted>"));
         assert!(!rendered.contains("password"));
         assert!(!rendered.contains(&"b".repeat(MIN_JWT_SECRET_BYTES)));
+        let secret = format!("{:?}", config.jwt_secret.as_ref().unwrap());
+        assert_eq!(secret, "JwtSecret(<redacted>)");
+    }
+
+    #[test]
+    fn http_limits_parse_and_reject_bad_values() {
+        let config = Config::from_lookup(|k| match k {
+            "MEGABASE_HTTP_TIMEOUT_MS" => Some("60000".into()),
+            "MEGABASE_REQUEST_BODY_LIMIT_BYTES" => Some("1024".into()),
+            _ => None,
+        })
+        .unwrap();
+        assert_eq!(config.http_timeout, Duration::from_millis(60_000));
+        assert_eq!(config.request_body_limit, 1024);
+
+        let timeout =
+            Config::from_lookup(|k| (k == "MEGABASE_HTTP_TIMEOUT_MS").then(|| "0".into()))
+                .unwrap_err();
+        assert!(timeout.to_string().contains("greater than 0"), "{timeout}");
+        let bad = Config::from_lookup(|k| (k == "MEGABASE_HTTP_TIMEOUT_MS").then(|| "nope".into()))
+            .unwrap_err();
+        assert!(bad.to_string().contains("millisecond"), "{bad}");
+        let body = Config::from_lookup(|k| {
+            (k == "MEGABASE_REQUEST_BODY_LIMIT_BYTES").then(|| "-1".into())
+        })
+        .unwrap_err();
+        assert!(body.to_string().contains("byte count"), "{body}");
     }
 }

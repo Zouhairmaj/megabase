@@ -18,7 +18,6 @@
 //! First batch of `/auth/v1/admin` routes (issue #6).
 
 use std::collections::HashMap;
-use std::time::Duration;
 
 use axum::{
     body::Bytes,
@@ -34,22 +33,17 @@ use megabase_core::jwt::bearer_token;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use tokio_postgres::{types::Json as PgJson, GenericClient, NoTls};
+use uuid::Uuid;
 
 use crate::http::{json_ok, no_content, AuthError};
 use crate::state::AuthState;
 
 const NIL_INSTANCE: &str = "00000000-0000-0000-0000-000000000000";
 const AUTH_PREFIX: &str = "/auth/v1";
-const CONNECT_DEADLINE: Duration = Duration::from_secs(30);
-const CUSTOM_PROVIDER_COLUMNS: &str =
-    "SELECT id::text, provider_type, identifier, name, client_id, \
-                    acceptable_client_ids, scopes, pkce_enabled, attribute_mapping, \
-                    custom_claims_allowlist, authorization_params, enabled, email_optional, \
-                    issuer, discovery_url, skip_nonce_check, cached_discovery, \
-                    authorization_url, token_url, userinfo_url, jwks_uri, \
-                    created_at, updated_at \
-             FROM auth.custom_oauth_providers";
+
+fn nil_instance() -> Uuid {
+    Uuid::nil()
+}
 
 pub fn router(state: AuthState) -> Router {
     Router::new()
@@ -140,20 +134,18 @@ fn is_uuid(value: &str) -> bool {
     true
 }
 
-async fn connect(state: &AuthState) -> Result<tokio_postgres::Client, AuthError> {
-    let url = state
-        .database_url
-        .as_deref()
-        .ok_or_else(|| AuthError::internal("Database error"))?;
-    let (client, connection) =
-        tokio::time::timeout(CONNECT_DEADLINE, tokio_postgres::connect(url, NoTls))
-            .await
-            .map_err(|_| AuthError::internal("Database error"))?
-            .map_err(|_| AuthError::internal("Database error"))?;
-    tokio::spawn(async move {
-        let _ = connection.await;
-    });
-    Ok(client)
+fn pool(state: &AuthState) -> Result<sqlx::PgPool, AuthError> {
+    state
+        .backend
+        .pg_pool()
+        .ok_or_else(|| AuthError::internal("Database error"))
+}
+
+fn ts_json(time: Option<chrono::DateTime<chrono::Utc>>) -> Value {
+    match time {
+        Some(time) => Value::String(system_time_rfc3339(std::time::SystemTime::from(time))),
+        None => Value::Null,
+    }
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -186,95 +178,17 @@ async fn get_audit(
     require_admin(&state, &headers)?;
     let page = parse_uint(query.page.as_deref(), 1)?;
     let per_page = parse_uint(query.per_page.as_deref(), 50)?;
-    let mut filter_sql = String::new();
-    let mut filter_value = None;
-    if let Some(raw) = query.query.as_deref().filter(|q| !q.is_empty()) {
-        let (scope, value) = raw
-            .split_once(':')
-            .ok_or_else(|| AuthError::validation(400, format!("Invalid query scope: {raw}")))?;
-        let columns: &[&str] = match scope {
-            "author" => &["actor_username", "actor_name"],
-            "action" => &["action"],
-            "type" => &["log_type"],
-            _ => {
-                return Err(AuthError::validation(
-                    400,
-                    format!("Invalid query scope: {raw}"),
-                ))
-            }
-        };
-        // FindAuditLogEntries applies the ILIKE only when the value is non-empty.
-        if !value.is_empty() {
-            let like = format!("%{value}%");
-            let clause = columns
-                .iter()
-                .map(|col| format!("payload->>'{col}' ILIKE $2"))
-                .collect::<Vec<_>>()
-                .join(" OR ");
-            filter_sql = format!(" AND ({clause})");
-            filter_value = Some(like);
-        }
-    }
-
-    let client = connect(&state).await?;
-    let count: i64 = if let Some(like) = &filter_value {
-        client
-            .query_one(
-                &format!(
-                    "SELECT COUNT(*) FROM auth.audit_log_entries WHERE instance_id = $1::text::uuid{filter_sql}"
-                ),
-                &[&NIL_INSTANCE, like],
-            )
-            .await
-            .map_err(|_| AuthError::internal("Error searching for audit logs"))?
-            .get(0)
-    } else {
-        client
-            .query_one(
-                "SELECT COUNT(*) FROM auth.audit_log_entries WHERE instance_id = $1::text::uuid",
-                &[&NIL_INSTANCE],
-            )
-            .await
-            .map_err(|_| AuthError::internal("Error searching for audit logs"))?
-            .get(0)
-    };
-
+    let filter = audit_filter(query.query.as_deref())?;
+    let db = pool(&state)?;
+    let mut conn = db
+        .acquire()
+        .await
+        .map_err(|_| AuthError::internal("Error searching for audit logs"))?;
+    let instance = nil_instance();
+    let count = audit_count(&mut conn, &filter, instance).await?;
     let offset = page.saturating_sub(1).saturating_mul(per_page) as i64;
     let limit = per_page as i64;
-    let rows = if let Some(like) = &filter_value {
-        client
-            .query(
-                &format!(
-                    "SELECT id::text, payload, created_at, ip_address FROM auth.audit_log_entries \
-                     WHERE instance_id = $1::text::uuid{filter_sql} ORDER BY created_at DESC LIMIT $3 OFFSET $4"
-                ),
-                &[&NIL_INSTANCE, like, &limit, &offset],
-            )
-            .await
-    } else {
-        client
-            .query(
-                "SELECT id::text, payload, created_at, ip_address FROM auth.audit_log_entries \
-                 WHERE instance_id = $1::text::uuid ORDER BY created_at DESC LIMIT $2 OFFSET $3",
-                &[&NIL_INSTANCE, &limit, &offset],
-            )
-            .await
-    }
-    .map_err(|_| AuthError::internal("Error searching for audit logs"))?;
-
-    let mut logs = Vec::with_capacity(rows.len());
-    for row in rows {
-        let id: String = row.try_get(0).unwrap_or_default();
-        let payload: Value = row_json(&row, 1).unwrap_or(Value::Null);
-        let created_at = row_timestamptz(&row, 2);
-        let ip_address: String = row.try_get(3).unwrap_or_default();
-        logs.push(json!({
-            "id": id,
-            "payload": payload,
-            "created_at": created_at,
-            "ip_address": ip_address,
-        }));
-    }
+    let logs = audit_page(&mut conn, &filter, instance, limit, offset).await?;
 
     let total = u64::try_from(count).unwrap_or(0);
     let total_pages = match per_page {
@@ -318,6 +232,186 @@ async fn get_audit(
     Ok(response)
 }
 
+enum AuditFilter {
+    None,
+    Author(String),
+    Action(String),
+    Type(String),
+}
+
+fn audit_filter(raw: Option<&str>) -> Result<AuditFilter, AuthError> {
+    let Some(raw) = raw.filter(|query| !query.is_empty()) else {
+        return Ok(AuditFilter::None);
+    };
+    let (scope, value) = raw
+        .split_once(':')
+        .ok_or_else(|| AuthError::validation(400, format!("Invalid query scope: {raw}")))?;
+    // FindAuditLogEntries applies the ILIKE only when the value is non-empty.
+    if value.is_empty() {
+        return match scope {
+            "author" | "action" | "type" => Ok(AuditFilter::None),
+            _ => Err(AuthError::validation(
+                400,
+                format!("Invalid query scope: {raw}"),
+            )),
+        };
+    }
+    let like = format!("%{value}%");
+    match scope {
+        "author" => Ok(AuditFilter::Author(like)),
+        "action" => Ok(AuditFilter::Action(like)),
+        "type" => Ok(AuditFilter::Type(like)),
+        _ => Err(AuthError::validation(
+            400,
+            format!("Invalid query scope: {raw}"),
+        )),
+    }
+}
+
+fn audit_entry(
+    id: Uuid,
+    payload: Option<Value>,
+    created_at: Option<chrono::DateTime<chrono::Utc>>,
+    ip_address: &str,
+) -> Value {
+    json!({
+        "id": id.to_string(),
+        "payload": payload.unwrap_or(Value::Null),
+        "created_at": ts_json(created_at),
+        "ip_address": ip_address,
+    })
+}
+
+async fn audit_count(
+    conn: &mut sqlx::PgConnection,
+    filter: &AuditFilter,
+    instance: Uuid,
+) -> Result<i64, AuthError> {
+    let fail = |_| AuthError::internal("Error searching for audit logs");
+    let count = match filter {
+        AuditFilter::None => {
+            sqlx::query!(
+                "SELECT COUNT(*) AS count FROM auth.audit_log_entries WHERE instance_id = $1",
+                instance,
+            )
+            .fetch_one(&mut *conn)
+            .await
+            .map_err(fail)?
+            .count
+        }
+        AuditFilter::Author(like) => {
+            sqlx::query!(
+                "SELECT COUNT(*) AS count FROM auth.audit_log_entries
+                 WHERE instance_id = $1
+                   AND (payload->>'actor_username' ILIKE $2 OR payload->>'actor_name' ILIKE $2)",
+                instance,
+                like,
+            )
+            .fetch_one(&mut *conn)
+            .await
+            .map_err(fail)?
+            .count
+        }
+        AuditFilter::Action(like) => {
+            sqlx::query!(
+                "SELECT COUNT(*) AS count FROM auth.audit_log_entries
+                 WHERE instance_id = $1 AND payload->>'action' ILIKE $2",
+                instance,
+                like,
+            )
+            .fetch_one(&mut *conn)
+            .await
+            .map_err(fail)?
+            .count
+        }
+        AuditFilter::Type(like) => {
+            sqlx::query!(
+                "SELECT COUNT(*) AS count FROM auth.audit_log_entries
+                 WHERE instance_id = $1 AND payload->>'log_type' ILIKE $2",
+                instance,
+                like,
+            )
+            .fetch_one(&mut *conn)
+            .await
+            .map_err(fail)?
+            .count
+        }
+    };
+    Ok(count.unwrap_or(0))
+}
+
+async fn audit_page(
+    conn: &mut sqlx::PgConnection,
+    filter: &AuditFilter,
+    instance: Uuid,
+    limit: i64,
+    offset: i64,
+) -> Result<Vec<Value>, AuthError> {
+    let fail = |_| AuthError::internal("Error searching for audit logs");
+    let logs = match filter {
+        AuditFilter::None => sqlx::query!(
+            "SELECT id, payload, created_at, ip_address FROM auth.audit_log_entries
+             WHERE instance_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3",
+            instance,
+            limit,
+            offset,
+        )
+        .fetch_all(&mut *conn)
+        .await
+        .map_err(fail)?
+        .into_iter()
+        .map(|row| audit_entry(row.id, row.payload, row.created_at, &row.ip_address))
+        .collect(),
+        AuditFilter::Author(like) => sqlx::query!(
+            "SELECT id, payload, created_at, ip_address FROM auth.audit_log_entries
+             WHERE instance_id = $1
+               AND (payload->>'actor_username' ILIKE $2 OR payload->>'actor_name' ILIKE $2)
+             ORDER BY created_at DESC LIMIT $3 OFFSET $4",
+            instance,
+            like,
+            limit,
+            offset,
+        )
+        .fetch_all(&mut *conn)
+        .await
+        .map_err(fail)?
+        .into_iter()
+        .map(|row| audit_entry(row.id, row.payload, row.created_at, &row.ip_address))
+        .collect(),
+        AuditFilter::Action(like) => sqlx::query!(
+            "SELECT id, payload, created_at, ip_address FROM auth.audit_log_entries
+             WHERE instance_id = $1 AND payload->>'action' ILIKE $2
+             ORDER BY created_at DESC LIMIT $3 OFFSET $4",
+            instance,
+            like,
+            limit,
+            offset,
+        )
+        .fetch_all(&mut *conn)
+        .await
+        .map_err(fail)?
+        .into_iter()
+        .map(|row| audit_entry(row.id, row.payload, row.created_at, &row.ip_address))
+        .collect(),
+        AuditFilter::Type(like) => sqlx::query!(
+            "SELECT id, payload, created_at, ip_address FROM auth.audit_log_entries
+             WHERE instance_id = $1 AND payload->>'log_type' ILIKE $2
+             ORDER BY created_at DESC LIMIT $3 OFFSET $4",
+            instance,
+            like,
+            limit,
+            offset,
+        )
+        .fetch_all(&mut *conn)
+        .await
+        .map_err(fail)?
+        .into_iter()
+        .map(|row| audit_entry(row.id, row.payload, row.created_at, &row.ip_address))
+        .collect(),
+    };
+    Ok(logs)
+}
+
 fn format_link(path: &str, pairs: &[(String, String)]) -> String {
     if pairs.is_empty() {
         return path.to_string();
@@ -328,19 +422,6 @@ fn format_link(path: &str, pairs: &[(String, String)]) -> String {
         .collect::<Vec<_>>()
         .join("&");
     format!("{path}?{query}")
-}
-
-fn row_json(row: &tokio_postgres::Row, idx: usize) -> Option<Value> {
-    row.try_get::<_, PgJson<Value>>(idx)
-        .ok()
-        .map(|PgJson(value)| value)
-}
-
-fn row_timestamptz(row: &tokio_postgres::Row, idx: usize) -> Value {
-    if let Ok(ts) = row.try_get::<_, std::time::SystemTime>(idx) {
-        return Value::String(system_time_rfc3339(ts));
-    }
-    Value::Null
 }
 
 fn system_time_rfc3339(time: std::time::SystemTime) -> String {
@@ -408,29 +489,43 @@ async fn list_custom_providers(
             ))
         }
     }
-    let client = connect(&state).await?;
+    let db = pool(&state)?;
+    let mut conn = db
+        .acquire()
+        .await
+        .map_err(|_| AuthError::internal("Error retrieving custom OAuth providers"))?;
     let rows = match query.provider_type.as_deref() {
-        Some(kind @ ("oauth2" | "oidc")) => {
-            client
-                .query(
-                    &format!(
-                    "{CUSTOM_PROVIDER_COLUMNS} WHERE provider_type = $1 ORDER BY created_at DESC"
-                ),
-                    &[&kind],
-                )
-                .await
-        }
-        _ => {
-            client
-                .query(
-                    &format!("{CUSTOM_PROVIDER_COLUMNS} ORDER BY created_at DESC"),
-                    &[],
-                )
-                .await
-        }
-    }
-    .map_err(|_| AuthError::internal("Error retrieving custom OAuth providers"))?;
-
+        Some(kind @ ("oauth2" | "oidc")) => sqlx::query_as!(
+            CustomProviderRow,
+            "SELECT id, provider_type, identifier, name, client_id,
+                    acceptable_client_ids, scopes, pkce_enabled, attribute_mapping,
+                    custom_claims_allowlist, authorization_params, enabled, email_optional,
+                    issuer, discovery_url, skip_nonce_check, cached_discovery,
+                    authorization_url, token_url, userinfo_url, jwks_uri,
+                    created_at, updated_at
+             FROM auth.custom_oauth_providers
+             WHERE provider_type = $1
+             ORDER BY created_at DESC",
+            kind,
+        )
+        .fetch_all(&mut *conn)
+        .await
+        .map_err(|_| AuthError::internal("Error retrieving custom OAuth providers"))?,
+        _ => sqlx::query_as!(
+            CustomProviderRow,
+            "SELECT id, provider_type, identifier, name, client_id,
+                    acceptable_client_ids, scopes, pkce_enabled, attribute_mapping,
+                    custom_claims_allowlist, authorization_params, enabled, email_optional,
+                    issuer, discovery_url, skip_nonce_check, cached_discovery,
+                    authorization_url, token_url, userinfo_url, jwks_uri,
+                    created_at, updated_at
+             FROM auth.custom_oauth_providers
+             ORDER BY created_at DESC",
+        )
+        .fetch_all(&mut *conn)
+        .await
+        .map_err(|_| AuthError::internal("Error retrieving custom OAuth providers"))?,
+    };
     let providers: Vec<Value> = rows.iter().map(custom_provider_json).collect();
     Ok(json_ok(&json!({ "providers": providers })))
 }
@@ -444,8 +539,12 @@ async fn get_custom_provider(
     require_admin(&state, &headers)?;
     require_custom_oauth(&state)?;
     validate_custom_identifier(&identifier)?;
-    let client = connect(&state).await?;
-    let provider = load_custom_provider(&client, &identifier).await?;
+    let db = pool(&state)?;
+    let mut conn = db
+        .acquire()
+        .await
+        .map_err(|_| AuthError::internal("Error retrieving custom OAuth provider"))?;
+    let provider = load_custom_provider(&mut conn, &identifier).await?;
     Ok(json_ok(&provider))
 }
 
@@ -458,14 +557,15 @@ async fn delete_custom_provider(
     require_admin(&state, &headers)?;
     require_custom_oauth(&state)?;
     validate_custom_identifier(&identifier)?;
-    let client = connect(&state).await?;
-    let deleted = client
-        .execute(
-            "DELETE FROM auth.custom_oauth_providers WHERE identifier = $1",
-            &[&identifier],
-        )
-        .await
-        .map_err(|_| AuthError::internal("Error deleting custom OAuth provider"))?;
+    let db = pool(&state)?;
+    let deleted = sqlx::query!(
+        "DELETE FROM auth.custom_oauth_providers WHERE identifier = $1",
+        identifier,
+    )
+    .execute(&db)
+    .await
+    .map_err(|_| AuthError::internal("Error deleting custom OAuth provider"))?
+    .rows_affected();
     if deleted == 0 {
         return Err(AuthError::not_found(
             "custom_provider_not_found",
@@ -488,17 +588,50 @@ fn validate_custom_identifier(identifier: &str) -> Result<(), AuthError> {
     Ok(())
 }
 
+struct CustomProviderRow {
+    id: Uuid,
+    provider_type: String,
+    identifier: String,
+    name: String,
+    client_id: String,
+    acceptable_client_ids: Vec<String>,
+    scopes: Vec<String>,
+    pkce_enabled: bool,
+    attribute_mapping: Value,
+    custom_claims_allowlist: Vec<String>,
+    authorization_params: Value,
+    enabled: bool,
+    email_optional: bool,
+    issuer: Option<String>,
+    discovery_url: Option<String>,
+    skip_nonce_check: bool,
+    cached_discovery: Option<Value>,
+    authorization_url: Option<String>,
+    token_url: Option<String>,
+    userinfo_url: Option<String>,
+    jwks_uri: Option<String>,
+    created_at: chrono::DateTime<chrono::Utc>,
+    updated_at: chrono::DateTime<chrono::Utc>,
+}
+
 async fn load_custom_provider(
-    client: &tokio_postgres::Client,
+    conn: &mut sqlx::PgConnection,
     identifier: &str,
 ) -> Result<Value, AuthError> {
-    let row = client
-        .query_opt(
-            &format!("{CUSTOM_PROVIDER_COLUMNS} WHERE identifier = $1"),
-            &[&identifier],
-        )
-        .await
-        .map_err(|_| AuthError::internal("Error retrieving custom OAuth provider"))?;
+    let row = sqlx::query_as!(
+        CustomProviderRow,
+        "SELECT id, provider_type, identifier, name, client_id,
+                acceptable_client_ids, scopes, pkce_enabled, attribute_mapping,
+                custom_claims_allowlist, authorization_params, enabled, email_optional,
+                issuer, discovery_url, skip_nonce_check, cached_discovery,
+                authorization_url, token_url, userinfo_url, jwks_uri,
+                created_at, updated_at
+         FROM auth.custom_oauth_providers WHERE identifier = $1",
+        identifier,
+    )
+    .fetch_optional(&mut *conn)
+    .await
+    .map_err(|_| AuthError::internal("Error retrieving custom OAuth provider"))?;
     let Some(row) = row else {
         return Err(AuthError::not_found(
             "custom_provider_not_found",
@@ -508,75 +641,34 @@ async fn load_custom_provider(
     Ok(custom_provider_json(&row))
 }
 
-fn custom_provider_json(row: &tokio_postgres::Row) -> Value {
+fn custom_provider_json(row: &CustomProviderRow) -> Value {
     let mut object = serde_json::Map::new();
-    object.insert(
-        "id".into(),
-        json!(row.try_get::<_, String>(0).unwrap_or_default()),
-    );
-    object.insert(
-        "provider_type".into(),
-        json!(row.try_get::<_, String>(1).unwrap_or_default()),
-    );
-    object.insert(
-        "identifier".into(),
-        json!(row.try_get::<_, String>(2).unwrap_or_default()),
-    );
-    object.insert(
-        "name".into(),
-        json!(row.try_get::<_, String>(3).unwrap_or_default()),
-    );
-    object.insert(
-        "client_id".into(),
-        json!(row.try_get::<_, String>(4).unwrap_or_default()),
-    );
+    object.insert("id".into(), json!(row.id.to_string()));
+    object.insert("provider_type".into(), json!(row.provider_type));
+    object.insert("identifier".into(), json!(row.identifier));
+    object.insert("name".into(), json!(row.name));
+    object.insert("client_id".into(), json!(row.client_id));
     object.insert(
         "acceptable_client_ids".into(),
-        json!(row.try_get::<_, Vec<String>>(5).unwrap_or_default()),
+        json!(row.acceptable_client_ids),
     );
-    object.insert(
-        "scopes".into(),
-        json!(row.try_get::<_, Vec<String>>(6).unwrap_or_default()),
-    );
-    object.insert(
-        "pkce_enabled".into(),
-        json!(row.try_get::<_, bool>(7).unwrap_or(true)),
-    );
-    object.insert(
-        "attribute_mapping".into(),
-        row_json(row, 8).unwrap_or(json!({})),
-    );
+    object.insert("scopes".into(), json!(row.scopes));
+    object.insert("pkce_enabled".into(), json!(row.pkce_enabled));
+    object.insert("attribute_mapping".into(), row.attribute_mapping.clone());
     object.insert(
         "custom_claims_allowlist".into(),
-        json!(row.try_get::<_, Vec<String>>(9).unwrap_or_default()),
+        json!(row.custom_claims_allowlist),
     );
     object.insert(
         "authorization_params".into(),
-        row_json(row, 10).unwrap_or(json!({})),
+        row.authorization_params.clone(),
     );
-    object.insert(
-        "enabled".into(),
-        json!(row.try_get::<_, bool>(11).unwrap_or(true)),
-    );
-    object.insert(
-        "email_optional".into(),
-        json!(row.try_get::<_, bool>(12).unwrap_or(false)),
-    );
-    insert_opt_str(
-        &mut object,
-        "issuer",
-        row.try_get::<_, Option<String>>(13).ok().flatten(),
-    );
-    insert_opt_str(
-        &mut object,
-        "discovery_url",
-        row.try_get::<_, Option<String>>(14).ok().flatten(),
-    );
-    object.insert(
-        "skip_nonce_check".into(),
-        json!(row.try_get::<_, bool>(15).unwrap_or(false)),
-    );
-    if let Some(discovery) = row_json(row, 16) {
+    object.insert("enabled".into(), json!(row.enabled));
+    object.insert("email_optional".into(), json!(row.email_optional));
+    insert_opt_str(&mut object, "issuer", row.issuer.clone());
+    insert_opt_str(&mut object, "discovery_url", row.discovery_url.clone());
+    object.insert("skip_nonce_check".into(), json!(row.skip_nonce_check));
+    if let Some(discovery) = row.cached_discovery.clone() {
         if !discovery.is_null() {
             object.insert("discovery_document".into(), discovery);
         }
@@ -584,25 +676,13 @@ fn custom_provider_json(row: &tokio_postgres::Row) -> Value {
     insert_opt_str(
         &mut object,
         "authorization_url",
-        row.try_get::<_, Option<String>>(17).ok().flatten(),
+        row.authorization_url.clone(),
     );
-    insert_opt_str(
-        &mut object,
-        "token_url",
-        row.try_get::<_, Option<String>>(18).ok().flatten(),
-    );
-    insert_opt_str(
-        &mut object,
-        "userinfo_url",
-        row.try_get::<_, Option<String>>(19).ok().flatten(),
-    );
-    insert_opt_str(
-        &mut object,
-        "jwks_uri",
-        row.try_get::<_, Option<String>>(20).ok().flatten(),
-    );
-    object.insert("created_at".into(), row_timestamptz(row, 21));
-    object.insert("updated_at".into(), row_timestamptz(row, 22));
+    insert_opt_str(&mut object, "token_url", row.token_url.clone());
+    insert_opt_str(&mut object, "userinfo_url", row.userinfo_url.clone());
+    insert_opt_str(&mut object, "jwks_uri", row.jwks_uri.clone());
+    object.insert("created_at".into(), ts_json(Some(row.created_at)));
+    object.insert("updated_at".into(), ts_json(Some(row.updated_at)));
     Value::Object(object)
 }
 
@@ -619,17 +699,17 @@ async fn list_oauth_clients(
 ) -> Result<Response, AuthError> {
     require_admin(&state, &headers)?;
     require_oauth_server(&state)?;
-    let client = connect(&state).await?;
-    let rows = client
-        .query(
-            "SELECT id::text, client_type::text, redirect_uris, token_endpoint_auth_method, \
-                    grant_types, client_name, client_uri, logo_uri, registration_type::text, \
-                    created_at, updated_at \
-             FROM auth.oauth_clients WHERE deleted_at IS NULL ORDER BY created_at DESC",
-            &[],
-        )
-        .await
-        .map_err(|_| AuthError::internal("Error listing OAuth clients"))?;
+    let db = pool(&state)?;
+    let rows = sqlx::query_as!(
+        OAuthClientRow,
+        "SELECT id, client_type::text AS client_type, redirect_uris, token_endpoint_auth_method,
+                grant_types, client_name, client_uri, logo_uri, registration_type::text AS registration_type,
+                created_at, updated_at
+         FROM auth.oauth_clients WHERE deleted_at IS NULL ORDER BY created_at DESC",
+    )
+    .fetch_all(&db)
+    .await
+    .map_err(|_| AuthError::internal("Error listing OAuth clients"))?;
     if rows.is_empty() {
         return Ok(json_ok(&json!({})));
     }
@@ -637,54 +717,45 @@ async fn list_oauth_clients(
     Ok(json_ok(&json!({ "clients": clients })))
 }
 
-fn oauth_client_json(row: &tokio_postgres::Row) -> Value {
+struct OAuthClientRow {
+    id: Uuid,
+    client_type: Option<String>,
+    redirect_uris: String,
+    token_endpoint_auth_method: String,
+    grant_types: String,
+    client_name: Option<String>,
+    client_uri: Option<String>,
+    logo_uri: Option<String>,
+    registration_type: Option<String>,
+    created_at: chrono::DateTime<chrono::Utc>,
+    updated_at: chrono::DateTime<chrono::Utc>,
+}
+
+fn oauth_client_json(row: &OAuthClientRow) -> Value {
     let mut object = serde_json::Map::new();
-    object.insert(
-        "client_id".into(),
-        json!(row.try_get::<_, String>(0).unwrap_or_default()),
-    );
+    object.insert("client_id".into(), json!(row.id.to_string()));
     object.insert(
         "client_type".into(),
-        json!(row.try_get::<_, String>(1).unwrap_or_default()),
+        json!(row.client_type.clone().unwrap_or_default()),
     );
-    insert_nonempty_list(
-        &mut object,
-        "redirect_uris",
-        &split_csv(&row.try_get::<_, String>(2).unwrap_or_default()),
-    );
+    insert_nonempty_list(&mut object, "redirect_uris", &split_csv(&row.redirect_uris));
     insert_opt_str(
         &mut object,
         "token_endpoint_auth_method",
-        row.try_get::<_, String>(3).ok(),
+        Some(row.token_endpoint_auth_method.clone()),
     );
-    insert_nonempty_list(
-        &mut object,
-        "grant_types",
-        &split_csv(&row.try_get::<_, String>(4).unwrap_or_default()),
-    );
+    insert_nonempty_list(&mut object, "grant_types", &split_csv(&row.grant_types));
     object.insert("response_types".into(), json!(["code"]));
-    insert_opt_str(
-        &mut object,
-        "client_name",
-        row.try_get::<_, Option<String>>(5).ok().flatten(),
-    );
-    insert_opt_str(
-        &mut object,
-        "client_uri",
-        row.try_get::<_, Option<String>>(6).ok().flatten(),
-    );
-    insert_opt_str(
-        &mut object,
-        "logo_uri",
-        row.try_get::<_, Option<String>>(7).ok().flatten(),
-    );
+    insert_opt_str(&mut object, "client_name", row.client_name.clone());
+    insert_opt_str(&mut object, "client_uri", row.client_uri.clone());
+    insert_opt_str(&mut object, "logo_uri", row.logo_uri.clone());
     insert_opt_str(
         &mut object,
         "registration_type",
-        row.try_get::<_, String>(8).ok(),
+        row.registration_type.clone(),
     );
-    object.insert("created_at".into(), row_timestamptz(row, 9));
-    object.insert("updated_at".into(), row_timestamptz(row, 10));
+    object.insert("created_at".into(), ts_json(Some(row.created_at)));
+    object.insert("updated_at".into(), ts_json(Some(row.updated_at)));
     Value::Object(object)
 }
 
@@ -716,15 +787,18 @@ async fn delete_oauth_client(
     if !is_uuid(&client_id) {
         return Err(AuthError::validation(400, "invalid client_id format"));
     }
-    let client = connect(&state).await?;
-    let deleted = client
-        .execute(
-            "UPDATE auth.oauth_clients SET deleted_at = NOW() \
-             WHERE id = $1::text::uuid AND deleted_at IS NULL",
-            &[&client_id],
-        )
-        .await
-        .map_err(|_| AuthError::internal("Error deleting OAuth client"))?;
+    let id = Uuid::parse_str(&client_id)
+        .map_err(|_| AuthError::validation(400, "invalid client_id format"))?;
+    let db = pool(&state)?;
+    let deleted = sqlx::query!(
+        "UPDATE auth.oauth_clients SET deleted_at = NOW()
+         WHERE id = $1 AND deleted_at IS NULL",
+        id,
+    )
+    .execute(&db)
+    .await
+    .map_err(|_| AuthError::internal("Error deleting OAuth client"))?
+    .rows_affected();
     if deleted == 0 {
         return Err(AuthError::not_found(
             "oauth_client_not_found",
@@ -732,6 +806,14 @@ async fn delete_oauth_client(
         ));
     }
     Ok(no_content())
+}
+
+struct SsoProviderRow {
+    id: Uuid,
+    resource_id: Option<String>,
+    disabled: Option<bool>,
+    created_at: Option<chrono::DateTime<chrono::Utc>>,
+    updated_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 // megabase:unit auth:route:DELETE /auth/v1/admin/sso/providers/{idp_id}
@@ -748,23 +830,32 @@ async fn delete_sso_provider(
             "SSO Identity Provider not found",
         ));
     }
-    let client = connect(&state).await?;
+    let db = pool(&state)?;
+    let mut conn = db
+        .acquire()
+        .await
+        .map_err(|_| AuthError::internal("Database error finding SSO Identity Provider"))?;
     let row = if let Some(resource_id) = resource_id {
-        client
-            .query_opt(
-                "SELECT id::text, resource_id, disabled, created_at, updated_at \
-                 FROM auth.sso_providers WHERE resource_id = $1",
-                &[&resource_id],
-            )
-            .await
+        sqlx::query_as!(
+            SsoProviderRow,
+            "SELECT id, resource_id, disabled, created_at, updated_at
+             FROM auth.sso_providers WHERE resource_id = $1",
+            resource_id,
+        )
+        .fetch_optional(&mut *conn)
+        .await
     } else {
-        client
-            .query_opt(
-                "SELECT id::text, resource_id, disabled, created_at, updated_at \
-                 FROM auth.sso_providers WHERE id = $1::text::uuid",
-                &[&idp_id],
-            )
-            .await
+        let id = Uuid::parse_str(&idp_id).map_err(|_| {
+            AuthError::not_found("sso_provider_not_found", "SSO Identity Provider not found")
+        })?;
+        sqlx::query_as!(
+            SsoProviderRow,
+            "SELECT id, resource_id, disabled, created_at, updated_at
+             FROM auth.sso_providers WHERE id = $1",
+            id,
+        )
+        .fetch_optional(&mut *conn)
+        .await
     }
     .map_err(|_| AuthError::internal("Database error finding SSO Identity Provider"))?;
     let Some(row) = row else {
@@ -773,53 +864,41 @@ async fn delete_sso_provider(
             "SSO Identity Provider not found",
         ));
     };
-    let id: String = row.try_get(0).unwrap_or_default();
-    let resource_id: Option<String> = row.try_get(1).ok().flatten();
-    let disabled: Option<bool> = row.try_get(2).ok();
-    let created_at = row_timestamptz(&row, 3);
-    let updated_at = row_timestamptz(&row, 4);
+    let saml = sqlx::query!(
+        "SELECT entity_id, metadata_xml, metadata_url, name_id_format, attribute_mapping
+         FROM auth.saml_providers WHERE sso_provider_id = $1",
+        row.id,
+    )
+    .fetch_optional(&mut *conn)
+    .await
+    .ok()
+    .flatten();
+    let domains = sqlx::query!(
+        "SELECT domain FROM auth.sso_domains WHERE sso_provider_id = $1",
+        row.id,
+    )
+    .fetch_all(&mut *conn)
+    .await
+    .unwrap_or_default();
 
-    let saml = client
-        .query_opt(
-            "SELECT entity_id, metadata_xml, metadata_url, name_id_format, attribute_mapping \
-             FROM auth.saml_providers WHERE sso_provider_id = $1::text::uuid",
-            &[&id],
-        )
-        .await
-        .ok()
-        .flatten();
-    let domains = client
-        .query(
-            "SELECT domain FROM auth.sso_domains WHERE sso_provider_id = $1::text::uuid",
-            &[&id],
-        )
-        .await
-        .unwrap_or_default();
-
-    client
-        .execute(
-            "DELETE FROM auth.sso_providers WHERE id = $1::text::uuid",
-            &[&id],
-        )
+    sqlx::query!("DELETE FROM auth.sso_providers WHERE id = $1", row.id)
+        .execute(&mut *conn)
         .await
         .map_err(|_| AuthError::internal("Database error deleting SSO Identity Provider"))?;
 
     let mut provider = serde_json::Map::new();
-    provider.insert("id".into(), json!(id));
-    if let Some(resource_id) = resource_id {
+    provider.insert("id".into(), json!(row.id.to_string()));
+    if let Some(resource_id) = row.resource_id {
         provider.insert("resource_id".into(), json!(resource_id));
     }
-    provider.insert("disabled".into(), json!(disabled));
+    provider.insert("disabled".into(), json!(row.disabled));
     if let Some(saml) = saml {
         let mut saml_obj = serde_json::Map::new();
-        saml_obj.insert(
-            "entity_id".into(),
-            json!(saml.try_get::<_, String>(0).unwrap_or_default()),
-        );
+        saml_obj.insert("entity_id".into(), json!(saml.entity_id));
         // Metadata XML is cleared on list; delete returns the stored row, then
         // destroy. Match list's empty metadata so the body stays small.
         saml_obj.insert("metadata_xml".into(), json!(""));
-        if let Ok(Some(url)) = saml.try_get::<_, Option<String>>(2) {
+        if let Some(url) = saml.metadata_url {
             saml_obj.insert("metadata_url".into(), json!(url));
         }
         provider.insert("saml".into(), Value::Object(saml_obj));
@@ -827,12 +906,12 @@ async fn delete_sso_provider(
     provider.insert(
         "domains".into(),
         json!(domains
-            .iter()
-            .map(|d| json!({ "domain": d.try_get::<_, String>(0).unwrap_or_default() }))
+            .into_iter()
+            .map(|domain| json!({ "domain": domain.domain }))
             .collect::<Vec<_>>()),
     );
-    provider.insert("created_at".into(), created_at);
-    provider.insert("updated_at".into(), updated_at);
+    provider.insert("created_at".into(), ts_json(row.created_at));
+    provider.insert("updated_at".into(), ts_json(row.updated_at));
     Ok(json_ok(&Value::Object(provider)))
 }
 
@@ -855,8 +934,15 @@ async fn delete_user(
             "user_id must be an UUID",
         ));
     }
-    let mut client = connect(&state).await?;
-    let user = load_user(&client, &user_id).await?;
+    let id = Uuid::parse_str(&user_id)
+        .map_err(|_| AuthError::not_found("validation_failed", "user_id must be an UUID"))?;
+    let db = pool(&state)?;
+    let mut conn = db
+        .acquire()
+        .await
+        .map_err(|_| AuthError::internal("Database error loading user"))?;
+    let user = load_user(&mut conn, id).await?;
+    drop(conn);
     let soft = if body.is_empty() {
         false
     } else {
@@ -865,22 +951,20 @@ async fn delete_user(
             .should_soft_delete
             .unwrap_or(false)
     };
-    let tx = client
-        .transaction()
+    let mut tx = db
+        .begin()
         .await
         .map_err(|_| AuthError::internal("Database error deleting user"))?;
-    write_user_deleted_audit(&tx, &user).await?;
+    write_user_deleted_audit(&mut tx, &user).await?;
     if soft {
         if user.deleted_at.is_none() {
-            soft_delete_user(&tx, &user).await?;
+            soft_delete_user(&mut tx, &user).await?;
         }
     } else {
-        tx.execute(
-            "DELETE FROM auth.users WHERE id = $1::text::uuid",
-            &[&user_id],
-        )
-        .await
-        .map_err(|_| AuthError::internal("Database error deleting user"))?;
+        sqlx::query!("DELETE FROM auth.users WHERE id = $1", user.id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|_| AuthError::internal("Database error deleting user"))?;
     }
     tx.commit()
         .await
@@ -888,127 +972,125 @@ async fn delete_user(
     Ok(json_ok(&json!({})))
 }
 
-async fn soft_delete_user<C>(client: &C, user: &LoadedUser) -> Result<(), AuthError>
-where
-    C: GenericClient + Sync,
-{
-    let email = obfuscate_email(&user.id, user.email.as_deref().unwrap_or(""));
-    let phone = obfuscate_phone(&user.id, user.phone.as_deref().unwrap_or(""));
-    let email_change = obfuscate_email(&user.id, user.email_change.as_deref().unwrap_or(""));
-    let phone_change = obfuscate_phone(&user.id, user.phone_change.as_deref().unwrap_or(""));
-    client
-        .execute(
-            "UPDATE auth.users SET \
-                    email = $2, phone = $3, email_change = $4, phone_change = $5, \
-                    encrypted_password = NULL, \
-                    confirmation_token = '', recovery_token = '', \
-                    email_change_token_current = '', email_change_token_new = '', \
-                    phone_change_token = '', deleted_at = NOW(), \
-                    raw_user_meta_data = '{}'::jsonb, raw_app_meta_data = '{}'::jsonb \
-                 WHERE id = $1::text::uuid",
-            &[&user.id, &email, &phone, &email_change, &phone_change],
-        )
-        .await
-        .map_err(|_| AuthError::internal("Error soft deleting user"))?;
-    client
-        .execute(
-            "DELETE FROM auth.one_time_tokens WHERE user_id = $1::text::uuid",
-            &[&user.id],
-        )
-        .await
-        .map_err(|_| AuthError::internal("Error soft deleting user"))?;
-    soft_delete_user_identities(client, &user.id).await?;
-    client
-        .execute(
-            "DELETE FROM auth.mfa_factors WHERE user_id = $1::text::uuid",
-            &[&user.id],
-        )
+async fn soft_delete_user(
+    conn: &mut sqlx::PgConnection,
+    user: &LoadedUser,
+) -> Result<(), AuthError> {
+    let user_key = user.id.to_string();
+    let email = obfuscate_email(&user_key, user.email.as_deref().unwrap_or(""));
+    let phone = obfuscate_phone(&user_key, user.phone.as_deref().unwrap_or(""));
+    let email_change = obfuscate_email(&user_key, user.email_change.as_deref().unwrap_or(""));
+    let phone_change = obfuscate_phone(&user_key, user.phone_change.as_deref().unwrap_or(""));
+    sqlx::query!(
+        "UPDATE auth.users SET
+            email = $2, phone = $3, email_change = $4, phone_change = $5,
+            encrypted_password = NULL,
+            confirmation_token = '', recovery_token = '',
+            email_change_token_current = '', email_change_token_new = '',
+            phone_change_token = '', deleted_at = NOW(),
+            raw_user_meta_data = '{}'::jsonb, raw_app_meta_data = '{}'::jsonb
+         WHERE id = $1",
+        user.id,
+        email,
+        phone,
+        email_change,
+        phone_change,
+    )
+    .execute(&mut *conn)
+    .await
+    .map_err(|_| AuthError::internal("Error soft deleting user"))?;
+    sqlx::query!(
+        "DELETE FROM auth.one_time_tokens WHERE user_id = $1",
+        user.id,
+    )
+    .execute(&mut *conn)
+    .await
+    .map_err(|_| AuthError::internal("Error soft deleting user"))?;
+    soft_delete_user_identities(conn, &user_key, user.id).await?;
+    sqlx::query!("DELETE FROM auth.mfa_factors WHERE user_id = $1", user.id,)
+        .execute(&mut *conn)
         .await
         .map_err(|_| AuthError::internal("Error deleting user's factors"))?;
-    client
-        .execute(
-            "DELETE FROM auth.webauthn_credentials WHERE user_id = $1::text::uuid",
-            &[&user.id],
-        )
-        .await
-        .map_err(|_| AuthError::internal("Error deleting user's WebAuthn credentials"))?;
-    client
-        .execute(
-            "DELETE FROM auth.sessions WHERE user_id = $1::text::uuid",
-            &[&user.id],
-        )
+    sqlx::query!(
+        "DELETE FROM auth.webauthn_credentials WHERE user_id = $1",
+        user.id,
+    )
+    .execute(&mut *conn)
+    .await
+    .map_err(|_| AuthError::internal("Error deleting user's WebAuthn credentials"))?;
+    sqlx::query!("DELETE FROM auth.sessions WHERE user_id = $1", user.id)
+        .execute(&mut *conn)
         .await
         .map_err(|_| AuthError::internal("Error deleting user's sessions"))?;
     Ok(())
 }
 
-async fn soft_delete_user_identities<C>(client: &C, user_id: &str) -> Result<(), AuthError>
-where
-    C: GenericClient + Sync,
-{
-    let rows = client
-        .query(
-            "SELECT id::text, provider, provider_id FROM auth.identities \
-             WHERE user_id = $1::text::uuid",
-            &[&user_id],
+async fn soft_delete_user_identities(
+    conn: &mut sqlx::PgConnection,
+    user_key: &str,
+    user_id: Uuid,
+) -> Result<(), AuthError> {
+    let rows = sqlx::query!(
+        "SELECT id, provider, provider_id FROM auth.identities WHERE user_id = $1",
+        user_id,
+    )
+    .fetch_all(&mut *conn)
+    .await
+    .map_err(|_| AuthError::internal("Error soft deleting user identities"))?;
+    for row in rows {
+        let obfuscated =
+            obfuscate_value(user_key, &format!("{}:{}", row.provider, row.provider_id));
+        sqlx::query!(
+            "UPDATE auth.identities SET identity_data = '{}'::jsonb, provider_id = $2
+             WHERE id = $1",
+            row.id,
+            obfuscated,
         )
+        .execute(&mut *conn)
         .await
         .map_err(|_| AuthError::internal("Error soft deleting user identities"))?;
-    for row in rows {
-        let id: String = row.try_get(0).unwrap_or_default();
-        let provider: String = row.try_get(1).unwrap_or_default();
-        let provider_id: String = row.try_get(2).unwrap_or_default();
-        let obfuscated = obfuscate_value(user_id, &format!("{provider}:{provider_id}"));
-        client
-            .execute(
-                "UPDATE auth.identities SET identity_data = '{}'::jsonb, provider_id = $2 \
-                 WHERE id = $1::text::uuid",
-                &[&id, &obfuscated],
-            )
-            .await
-            .map_err(|_| AuthError::internal("Error soft deleting user identities"))?;
     }
     Ok(())
 }
 
 struct LoadedUser {
-    id: String,
+    id: Uuid,
     email: Option<String>,
     phone: Option<String>,
     email_change: Option<String>,
     phone_change: Option<String>,
-    deleted_at: Option<std::time::SystemTime>,
+    deleted_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
-async fn load_user<C>(client: &C, user_id: &str) -> Result<LoadedUser, AuthError>
-where
-    C: GenericClient + Sync,
-{
-    let row = client
-        .query_opt(
-            "SELECT email, phone, email_change, phone_change, deleted_at FROM auth.users \
-             WHERE instance_id = $1::text::uuid AND id = $2::text::uuid",
-            &[&NIL_INSTANCE, &user_id],
-        )
-        .await
-        .map_err(|_| AuthError::internal("Database error loading user"))?;
+async fn load_user(conn: &mut sqlx::PgConnection, user_id: Uuid) -> Result<LoadedUser, AuthError> {
+    let instance = nil_instance();
+    let row = sqlx::query!(
+        "SELECT email, phone, email_change, phone_change, deleted_at FROM auth.users
+         WHERE instance_id = $1 AND id = $2",
+        instance,
+        user_id,
+    )
+    .fetch_optional(&mut *conn)
+    .await
+    .map_err(|_| AuthError::internal("Database error loading user"))?;
     let Some(row) = row else {
         return Err(AuthError::not_found("user_not_found", "User not found"));
     };
     Ok(LoadedUser {
-        id: user_id.to_string(),
-        email: row.try_get(0).ok().flatten(),
-        phone: row.try_get(1).ok().flatten(),
-        email_change: row.try_get(2).ok().flatten(),
-        phone_change: row.try_get(3).ok().flatten(),
-        deleted_at: row.try_get(4).ok().flatten(),
+        id: user_id,
+        email: row.email,
+        phone: row.phone,
+        email_change: row.email_change,
+        phone_change: row.phone_change,
+        deleted_at: row.deleted_at,
     })
 }
 
-async fn write_user_deleted_audit<C>(client: &C, user: &LoadedUser) -> Result<(), AuthError>
-where
-    C: GenericClient + Sync,
-{
+async fn write_user_deleted_audit(
+    conn: &mut sqlx::PgConnection,
+    user: &LoadedUser,
+) -> Result<(), AuthError> {
+    let instance = nil_instance();
     let payload = json!({
         "actor_id": NIL_INSTANCE,
         "actor_via_sso": false,
@@ -1016,19 +1098,20 @@ where
         "action": "user_deleted",
         "log_type": "team",
         "traits": {
-            "user_id": user.id,
+            "user_id": user.id.to_string(),
             "user_email": user.email,
             "user_phone": user.phone,
         }
     });
-    client
-        .execute(
-            "INSERT INTO auth.audit_log_entries (instance_id, id, payload, created_at, ip_address) \
-             VALUES ($1::text::uuid, gen_random_uuid(), $2, NOW(), '')",
-            &[&NIL_INSTANCE, &PgJson(&payload)],
-        )
-        .await
-        .map_err(|_| AuthError::internal("Error recording audit log entry"))?;
+    sqlx::query!(
+        "INSERT INTO auth.audit_log_entries (instance_id, id, payload, created_at, ip_address)
+         VALUES ($1, gen_random_uuid(), $2, NOW(), '')",
+        instance,
+        payload,
+    )
+    .execute(&mut *conn)
+    .await
+    .map_err(|_| AuthError::internal("Error recording audit log entry"))?;
     Ok(())
 }
 
@@ -1062,23 +1145,34 @@ async fn delete_factor(
             "user_id must be an UUID",
         ));
     }
-    let mut client = connect(&state).await?;
-    let _user = load_user(&client, user_id).await?;
+    let user_uuid = Uuid::parse_str(user_id)
+        .map_err(|_| AuthError::not_found("validation_failed", "user_id must be an UUID"))?;
+    let db = pool(&state)?;
+    let mut conn = db
+        .acquire()
+        .await
+        .map_err(|_| AuthError::internal("Database error loading user"))?;
+    let _user = load_user(&mut conn, user_uuid).await?;
     if !is_uuid(factor_id) {
         return Err(AuthError::not_found(
             "validation_failed",
             "factor_id must be an UUID",
         ));
     }
-    let row = client
-        .query_opt(
-            "SELECT id::text, friendly_name, factor_type::text, status::text, \
-                    created_at, updated_at, phone, last_challenged_at \
-             FROM auth.mfa_factors WHERE user_id = $1::text::uuid AND id = $2::text::uuid",
-            &[&user_id, &factor_id],
-        )
-        .await
-        .map_err(|_| AuthError::internal("Database error loading factor"))?;
+    let factor_uuid = Uuid::parse_str(factor_id)
+        .map_err(|_| AuthError::not_found("validation_failed", "factor_id must be an UUID"))?;
+    let row = sqlx::query_as!(
+        FactorRow,
+        "SELECT id, friendly_name, factor_type::text AS factor_type, status::text AS status,
+                created_at, updated_at, phone, last_challenged_at
+         FROM auth.mfa_factors WHERE user_id = $1 AND id = $2",
+        user_uuid,
+        factor_uuid,
+    )
+    .fetch_optional(&mut *conn)
+    .await
+    .map_err(|_| AuthError::internal("Database error loading factor"))?;
+    drop(conn);
     let Some(row) = row else {
         return Err(AuthError::not_found(
             "mfa_factor_not_found",
@@ -1086,79 +1180,72 @@ async fn delete_factor(
         ));
     };
     let mut factor = serde_json::Map::new();
-    factor.insert(
-        "id".into(),
-        json!(row.try_get::<_, String>(0).unwrap_or_default()),
-    );
-    if let Ok(Some(name)) = row.try_get::<_, Option<String>>(1) {
-        if !name.is_empty() {
-            factor.insert("friendly_name".into(), json!(name));
-        }
+    let factor_type = row.factor_type.clone().unwrap_or_default();
+    factor.insert("id".into(), json!(row.id.to_string()));
+    if let Some(name) = row.friendly_name.clone().filter(|name| !name.is_empty()) {
+        factor.insert("friendly_name".into(), json!(name));
     }
-    factor.insert(
-        "factor_type".into(),
-        json!(row.try_get::<_, String>(2).unwrap_or_default()),
-    );
+    factor.insert("factor_type".into(), json!(factor_type));
     factor.insert(
         "status".into(),
-        json!(row.try_get::<_, String>(3).unwrap_or_default()),
+        json!(row.status.clone().unwrap_or_default()),
     );
-    factor.insert("created_at".into(), row_timestamptz(&row, 4));
-    factor.insert("updated_at".into(), row_timestamptz(&row, 5));
-    factor.insert(
-        "phone".into(),
-        json!(row
-            .try_get::<_, Option<String>>(6)
-            .ok()
-            .flatten()
-            .unwrap_or_default()),
-    );
-    factor.insert("last_challenged_at".into(), row_timestamptz(&row, 7));
+    factor.insert("created_at".into(), ts_json(Some(row.created_at)));
+    factor.insert("updated_at".into(), ts_json(Some(row.updated_at)));
+    factor.insert("phone".into(), json!(row.phone.unwrap_or_default()));
+    factor.insert("last_challenged_at".into(), ts_json(row.last_challenged_at));
 
-    let factor_type = factor
-        .get("factor_type")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_string();
     let amr = amr_method_for_factor_type(&factor_type)?;
-    let tx = client
-        .transaction()
+    let mut tx = db
+        .begin()
         .await
         .map_err(|_| AuthError::internal("Database error deleting factor"))?;
-    tx.execute(
-        "DELETE FROM auth.mfa_factors WHERE id = $1::text::uuid",
-        &[&factor_id],
-    )
-    .await
-    .map_err(|_| AuthError::internal("Database error deleting factor"))?;
-    let sessions = tx
-        .query(
-            "SELECT id::text FROM auth.sessions WHERE factor_id = $1::text::uuid",
-            &[&factor_id],
-        )
+    sqlx::query!("DELETE FROM auth.mfa_factors WHERE id = $1", factor_uuid)
+        .execute(&mut *tx)
         .await
-        .map_err(|_| AuthError::internal("Database error downgrading sessions"))?;
+        .map_err(|_| AuthError::internal("Database error deleting factor"))?;
+    let sessions = sqlx::query!(
+        "SELECT id FROM auth.sessions WHERE factor_id = $1",
+        factor_uuid,
+    )
+    .fetch_all(&mut *tx)
+    .await
+    .map_err(|_| AuthError::internal("Database error downgrading sessions"))?;
     for session in sessions {
-        let session_id: String = session.try_get(0).unwrap_or_default();
-        tx.execute(
-            "DELETE FROM auth.mfa_amr_claims \
-             WHERE session_id = $1::text::uuid AND authentication_method = $2",
-            &[&session_id, &amr],
+        sqlx::query!(
+            "DELETE FROM auth.mfa_amr_claims
+             WHERE session_id = $1 AND authentication_method = $2",
+            session.id,
+            amr,
         )
+        .execute(&mut *tx)
         .await
         .map_err(|_| AuthError::internal("Database error downgrading sessions"))?;
     }
-    tx.execute(
-        "UPDATE auth.sessions SET aal = 'aal1', factor_id = NULL \
-         WHERE user_id = $1::text::uuid AND factor_id = $2::text::uuid",
-        &[&user_id, &factor_id],
+    sqlx::query!(
+        "UPDATE auth.sessions SET aal = 'aal1', factor_id = NULL
+         WHERE user_id = $1 AND factor_id = $2",
+        user_uuid,
+        factor_uuid,
     )
+    .execute(&mut *tx)
     .await
     .map_err(|_| AuthError::internal("Database error downgrading sessions"))?;
     tx.commit()
         .await
         .map_err(|_| AuthError::internal("Database error deleting factor"))?;
     Ok(json_ok(&Value::Object(factor)))
+}
+
+struct FactorRow {
+    id: Uuid,
+    friendly_name: Option<String>,
+    factor_type: Option<String>,
+    status: Option<String>,
+    created_at: chrono::DateTime<chrono::Utc>,
+    updated_at: chrono::DateTime<chrono::Utc>,
+    phone: Option<String>,
+    last_challenged_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 fn amr_method_for_factor_type(factor_type: &str) -> Result<String, AuthError> {
@@ -1187,21 +1274,32 @@ async fn delete_passkey(
             "user_id must be an UUID",
         ));
     }
-    let client = connect(&state).await?;
-    let _user = load_user(&client, user_id).await?;
+    let user_uuid = Uuid::parse_str(user_id)
+        .map_err(|_| AuthError::not_found("validation_failed", "user_id must be an UUID"))?;
+    let db = pool(&state)?;
+    let mut conn = db
+        .acquire()
+        .await
+        .map_err(|_| AuthError::internal("Database error loading user"))?;
+    let _user = load_user(&mut conn, user_uuid).await?;
+    drop(conn);
     if !is_uuid(passkey_id) {
         return Err(AuthError::not_found(
             "validation_failed",
             "Passkey not found",
         ));
     }
-    let deleted = client
-        .execute(
-            "DELETE FROM auth.webauthn_credentials WHERE id = $1::text::uuid AND user_id = $2::text::uuid",
-            &[&passkey_id, &user_id],
-        )
-        .await
-        .map_err(|_| AuthError::internal("Database error deleting passkey"))?;
+    let passkey_uuid = Uuid::parse_str(passkey_id)
+        .map_err(|_| AuthError::not_found("validation_failed", "Passkey not found"))?;
+    let deleted = sqlx::query!(
+        "DELETE FROM auth.webauthn_credentials WHERE id = $1 AND user_id = $2",
+        passkey_uuid,
+        user_uuid,
+    )
+    .execute(&db)
+    .await
+    .map_err(|_| AuthError::internal("Database error deleting passkey"))?
+    .rows_affected();
     if deleted == 0 {
         return Err(AuthError::not_found(
             "validation_failed",

@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT COUNT(*) AS count FROM auth.audit_log_entries\n                 WHERE instance_id = $1\n                   AND (payload->>'actor_username' ILIKE $2 OR payload->>'actor_name' ILIKE $2)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "e296c1f90576b6c78438dee219606a38f20d339cbeea1b876d3fb4254bcf94f4"
+}

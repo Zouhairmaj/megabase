@@ -1,0 +1,46 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT entity_id, metadata_xml, metadata_url, name_id_format, attribute_mapping\n         FROM auth.saml_providers WHERE sso_provider_id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "entity_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "metadata_xml",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "metadata_url",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "name_id_format",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "attribute_mapping",
+        "type_info": "Jsonb"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "bbefbbf99f9cbe764e48631b26802bec4a3249cba43f3825017cf8374c521c1c"
+}

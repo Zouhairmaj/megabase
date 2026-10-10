@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO auth.users (\n            instance_id, id, aud, role, email, encrypted_password,\n            email_confirmed_at, confirmation_token, recovery_token,\n            email_change_token_new, email_change, email_change_token_current,\n            email_change_confirm_status,\n            phone, phone_change, phone_change_token, reauthentication_token,\n            last_sign_in_at, raw_app_meta_data, raw_user_meta_data,\n            is_sso_user, is_anonymous, created_at, updated_at\n        ) VALUES (\n            $1::uuid, $2::uuid, $3, $4, $5, $6,\n            $7::timestamptz, '', '',\n            '', '', '',\n            0,\n            NULL, '', '', '',\n            $8::timestamptz, $9::jsonb, $10::jsonb,\n            false, false, $11::timestamptz, $11::timestamptz\n        )",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Varchar",
+        "Varchar",
+        "Varchar",
+        "Varchar",
+        "Timestamptz",
+        "Timestamptz",
+        "Jsonb",
+        "Jsonb",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c88d12c803f51aa071a3dcb2116d1811ce0e8a874212e7a348e2e1b1ecafdb9c"
+}

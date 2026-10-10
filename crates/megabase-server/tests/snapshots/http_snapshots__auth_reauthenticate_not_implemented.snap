@@ -1,0 +1,14 @@
+---
+source: crates/megabase-server/tests/http_snapshots.rs
+expression: "observe(\"GET\", \"/auth/v1/reauthenticate\", None).await"
+---
+{
+  "body": {
+    "code": "MEGABASE_NOT_IMPLEMENTED",
+    "component": "auth",
+    "message": "auth:route:GET /auth/v1/reauthenticate is not implemented by Megabase yet",
+    "unit": "auth:route:GET /auth/v1/reauthenticate"
+  },
+  "content_type": "application/json",
+  "status": 501
+}

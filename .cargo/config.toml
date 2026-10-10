@@ -1,0 +1,5 @@
+# Auth `query!` / `query_as!` compile from the committed `.sqlx` cache.
+# Refresh that cache with `SQLX_OFFLINE=false` and a live `DATABASE_URL`;
+# see docs/contributing.md.
+[env]
+SQLX_OFFLINE = "true"

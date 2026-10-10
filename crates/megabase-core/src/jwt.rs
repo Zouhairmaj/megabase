@@ -9,6 +9,8 @@
 use std::fmt;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use crate::ids::{CompactJwt, UserId};
+
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use hmac::{Hmac, Mac};
@@ -38,7 +40,7 @@ pub struct JwtClaims {
     pub role: Option<String>,
     /// Payload `sub` when it is a JSON string. User access tokens set this;
     /// the demo anon / service_role keys do not.
-    pub sub: Option<String>,
+    pub sub: Option<UserId>,
     /// Payload `exp` as Unix seconds when it is a JSON number.
     pub exp: Option<i64>,
     /// Full payload object (`auth.jwt()` / `request.jwt.claims`).
@@ -110,7 +112,7 @@ impl Hs256 {
     /// Ported from supabase/auth `internal/tokens/service.go` `SignJWT` (MIT),
     /// pin v2.197.0. The payload object is serialized as JSON; claim order is
     /// not significant.
-    pub fn sign(&self, payload: &Value) -> Result<String, JwtError> {
+    pub fn sign(&self, payload: &Value) -> Result<CompactJwt, JwtError> {
         let header = serde_json::json!({ "alg": HS256, "typ": "JWT" });
         let header_json = serde_json::to_vec(&header).map_err(|_| JwtError::BadCrypto)?;
         let payload_json = serde_json::to_vec(payload).map_err(|_| JwtError::BadCrypto)?;
@@ -121,16 +123,17 @@ impl Hs256 {
             HmacSha256::new_from_slice(&self.secret).map_err(|_| JwtError::SecretMissing)?;
         mac.update(signing_input.as_bytes());
         let signature = URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes());
-        Ok(format!("{signing_input}.{signature}"))
+        Ok(CompactJwt::new(format!("{signing_input}.{signature}")))
     }
 
     /// Verify `token` with the current Unix time.
-    pub fn verify(&self, token: &str) -> Result<JwtClaims, JwtError> {
-        self.verify_at(token, unix_now())
+    pub fn verify(&self, token: impl AsRef<str>) -> Result<JwtClaims, JwtError> {
+        self.verify_at(token.as_ref(), unix_now())
     }
 
     /// Verify `token` as of `now_unix` (seconds since epoch).
-    pub fn verify_at(&self, token: &str, now_unix: i64) -> Result<JwtClaims, JwtError> {
+    pub fn verify_at(&self, token: impl AsRef<str>, now_unix: i64) -> Result<JwtClaims, JwtError> {
+        let token = token.as_ref();
         if token.is_empty() {
             return Err(JwtError::Empty);
         }
@@ -184,7 +187,7 @@ impl Hs256 {
 
         Ok(JwtClaims {
             role: string_claim(&raw, "role"),
-            sub: string_claim(&raw, "sub"),
+            sub: string_claim(&raw, "sub").map(UserId::new),
             exp,
             raw,
         })
@@ -679,5 +682,51 @@ mod tests {
         assert_eq!(bearer_token(""), None);
         assert_eq!(bearer_token("Bear"), None);
         assert_eq!(bearer_token("bearer"), None);
+    }
+
+    #[test]
+    fn compact_jwt_debug_redacts_the_token() {
+        let token = verifier()
+            .sign(&json!({"role": "anon", "exp": DURING_DEMO + 60}))
+            .unwrap();
+        let rendered = format!("{token:?}");
+        assert_eq!(rendered, "CompactJwt(<redacted>)");
+        assert!(!rendered.contains(token.as_str()));
+    }
+}
+
+#[cfg(test)]
+mod jwt_properties {
+    use super::*;
+    use proptest::prelude::*;
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(64))]
+
+        #[test]
+        fn jwt_sign_verify_roundtrip(
+            role in "[a-z][a-z0-9_]{0,31}",
+            sub in "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
+            extra in "[A-Za-z0-9]{0,24}",
+        ) {
+            const DEMO_SECRET: &str = "your-super-secret-jwt-token-with-at-least-32-characters-long";
+            const DURING_DEMO: i64 = 1_791_504_000;
+            let verifier = Hs256::new(DEMO_SECRET.as_bytes()).unwrap();
+            let payload = serde_json::json!({
+                "role": role,
+                "sub": sub,
+                "extra": extra,
+                "exp": DURING_DEMO + 86_400,
+            });
+            let token = verifier.sign(&payload).unwrap();
+            let claims = verifier.verify_at(&token, DURING_DEMO).unwrap();
+            prop_assert_eq!(claims.role.as_deref(), Some(role.as_str()));
+            prop_assert_eq!(claims.sub.as_deref(), Some(sub.as_str()));
+            prop_assert_eq!(&claims.raw["extra"], &payload["extra"]);
+            prop_assert_eq!(claims.exp, Some(DURING_DEMO + 86_400));
+            let again = verifier.sign(&serde_json::Value::Object(claims.raw.clone())).unwrap();
+            let round = verifier.verify_at(again.as_str(), DURING_DEMO).unwrap();
+            prop_assert_eq!(round.raw, claims.raw);
+        }
     }
 }

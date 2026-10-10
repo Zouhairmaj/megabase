@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT u.id::text AS id\n         FROM auth.identities i\n         JOIN auth.users u ON u.id = i.user_id\n         WHERE i.email = $1\n           AND u.aud = $2\n           AND u.instance_id = $3::uuid\n           AND u.is_sso_user = false\n         LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "d358346af7a55a2ef76eb7ce007ded7d161f249e0481bf5d3a38c8c4596b174e"
+}

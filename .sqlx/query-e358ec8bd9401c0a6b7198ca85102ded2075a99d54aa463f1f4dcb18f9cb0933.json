@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE auth.identities SET identity_data = '{}'::jsonb, provider_id = $2\n             WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e358ec8bd9401c0a6b7198ca85102ded2075a99d54aa463f1f4dcb18f9cb0933"
+}
