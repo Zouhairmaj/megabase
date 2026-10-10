@@ -136,7 +136,8 @@ pub fn is_human_log_review_ok(before: &str, after: &str) -> bool {
         || (new_pending.starts_with(old_pending)
             && pending_grow_starts_at_item_boundary(old_pending, new_pending))
         || (old_pending.starts_with(new_pending)
-            && pending_shrink_ends_at_item_boundary(old_pending, new_pending));
+            && pending_shrink_ends_at_item_boundary(old_pending, new_pending))
+        || pending_only_drops_dated_items(old_pending, new_pending);
     pending_ok && is_completed_section_ok(old_rest, new_rest) && after != before
 }
 
@@ -144,6 +145,76 @@ fn pending_grow_starts_at_item_boundary(old_pending: &str, new_pending: &str) ->
     new_pending
         .get(old_pending.len()..)
         .is_some_and(|added| added.trim_start_matches('\n').starts_with("- "))
+}
+
+/// Drop whole `- **Date**` items anywhere in Pending. Items that remain
+/// must be unchanged, in the same order, with the same separators between
+/// them. An edited item is not a drop. Extra blank lines between kept
+/// items are not a drop.
+fn pending_only_drops_dated_items(old_pending: &str, new_pending: &str) -> bool {
+    let old_items = pending_items(old_pending);
+    let new_items = pending_items(new_pending);
+    if new_items.len() >= old_items.len() {
+        return false;
+    }
+    let mut kept: Vec<&PendingItem<'_>> = Vec::new();
+    let mut dropped = false;
+    for item in &old_items {
+        if kept.len() < new_items.len() && new_items[kept.len()].text == item.text {
+            kept.push(item);
+        } else if item.text.starts_with("- **Date**") {
+            dropped = true;
+        } else {
+            return false;
+        }
+    }
+    if kept.len() != new_items.len() || !dropped {
+        return false;
+    }
+    let mut expected = String::new();
+    for (i, item) in kept.iter().enumerate() {
+        if i > 0 {
+            expected.push_str("\n\n");
+        }
+        expected.push_str(item.raw);
+    }
+    new_pending.trim_matches('\n') == expected
+}
+
+struct PendingItem<'a> {
+    /// Item text without surrounding newlines, used for equality.
+    text: &'a str,
+    /// Item bytes between separators, including a blank line that belonged
+    /// to the gap before the next `- **Date**` marker.
+    raw: &'a str,
+}
+
+fn pending_items(body: &str) -> Vec<PendingItem<'_>> {
+    let trimmed = body.trim_matches('\n');
+    if trimmed.is_empty() {
+        return Vec::new();
+    }
+    // A blank line inside an item is not a new item. The next item starts
+    // at `- **Date**` after a blank line.
+    let mut items = Vec::new();
+    let mut start = 0;
+    let mut search_from = 0;
+    while let Some(rel) = trimmed[search_from..].find("\n\n- **Date**") {
+        let split_at = search_from + rel;
+        let raw = &trimmed[start..split_at];
+        let text = raw.trim_matches('\n');
+        if !text.is_empty() {
+            items.push(PendingItem { text, raw });
+        }
+        start = split_at + 2;
+        search_from = start;
+    }
+    let raw = &trimmed[start..];
+    let text = raw.trim_matches('\n');
+    if !text.is_empty() {
+        items.push(PendingItem { text, raw });
+    }
+    items
 }
 
 fn pending_shrink_ends_at_item_boundary(old_pending: &str, new_pending: &str) -> bool {
@@ -626,6 +697,44 @@ mod tests {
             keep,
             "- **Date**: 2026-10-09\n- **Action**: keep\n- **Re"
         ));
+    }
+
+    #[test]
+    fn review_branch_may_drop_an_earlier_pending_item() {
+        let header = "# Human Intervention Log\n\n## Pending\n\n";
+        let rest = "\n---\n\n## Completed\n\n- already\n";
+        let first = "- **Date**: 2026-10-09\n- **Action**: pages\n";
+        let second = "- **Date**: 2026-10-09\n- **Action**: keep\n";
+        let third = "- **Date**: 2026-10-10\n- **Action**: still open\n";
+        let before = format!("{header}{first}\n{second}\n{third}{rest}");
+        let after = format!(
+            "{header}{second}\n{third}{rest}- **Date**: 2026-10-10\n- **Action**: pages is live\n"
+        );
+        let c = ctx("review/human-log", false);
+        assert!(
+            evaluate(&[modified("HUMAN_LOG.md", &before, &after)], &c).is_empty(),
+            "{:?}",
+            evaluate(&[modified("HUMAN_LOG.md", &before, &after)], &c)
+        );
+        let rewritten =
+            format!("{header}{second}\n- **Date**: 2026-10-09\n- **Action**: edited\n{rest}");
+        assert_eq!(
+            evaluate(&[modified("HUMAN_LOG.md", &before, &rewritten)], &c).len(),
+            1
+        );
+        let spaced =
+            "- **Date**: 2026-10-09\n- **Action**: pages\n\nSame item, second paragraph.\n";
+        let before_spaced = format!("{header}{spaced}\n{second}{rest}");
+        let after_spaced = format!("{header}{second}{rest}");
+        assert!(
+            is_human_log_review_ok(&before_spaced, &after_spaced),
+            "a blank line inside a dated item stays part of that item"
+        );
+        let extra_gap = format!("{header}{second}\n\n{third}{rest}");
+        assert!(
+            !is_human_log_review_ok(&before, &extra_gap),
+            "an added blank line between kept items is not a drop"
+        );
     }
 
     #[test]

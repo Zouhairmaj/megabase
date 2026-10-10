@@ -5,6 +5,8 @@
 //! cargo run -p megabase-coverage -- update   # regenerate everything
 //! cargo run -p megabase-coverage -- check    # fail if anything committed is stale
 //! cargo run -p megabase-coverage -- verify-pins
+//! cargo run -p megabase-coverage -- conformance FILE
+//! cargo run -p megabase-coverage -- judge-history HISTORY SHA RESULTS
 //! ```
 
 #[allow(dead_code)] // generator kept for tests; committed SVGs are Kite assets
@@ -99,9 +101,62 @@ fn build(root: &Path) -> Result<render::Outputs> {
     render::render(&units, &status, &summary)
 }
 
+fn conformance_command(path: &Path) -> Result<bool> {
+    let text =
+        std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
+    let results: status::JudgeResults =
+        serde_json::from_str(&text).context("parsing judge results")?;
+    match status::conformance_of(&results) {
+        Some(measured) => {
+            println!("{}", measured.fields());
+            Ok(true)
+        }
+        None => {
+            eprintln!("judge results have no cases");
+            Ok(false)
+        }
+    }
+}
+
+fn judge_history_command(history: &Path, sha: &str, results_path: &Path) -> Result<bool> {
+    let history_json = std::fs::read_to_string(history)
+        .with_context(|| format!("reading {}", history.display()))?;
+    let results_json = std::fs::read_to_string(results_path)
+        .with_context(|| format!("reading {}", results_path.display()))?;
+    let results: status::JudgeResults =
+        serde_json::from_str(&results_json).context("parsing judge results")?;
+    print!(
+        "{}",
+        status::merge_judge_history(&history_json, sha, &results)?
+    );
+    Ok(true)
+}
+
 fn run() -> Result<bool> {
+    let mut args = std::env::args().skip(1);
+    let command = args.next().unwrap_or_default();
+    match command.as_str() {
+        "conformance" => {
+            let path = args
+                .next()
+                .context("usage: megabase-coverage conformance FILE")?;
+            return conformance_command(Path::new(&path));
+        }
+        "judge-history" => {
+            let history = args
+                .next()
+                .context("usage: megabase-coverage judge-history HISTORY SHA RESULTS")?;
+            let sha = args
+                .next()
+                .context("usage: megabase-coverage judge-history HISTORY SHA RESULTS")?;
+            let results = args
+                .next()
+                .context("usage: megabase-coverage judge-history HISTORY SHA RESULTS")?;
+            return judge_history_command(Path::new(&history), &sha, Path::new(&results));
+        }
+        _ => {}
+    }
     let root = repo_root()?;
-    let command = std::env::args().nth(1).unwrap_or_default();
     match command.as_str() {
         "update" => {
             let outputs = build(&root)?;
@@ -135,7 +190,9 @@ fn run() -> Result<bool> {
             Ok(true)
         }
         _ => {
-            eprintln!("usage: megabase-coverage <update|check|verify-pins>");
+            eprintln!(
+                "usage: megabase-coverage <update|check|verify-pins|conformance|judge-history>"
+            );
             Ok(false)
         }
     }
