@@ -4,6 +4,18 @@ All notable changes to Megabase are documented in this file.
 The format is produced by [release-please](https://github.com/googleapis/release-please).
 Sections: Features, Bug Fixes, Performance, Conformance/judge, Documentation.
 
+## [0.1.13](https://github.com/Zouhairmaj/megabase/compare/v0.1.12...v0.1.13) (2026-10-10)
+
+
+### Bug Fixes
+
+* **coverage:** hide standalone conformance % in README treemap ([#258](https://github.com/Zouhairmaj/megabase/issues/258)) ([83f4506](https://github.com/Zouhairmaj/megabase/commit/83f4506db7203387f9b5776f48b75b66537cfdb0))
+
+
+### Documentation
+
+* **judge:** add Level 1 minimum cases and hidden suite gate ([#255](https://github.com/Zouhairmaj/megabase/issues/255)) ([a5cf89f](https://github.com/Zouhairmaj/megabase/commit/a5cf89f03c15f71b218310cbcca86ea7060eea22))
+
 ## [0.1.12](https://github.com/Zouhairmaj/megabase/compare/v0.1.11...v0.1.12) (2026-10-10)
 
 
