@@ -1,12 +1,14 @@
 //! PostgREST-compatible REST API (`/rest/v1`) for Megabase.
 //!
 //! Target behavior: PostgREST, vendor/postgrest (MIT), pinned in `vendor/`.
-//! `GET /rest/v1/{relation}` runs when every query filter is one of the
-//! operators in [`specs/rest/filtering.md`](../../../specs/rest/filtering.md).
+//! `GET /rest/v1/{relation}` runs for the horizontal filters in
+//! [`specs/rest/filtering.md`](../../../specs/rest/filtering.md) and the query
+//! parameters in [`specs/rest/query-params.md`](../../../specs/rest/query-params.md).
 //! Every other REST request returns `MEGABASE_NOT_IMPLEMENTED`.
 
 mod db;
 mod filter;
+mod params;
 mod query;
 mod read;
 

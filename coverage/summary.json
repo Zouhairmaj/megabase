@@ -2,12 +2,12 @@
   "schema": 1,
   "totals": {
     "units": 1024,
-    "implemented": 99,
-    "tested": 73,
+    "implemented": 107,
+    "tested": 81,
     "conformant": 0
   },
   "percent": {
-    "coverage": 9.7,
+    "coverage": 10.4,
     "conformance": 0.0,
     "done": 0.0
   },
@@ -316,8 +316,8 @@
     },
     "rest": {
       "units": 93,
-      "implemented": 28,
-      "tested": 13,
+      "implemented": 36,
+      "tested": 21,
       "conformant": 0,
       "groups": {
         "aggregates": {
@@ -364,8 +364,8 @@
         },
         "query-params": {
           "units": 8,
-          "implemented": 0,
-          "tested": 0,
+          "implemented": 8,
+          "tested": 8,
           "conformant": 0
         },
         "resources": {
@@ -654,6 +654,14 @@
     "rest:filter-operator:plfts": "tested",
     "rest:filter-operator:sl": "tested",
     "rest:filter-operator:sr": "tested",
-    "rest:filter-operator:wfts": "tested"
+    "rest:filter-operator:wfts": "tested",
+    "rest:query-param:and": "tested",
+    "rest:query-param:columns": "tested",
+    "rest:query-param:limit": "tested",
+    "rest:query-param:offset": "tested",
+    "rest:query-param:on_conflict": "tested",
+    "rest:query-param:or": "tested",
+    "rest:query-param:order": "tested",
+    "rest:query-param:select": "tested"
   }
 }

@@ -88,10 +88,12 @@ applies.
 ## Outputs
 
 Status 200. `Content-Type` is `application/json; charset=utf-8`. The body is
-`json_agg` of the matching rows, or `[]`. Column order is `attnum` order.
-`Content-Range` is `0-{n-1}/*` when `n > 0`, and `*/*` when the array is
-empty. The count is `pg_catalog.count` of the aggregated rows, not a second
-parse of the JSON body. There is no `ORDER BY` unless a later unit adds `order`.
+a JSON array of the matching rows, or `[]`. Column order is `attnum` order
+when `select` is `*` or omitted. A `select` list returns those columns.
+`Content-Range` is `{offset}-{offset+count-1}/*` when the page is not empty,
+and `*/*` when it is. With no `offset`, the start is 0. `order` adds
+`ORDER BY`. A horizontal filter alone does not. The count is the number of
+rows in the page.
 
 ## Errors
 
@@ -119,8 +121,8 @@ parse of the JSON body. There is no `ORDER BY` unless a later unit adds `order`.
 - `is.nullity` matches `null` and ignores the leftover. `is.not_null` does
   not match `null`.
 - `select`, `order`, `limit`, `offset`, `and`, `or`, `columns`, and
-  `on_conflict` return 501 for that query-param unit.
-  `id=in.(1,3)&order=id` is 501 for `rest:query-param:order`.
+  `on_conflict` are served on this GET. See [query-params](query-params.md).
+  `id=in.(1,3)&order=id` returns the matching rows in `id` order.
 - `Accept: application/vnd.pgrst.object+json`, a `Prefer` header, a `Range`
   header, and `Accept-Profile` other than `public` return 501.
 - A path that is not a single relation, and every method other than `GET`,
@@ -145,16 +147,17 @@ parse of the JSON body. There is no `ORDER BY` unless a later unit adds `order`.
 
 ## Out of scope
 
-Embeds, vertical filtering, `order` / `limit` / `offset`, preferences,
-object and CSV media types, and writes. Those return HTTP 501 via
-`megabase_core::MegabaseNotImplemented`.
+Embeds, preferences, object and CSV media types, and writes. Those return
+HTTP 501 via `megabase_core::MegabaseNotImplemented`. Vertical filtering
+(`select`), `order`, `limit`, `offset`, `and`, `or`, `columns`, and
+`on_conflict` are in [query-params](query-params.md).
 
 ## Judge cases
 
 `judge/cases/rest.toml`: `rest.filter.eq` (`GET /rest/v1/todos?done=eq.true`).
 `rest.filter.gt-lt` (`priority=gt.1&priority=lt.3`) covers `gt` and `lt`.
-`rest.filter.in` also sends `order=id`, so it stays 501 for
-`rest:query-param:order` until that unit is served.
+`rest.filter.in` sends `id=in.(1,3)&order=id` and returns those two rows
+in `id` order.
 `rest.filter.unknown-operator` is the `PGRST100` shape for `id=nope.1`.
 Issue 29 cases live on the judge review branch: `rest.filter.ov`,
 `rest.filter.sl`, `rest.filter.sr`, `rest.filter.nxr`, `rest.filter.nxl`

@@ -1,4 +1,4 @@
-//! `GET /rest/v1/{relation}` when every filter is a served operator.
+//! `GET /rest/v1/{relation}` for served filters and query parameters.
 //!
 //! Anything else on the REST prefix stays
 //! [`megabase_core::MegabaseNotImplemented`]. Values are bound parameters.
@@ -12,11 +12,9 @@ use axum::Router;
 use megabase_core::{bearer_token, JwtError, MegabaseNotImplemented};
 use serde_json::{Map, Value};
 
-use crate::filter::{
-    parse_filter_value, predicate_sql, quote_ident, BoundFilter, FilterBody, ParsedFilter,
-    UnsafeType,
-};
-use crate::query::{classify_query, path_decode};
+use crate::filter::UnsafeType;
+use crate::params::{build_read_sql, parse_get_query, QueryFail};
+use crate::query::path_decode;
 use crate::RestState;
 
 const JSON_UTF8: &str = "application/json; charset=utf-8";
@@ -42,31 +40,15 @@ async fn dispatch(
         Ok(session) => session,
         Err(response) => return *response,
     };
-    let classified = classify_query(uri.query().unwrap_or(""));
-    if classified.filters.is_empty() && classified.reserved.is_none() && !classified.embed {
+    let raw = uri.query().unwrap_or("");
+    if raw.is_empty() {
         return not_implemented(&method, path);
     }
-    let mut served = Vec::new();
-    for filter in &classified.filters {
-        match parse_filter_value(&filter.value) {
-            Ok(parsed) => served.push((filter.column.clone(), parsed)),
-            Err(error) => {
-                return pgrst(
-                    StatusCode::BAD_REQUEST,
-                    "PGRST100",
-                    &error.message,
-                    Some(&error.details),
-                    None,
-                );
-            }
-        }
-    }
-    if let Some(unit) = classified.reserved {
-        return MegabaseNotImplemented::new(crate::COMPONENT, unit).into_response();
-    }
-    if classified.embed {
-        return not_implemented(&method, path);
-    }
+    let query = match parse_get_query(raw) {
+        Ok(query) if query.handled() => query,
+        Ok(_) => return not_implemented(&method, path),
+        Err(fail) => return query_fail(&method, path, fail),
+    };
     if let Some(unit) = reject_accept(headers.get(header::ACCEPT)) {
         return unimplemented_unit(&method, path, unit);
     }
@@ -90,9 +72,34 @@ async fn dispatch(
             None,
         );
     };
-    match read_rows(pool, &relation, &session, &served).await {
-        Ok((count, body)) => json_rows(count, &body),
+    match read_rows(pool, &relation, &session, &query).await {
+        Ok((count, body, offset)) => json_rows(offset, count, &body),
         Err(error) => *error,
+    }
+}
+
+fn query_fail(method: &Method, path: &str, fail: QueryFail) -> Response {
+    match fail {
+        QueryFail::Parse { message, details } => pgrst(
+            StatusCode::BAD_REQUEST,
+            "PGRST100",
+            &message,
+            Some(&details),
+            None,
+        ),
+        QueryFail::NotEmbedded { resource } => pgrst(
+            StatusCode::BAD_REQUEST,
+            "PGRST108",
+            &format!("'{resource}' is not an embedded resource in this request"),
+            None,
+            Some(&format!(
+                "Verify that '{resource}' is included in the 'select' query parameter."
+            )),
+        ),
+        QueryFail::Unimplemented(unit) => {
+            MegabaseNotImplemented::new(crate::COMPONENT, unit).into_response()
+        }
+        QueryFail::Route => not_implemented(method, path),
     }
 }
 
@@ -292,8 +299,8 @@ async fn read_rows(
     pool: &sqlx::PgPool,
     relation: &str,
     session: &Session,
-    filters: &[(String, ParsedFilter)],
-) -> Result<(i64, String), Box<Response>> {
+    read: &crate::params::ReadQuery,
+) -> Result<(i64, String, i64), Box<Response>> {
     let mut tx = pool
         .begin()
         .await
@@ -332,16 +339,12 @@ async fn read_rows(
         .fetch_all(&mut *tx)
         .await
         .map_err(|error| Box::new(query_failure(&error, session.anon)))?;
-    let mut bound = Vec::with_capacity(filters.len());
-    for (column, parsed) in filters {
-        let pg_type = columns
-            .iter()
-            .find(|(name, _)| name == column)
-            .map(|(_, pg_type)| pg_type.clone());
-        bound.push(bound_filter(column, parsed, pg_type));
-    }
-    let predicate =
-        predicate_sql(relation, &bound).map_err(|error| Box::new(unsafe_type(&error)))?;
+    let column_types: Vec<(&str, &str)> = columns
+        .iter()
+        .map(|(name, pg_type)| (name.as_str(), pg_type.as_str()))
+        .collect();
+    let built = build_read_sql(relation, read, &column_types)
+        .map_err(|error| Box::new(unsafe_type(&error)))?;
     let request_path = format!("/{relation}");
     sqlx::query(
         "SELECT set_config('role', $1, true),
@@ -358,17 +361,8 @@ async fn read_rows(
     .execute(&mut *tx)
     .await
     .map_err(|error| Box::new(query_failure(&error, session.anon)))?;
-    let relation_ident = quote_ident(relation);
-    let sql = format!(
-        "SELECT pg_catalog.count(_postgrest_t), \
-         coalesce(json_agg(_postgrest_t), '[]'::json)::text \
-         FROM (SELECT {relation_ident}.* FROM {schema}.{relation_ident} \
-         WHERE {predicate}) _postgrest_t",
-        schema = quote_ident("public"),
-        predicate = predicate.sql,
-    );
-    let mut query = sqlx::query_as::<sqlx::Postgres, (i64, String)>(&sql);
-    for param in &predicate.params {
+    let mut query = sqlx::query_as::<sqlx::Postgres, (i64, String)>(&built.sql);
+    for param in &built.params {
         query = query.bind(param);
     }
     let row = query
@@ -378,38 +372,7 @@ async fn read_rows(
     tx.commit()
         .await
         .map_err(|error| Box::new(query_failure(&error, session.anon)))?;
-    Ok(row)
-}
-
-fn bound_filter(column: &str, parsed: &ParsedFilter, pg_type: Option<String>) -> BoundFilter {
-    let (negated, body) = match parsed {
-        ParsedFilter::Served {
-            negated,
-            op,
-            quant,
-            language,
-            value,
-        } => (
-            *negated,
-            FilterBody::Op {
-                op: *op,
-                quant: *quant,
-                language: language.clone(),
-                value: value.clone(),
-            },
-        ),
-        ParsedFilter::In { negated, values } => (*negated, FilterBody::In(values.clone())),
-        ParsedFilter::Is { negated, value } => (*negated, FilterBody::Is(*value)),
-        ParsedFilter::IsDistinct { negated, value } => {
-            (*negated, FilterBody::IsDistinct(value.clone()))
-        }
-    };
-    BoundFilter {
-        column: column.to_string(),
-        negated,
-        body,
-        pg_type,
-    }
+    Ok((row.0, row.1, built.offset))
 }
 
 /// Column names and base types. `NULL` typmod matches an unknown literal:
@@ -523,13 +486,8 @@ fn sanitize(text: &str) -> String {
     }
 }
 
-fn json_rows(count: i64, body: &str) -> Response {
-    let len = usize::try_from(count).unwrap_or(0);
-    let range = if len == 0 {
-        "*/*".to_string()
-    } else {
-        format!("0-{}/*", len - 1)
-    };
+fn json_rows(offset: i64, count: i64, body: &str) -> Response {
+    let range = content_range(offset, count);
     (
         StatusCode::OK,
         [
@@ -539,6 +497,20 @@ fn json_rows(count: i64, body: &str) -> Response {
         body.to_string(),
     )
         .into_response()
+}
+
+/// `Content-Range` without `Prefer: count`. The total stays `*`.
+///
+/// `lower` is the offset. `upper` is `offset + count - 1`. An empty page,
+/// or a lower bound past the upper bound, is `*/*` (`RangeQuery.contentRangeH`).
+fn content_range(offset: i64, count: i64) -> String {
+    if count <= 0 {
+        return "*/*".to_string();
+    }
+    match offset.checked_add(count - 1) {
+        Some(upper) if offset <= upper => format!("{offset}-{upper}/*"),
+        _ => "*/*".to_string(),
+    }
 }
 
 fn pgrst(
@@ -617,18 +589,24 @@ mod tests {
 
     #[test]
     fn content_range_uses_the_sql_count() {
-        let response = json_rows(2, "not json");
+        let response = json_rows(0, 2, "not json");
         let range = response
             .headers()
             .get(header::CONTENT_RANGE)
             .and_then(|value| value.to_str().ok());
         assert_eq!(range, Some("0-1/*"));
-        let empty = json_rows(0, "[]");
+        let empty = json_rows(0, 0, "[]");
         let range = empty
             .headers()
             .get(header::CONTENT_RANGE)
             .and_then(|value| value.to_str().ok());
         assert_eq!(range, Some("*/*"));
+        let shifted = json_rows(1, 1, "[{}]");
+        let range = shifted
+            .headers()
+            .get(header::CONTENT_RANGE)
+            .and_then(|value| value.to_str().ok());
+        assert_eq!(range, Some("1-1/*"));
     }
 
     #[test]
@@ -685,11 +663,126 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn reserved_param_is_501() {
+    async fn query_params_without_pool_are_503() {
+        let paths = [
+            "/rest/v1/todos?select=id&done=eq.true",
+            "/rest/v1/todos?order=id.desc",
+            "/rest/v1/todos?limit=1&offset=1",
+            "/rest/v1/todos?and=(done.eq.true,priority.gte.1)",
+            "/rest/v1/todos?or=(id.eq.1,id.eq.3)",
+            "/rest/v1/todos?columns=id,title",
+            "/rest/v1/todos?on_conflict=id&select=id",
+            "/rest/v1/todos?limit=",
+        ];
+        for path in paths {
+            let app = router(RestState::from_config(&Config::default()));
+            let (status, body, _) = send(app, get(path)).await;
+            assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{path}");
+            assert_eq!(body["code"], "PGRST000", "{path}");
+            assert!(body["unit"].is_null(), "{path}");
+        }
+    }
+
+    #[tokio::test]
+    async fn bad_order_is_pgrst100() {
         let app = router(RestState::from_config(&Config::default()));
-        let (status, body, _) = send(app, get("/rest/v1/todos?select=id&done=eq.true")).await;
+        let (status, body, _) = send(app, get("/rest/v1/todos?order=id.ac&id=nope")).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(body["code"], "PGRST100");
+        assert_eq!(
+            body["message"],
+            "\"failed to parse order (id.ac)\" (line 1, column 4)"
+        );
+    }
+
+    #[tokio::test]
+    async fn empty_columns_is_pgrst100() {
+        let app = router(RestState::from_config(&Config::default()));
+        let (status, body, _) = send(app, get("/rest/v1/todos?columns=")).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(body["code"], "PGRST100");
+        assert!(body["message"]
+            .as_str()
+            .unwrap()
+            .contains("failed to parse columns parameter"));
+    }
+
+    #[tokio::test]
+    async fn embedded_order_is_pgrst108() {
+        let app = router(RestState::from_config(&Config::default()));
+        let (status, body, _) = send(app, get("/rest/v1/todos?select=id&items.order=id")).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(body["code"], "PGRST108");
+        assert_eq!(
+            body["message"],
+            "'items' is not an embedded resource in this request"
+        );
+        assert!(body["details"].is_null());
+        assert_eq!(
+            body["hint"],
+            "Verify that 'items' is included in the 'select' query parameter."
+        );
+    }
+
+    #[tokio::test]
+    async fn aggregate_select_is_501() {
+        let app = router(RestState::from_config(&Config::default()));
+        let (status, body, _) = send(app, get("/rest/v1/todos?select=id.count()")).await;
         assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
-        assert_eq!(body["unit"], "rest:query-param:select");
+        assert_eq!(body["unit"], "rest:aggregate:count");
+    }
+
+    #[tokio::test]
+    async fn embed_select_is_route_501() {
+        let app = router(RestState::from_config(&Config::default()));
+        let (status, body, _) = send(app, get("/rest/v1/todos?select=notes(body)")).await;
+        assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
+        assert_eq!(body["unit"], "GET /rest/v1/todos");
+    }
+
+    #[tokio::test]
+    async fn inner_embed_is_501() {
+        let app = router(RestState::from_config(&Config::default()));
+        let (status, body, _) = send(app, get("/rest/v1/todos?select=notes!inner(body)")).await;
+        assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
+        assert_eq!(body["unit"], "rest:embed-join:inner");
+    }
+
+    #[tokio::test]
+    async fn embed_select_with_bad_filter_is_pgrst100() {
+        let app = router(RestState::from_config(&Config::default()));
+        let (status, body, _) = send(app, get("/rest/v1/todos?select=notes(body)&id=nope")).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(body["code"], "PGRST100");
+    }
+
+    #[tokio::test]
+    async fn dotted_filter_stays_501() {
+        let app = router(RestState::from_config(&Config::default()));
+        let (status, body, _) = send(app, get("/rest/v1/todos?a.b=eq.1")).await;
+        assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
+        assert_eq!(body["unit"], "GET /rest/v1/todos");
+    }
+
+    #[tokio::test]
+    async fn select_without_equals_stays_501() {
+        let app = router(RestState::from_config(&Config::default()));
+        let (status, body, _) = send(app, get("/rest/v1/todos?select")).await;
+        assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
+        assert_eq!(body["unit"], "GET /rest/v1/todos");
+    }
+
+    #[tokio::test]
+    async fn bad_bearer_is_401_before_query_parse() {
+        let app = router(state_with_secret(SECRET));
+        let request = Request::builder()
+            .uri("/rest/v1/todos?order=id.ac")
+            .header(header::AUTHORIZATION, "Bearer not-a-jwt")
+            .body(Body::empty())
+            .unwrap();
+        let (status, body, _) = send(app, request).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+        assert_eq!(body["code"], "PGRST301");
     }
 
     #[tokio::test]

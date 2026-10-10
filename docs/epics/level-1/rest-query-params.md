@@ -10,11 +10,11 @@ Specs go in `specs/rest/<unit>.md` (GOAL.md section 5). Mark served code with `/
 
 | State | Unit id | Upstream source |
 |---|---|---|
-| ⬜ | `rest:query-param:and` | [src/library/PostgREST/ApiRequest/QueryParams.hs:185](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/ApiRequest/QueryParams.hs#L185) |
-| ⬜ | `rest:query-param:columns` | [src/library/PostgREST/ApiRequest/QueryParams.hs:188](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/ApiRequest/QueryParams.hs#L188) |
-| ⬜ | `rest:query-param:limit` | [src/library/PostgREST/ApiRequest/QueryParams.hs:190](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/ApiRequest/QueryParams.hs#L190) |
-| ⬜ | `rest:query-param:offset` | [src/library/PostgREST/ApiRequest/QueryParams.hs:192](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/ApiRequest/QueryParams.hs#L192) |
-| ⬜ | `rest:query-param:on_conflict` | [src/library/PostgREST/ApiRequest/QueryParams.hs:187](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/ApiRequest/QueryParams.hs#L187) |
-| ⬜ | `rest:query-param:or` | [src/library/PostgREST/ApiRequest/QueryParams.hs:185](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/ApiRequest/QueryParams.hs#L185) |
-| ⬜ | `rest:query-param:order` | [src/library/PostgREST/ApiRequest/QueryParams.hs:189](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/ApiRequest/QueryParams.hs#L189) |
-| ⬜ | `rest:query-param:select` | [src/library/PostgREST/ApiRequest/QueryParams.hs:186](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/ApiRequest/QueryParams.hs#L186) |
+| 🟩 | `rest:query-param:and` | [src/library/PostgREST/ApiRequest/QueryParams.hs:185](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/ApiRequest/QueryParams.hs#L185) |
+| 🟩 | `rest:query-param:columns` | [src/library/PostgREST/ApiRequest/QueryParams.hs:188](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/ApiRequest/QueryParams.hs#L188) |
+| 🟩 | `rest:query-param:limit` | [src/library/PostgREST/ApiRequest/QueryParams.hs:190](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/ApiRequest/QueryParams.hs#L190) |
+| 🟩 | `rest:query-param:offset` | [src/library/PostgREST/ApiRequest/QueryParams.hs:192](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/ApiRequest/QueryParams.hs#L192) |
+| 🟩 | `rest:query-param:on_conflict` | [src/library/PostgREST/ApiRequest/QueryParams.hs:187](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/ApiRequest/QueryParams.hs#L187) |
+| 🟩 | `rest:query-param:or` | [src/library/PostgREST/ApiRequest/QueryParams.hs:185](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/ApiRequest/QueryParams.hs#L185) |
+| 🟩 | `rest:query-param:order` | [src/library/PostgREST/ApiRequest/QueryParams.hs:189](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/ApiRequest/QueryParams.hs#L189) |
+| 🟩 | `rest:query-param:select` | [src/library/PostgREST/ApiRequest/QueryParams.hs:186](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/ApiRequest/QueryParams.hs#L186) |
