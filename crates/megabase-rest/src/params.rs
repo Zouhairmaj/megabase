@@ -2118,9 +2118,19 @@ mod tests {
         let query =
             parse_get_query("or=(id.eq.1,and(done.eq.true,not.or(id.eq.2,id.eq.3)))").unwrap();
         let sql = build_read_sql("public", "todos", &query, &[]).unwrap();
-        assert!(sql.sql.contains(" OR "));
-        assert!(sql.sql.contains(" AND "));
-        assert!(sql.sql.contains("NOT ("));
+        // Two ORs (outer and negated inner), one AND, one NOT group.
+        assert_eq!(sql.sql.matches(" OR ").count(), 2);
+        assert_eq!(sql.sql.matches(" AND ").count(), 1);
+        assert_eq!(sql.sql.matches("NOT (").count(), 1);
+        // Nesting order: outer OR, then AND, then NOT, with placeholders in
+        // traversal order.
+        let at = |needle: &str| sql.sql.find(needle).unwrap();
+        assert!(at("$1") < at(" OR "));
+        assert!(at(" OR ") < at("$2"));
+        assert!(at("$2") < at(" AND "));
+        assert!(at(" AND ") < at("NOT ("));
+        assert!(at("NOT (") < at("$3"));
+        assert!(at("$3") < at("$4"));
         assert_eq!(sql.params, vec!["1", "true", "2", "3"]);
         assert!(matches!(
             parse_get_query("or=()").unwrap_err(),
