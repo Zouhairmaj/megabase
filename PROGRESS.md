@@ -169,14 +169,17 @@ waiting on a human.
     on both databases fails; `auth.sso_sessions` is required absent
     (`absent = true`). A missing fixture snapshot table on the reference
     still aborts. `storage.objects` stays Level 2.
-19. **Signed releases.** When release-please creates a GitHub Release (or
-    a human dispatches Release with an existing tag), CI builds musl-static
-    linux `x86_64` and `aarch64` `megabase` binaries, writes `SHA256SUMS`,
-    signs blobs keylessly with Sigstore (`cosign sign-blob`), attaches SLSA
-    provenance (`.intoto.jsonl` via `actions/attest-build-provenance`), and
-    publishes `ghcr.io/zouhairmaj/megabase` tagged with the version
-    (`cosign sign`). `id-token: write` is only on that signing job. Install
-    and verify: [`docs/install.md`](docs/install.md). Goal: OpenSSF Scorecard
+19. **Signed releases.** When release-please creates a GitHub Release
+    whose commit is this workflow run's SHA, or a human dispatches
+    Release from that tag, CI builds musl-static linux `x86_64` and
+    `aarch64` `megabase` binaries, writes `SHA256SUMS`, signs blobs
+    keylessly with Sigstore (`cosign sign-blob`), attaches SLSA
+    provenance (`.intoto.jsonl` via `actions/attest-build-provenance`),
+    and publishes `ghcr.io/zouhairmaj/megabase` tagged with the version
+    (`cosign sign`). A release created for an older tag on a later push
+    does not build (the attestation would record the later SHA).
+    `id-token: write` is only on that signing job. Install and verify:
+    [`docs/install.md`](docs/install.md). Goal: OpenSSF Scorecard
     Packaging and Signed-Releases.
 20. **No coverage push to `main`; judge images off Docker Hub.** The
     `Update coverage on main` job only rewrote
@@ -317,24 +320,26 @@ Physically impossible for the agent (repository settings or credentials):
 - [x] Allow GitHub Actions to create and approve pull requests
       (Settings → Actions → General → Workflow permissions;
       `can_approve_pull_request_reviews=true`. Run 37961663758 predates it.)
-- [ ] Grant `RELEASE_PLEASE_TOKEN` the permissions release-please uses.
-      Fine-grained PAT or GitHub App for `Zouhairmaj/megabase`:
-      **Contents: Read and write** and **Pull requests: Read and write**.
-      Contents write is what
+- [ ] Grant `RELEASE_PLEASE_TOKEN` **Contents: Read and write**
+      (fine-grained repository permission `contents: write`) and
+      **Pull requests: Read and write**. Run 38007606007 proved
+      Contents write is the missing one: the tree probe returned
+      HTTP 403 `Resource not accessible by personal access token` on
       [Create a tree](https://docs.github.com/rest/git/trees#create-a-tree)
-      and
+      (that endpoint's fine-grained permission is Contents write),
+      then Sync Cargo.lock's `git push` failed with
+      `Permission to Zouhairmaj/megabase.git denied to megabase-agent`.
+      The push changed only `Cargo.lock`, so this is not Workflows
+      permission. Run 38003872424 failed the same way on
       [Create a release](https://docs.github.com/rest/releases/releases#create-a-release)
-      require. The tree probe and the release commit only add
+      after pull request #144 merged. Classic PAT equivalent: `repo`.
+      The tree probe and the release commit only add
       `.release-please-manifest.json`, `CHANGELOG.md`, and `Cargo.toml`
-      on top of `base_tree`; they do not change `.github/workflows`, so
-      this flow does not need Workflows write. A 403 on that tree call
-      is what release-please prints as `Error adding to tree`. Run
-      38003872424 failed with `Resource not accessible by personal
-      access token` on create-a-release after pull request #144 merged,
-      which is the same Contents write gap. Classic PAT: `repo`. The
-      Release workflow probes the tree call and falls back to
-      `GITHUB_TOKEN` only on HTTP 403 or 404. Lockfile pushes keep using
-      this secret so required checks start natively.
+      on top of `base_tree`. The workflow falls back to `GITHUB_TOKEN`
+      only on HTTP 403 or 404 from that tree call (not a rate limit).
+      The lockfile push uses the token the probe selected. A fallback
+      push does not start `push` workflows, so the job dispatches the
+      required checks.
 - [ ] Allow `github-actions` to publish GitHub Releases / tags on `main`
 - [ ] Enforce CODEOWNERS
 - [x] Coverage commits on `main` are not used. Shields JSON is

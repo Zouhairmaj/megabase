@@ -105,11 +105,13 @@ A TOML extra-file updater bumps `[workspace.package].version`; member
 crates inherit. The Release workflow runs `cargo update -w` on
 `release-please--branches--*` and commits `Cargo.lock` if workspace
 member versions drifted, so `--locked` CI (Build, Codecov, Bencher,
-Protected paths, Judge) stays green. That commit is pushed with
-`RELEASE_PLEASE_TOKEN` when set (a user PAT or GitHub App whose pushes
-start workflows). `GITHUB_TOKEN` pushes do not trigger
-`push`/`pull_request` workflows. Token permissions are under
-Human-only actions in `PROGRESS.md`. When the secret is unset, or the
+Protected paths, Judge) stays green. That commit is pushed with the token the tree probe
+selected.
+`RELEASE_PLEASE_TOKEN` is used only when that probe can create a git
+tree, so the push starts workflows. Otherwise the push uses
+`GITHUB_TOKEN`, which does not trigger `push`/`pull_request`
+workflows. Token permissions are under Human-only actions in
+`PROGRESS.md`. When the probe did not select the secret, or the
 lockfile commit was not pushed, the lockfile job `workflow_dispatch`es
 CI, Bencher, and Judge on the release branch
 (native check runs on that SHA). If that ref's workflow files lack
@@ -146,7 +148,9 @@ approval of the current head SHA and green CI. The lockfile is part of
 the release PR (`cargo update -w` on the release branch). If it is still
 stale, run `cargo update -w` on that branch. Each GitHub Release body
 is annotated with the coverage / conformance delta versus the previous
-tag. The same Release job attaches musl-static linux `x86_64` and
-`aarch64` binaries, `SHA256SUMS`, Sigstore signatures, and SLSA
-provenance, and publishes `ghcr.io/zouhairmaj/megabase:<tag>` (cosign).
+tag. The same Release workflow attaches musl-static linux `x86_64`
+and `aarch64` binaries, `SHA256SUMS`, Sigstore signatures, and SLSA
+provenance, and publishes `ghcr.io/zouhairmaj/megabase:<tag>` (cosign),
+only when the run SHA is that release tag (the push that tags this
+commit, or Release dispatched from the tag).
 Install and verify those artifacts in [Install](install.md).

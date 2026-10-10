@@ -26,6 +26,11 @@ jobs:
     outputs:
       release_created: ${{ steps.release.outputs.release_created }}
       tag_name: ${{ steps.release.outputs.tag_name }}
+      # CreatedRelease.sha (GitHub target_commitish). Full commit SHA
+      # when the release API echoes the SHA passed to createRelease.
+      sha: ${{ steps.release.outputs.sha }}
+      # tree-token source: release (probe succeeded) or github (403/404 fallback).
+      token_source: ${{ steps.tree-token.outputs.source }}
     steps:
       # bootstrap-sha is the Phase 0 merge (7aa41e8, exclusive). Commits
       # before it use [phase0]/[brand]/Day 0 subjects that
@@ -35,8 +40,9 @@ jobs:
       #
       # RELEASE_PLEASE_TOKEN is preferred when its tree probe succeeds:
       # a user or GitHub App push starts workflows; GITHUB_TOKEN does not.
-      # The lockfile job dispatches required checks when that push does
-      # not happen (see sync-lockfile). Required secret permissions are
+      # The lockfile job uses this step's source output as token_source
+      # and dispatches required checks when the push does not use the
+      # secret (see sync-lockfile). Required secret permissions are
       # in PROGRESS.md (Human-only actions).
       #
       # The probe POSTs /git/trees with an unreferenced tree (a "probe"
@@ -133,11 +139,17 @@ jobs:
       checks: read
       pull-requests: read
     steps:
+      # Same credential the tree probe selected. A secret that cannot
+      # create a git tree also cannot push: run 38007606007 checked out
+      # with RELEASE_PLEASE_TOKEN and git push returned 403
+      # "Permission to Zouhairmaj/megabase.git denied to megabase-agent".
+      # GITHUB_TOKEN can push; it does not start push workflows, so the
+      # confirm step dispatches checks unless token_source is release.
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
           persist-credentials: true
-          token: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
+          token: ${{ needs.release-please.outputs.token_source == 'release' && secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
       - name: Checkout the release-please branch
         id: branch
         run: |
@@ -190,7 +202,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PUSHED: ${{ steps.commit.outputs.pushed }}
           BRANCH: ${{ steps.branch.outputs.name }}
-          HAS_RELEASE_PLEASE_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN != '' }}
+          TOKEN_SOURCE: ${{ needs.release-please.outputs.token_source }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           LOCKFILE_CHECK_ATTEMPTS: 60
           LOCKFILE_CHECK_SLEEP_SECONDS: 6
@@ -222,11 +234,14 @@ jobs:
           # that ref's workflow files lack workflow_dispatch, fall back to
           # Lockfile required checks on the default branch, which reports
           # the same check names onto this SHA via the Checks API.
-          # Dispatch whenever checks are missing, including a rerun after
-          # RELEASE_PLEASE_TOKEN is set but the existing head was pushed
-          # with GITHUB_TOKEN (no new lockfile commit).
-          if [ "${HAS_RELEASE_PLEASE_TOKEN}" != "true" ] || [ "${PUSHED:-false}" != "true" ]; then
-            echo "Required checks missing on ${SHA}; dispatching (RELEASE_PLEASE_TOKEN=${HAS_RELEASE_PLEASE_TOKEN} pushed=${PUSHED:-false})"
+          # Dispatch whenever checks are missing, unless this run pushed
+          # with the probed release token (that push starts workflows).
+          # token_source is github when the probe fell back, including a
+          # secret that is set but lacks Contents write. Also dispatch
+          # when this step did not push (the existing head may have been
+          # pushed with GITHUB_TOKEN).
+          if [ "${TOKEN_SOURCE}" != "release" ] || [ "${PUSHED:-false}" != "true" ]; then
+            echo "Required checks missing on ${SHA}; dispatching (token_source=${TOKEN_SOURCE:-unset} pushed=${PUSHED:-false})"
             if gh workflow run ci.yml --repo "${GITHUB_REPOSITORY}" --ref "${BRANCH}" \
                && gh workflow run bencher.yml --repo "${GITHUB_REPOSITORY}" --ref "${BRANCH}" \
                && gh workflow run judge.yml --repo "${GITHUB_REPOSITORY}" --ref "${BRANCH}"; then
@@ -306,10 +321,16 @@ jobs:
   # binaries, SHA256SUMS, cosign keyless .sig/.pem, SLSA .intoto.jsonl, and
   # publish a version-tagged image to ghcr.io/zouhairmaj/megabase (cosign).
   # id-token: write stays on sign-and-publish only.
+  # Push builds run only when this commit is the release tag.
+  # attest-build-provenance records GITHUB_SHA. release-please can set
+  # release_created for an older tag on a later push (run 38007606007
+  # published v0.1.1 at ff54751 while this run was a3a1300); those
+  # builds must skip, not fail the SHA check. workflow_dispatch still
+  # runs, and the SHA check step requires Use workflow from = the tag.
   build-binaries:
     name: Build ${{ matrix.target }}
     needs: release-please
-    if: always() && !cancelled() && (github.event_name == 'workflow_dispatch' || needs.release-please.outputs.release_created == 'true')
+    if: always() && !cancelled() && (github.event_name == 'workflow_dispatch' || (needs.release-please.outputs.release_created == 'true' && needs.release-please.outputs.sha == github.sha))
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
     permissions:
@@ -386,7 +407,7 @@ jobs:
   sign-and-publish:
     name: Sign and publish
     needs: [release-please, build-binaries]
-    if: always() && !cancelled() && needs.build-binaries.result == 'success' && (github.event_name == 'workflow_dispatch' || needs.release-please.outputs.release_created == 'true')
+    if: always() && !cancelled() && needs.build-binaries.result == 'success' && (github.event_name == 'workflow_dispatch' || (needs.release-please.outputs.release_created == 'true' && needs.release-please.outputs.sha == github.sha))
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:
