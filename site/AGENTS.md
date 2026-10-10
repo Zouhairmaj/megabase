@@ -16,19 +16,21 @@ Extends the root `AGENTS.md`; it does not relax it.
   `site/Cargo.lock`. Keep `resvg` on the harfrust/skrifa stack (0.48+);
   do not regress to rustybuzz or ttf-parser (RUSTSEC-2026-0206,
   RUSTSEC-2026-0192).
-- Deployed to GitHub Pages by `.github/workflows/pages.yml` on push to
-  `main` (and `workflow_dispatch`). That workflow checks out the event
-  SHA only and does not download Judge output. It saves the
-  default-branch Rust cache on pushes to `main`. After a successful
-  Judge run on `main`, `.github/workflows/pages-badges.yml`
-  (`workflow_run` only, no cache action) checks out the default branch
-  and applies the Judge JSON as data when that commit is the checkout
-  or an ancestor of it, then publishes shields JSON and the README
-  treemap PNGs to `gh-pages` and redeploys the site. It does not set
+- `pages.yml` builds the site on push to `main` (and
+  `workflow_dispatch`) and does not deploy that build. It checks out
+  the event SHA only, does not download Judge output, and saves the
+  default-branch Rust cache on pushes to `main`. Deploying that
+  checkout would publish the regression baseline over the live score.
+  After a successful Judge run on `main`,
+  `.github/workflows/pages-badges.yml` (`workflow_run` only, no cache
+  action) checks out the default branch and applies the Judge JSON as
+  data when that commit is the checkout or an ancestor of it, then
+  publishes shields JSON, `judge-history.json`, the README treemap
+  PNGs to `gh-pages`, and deploys the site. It does not set
   `actions/checkout` `ref` from the triggering run. The generator
   writes the JSON and those PNGs to `_site/coverage/` (never treemap
-  SVGs). Both workflows share the `pages` concurrency group. Neither
-  pushes to `main`.
+  SVGs). `pages-badges.yml` uses the `pages` concurrency group.
+  Neither workflow pushes to `main`.
 - Root design gate: the PR links the approved Kite frame and its committee
   review.
 - Treemaps are generated in Rust (`src/treemap.rs`) from

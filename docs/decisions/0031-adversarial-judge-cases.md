@@ -3,6 +3,8 @@
 - Status: Accepted (agent coordinator)
 - Date: 2026-10-10
 
+Numbered 0031 because 0030 is the live Judge score.
+
 Issue #117. Level 1 cannot be called done while a P0 Auth or RLS hole
 is open, so the attacks are visible judge cases. The reference stack is
 the oracle: a case records the request, and both stacks must answer the

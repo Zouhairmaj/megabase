@@ -34,6 +34,7 @@ not contained in the checkout is skipped. The JSON stays data: the
 cached Pages job never downloads it. `.github/workflows/pages.yml` is
 push and `workflow_dispatch` only, checks out the event SHA, and does
 not download `gh-pages` or a Judge artifact. It saves the
-default-branch Rust cache on pushes to `main`. Both workflows share
-the `pages` concurrency group so a baseline site deploy cannot overlap
-the Judge deploy.
+default-branch Rust cache on pushes to `main` and does not deploy
+that build. Publication, `judge-history.json`, and the `pages`
+concurrency group belong to `pages-badges.yml`
+([decision 0030](0030-conformance-is-the-live-judge-score.md)).

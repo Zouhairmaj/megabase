@@ -2,7 +2,8 @@
 
 Extends the root `AGENTS.md`; it does not relax it.
 
-- `megabase-coverage` (`update`, `check`, `verify-pins`): if you change
+- `megabase-coverage` (`update`, `check`, `verify-pins`, `conformance`,
+  `judge-history`): if you change
   extraction or rendering, commit the regenerated output (`just coverage`)
   in the same PR, and explain any change in the unit count in the PR body.
   README coverage/conformance shields.io badges and the README treemap
@@ -10,8 +11,11 @@ Extends the root `AGENTS.md`; it does not relax it.
   (`coverage/badge-coverage.json`, `coverage/badge-conformance.json`,
   `coverage/treemap.png`, `coverage/treemap-light.png`). PRs still
   commit the generated files so `check` can reject drift. The committed
-  `coverage/judge-results.json` is the regression baseline, so those
-  committed files stay at zero passes until a case is recorded there.
+  `coverage/judge-results.json` is the regression baseline (decision
+  0030). Generated prose does not quote its pass count as the
+  conformance score. That score is the Judge publication on `gh-pages`
+  and megabase.sh. `judge-history.json` on that branch is the
+  per-commit record release notes use.
   Colors:
   `#e05d44` below 50%, `#fe7d37` from 50% to under 90%, `#00D892` at 90%
   and above. SVG/treemap chips keep the brand greens in `badge_color`.
