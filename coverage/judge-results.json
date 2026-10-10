@@ -1,0 +1,693 @@
+{
+  "schema": 1,
+  "cases": [
+    {
+      "id": "auth.admin.audit.anon",
+      "pass": true
+    },
+    {
+      "id": "auth.admin.audit.bad-page",
+      "pass": true
+    },
+    {
+      "id": "auth.admin.audit.bad-query",
+      "pass": true
+    },
+    {
+      "id": "auth.admin.audit.list",
+      "pass": true
+    },
+    {
+      "id": "auth.admin.custom-providers.anon",
+      "pass": true
+    },
+    {
+      "id": "auth.admin.custom-providers.delete.anon",
+      "pass": true
+    },
+    {
+      "id": "auth.admin.custom-providers.delete.missing",
+      "pass": true
+    },
+    {
+      "id": "auth.admin.custom-providers.get.anon",
+      "pass": true
+    },
+    {
+      "id": "auth.admin.custom-providers.get.missing",
+      "pass": true
+    },
+    {
+      "id": "auth.admin.custom-providers.get.prefix",
+      "pass": true
+    },
+    {
+      "id": "auth.admin.custom-providers.list",
+      "pass": true
+    },
+    {
+      "id": "auth.admin.oauth.clients.anon",
+      "pass": true
+    },
+    {
+      "id": "auth.admin.oauth.clients.delete.anon",
+      "pass": true
+    },
+    {
+      "id": "auth.admin.oauth.clients.delete.disabled",
+      "pass": true
+    },
+    {
+      "id": "auth.admin.oauth.clients.disabled",
+      "pass": true
+    },
+    {
+      "id": "auth.admin.sso.providers.delete.anon",
+      "pass": true
+    },
+    {
+      "id": "auth.admin.sso.providers.delete.bad-id",
+      "pass": true
+    },
+    {
+      "id": "auth.admin.sso.providers.delete.missing",
+      "pass": true
+    },
+    {
+      "id": "auth.admin.users.anon",
+      "pass": true
+    },
+    {
+      "id": "auth.admin.users.delete.anon",
+      "pass": true
+    },
+    {
+      "id": "auth.admin.users.delete.bad-id",
+      "pass": true
+    },
+    {
+      "id": "auth.admin.users.delete.missing",
+      "pass": true
+    },
+    {
+      "id": "auth.admin.users.factors.delete.anon",
+      "pass": true
+    },
+    {
+      "id": "auth.admin.users.factors.delete.bad-user",
+      "pass": true
+    },
+    {
+      "id": "auth.admin.users.factors.delete.missing-user",
+      "pass": true
+    },
+    {
+      "id": "auth.admin.users.list",
+      "pass": true
+    },
+    {
+      "id": "auth.admin.users.passkeys.delete.anon",
+      "pass": true
+    },
+    {
+      "id": "auth.admin.users.passkeys.delete.bad-user",
+      "pass": true
+    },
+    {
+      "id": "auth.admin.users.passkeys.delete.missing-user",
+      "pass": true
+    },
+    {
+      "id": "auth.adversarial.body.signup-email-and-phone",
+      "pass": true
+    },
+    {
+      "id": "auth.adversarial.body.signup-email-type",
+      "pass": false
+    },
+    {
+      "id": "auth.adversarial.body.signup-empty",
+      "pass": true
+    },
+    {
+      "id": "auth.adversarial.body.signup-not-json",
+      "pass": false
+    },
+    {
+      "id": "auth.adversarial.body.signup-password-type",
+      "pass": false
+    },
+    {
+      "id": "auth.adversarial.body.token-empty",
+      "pass": true
+    },
+    {
+      "id": "auth.adversarial.body.token-grant",
+      "pass": true
+    },
+    {
+      "id": "auth.adversarial.body.token-not-json",
+      "pass": false
+    },
+    {
+      "id": "auth.adversarial.jwt.alg-none",
+      "pass": true
+    },
+    {
+      "id": "auth.adversarial.jwt.expired",
+      "pass": true
+    },
+    {
+      "id": "auth.adversarial.jwt.forged",
+      "pass": true
+    },
+    {
+      "id": "auth.adversarial.jwt.malformed",
+      "pass": true
+    },
+    {
+      "id": "auth.adversarial.jwt.role-escalation",
+      "pass": true
+    },
+    {
+      "id": "auth.adversarial.jwt.tampered-role",
+      "pass": true
+    },
+    {
+      "id": "auth.adversarial.jwt.truncated",
+      "pass": true
+    },
+    {
+      "id": "auth.adversarial.rate-limit.token",
+      "pass": false
+    },
+    {
+      "id": "auth.adversarial.redirect.authorize",
+      "pass": false
+    },
+    {
+      "id": "auth.adversarial.redirect.decimal-ip",
+      "pass": true
+    },
+    {
+      "id": "auth.adversarial.redirect.external",
+      "pass": true
+    },
+    {
+      "id": "auth.adversarial.redirect.javascript",
+      "pass": true
+    },
+    {
+      "id": "auth.adversarial.redirect.protocol-relative",
+      "pass": true
+    },
+    {
+      "id": "auth.adversarial.redirect.same-origin",
+      "pass": true
+    },
+    {
+      "id": "auth.adversarial.redirect.scheme",
+      "pass": true
+    },
+    {
+      "id": "auth.adversarial.redirect.suffix-host",
+      "pass": true
+    },
+    {
+      "id": "auth.adversarial.redirect.userinfo",
+      "pass": true
+    },
+    {
+      "id": "auth.health",
+      "pass": true
+    },
+    {
+      "id": "auth.logout",
+      "pass": true
+    },
+    {
+      "id": "auth.settings",
+      "pass": false
+    },
+    {
+      "id": "auth.signup.password",
+      "pass": true
+    },
+    {
+      "id": "auth.signup.weak-password",
+      "pass": true
+    },
+    {
+      "id": "auth.sql.function.email",
+      "pass": true
+    },
+    {
+      "id": "auth.sql.function.jwt",
+      "pass": true
+    },
+    {
+      "id": "auth.sql.function.role",
+      "pass": true
+    },
+    {
+      "id": "auth.sql.function.uid",
+      "pass": true
+    },
+    {
+      "id": "auth.sql.table.audit_log_entries",
+      "pass": false
+    },
+    {
+      "id": "auth.sql.table.custom_oauth_providers",
+      "pass": false
+    },
+    {
+      "id": "auth.sql.table.flow_state",
+      "pass": false
+    },
+    {
+      "id": "auth.sql.table.identities",
+      "pass": false
+    },
+    {
+      "id": "auth.sql.table.instances",
+      "pass": false
+    },
+    {
+      "id": "auth.sql.table.mfa_amr_claims",
+      "pass": false
+    },
+    {
+      "id": "auth.sql.table.mfa_challenges",
+      "pass": false
+    },
+    {
+      "id": "auth.sql.table.mfa_factors",
+      "pass": false
+    },
+    {
+      "id": "auth.sql.table.mfa_recovery_code_sets",
+      "pass": false
+    },
+    {
+      "id": "auth.sql.table.mfa_recovery_codes",
+      "pass": false
+    },
+    {
+      "id": "auth.sql.table.oauth_authorizations",
+      "pass": false
+    },
+    {
+      "id": "auth.sql.table.oauth_client_states",
+      "pass": false
+    },
+    {
+      "id": "auth.sql.table.oauth_clients",
+      "pass": false
+    },
+    {
+      "id": "auth.sql.table.oauth_consents",
+      "pass": false
+    },
+    {
+      "id": "auth.sql.table.one_time_tokens",
+      "pass": false
+    },
+    {
+      "id": "auth.sql.table.refresh_tokens",
+      "pass": false
+    },
+    {
+      "id": "auth.sql.table.saml_providers",
+      "pass": false
+    },
+    {
+      "id": "auth.sql.table.saml_relay_states",
+      "pass": false
+    },
+    {
+      "id": "auth.sql.table.schema_migrations",
+      "pass": true
+    },
+    {
+      "id": "auth.sql.table.scim_tokens",
+      "pass": false
+    },
+    {
+      "id": "auth.sql.table.scim_users",
+      "pass": false
+    },
+    {
+      "id": "auth.sql.table.sessions",
+      "pass": false
+    },
+    {
+      "id": "auth.sql.table.sso_domains",
+      "pass": false
+    },
+    {
+      "id": "auth.sql.table.sso_providers",
+      "pass": false
+    },
+    {
+      "id": "auth.sql.table.sso_sessions",
+      "pass": true
+    },
+    {
+      "id": "auth.sql.table.users",
+      "pass": false
+    },
+    {
+      "id": "auth.token.password",
+      "pass": true
+    },
+    {
+      "id": "auth.token.refresh",
+      "pass": true
+    },
+    {
+      "id": "auth.token.wrong-password",
+      "pass": true
+    },
+    {
+      "id": "auth.user.anon-key",
+      "pass": true
+    },
+    {
+      "id": "auth.user.get",
+      "pass": true
+    },
+    {
+      "id": "auth.user.identity.authorize-disabled",
+      "pass": true
+    },
+    {
+      "id": "auth.user.identity.unlink-disabled",
+      "pass": true
+    },
+    {
+      "id": "auth.user.oauth.grants-disabled",
+      "pass": true
+    },
+    {
+      "id": "auth.user.put-metadata",
+      "pass": true
+    },
+    {
+      "id": "auth.user.put-password",
+      "pass": true
+    },
+    {
+      "id": "auth.user.put-phone",
+      "pass": true
+    },
+    {
+      "id": "auth.user.put-same-password",
+      "pass": true
+    },
+    {
+      "id": "auth.verify.get.email-change-expired",
+      "pass": true
+    },
+    {
+      "id": "auth.verify.get.invalid-type",
+      "pass": true
+    },
+    {
+      "id": "auth.verify.get.invite-expired",
+      "pass": true
+    },
+    {
+      "id": "auth.verify.get.missing-token",
+      "pass": true
+    },
+    {
+      "id": "auth.verify.get.missing-type",
+      "pass": true
+    },
+    {
+      "id": "auth.verify.get.recovery-expired",
+      "pass": true
+    },
+    {
+      "id": "auth.verify.get.signup-expired",
+      "pass": true
+    },
+    {
+      "id": "auth.verify.post.both-tokens",
+      "pass": true
+    },
+    {
+      "id": "auth.verify.post.email-change-expired",
+      "pass": true
+    },
+    {
+      "id": "auth.verify.post.hash-with-email",
+      "pass": true
+    },
+    {
+      "id": "auth.verify.post.invalid-email",
+      "pass": true
+    },
+    {
+      "id": "auth.verify.post.invalid-type",
+      "pass": true
+    },
+    {
+      "id": "auth.verify.post.invite-expired",
+      "pass": true
+    },
+    {
+      "id": "auth.verify.post.missing-type",
+      "pass": true
+    },
+    {
+      "id": "auth.verify.post.recovery-expired",
+      "pass": true
+    },
+    {
+      "id": "auth.verify.post.signup-expired",
+      "pass": true
+    },
+    {
+      "id": "auth.verify.post.token-without-address",
+      "pass": true
+    },
+    {
+      "id": "auth.verify.post.token-xor",
+      "pass": true
+    },
+    {
+      "id": "meta.config.version",
+      "pass": false
+    },
+    {
+      "id": "meta.health",
+      "pass": false
+    },
+    {
+      "id": "realtime.ping",
+      "pass": false
+    },
+    {
+      "id": "rest.adversarial.jwt.alg-none",
+      "pass": false
+    },
+    {
+      "id": "rest.adversarial.jwt.expired",
+      "pass": true
+    },
+    {
+      "id": "rest.adversarial.jwt.forged",
+      "pass": false
+    },
+    {
+      "id": "rest.adversarial.jwt.malformed",
+      "pass": true
+    },
+    {
+      "id": "rest.adversarial.jwt.tampered-role",
+      "pass": false
+    },
+    {
+      "id": "rest.adversarial.rls.anon",
+      "pass": true
+    },
+    {
+      "id": "rest.adversarial.rls.anon-embed",
+      "pass": false
+    },
+    {
+      "id": "rest.adversarial.rls.apikey-role",
+      "pass": true
+    },
+    {
+      "id": "rest.adversarial.rls.cross-user-comment",
+      "pass": false
+    },
+    {
+      "id": "rest.adversarial.rls.cross-user-delete",
+      "pass": false
+    },
+    {
+      "id": "rest.adversarial.rls.cross-user-insert",
+      "pass": false
+    },
+    {
+      "id": "rest.adversarial.rls.cross-user-not",
+      "pass": true
+    },
+    {
+      "id": "rest.adversarial.rls.cross-user-or",
+      "pass": true
+    },
+    {
+      "id": "rest.adversarial.rls.cross-user-read",
+      "pass": true
+    },
+    {
+      "id": "rest.adversarial.rls.cross-user-update",
+      "pass": false
+    },
+    {
+      "id": "rest.adversarial.rls.embed",
+      "pass": false
+    },
+    {
+      "id": "rest.adversarial.rls.embed-comments",
+      "pass": false
+    },
+    {
+      "id": "rest.adversarial.rls.embed-inner",
+      "pass": false
+    },
+    {
+      "id": "rest.adversarial.rls.filter-drop",
+      "pass": false
+    },
+    {
+      "id": "rest.adversarial.rls.filter-quote",
+      "pass": true
+    },
+    {
+      "id": "rest.adversarial.rls.owner-insert",
+      "pass": false
+    },
+    {
+      "id": "rest.adversarial.rls.owner-read",
+      "pass": true
+    },
+    {
+      "id": "rest.adversarial.rls.service-role",
+      "pass": true
+    },
+    {
+      "id": "rest.count.exact",
+      "pass": false
+    },
+    {
+      "id": "rest.filter.eq",
+      "pass": true
+    },
+    {
+      "id": "rest.filter.gt-lt",
+      "pass": true
+    },
+    {
+      "id": "rest.filter.in",
+      "pass": true
+    },
+    {
+      "id": "rest.filter.nxl",
+      "pass": true
+    },
+    {
+      "id": "rest.filter.nxr",
+      "pass": true
+    },
+    {
+      "id": "rest.filter.ov",
+      "pass": true
+    },
+    {
+      "id": "rest.filter.phfts",
+      "pass": true
+    },
+    {
+      "id": "rest.filter.plfts",
+      "pass": true
+    },
+    {
+      "id": "rest.filter.sl",
+      "pass": true
+    },
+    {
+      "id": "rest.filter.sr",
+      "pass": true
+    },
+    {
+      "id": "rest.filter.unknown-operator",
+      "pass": true
+    },
+    {
+      "id": "rest.filter.wfts",
+      "pass": true
+    },
+    {
+      "id": "rest.insert.rls-denied",
+      "pass": false
+    },
+    {
+      "id": "rest.limit-offset",
+      "pass": true
+    },
+    {
+      "id": "rest.missing-table",
+      "pass": true
+    },
+    {
+      "id": "rest.object.single",
+      "pass": false
+    },
+    {
+      "id": "rest.query.and",
+      "pass": true
+    },
+    {
+      "id": "rest.query.columns",
+      "pass": true
+    },
+    {
+      "id": "rest.query.on-conflict",
+      "pass": true
+    },
+    {
+      "id": "rest.query.or",
+      "pass": true
+    },
+    {
+      "id": "rest.rpc.get",
+      "pass": true
+    },
+    {
+      "id": "rest.rpc.post",
+      "pass": true
+    },
+    {
+      "id": "rest.select.all",
+      "pass": true
+    },
+    {
+      "id": "rest.select.columns",
+      "pass": true
+    },
+    {
+      "id": "storage.bucket.list",
+      "pass": false
+    },
+    {
+      "id": "storage.bucket.missing",
+      "pass": false
+    }
+  ]
+}
