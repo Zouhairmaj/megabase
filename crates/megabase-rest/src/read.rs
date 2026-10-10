@@ -18,7 +18,7 @@ use serde_json::{Map, Value};
 use crate::filter::UnsafeType;
 use crate::mutate::mutate;
 use crate::openapi::document;
-use crate::params::{build_read_sql, parse_get_query, QueryFail};
+use crate::params::{build_read_sql_as, parse_get_query, QueryFail};
 use crate::query::path_decode;
 use crate::RestState;
 
@@ -183,7 +183,27 @@ async fn relation_route(
     if let Some(unit) = reject_prefer(headers.get("prefer")) {
         return unimplemented_unit(method, path, unit);
     }
-    if let Some(unit) = reject_accept(headers.get(header::ACCEPT)) {
+    let mut csv = false;
+    if matches!(*method, Method::GET | Method::HEAD) {
+        match negotiate_read(headers.get(header::ACCEPT)) {
+            ReadAccept::Csv => csv = true,
+            ReadAccept::NotAcceptable(types) => {
+                return pgrst(
+                    StatusCode::NOT_ACCEPTABLE,
+                    "PGRST107",
+                    &format!("None of these media types are available: {types}"),
+                    None,
+                    None,
+                );
+            }
+            ReadAccept::Json => {}
+            ReadAccept::Other => {
+                if let Some(unit) = reject_accept(headers.get(header::ACCEPT)) {
+                    return unimplemented_unit(method, path, unit);
+                }
+            }
+        }
+    } else if let Some(unit) = reject_accept(headers.get(header::ACCEPT)) {
         return unimplemented_unit(method, path, unit);
     }
     if method == Method::GET && headers.get(header::RANGE).is_some() {
@@ -203,7 +223,7 @@ async fn relation_route(
                 &session,
                 &query,
                 state.aggregates,
-                false,
+                ReadShape::new(false, csv),
             )
             .await
         }
@@ -219,7 +239,7 @@ async fn relation_route(
                 &session,
                 &query,
                 state.aggregates,
-                true,
+                ReadShape::new(true, csv),
             )
             .await
         }
@@ -543,6 +563,67 @@ fn jwt_failure(error: &JwtError) -> Response {
     response
 }
 
+/// Outcome of `Accept` negotiation for a relation read.
+enum ReadAccept {
+    /// `application/json`, `*/*`, `application/*`, or no `Accept`.
+    Json,
+    /// `text/csv`: the builtin CSV handler.
+    Csv,
+    /// Every accepted type lacks a handler on a table or view (PGRST107).
+    NotAcceptable(String),
+    /// Another media type; `reject_accept` decides.
+    Other,
+}
+
+/// Pick the first accepted media type with a handler, as `negotiateContent`
+/// does. `text/plain` and `text/xml` have none for a table or view, because
+/// no custom aggregate is registered.
+fn negotiate_read(value: Option<&axum::http::HeaderValue>) -> ReadAccept {
+    let Some(text) = header_str(value) else {
+        return ReadAccept::Json;
+    };
+    let mut skipped: Vec<String> = Vec::new();
+    for part in text.split(',') {
+        let part = part.trim();
+        if part.is_empty() {
+            continue;
+        }
+        let essence = part
+            .split(';')
+            .next()
+            .unwrap_or("")
+            .trim()
+            .to_ascii_lowercase();
+        match essence.as_str() {
+            // megabase:unit rest:media-type:text/csv
+            "text/csv" => return ReadAccept::Csv,
+            // megabase:unit rest:media-type:text/plain
+            // megabase:unit rest:media-type:text/xml
+            "text/plain" | "text/xml" => skipped.push(essence),
+            "*/*" | "application/json" | "application/*" => return ReadAccept::Json,
+            _ => return ReadAccept::Other,
+        }
+    }
+    if skipped.is_empty() {
+        ReadAccept::Json
+    } else {
+        ReadAccept::NotAcceptable(skipped.join(", "))
+    }
+}
+
+/// Method and body format of a relation read.
+#[derive(Clone, Copy)]
+struct ReadShape {
+    headers_only: bool,
+    csv: bool,
+}
+
+impl ReadShape {
+    fn new(headers_only: bool, csv: bool) -> Self {
+        Self { headers_only, csv }
+    }
+}
+
 /// `Err` is a coverage unit id. An empty string means the concrete path.
 pub(crate) fn reject_accept(value: Option<&axum::http::HeaderValue>) -> Option<&'static str> {
     let value = header_str(value)?;
@@ -648,22 +729,17 @@ async fn read_relation(
     session: &Session,
     read: &crate::params::ReadQuery,
     aggregates: bool,
-    headers_only: bool,
+    shape: ReadShape,
 ) -> Response {
-    let http_method = if headers_only { "HEAD" } else { "GET" };
-    match read_rows(
-        pool,
-        schema,
-        relation,
-        session,
-        read,
-        aggregates,
-        http_method,
-    )
-    .await
-    {
+    let ReadShape { headers_only, csv } = shape;
+    match read_rows(pool, schema, relation, session, read, aggregates, shape).await {
         Ok((count, body, offset)) => {
-            let mut response = json_rows(offset, count, if headers_only { "" } else { &body });
+            let body = if headers_only { "" } else { &body };
+            let mut response = if csv {
+                csv_rows(offset, count, body)
+            } else {
+                json_rows(offset, count, body)
+            };
             profile_header(&mut response, schema);
             response
         }
@@ -678,8 +754,10 @@ async fn read_rows(
     session: &Session,
     read: &crate::params::ReadQuery,
     aggregates: bool,
-    http_method: &str,
+    shape: ReadShape,
 ) -> Result<(i64, String, i64), Box<Response>> {
+    let ReadShape { headers_only, csv } = shape;
+    let http_method = if headers_only { "HEAD" } else { "GET" };
     let mut tx = pool
         .begin()
         .await
@@ -710,7 +788,7 @@ async fn read_rows(
         .iter()
         .map(|(name, pg_type)| (name.as_str(), pg_type.as_str()))
         .collect();
-    let built = build_read_sql(schema, relation, read, &column_types)
+    let built = build_read_sql_as(schema, relation, read, &column_types, csv)
         .map_err(|error| Box::new(unsafe_type(&error)))?;
     let request_path = format!("/{relation}");
     set_request_context(&mut tx, session, http_method, &request_path, schema).await?;
@@ -937,6 +1015,19 @@ fn json_rows(offset: i64, count: i64, body: &str) -> Response {
         StatusCode::OK,
         [
             (header::CONTENT_TYPE, JSON_UTF8),
+            (header::CONTENT_RANGE, range.as_str()),
+        ],
+        body.to_string(),
+    )
+        .into_response()
+}
+
+fn csv_rows(offset: i64, count: i64, body: &str) -> Response {
+    let range = content_range(offset, count);
+    (
+        StatusCode::OK,
+        [
+            (header::CONTENT_TYPE, "text/csv; charset=utf-8"),
             (header::CONTENT_RANGE, range.as_str()),
         ],
         body.to_string(),
@@ -1251,6 +1342,59 @@ mod tests {
             body["unit"],
             "rest:media-type:application/vnd.pgrst.object+json"
         );
+    }
+
+    #[tokio::test]
+    async fn text_plain_and_xml_are_406_on_a_relation() {
+        for (accept, listed) in [
+            ("text/plain", "text/plain"),
+            ("text/xml;q=0.5", "text/xml"),
+            ("text/plain, text/xml", "text/plain, text/xml"),
+        ] {
+            let app = router(RestState::from_config(&Config::default()));
+            let request = Request::builder()
+                .uri("/rest/v1/todos")
+                .header(header::ACCEPT, accept)
+                .body(Body::empty())
+                .unwrap();
+            let (status, body, _) = send(app, request).await;
+            assert_eq!(status, StatusCode::NOT_ACCEPTABLE);
+            assert_eq!(body["code"], "PGRST107");
+            assert_eq!(
+                body["message"],
+                format!("None of these media types are available: {listed}")
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn csv_accept_reaches_the_pool_check() {
+        for accept in [
+            "text/csv",
+            "text/plain, text/csv",
+            "text/csv; charset=utf-8",
+        ] {
+            let app = router(RestState::from_config(&Config::default()));
+            let request = Request::builder()
+                .uri("/rest/v1/todos")
+                .header(header::ACCEPT, accept)
+                .body(Body::empty())
+                .unwrap();
+            let (status, _, _) = send(app, request).await;
+            assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{accept}");
+        }
+    }
+
+    #[test]
+    fn negotiation_picks_the_first_handled_type() {
+        let pick = |text: &'static str| negotiate_read(Some(&HeaderValue::from_static(text)));
+        assert!(matches!(
+            pick("text/xml, application/json"),
+            ReadAccept::Json
+        ));
+        assert!(matches!(pick("text/xml, text/csv"), ReadAccept::Csv));
+        assert!(matches!(pick("application/geo+json"), ReadAccept::Other));
+        assert!(matches!(negotiate_read(None), ReadAccept::Json));
     }
 
     #[tokio::test]
