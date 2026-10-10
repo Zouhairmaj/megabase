@@ -188,7 +188,7 @@ pub fn home(paths: &Paths, metrics: &Metrics, counts: &PublicCounts) -> String {
         how = paths.page("how-it-works"),
         lede = esc(&lede),
         roadmap = paths.page("roadmap"),
-        levels = level_cards(metrics, false),
+        levels = home_level_row(metrics),
         components_href = paths.page("components"),
         scope = scope,
         faq_href = paths.page("faq"),
@@ -512,7 +512,7 @@ fn level_complete(metrics: &Metrics, spec: &LevelSpec) -> bool {
     }
 }
 
-fn level_progress_label(metrics: &Metrics, spec: &LevelSpec) -> String {
+fn level_progress_text(metrics: &Metrics, spec: &LevelSpec, one_decimal: bool) -> String {
     if spec.stretch {
         return "deferred".into();
     }
@@ -531,12 +531,25 @@ fn level_progress_label(metrics: &Metrics, spec: &LevelSpec) -> String {
             } else {
                 "in progress"
             };
-            format!("{} · {state}", metrics::compact_pct(value))
+            let shown = if one_decimal {
+                format!("{value:.1}%")
+            } else {
+                metrics::compact_pct(value)
+            };
+            format!("{shown} · {state}")
         }
     }
 }
 
 fn level_cards(metrics: &Metrics, detailed: bool) -> String {
+    level_row(metrics, detailed, false)
+}
+
+fn home_level_row(metrics: &Metrics) -> String {
+    level_row(metrics, false, true)
+}
+
+fn level_row(metrics: &Metrics, detailed: bool, one_decimal: bool) -> String {
     let next = LEVELS
         .iter()
         .find(|spec| !spec.stretch && !level_complete(metrics, spec))
@@ -556,7 +569,7 @@ fn level_cards(metrics: &Metrics, detailed: bool) -> String {
         } else {
             spec.kicker.to_string()
         };
-        let progress = level_progress_label(metrics, spec);
+        let progress = level_progress_text(metrics, spec, one_decimal);
         let extra = if detailed {
             String::new()
         } else {
@@ -1158,6 +1171,8 @@ mod tests {
         assert!(html.contains("04 JUDGE"));
         assert!(!html.contains("How the loop works"));
         assert!(html.contains("2 pass the judge."));
+        assert!(html.contains("66.7% · in progress"));
+        assert!(html.contains("0.0% · not started"));
     }
 
     #[test]
@@ -1240,14 +1255,20 @@ mod tests {
     fn roadmap_progress_is_per_level_scope() {
         let live = live_progress();
         assert_eq!(
-            level_progress_label(&live, &LEVELS[0]),
+            level_progress_text(&live, &LEVELS[0], false),
             "66.7% · in progress"
         );
-        assert_eq!(level_progress_label(&live, &LEVELS[1]), "0% · not started");
-        assert_eq!(level_progress_label(&live, &LEVELS[2]), "0% · not started");
-        assert_eq!(level_progress_label(&live, &LEVELS[4]), "deferred");
+        assert_eq!(
+            level_progress_text(&live, &LEVELS[1], false),
+            "0% · not started"
+        );
+        assert_eq!(
+            level_progress_text(&live, &LEVELS[2], false),
+            "0% · not started"
+        );
+        assert_eq!(level_progress_text(&live, &LEVELS[4], false), "deferred");
         assert_ne!(
-            level_progress_label(&live, &LEVELS[0]),
+            level_progress_text(&live, &LEVELS[0], false),
             format!("{} · not started", live.conformance_label())
         );
         let html = level_cards(&live, false);

@@ -2283,7 +2283,8 @@ body:has(#licensing-and-credits:target) .toc-list a[href="#licensing-and-credits
 }
 
 .page-home .site-footer {
-  padding: 40px var(--pad) 48px;
+  margin: 0 var(--pad) 48px;
+  padding: 40px 0 0;
 }
 
 .page-home .kicker {
@@ -2462,9 +2463,12 @@ body:has(#licensing-and-credits:target) .toc-list a[href="#licensing-and-credits
   background: var(--panel);
 }
 
-.page-home .step-kicker {
+.page-home .home-steps .step-kicker {
+  margin: 0;
   color: var(--accent);
+  font-family: var(--font);
   font-size: 13px;
+  line-height: 1.2;
 }
 
 .page-home .home-steps h3 {
@@ -2515,6 +2519,28 @@ body:has(#licensing-and-credits:target) .toc-list a[href="#licensing-and-credits
   color: var(--body);
   font-size: 13px;
   font-weight: 400;
+}
+
+.page-home .scope-name span:last-child {
+  font-size: 12px;
+}
+
+.page-home .level-card h3 {
+  margin: 0;
+  font-size: 16px;
+  line-height: 1.4;
+}
+
+.page-home .level-card > p {
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.page-home .level-head .muted,
+.page-home .level-foot .muted {
+  font-family: var(--font);
+  font-size: 12px;
 }
 
 .page-home .scope-name span:first-child {
@@ -2590,6 +2616,7 @@ body:has(#licensing-and-credits:target) .toc-list a[href="#licensing-and-credits
 @media (max-width: 900px) {
   .page-home .site-header {
     padding: 18px 20px;
+    border: 1px solid var(--border);
   }
 
   .page-home .hero {
@@ -2692,6 +2719,7 @@ body:has(#licensing-and-credits:target) .toc-list a[href="#licensing-and-credits
   }
 
   .page-home .band {
+    align-items: stretch;
     border-top: 0;
     padding: 48px 20px 0;
   }
@@ -2824,6 +2852,7 @@ body:has(#licensing-and-credits:target) .toc-list a[href="#licensing-and-credits
   }
 
   .page-home .site-footer {
+    margin: 0;
     padding: 32px 20px;
   }
 }
