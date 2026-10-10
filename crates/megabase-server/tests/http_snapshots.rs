@@ -2,6 +2,13 @@
 //!
 //! `x-request-id` is generated per call, so these snapshots omit it. A fixed
 //! incoming id is checked separately.
+//!
+//! `GET /_megabase/health` reports the crate version from `CARGO_PKG_VERSION`.
+//! The test asserts that field, then stores `[version]` in the snapshot, so
+//! a release-please bump does not rewrite the file. Insta's `redactions`
+//! feature is not used: it depends on `pest` and `pest_derive`, which are
+//! not on the `deny.toml` allow list. The other snapshots do not include
+//! the crate version. `/auth/v1/health` reports the pinned GoTrue version.
 
 use axum::{
     body::{to_bytes, Body},
@@ -54,10 +61,14 @@ async fn observe(method: &str, path: &str, body: Option<&str>) -> Value {
 
 #[tokio::test]
 async fn health_and_not_implemented_bodies() {
-    insta::assert_json_snapshot!(
-        "megabase_health",
-        observe("GET", "/_megabase/health", None).await
+    let mut health = observe("GET", "/_megabase/health", None).await;
+    assert_eq!(
+        health["body"]["version"].as_str(),
+        Some(env!("CARGO_PKG_VERSION")),
+        "GET /_megabase/health version is the crate version"
     );
+    health["body"]["version"] = json!("[version]");
+    insta::assert_json_snapshot!("megabase_health", health);
     insta::assert_json_snapshot!("auth_health", observe("GET", "/auth/v1/health", None).await);
     insta::assert_json_snapshot!(
         "auth_settings",
