@@ -666,7 +666,10 @@ pub(crate) fn reject_accept(value: Option<&axum::http::HeaderValue>) -> Option<&
 fn accept_unit(first: &str) -> Option<&'static str> {
     let mut pieces = first.split(';');
     let essence = pieces.next()?.trim().to_ascii_lowercase();
-    let nulls_stripped = pieces.any(|param| param.trim().eq_ignore_ascii_case("nulls=stripped"));
+    let nulls_stripped = pieces.any(|param| {
+        let compact: String = param.split_whitespace().collect();
+        compact.eq_ignore_ascii_case("nulls=stripped")
+    });
     match essence.as_str() {
         "*/*" | "application/json" | "application/*" => None,
         "application/vnd.pgrst.object+json" if nulls_stripped => {
