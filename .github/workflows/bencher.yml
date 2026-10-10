@@ -21,13 +21,15 @@ env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: 0
 
-# Latency is a static ceiling. The Bencher `latency` measure is nanoseconds
-# (`rust_criterion`). A quiet run is about 3.6 µs (3,600 ns) for health and
-# 4.5 µs for the REST stub. PR #180 measured health at 6.81 µs (6,810 ns)
-# against a percentage limit of 6.53 µs (300% above a 1.63 µs historical
-# mean). The miss is 0.28 µs, runner noise at this scale, not a slower
-# gateway. 20,000 ns (20 µs) is a few times those results and still fails
-# the check if a route leaves the tens of microseconds.
+# Latency is a percentage boundary on the `latency` measure, which
+# `rust_criterion` reports in nanoseconds. Upper boundary `0.75` means the
+# limit is 1.75× the mean of the most recent 6 results (the test does not
+# run until 6 exist). Pull request #187 had no server change and still
+# alerted: health 5.31 µs and REST 6.61 µs against a 0.95 t-test limit of
+# 4.79 µs and 6.00 µs, because 12 of those 16 samples were still the
+# pre-layer ~1.6 µs results. 1.75× the recent mean passes that runner
+# spread and fails a result at twice the recent mean.
+# See docs/decisions/0028-bencher-recent-mean-boundary.md.
 jobs:
   benchmark:
     name: Bencher
@@ -76,8 +78,11 @@ jobs:
             --testbed github-actions \
             --adapter rust_criterion \
             --threshold-measure latency \
-            --threshold-test static \
-            --threshold-upper-boundary 20000 \
+            --threshold-test percentage \
+            --threshold-min-sample-size 6 \
+            --threshold-max-sample-size 6 \
+            --threshold-upper-boundary 0.75 \
+            --thresholds-reset \
             --error-on-alert \
             "cargo bench --locked --bench health"
 
@@ -100,8 +105,11 @@ jobs:
             --testbed github-actions \
             --adapter rust_criterion \
             --threshold-measure latency \
-            --threshold-test static \
-            --threshold-upper-boundary 20000 \
+            --threshold-test percentage \
+            --threshold-min-sample-size 6 \
+            --threshold-max-sample-size 6 \
+            --threshold-upper-boundary 0.75 \
+            --thresholds-reset \
             --error-on-alert \
             --github-actions "$GH_TOKEN" \
             "cargo bench --locked --bench health"
@@ -125,8 +133,11 @@ jobs:
             --testbed github-actions \
             --adapter rust_criterion \
             --threshold-measure latency \
-            --threshold-test static \
-            --threshold-upper-boundary 20000 \
+            --threshold-test percentage \
+            --threshold-min-sample-size 6 \
+            --threshold-max-sample-size 6 \
+            --threshold-upper-boundary 0.75 \
+            --thresholds-reset \
             --error-on-alert \
             --github-actions "$GH_TOKEN" \
             "cargo bench --locked --bench health"

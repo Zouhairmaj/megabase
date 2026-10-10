@@ -27,6 +27,7 @@ other names. There is no `.env.example` in this tree; the judge uses
 | GOTRUE_SECURITY_MANUAL_LINKING_ENABLED | GoTrue flag. Default `false`. Accepted values match Go's bool parser (`1`, `t`, `T`, `true`, `0`, `f`, `F`, `false`, any case). Any other value aborts startup. When false, `GET /auth/v1/user/identities/authorize` and `DELETE /auth/v1/user/identities/{identity_id}` return 404 `manual_linking_disabled` after the bearer check. |
 | GOTRUE_SECURITY_UPDATE_PASSWORD_REQUIRE_REAUTHENTICATION | GoTrue flag. Default `false`. Accepted values match Go's bool parser (`1`, `t`, `T`, `true`, `0`, `f`, `F`, `false`, any case). Any other value aborts startup. When true, `PUT /auth/v1/user` with `password` returns 501. |
 | GOTRUE_SECURITY_UPDATE_PASSWORD_REQUIRE_CURRENT_PASSWORD | GoTrue flag. Default `false`. Accepted values match Go's bool parser (`1`, `t`, `T`, `true`, `0`, `f`, `F`, `false`, any case). Any other value aborts startup. When true, `PUT /auth/v1/user` with `password` returns 501. |
+| GOTRUE_URI_ALLOW_LIST | Comma-separated redirect globs for `POST /auth/v1/admin/generate_link`. `*` and `?` do not cross `.` or `/`; `**` does. When this is unset or blank, `ADDITIONAL_REDIRECT_URLS` is used instead. A pattern with an unescaped `[` `]` `{` or `}` is not implemented: a redirect that must be checked against it returns 501. |
 
 ## JWT verification
 

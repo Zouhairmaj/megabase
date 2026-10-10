@@ -12,8 +12,8 @@ Specs go in `specs/auth/<unit>.md` (GOAL.md section 5). Mark served code with `/
 |---|---|---|
 | 🟩 | `auth:route:DELETE /auth/v1/admin/users/{user_id}` | [internal/api/api.go:390](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/api.go#L390) |
 | 🟩 | `auth:route:GET /auth/v1/admin/audit` | [internal/api/api.go:363](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/api.go#L363) |
-| ⬜ | `auth:route:GET /auth/v1/admin/users` | [internal/api/api.go:367](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/api.go#L367) |
-| ⬜ | `auth:route:GET /auth/v1/admin/users/{user_id}` | [internal/api/api.go:388](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/api.go#L388) |
-| ⬜ | `auth:route:POST /auth/v1/admin/generate_link` | [internal/api/api.go:394](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/api.go#L394) |
+| 🟩 | `auth:route:GET /auth/v1/admin/users` | [internal/api/api.go:367](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/api.go#L367) |
+| 🟨 | `auth:route:GET /auth/v1/admin/users/{user_id}` | [internal/api/api.go:388](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/api.go#L388) |
+| 🟨 | `auth:route:POST /auth/v1/admin/generate_link` | [internal/api/api.go:394](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/api.go#L394) |
 | ⬜ | `auth:route:POST /auth/v1/admin/users` | [internal/api/api.go:368](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/api.go#L368) |
 | ⬜ | `auth:route:PUT /auth/v1/admin/users/{user_id}` | [internal/api/api.go:389](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/api.go#L389) |

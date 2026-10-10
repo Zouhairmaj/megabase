@@ -15,7 +15,9 @@
 //   internal/models/sso.go
 //   internal/models/webauthn_credential.go
 
-//! First batch of `/auth/v1/admin` routes (issue #6).
+//! `/auth/v1/admin` routes. Issue #6 is the first GET/DELETE batch. Issue #7
+//! adds the user, SSO, OAuth client, custom-provider, and generate-link
+//! handlers in `admin_batch2`.
 
 use std::collections::HashMap;
 
@@ -24,7 +26,7 @@ use axum::{
     extract::{Path, Query, State},
     http::{header::AUTHORIZATION, HeaderMap},
     response::Response,
-    routing::{delete, get},
+    routing::{delete, get, post},
     Router,
 };
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -41,7 +43,7 @@ use crate::state::AuthState;
 const NIL_INSTANCE: &str = "00000000-0000-0000-0000-000000000000";
 const AUTH_PREFIX: &str = "/auth/v1";
 
-fn nil_instance() -> Uuid {
+pub(crate) fn nil_instance() -> Uuid {
     Uuid::nil()
 }
 
@@ -50,22 +52,45 @@ pub fn router(state: AuthState) -> Router {
         .route("/auth/v1/admin/audit", get(get_audit))
         .route(
             "/auth/v1/admin/custom-providers",
-            get(list_custom_providers),
+            get(list_custom_providers).post(crate::admin_batch2::post_custom_provider),
         )
         .route(
             "/auth/v1/admin/custom-providers/:identifier",
             get(get_custom_provider).delete(delete_custom_provider),
         )
-        .route("/auth/v1/admin/oauth/clients", get(list_oauth_clients))
+        .route(
+            "/auth/v1/admin/oauth/clients",
+            get(list_oauth_clients).post(crate::admin_batch2::post_oauth_client),
+        )
         .route(
             "/auth/v1/admin/oauth/clients/:client_id",
-            delete(delete_oauth_client),
+            get(crate::admin_batch2::get_oauth_client).delete(delete_oauth_client),
+        )
+        .route(
+            "/auth/v1/admin/sso/providers",
+            get(crate::admin_batch2::list_sso_providers),
         )
         .route(
             "/auth/v1/admin/sso/providers/:idp_id",
-            delete(delete_sso_provider),
+            get(crate::admin_batch2::get_sso_provider).delete(delete_sso_provider),
         )
-        .route("/auth/v1/admin/users/:user_id", delete(delete_user))
+        .route("/auth/v1/admin/users", get(crate::admin_batch2::list_users))
+        .route(
+            "/auth/v1/admin/users/:user_id",
+            get(crate::admin_batch2::get_user).delete(delete_user),
+        )
+        .route(
+            "/auth/v1/admin/users/:user_id/factors",
+            get(crate::admin_batch2::get_user_factors),
+        )
+        .route(
+            "/auth/v1/admin/users/:user_id/passkeys",
+            get(crate::admin_batch2::get_user_passkeys),
+        )
+        .route(
+            "/auth/v1/admin/generate_link",
+            post(crate::admin_batch2::generate_link),
+        )
         .route(
             "/auth/v1/admin/users/:user_id/factors/:factor_id",
             delete(delete_factor),
@@ -77,7 +102,16 @@ pub fn router(state: AuthState) -> Router {
         .with_state(state)
 }
 
-fn require_admin(state: &AuthState, headers: &HeaderMap) -> Result<(), AuthError> {
+pub(crate) fn require_admin(state: &AuthState, headers: &HeaderMap) -> Result<(), AuthError> {
+    verified_admin_role(state, headers).map(|_| ())
+}
+
+/// Admin JWT role (`service_role` by default). `requireAdmin` stores this on a
+/// synthetic user whose email is the role string (`auth.go`).
+pub(crate) fn verified_admin_role(
+    state: &AuthState,
+    headers: &HeaderMap,
+) -> Result<String, AuthError> {
     let authorization = headers
         .get(AUTHORIZATION)
         .and_then(|value| value.to_str().ok())
@@ -91,10 +125,10 @@ fn require_admin(state: &AuthState, headers: &HeaderMap) -> Result<(), AuthError
     if !state.is_admin_role(claims.role.as_deref()) {
         return Err(AuthError::not_admin());
     }
-    Ok(())
+    Ok(claims.role.unwrap_or_default())
 }
 
-fn require_custom_oauth(state: &AuthState) -> Result<(), AuthError> {
+pub(crate) fn require_custom_oauth(state: &AuthState) -> Result<(), AuthError> {
     if state.custom_oauth_enabled {
         Ok(())
     } else {
@@ -104,7 +138,7 @@ fn require_custom_oauth(state: &AuthState) -> Result<(), AuthError> {
     }
 }
 
-fn require_oauth_server(state: &AuthState) -> Result<(), AuthError> {
+pub(crate) fn require_oauth_server(state: &AuthState) -> Result<(), AuthError> {
     if state.oauth_server_enabled {
         Ok(())
     } else {
@@ -112,7 +146,7 @@ fn require_oauth_server(state: &AuthState) -> Result<(), AuthError> {
     }
 }
 
-fn is_uuid(value: &str) -> bool {
+pub(crate) fn is_uuid(value: &str) -> bool {
     let bytes = value.as_bytes();
     if bytes.len() != 36 {
         return false;
@@ -134,14 +168,14 @@ fn is_uuid(value: &str) -> bool {
     true
 }
 
-fn pool(state: &AuthState) -> Result<sqlx::PgPool, AuthError> {
+pub(crate) fn pool(state: &AuthState) -> Result<sqlx::PgPool, AuthError> {
     state
         .backend
         .pg_pool()
         .ok_or_else(|| AuthError::internal("Database error"))
 }
 
-fn ts_json(time: Option<chrono::DateTime<chrono::Utc>>) -> Value {
+pub(crate) fn ts_json(time: Option<chrono::DateTime<chrono::Utc>>) -> Value {
     match time {
         Some(time) => Value::String(system_time_rfc3339(std::time::SystemTime::from(time))),
         None => Value::Null,
@@ -155,7 +189,7 @@ struct AuditQuery {
     query: Option<String>,
 }
 
-fn parse_uint(raw: Option<&str>, default: u64) -> Result<u64, AuthError> {
+pub(crate) fn parse_uint(raw: Option<&str>, default: u64) -> Result<u64, AuthError> {
     match raw {
         None | Some("") => Ok(default),
         Some(value) => value.parse::<u64>().map_err(|_| {
@@ -424,7 +458,7 @@ fn format_link(path: &str, pairs: &[(String, String)]) -> String {
     format!("{path}?{query}")
 }
 
-fn system_time_rfc3339(time: std::time::SystemTime) -> String {
+pub(crate) fn system_time_rfc3339(time: std::time::SystemTime) -> String {
     // Go `time.Time` JSON uses RFC3339Nano (fractional seconds, trailing zeros
     // stripped). Dropping sub-second precision via `as_secs()` would diverge.
     match time.duration_since(std::time::UNIX_EPOCH) {
@@ -588,7 +622,8 @@ fn validate_custom_identifier(identifier: &str) -> Result<(), AuthError> {
     Ok(())
 }
 
-struct CustomProviderRow {
+#[derive(sqlx::FromRow)]
+pub(crate) struct CustomProviderRow {
     id: Uuid,
     provider_type: String,
     identifier: String,
@@ -641,7 +676,7 @@ async fn load_custom_provider(
     Ok(custom_provider_json(&row))
 }
 
-fn custom_provider_json(row: &CustomProviderRow) -> Value {
+pub(crate) fn custom_provider_json(row: &CustomProviderRow) -> Value {
     let mut object = serde_json::Map::new();
     object.insert("id".into(), json!(row.id.to_string()));
     object.insert("provider_type".into(), json!(row.provider_type));
@@ -717,7 +752,8 @@ async fn list_oauth_clients(
     Ok(json_ok(&json!({ "clients": clients })))
 }
 
-struct OAuthClientRow {
+#[derive(sqlx::FromRow)]
+pub(crate) struct OAuthClientRow {
     id: Uuid,
     client_type: Option<String>,
     redirect_uris: String,
@@ -731,7 +767,7 @@ struct OAuthClientRow {
     updated_at: chrono::DateTime<chrono::Utc>,
 }
 
-fn oauth_client_json(row: &OAuthClientRow) -> Value {
+pub(crate) fn oauth_client_json(row: &OAuthClientRow) -> Value {
     let mut object = serde_json::Map::new();
     object.insert("client_id".into(), json!(row.id.to_string()));
     object.insert(

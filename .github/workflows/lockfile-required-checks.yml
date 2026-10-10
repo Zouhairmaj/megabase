@@ -224,7 +224,7 @@ jobs:
         run: |
           git fetch --no-tags origin main
           BASE_SHA="$(git rev-parse origin/main)"
-          # Same latency model as .github/workflows/bencher.yml (static, 20000 ns).
+          # Same latency model as .github/workflows/bencher.yml (percentage 0.75, sample size 6).
           bencher run \
             --project megabase \
             --ci-on-the-fly \
@@ -236,8 +236,11 @@ jobs:
             --testbed github-actions \
             --adapter rust_criterion \
             --threshold-measure latency \
-            --threshold-test static \
-            --threshold-upper-boundary 20000 \
+            --threshold-test percentage \
+            --threshold-min-sample-size 6 \
+            --threshold-max-sample-size 6 \
+            --threshold-upper-boundary 0.75 \
+            --thresholds-reset \
             --error-on-alert \
             --github-actions "$GH_TOKEN" \
             "cargo bench --locked --bench health"

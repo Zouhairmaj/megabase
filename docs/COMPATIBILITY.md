@@ -93,7 +93,7 @@ In scope: **1024 units**. Excluded: **76** upstream items.
 | REST | query-params | 1 | 8 | 0 | 0 | 0 |
 | REST | resources | 1 | 10 | 0 | 0 | 0 |
 | REST | rpc | 1 | 4 | 0 | 0 | 0 |
-| Auth | admin | 1–2 | 28 | 10 | 10 | 0 |
+| Auth | admin | 1–2 | 28 | 20 | 11 | 0 |
 | Auth | database | 1 | 32 | 32 | 30 | 0 |
 | Auth | endpoints | 1–2 | 13 | 4 | 4 | 0 |
 | Auth | factors | 2 | 9 | 0 | 0 | 0 |

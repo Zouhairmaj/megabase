@@ -7,7 +7,7 @@ use axum::{
     http::{header::CONTENT_TYPE, HeaderValue, StatusCode},
     response::{IntoResponse, Response},
 };
-use serde::Serialize;
+use serde_json::json;
 
 pub const ERROR_CODE_HEADER: &str = "x-sb-error-code";
 
@@ -16,13 +16,7 @@ pub struct AuthError {
     pub status: u16,
     pub error_code: &'static str,
     pub message: String,
-}
-
-#[derive(Serialize)]
-struct AuthErrorBody<'a> {
-    code: u16,
-    error_code: &'a str,
-    msg: &'a str,
+    pub weak_password: Option<Vec<String>>,
 }
 
 impl AuthError {
@@ -31,6 +25,16 @@ impl AuthError {
             status,
             error_code,
             message: message.into(),
+            weak_password: None,
+        }
+    }
+
+    pub fn weak_password(message: impl Into<String>, reasons: Vec<String>) -> Self {
+        Self {
+            status: 422,
+            error_code: "weak_password",
+            message: message.into(),
+            weak_password: Some(reasons),
         }
     }
 
@@ -69,16 +73,23 @@ impl AuthError {
     pub fn internal(message: impl Into<String>) -> Self {
         Self::new(500, "unexpected_failure", message)
     }
+
+    pub fn unprocessable(error_code: &'static str, message: impl Into<String>) -> Self {
+        Self::new(422, error_code, message)
+    }
 }
 
 impl IntoResponse for AuthError {
     fn into_response(self) -> Response {
         let status = StatusCode::from_u16(self.status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
-        let body = AuthErrorBody {
-            code: self.status,
-            error_code: self.error_code,
-            msg: &self.message,
-        };
+        let mut body = json!({
+            "code": self.status,
+            "error_code": self.error_code,
+            "msg": self.message,
+        });
+        if let Some(reasons) = &self.weak_password {
+            body["weak_password"] = json!({ "reasons": reasons });
+        }
         let mut response = (
             status,
             [(CONTENT_TYPE, HeaderValue::from_static("application/json"))],
@@ -93,8 +104,13 @@ impl IntoResponse for AuthError {
 }
 
 pub fn json_ok(value: &serde_json::Value) -> Response {
+    json_status(StatusCode::OK, value)
+}
+
+/// JSON body with an explicit status. OAuth client and custom-provider creates are 201.
+pub fn json_status(status: StatusCode, value: &serde_json::Value) -> Response {
     (
-        StatusCode::OK,
+        status,
         [(CONTENT_TYPE, HeaderValue::from_static("application/json"))],
         serde_json::to_vec(value).unwrap_or_else(|_| b"null".to_vec()),
     )
