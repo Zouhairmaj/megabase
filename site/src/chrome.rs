@@ -1,6 +1,11 @@
 //! Shared nav and footer, matching Kite components `Nav / Desktop`,
 //! `Nav / Mobile closed` / `Nav / Mobile open`, `Footer / Desktop` and
-//! `Footer / Mobile`.
+//! `Footer / Mobile`. The release pill beside the wordmark is the
+//! `Version` layer on those navs (frame `Home / Desktop (version)`).
+
+use std::fs;
+use std::io;
+use std::path::Path;
 
 use crate::html::esc;
 use crate::GITHUB;
@@ -120,8 +125,127 @@ const MOBILE_NAV: &[(&str, &str)] = &[
     ("faq", "FAQ"),
 ];
 
-pub fn header(paths: &Paths, logo: &str) -> String {
+/// Workspace package version from `[workspace.package]` in `Cargo.toml`.
+///
+/// # Errors
+///
+/// Returns an error when the manifest cannot be read or has no
+/// `[workspace.package] version`.
+pub fn read_workspace_version(repo_root: &Path) -> io::Result<String> {
+    let path = repo_root.join("Cargo.toml");
+    let text = fs::read_to_string(&path).map_err(|err| {
+        io::Error::new(
+            err.kind(),
+            format!("reading workspace manifest {}: {err}", path.display()),
+        )
+    })?;
+    parse_workspace_version(&text).ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("[workspace.package] version missing in {}", path.display()),
+        )
+    })
+}
+
+/// Version string from a workspace manifest's `[workspace.package]` table.
+pub fn parse_workspace_version(toml: &str) -> Option<String> {
+    let mut in_package = false;
+    for raw in toml.lines() {
+        let line = strip_toml_comment(raw).trim();
+        if line.is_empty() {
+            continue;
+        }
+        if line.starts_with('[') && line.ends_with(']') {
+            in_package = line == "[workspace.package]";
+            continue;
+        }
+        if !in_package {
+            continue;
+        }
+        let Some((key, value)) = toml_key_value(line) else {
+            continue;
+        };
+        if key != "version" {
+            continue;
+        }
+        let quoted = unquote(value)?;
+        if is_cargo_version(quoted) {
+            return Some(quoted.to_string());
+        }
+        return None;
+    }
+    None
+}
+
+fn strip_toml_comment(line: &str) -> &str {
+    let mut in_single = false;
+    let mut in_double = false;
+    for (index, ch) in line.char_indices() {
+        match ch {
+            '\'' if !in_double => in_single = !in_single,
+            '"' if !in_single => in_double = !in_double,
+            '#' if !in_single && !in_double => return &line[..index],
+            _ => {}
+        }
+    }
+    line
+}
+
+fn toml_key_value(line: &str) -> Option<(&str, &str)> {
+    let (key, value) = line.split_once('=')?;
+    let key = key.trim();
+    if key.is_empty() || key.contains(char::is_whitespace) {
+        return None;
+    }
+    Some((key, value.trim()))
+}
+
+fn unquote(value: &str) -> Option<&str> {
+    let bytes = value.as_bytes();
+    if bytes.len() < 2 {
+        return None;
+    }
+    let quote = bytes[0];
+    if (quote == b'"' || quote == b'\'') && bytes[bytes.len() - 1] == quote {
+        Some(&value[1..value.len() - 1])
+    } else {
+        None
+    }
+}
+
+/// `MAJOR.MINOR.PATCH` with an optional prerelease and build metadata.
+fn is_cargo_version(version: &str) -> bool {
+    let (main, build) = version.split_once('+').unwrap_or((version, ""));
+    if version.contains('+')
+        && (build.is_empty()
+            || !build
+                .chars()
+                .all(|ch| ch.is_ascii_alphanumeric() || ch == '.'))
+    {
+        return false;
+    }
+    let (core, pre) = main.split_once('-').unwrap_or((main, ""));
+    if main.contains('-')
+        && (pre.is_empty()
+            || !pre
+                .chars()
+                .all(|ch| ch.is_ascii_alphanumeric() || ch == '.' || ch == '-'))
+    {
+        return false;
+    }
+    let numbers: Vec<&str> = core.split('.').collect();
+    numbers.len() == 3
+        && numbers.iter().all(|part| {
+            !part.is_empty()
+                && part.chars().all(|ch| ch.is_ascii_digit())
+                && (part.len() == 1 || !part.starts_with('0'))
+        })
+}
+
+pub fn header(paths: &Paths, logo: &str, version: &str) -> String {
     let home = paths.home_href();
+    let version_text = esc(&format!("v{version}"));
+    let release = esc(&format!("{GITHUB}/releases/tag/v{version}"));
     let mut desktop = String::new();
     for (id, label, hidden) in DESKTOP_NAV {
         let class = if *hidden { " nav-hide-desktop" } else { "" };
@@ -146,7 +270,10 @@ pub fn header(paths: &Paths, logo: &str) -> String {
 
     format!(
         r#"<header class="site-header">
-  <a class="brand" href="{home}">{logo}<span class="wordmark">MEGABASE</span></a>
+  <div class="brand-lockup">
+    <a class="brand" href="{home}">{logo}<span class="wordmark">MEGABASE</span></a>
+    <a class="version-badge" href="{release}" rel="noopener noreferrer">{version_text}</a>
+  </div>
   <nav class="nav-desktop" aria-label="Primary">{desktop}</nav>
   <details class="nav-mobile">
     <summary class="nav-menu-btn"><span class="menu-open">MENU</span><span class="menu-close">CLOSE</span></summary>
@@ -277,4 +404,81 @@ pub fn footer(paths: &Paths, logo: &str) -> String {
   </div>
 </footer>"#
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_workspace_package_version_only() {
+        let toml = r#"
+[package]
+name = "megabase-site"
+version = "0.1.0"
+
+[workspace.package]
+edition = "2021"
+# version = "9.9.9"
+version = "0.1.6" # release
+
+[workspace.dependencies]
+tokio = { version = "1.40" }
+"#;
+        assert_eq!(parse_workspace_version(toml).as_deref(), Some("0.1.6"));
+    }
+
+    #[test]
+    fn accepts_prerelease_and_single_quotes() {
+        let toml = "[workspace.package]\nversion = '1.2.3-rc.1+build.7'\n";
+        assert_eq!(
+            parse_workspace_version(toml).as_deref(),
+            Some("1.2.3-rc.1+build.7")
+        );
+    }
+
+    #[test]
+    fn rejects_a_missing_or_invalid_version() {
+        assert!(parse_workspace_version("[package]\nversion = \"0.1.0\"\n").is_none());
+        assert!(parse_workspace_version("[workspace.package]\nversion = \"01.2.3\"\n").is_none());
+        assert!(
+            parse_workspace_version("[workspace.package]\nversion.workspace = true\n").is_none()
+        );
+        assert!(parse_workspace_version("[workspace.package]\nversion = 0.1.6\n").is_none());
+    }
+
+    #[test]
+    fn reads_the_workspace_manifest() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("repo root");
+        let version = read_workspace_version(root).expect("workspace version");
+        let text = fs::read_to_string(root.join("Cargo.toml")).unwrap();
+        let section = text
+            .split_once("[workspace.package]")
+            .expect("workspace.package")
+            .1
+            .split('[')
+            .next()
+            .expect("section body");
+        assert!(
+            section.contains(&format!("version = \"{version}\"")),
+            "parsed {version} is not the [workspace.package] version"
+        );
+    }
+
+    #[test]
+    fn header_places_one_release_badge_beside_the_wordmark() {
+        let html = header(&Paths::home(false), "<svg></svg>", "1.2.3");
+        let badge = html
+            .find(r#"<a class="version-badge" href="https://github.com/Zouhairmaj/megabase/releases/tag/v1.2.3" rel="noopener noreferrer">v1.2.3</a>"#)
+            .expect("badge");
+        let brand_open = html.find(r#"<a class="brand""#).expect("brand");
+        let brand_close = html[brand_open..].find("</a>").expect("brand close") + brand_open;
+        let nav = html.find(r#"class="nav-desktop""#).expect("nav");
+        assert!(brand_close < badge && badge < nav);
+        assert_eq!(html.matches("version-badge").count(), 1);
+        let footer = footer(&Paths::home(false), "<svg></svg>");
+        assert!(!footer.contains("version-badge"));
+    }
 }
