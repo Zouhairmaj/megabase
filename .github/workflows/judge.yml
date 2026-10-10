@@ -22,8 +22,26 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  changes:
+    name: Path filter
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      site: ${{ steps.paths.outputs.site }}
+      server: ${{ steps.paths.outputs.server }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+      - id: paths
+        uses: ./.github/actions/pr-paths
+
   build:
     name: Judge build
+    needs: changes
+    if: needs.changes.result == 'success' && needs.changes.outputs.server != 'false'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
@@ -51,17 +69,25 @@ jobs:
 
   services:
     name: Judge services
+    needs: changes
+    if: needs.changes.result == 'success'
     runs-on: ubuntu-latest
     permissions:
       contents: read
     outputs:
-      services: ${{ steps.list.outputs.services }}
+      services: ${{ steps.list.outputs.services || steps.skip.outputs.services }}
     steps:
+      - name: Site-only pull request
+        id: skip
+        if: needs.changes.outputs.server == 'false'
+        run: echo 'services=[]' >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        if: needs.changes.outputs.server != 'false'
         with:
           persist-credentials: false
           sparse-checkout: judge/cases
       - id: list
+        if: needs.changes.outputs.server != 'false'
         name: List judge/cases services
         run: |
           set -euo pipefail
@@ -75,7 +101,8 @@ jobs:
 
   service:
     name: Judge (${{ matrix.service }})
-    needs: [build, services]
+    needs: [changes, build, services]
+    if: needs.changes.outputs.server != 'false' && needs.build.result == 'success' && needs.services.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
@@ -222,19 +249,24 @@ jobs:
   # Required check name stays `Judge` so branch protection does not change.
   aggregate:
     name: Judge
-    needs: [services, service]
-    if: always()
+    needs: [changes, services, service]
+    if: always() && needs.changes.result == 'success'
     runs-on: ubuntu-latest
     permissions:
       contents: read
       pull-requests: write
     steps:
+      - name: Not applicable
+        if: needs.changes.outputs.server == 'false'
+        run: echo "Site-only pull request. Judge reports success without starting the reference stack."
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        if: needs.changes.outputs.server != 'false'
         continue-on-error: true
         with:
           pattern: judge-results-*
           path: /tmp/parts
       - name: Merge service results
+        if: needs.changes.outputs.server != 'false'
         id: merge
         run: |
           set -euo pipefail
@@ -279,7 +311,7 @@ jobs:
           fi
           echo "ok=true" >> "$GITHUB_OUTPUT"
       - name: Comment on the PR
-        if: github.event_name == 'pull_request' && always()
+        if: github.event_name == 'pull_request' && needs.changes.outputs.server != 'false' && always()
         continue-on-error: true
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
         with:
@@ -300,7 +332,7 @@ jobs:
       # pages-badges.yml downloads this artifact from the Judge run.
       # Do not push the file onto main (branch protection, decision 0022).
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        if: steps.merge.outputs.ok == 'true'
+        if: needs.changes.outputs.server != 'false' && steps.merge.outputs.ok == 'true'
         with:
           name: judge-results
           retention-days: 1

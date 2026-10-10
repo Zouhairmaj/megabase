@@ -53,6 +53,41 @@ SQLX_OFFLINE=false DATABASE_URL=postgres://… cargo sqlx prepare --workspace --
 Commit the `.sqlx` files the command writes. A CI `cargo sqlx prepare --check`
 step would live in `.github/` and needs its own `review/*` pull request.
 
+## Pull request checks
+
+Protected paths and Conventional Commits title run on every pull request.
+
+The other workflows call `.github/actions/pr-paths` instead of `paths` /
+`paths-ignore` on the trigger. A workflow that never starts leaves a
+required check at "Expected — waiting". Each job keeps its check name.
+When the diff does not apply, the job's first step succeeds and the
+remaining steps are skipped, so the check is success. An empty output
+runs the job. An empty diff or a failed base fetch runs the full suite.
+
+A diff is **site-only** when every path is `site/**`, `devlog/**`,
+`MANIFESTO.md`, `HUMAN_LOG.md`, or anything under `docs/**` except
+`docs/COMPATIBILITY.md` and `docs/epics/**` (coverage-tool output).
+A site-only pull request does not compile the server. These checks
+report success without their usual work: Build, MSRV 1.89, Coverage
+check, Container image, Judge, the `cargo-fuzz` matrix, Bencher,
+cargo-deny, cargo-audit, cargo-vet, cargo-machete, cargo-hack, and
+Codecov.
+
+**Generate site** (`pages.yml`) runs when a path is a generator input:
+`site/**`, `devlog/**`, `MANIFESTO.md`, `HUMAN_LOG.md`, a top-level
+`docs/*.md` file, `coverage/summary.json`, or `coverage/units.json`.
+That job formats, lints (`clippy -D warnings`), tests, and builds
+`site/`. A pull request with none of those paths reports Generate site
+as success without building.
+
+A diff that touches both a site path and a server path runs both
+suites. Push to `main`, the fuzz schedule, the hidden judge, Scorecard,
+Release, and `workflow_dispatch` (including release lockfile sync) are
+not filtered.
+
+CodeQL is GitHub code scanning default setup. There is no `codeql.yml`,
+so this filter does not skip it.
+
 ## Fuzzing
 
 OpenSSF Scorecard's Fuzzing check treats a Rust repo as fuzzed when a `*.rs`
@@ -80,9 +115,9 @@ cargo +nightly fuzz list
 ```
 
 `.github/workflows/fuzz.yml` runs each target for 60 seconds on pull
-requests and 600 seconds by default on a nightly schedule and
-`workflow_dispatch` (the `seconds` input can override that duration).
-A crash uploads `fuzz/artifacts/`. Seed inputs live in `fuzz/corpus/<target>/`.
+requests that are not site-only, and 600 seconds by default on a nightly
+schedule and `workflow_dispatch` (the `seconds` input can override that
+duration). A crash uploads `fuzz/artifacts/`. Seed inputs live in `fuzz/corpus/<target>/`.
 Do not commit `fuzz/target/`, `fuzz/artifacts/`, or `fuzz/coverage/`.
 
 ## Design
@@ -91,7 +126,7 @@ Mockups live in the [Kite identity file](https://kite.new/p/megabase-identity). 
 
 ## Supply chain
 
-Megabase owns two Rust lockfiles: the workspace `Cargo.lock` and `site/Cargo.lock` (the static generator is a standalone crate). `just audit` and the CI `cargo-audit` matrix each run `cargo audit --file` once per owned lockfile. A workspace-only `cargo audit` misses `site/`. There is no advisory ignore. Cargo still records optional `sqlx-mysql` in the workspace lockfile when only the postgres feature is on; `[patch.crates-io]` replaces that crate with `third_party/sqlx-mysql`, which leaves the `rsa` feature off so RUSTSEC-2023-0071 is not in the lockfile ([0033](decisions/0033-sqlx-mysql-rsa.md)). OpenSSF Scorecard's OSV check walks every `Cargo.lock` in the tree, including `site/`.
+Megabase owns two Rust lockfiles: the workspace `Cargo.lock` and `site/Cargo.lock` (the static generator is a standalone crate). `just audit` and the CI `cargo-audit` matrix each run `cargo audit --file` once per owned lockfile. A workspace-only `cargo audit` misses `site/`. Site-only pull requests skip that matrix; every push to `main` still audits both lockfiles. There is no advisory ignore. Cargo still records optional `sqlx-mysql` in the workspace lockfile when only the postgres feature is on; `[patch.crates-io]` replaces that crate with `third_party/sqlx-mysql`, which leaves the `rsa` feature off so RUSTSEC-2023-0071 is not in the lockfile ([0033](decisions/0033-sqlx-mysql-rsa.md)). OpenSSF Scorecard's OSV check walks every `Cargo.lock` in the tree, including `site/`.
 
 Lockfiles under `vendor/` belong to the pinned upstream spec. Agents never edit them ([ADR 0003](adr/0003-protected-paths.md)). Report issues in those trees upstream; do not add an OSV ignore unless a Scorecard finding is only in `vendor/` and cannot be fixed without bumping a pin.
 

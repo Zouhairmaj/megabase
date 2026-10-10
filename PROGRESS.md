@@ -130,6 +130,12 @@ Physically impossible for the agent (repository settings or credentials):
 - [ ] Branch protection on `main`: PRs only, required checks
       `Build`, `MSRV 1.89`, `Coverage check`, `Protected paths`,
       `Judge`, `Conventional Commits title`, one approving review
+- [ ] CodeQL default setup has no workflow in this repo, so the
+      pull-request path filter cannot skip it. If Settings → Code
+      security → CodeQL can exclude `site/**` from pull-request
+      analysis, set that. Do not add `codeql.yml` only to gain
+      `paths-ignore`: advanced setup disables the default setup
+      `docs/BESTPRACTICES.md` cites.
 - [x] Allow GitHub Actions to create and approve pull requests
       (Settings → Actions → General → Workflow permissions;
       `can_approve_pull_request_reviews=true`. Run 37961663758 predates it.)

@@ -51,14 +51,18 @@ git push -u origin HEAD
 PR checks: **Build, MSRV 1.89, Coverage check, Protected paths, Container
 image, Judge, Conventional Commits title, Fuzz, cargo-vet, cargo-machete,
 cargo-hack**. GitHub does not enforce them yet.
-Treat every one as required anyway.
+Treat every one as required anyway. A pull request that only changes the
+static site and site-only docs runs the site build and reports those other
+checks as success without compiling the server
+([Pull request checks](docs/contributing.md#pull-request-checks)). Pushes
+to `main` and release dispatch still run the full set.
 
 `fuzz/` is a standalone cargo-fuzz workspace (excluded from the root
 workspace). Targets: `jwt` (`megabase-core` HS256 + `bearer_token`),
 `gateway_http` (URI / Kong prefix matching), `rest_query` (stub query-string
 walker until PostgREST filter parsing exists). Scorecard's Fuzzing check
 detects `libfuzzer_sys` in those `*.rs` files. `.github/workflows/fuzz.yml`
-runs each target for 60 seconds on PRs and 10 minutes on a schedule, and
+runs each target for 60 seconds on pull requests that are not site-only, and 10 minutes on a schedule, and
 uploads `fuzz/artifacts/` on a crash. Needs nightly and `cargo-fuzz` 0.13.2;
 see [Contributing](docs/contributing.md#fuzzing).
 

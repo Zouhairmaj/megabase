@@ -26,8 +26,26 @@ env:
   CARGO_INCREMENTAL: 0
 
 jobs:
+  changes:
+    name: Path filter
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      site: ${{ steps.paths.outputs.site }}
+      server: ${{ steps.paths.outputs.server }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+      - id: paths
+        uses: ./.github/actions/pr-paths
+
   fuzz:
     name: cargo-fuzz
+    needs: changes
+    if: needs.changes.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
@@ -37,24 +55,33 @@ jobs:
       matrix:
         target: [jwt, gateway_http, rest_query]
     steps:
+      - name: Not applicable
+        if: needs.changes.outputs.server == 'false'
+        run: echo "Site-only pull request. cargo-fuzz (${{ matrix.target }}) reports success without fuzzing."
+
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        if: needs.changes.outputs.server != 'false'
         with:
           persist-credentials: false
 
       - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+        if: needs.changes.outputs.server != 'false'
         with:
           toolchain: nightly
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        if: needs.changes.outputs.server != 'false'
         with:
           workspaces: fuzz
           key: fuzz-${{ matrix.target }}
 
       - uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
+        if: needs.changes.outputs.server != 'false'
         with:
           tool: cargo-fuzz@0.13.2
 
       - name: Duration
+        if: needs.changes.outputs.server != 'false'
         id: duration
         env:
           EVENT_NAME: ${{ github.event_name }}
@@ -75,6 +102,7 @@ jobs:
           echo "seconds=$seconds" >> "$GITHUB_OUTPUT"
 
       - name: Fuzz ${{ matrix.target }}
+        if: needs.changes.outputs.server != 'false'
         run: |
           # taiki-e/install-action ships a musl cargo-fuzz, which otherwise
           # selects x86_64-unknown-linux-musl. ASan cannot link a static musl
@@ -84,7 +112,7 @@ jobs:
             -max_total_time="${{ steps.duration.outputs.seconds }}"
 
       - name: Upload crash artifacts
-        if: failure()
+        if: failure() && needs.changes.outputs.server != 'false'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: fuzz-artifacts-${{ matrix.target }}

@@ -1,0 +1,159 @@
+# Classify a pull request so workflows can skip work that does not apply.
+# Push, schedule, and workflow_dispatch set both outputs to true: main and
+# release dispatch keep the full suite.
+#
+# server=false only when every changed path is site content (see
+# site_only_path). site=false only when no changed path is a site-generator
+# input (see site_build_path). An empty diff or a failed base fetch sets
+# both to true so a filter bug runs the suite instead of skipping it.
+# Downstream jobs must treat any value other than the string false as "run".
+name: Pull request paths
+description: Classify a pull request as site content, server code, or both.
+
+outputs:
+  site:
+    description: Build and lint the static site unless this is the string false.
+    value: ${{ steps.filter.outputs.site }}
+  server:
+    description: Run server, judge, and supply-chain jobs unless this is the string false.
+    value: ${{ steps.filter.outputs.server }}
+
+runs:
+  using: composite
+  steps:
+    - name: Classify changed paths
+      id: filter
+      shell: bash
+      env:
+        EVENT_NAME: ${{ github.event_name }}
+        BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      run: |
+        set -euo pipefail
+
+        # Defaults are the full suite. Downstream jobs run unless the output
+        # is exactly "false", and this step still writes that on early exit.
+        site=true
+        server=true
+        reason="full suite"
+        wrote=false
+        cleanup() {
+          if [ "$wrote" = true ]; then
+            return 0
+          fi
+          echo "site=true" >> "$GITHUB_OUTPUT"
+          echo "server=true" >> "$GITHUB_OUTPUT"
+        }
+        trap cleanup EXIT
+
+        # True when this path cannot affect the Rust server, coverage check,
+        # or a generated coverage file. docs/COMPATIBILITY.md and docs/epics
+        # are coverage-tool output, so they stay on the server path.
+        site_only_path() {
+          case "$1" in
+            site/*|devlog/*|MANIFESTO.md|HUMAN_LOG.md) return 0 ;;
+            docs/COMPATIBILITY.md|docs/epics|docs/epics/*) return 1 ;;
+            docs/*) return 0 ;;
+            *) return 1 ;;
+          esac
+        }
+
+        # True when the static generator reads this path.
+        site_build_path() {
+          case "$1" in
+            site/*|devlog/*|MANIFESTO.md|HUMAN_LOG.md) return 0 ;;
+            coverage/summary.json|coverage/units.json) return 0 ;;
+            docs/*.md)
+              case "$1" in
+                docs/*/*) return 1 ;;
+                *) return 0 ;;
+              esac
+              ;;
+            *) return 1 ;;
+          esac
+        }
+
+        publish() {
+          echo "site=${site}" >> "$GITHUB_OUTPUT"
+          echo "server=${server}" >> "$GITHUB_OUTPUT"
+          wrote=true
+          {
+            echo "### Path filter"
+            echo
+            echo "site=\`${site}\` server=\`${server}\` (${reason})"
+          } >> "$GITHUB_STEP_SUMMARY"
+        }
+
+        if [ "$EVENT_NAME" != "pull_request" ]; then
+          reason="event ${EVENT_NAME} runs the full suite"
+          publish
+          exit 0
+        fi
+        if ! [[ "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+          echo "::warning::Pull request base SHA is missing; running the full suite."
+          reason="base SHA missing"
+          publish
+          exit 0
+        fi
+
+        fetched=false
+        attempt=1
+        while [ "$attempt" -le 3 ]; do
+          if git fetch --no-tags --depth=1 origin "$BASE_SHA"; then
+            fetched=true
+            break
+          fi
+          if [ "$attempt" -eq 3 ]; then
+            break
+          fi
+          sleep $((attempt * 2))
+          attempt=$((attempt + 1))
+        done
+        if [ "$fetched" != true ]; then
+          echo "::warning::Could not fetch ${BASE_SHA}; running the full suite."
+          reason="base fetch failed"
+          publish
+          exit 0
+        fi
+
+        # --no-renames lists both sides of a rename, so a move from crates/
+        # into site/ still counts as a server change. A shell variable
+        # cannot hold NUL, so the diff is written to a file before mapfile.
+        diff_file="$(mktemp)"
+        if ! git diff -z --name-only --no-renames "$BASE_SHA" HEAD >"$diff_file"; then
+          rm -f "$diff_file"
+          echo "::warning::git diff failed; running the full suite."
+          reason="git diff failed"
+          publish
+          exit 0
+        fi
+        mapfile -d '' files < "$diff_file"
+        rm -f "$diff_file"
+        if [ "${#files[@]}" -eq 0 ]; then
+          reason="empty diff"
+          publish
+          exit 0
+        fi
+
+        site=false
+        server=false
+        seen=false
+        for path in "${files[@]}"; do
+          [ -n "$path" ] || continue
+          seen=true
+          if site_build_path "$path"; then
+            site=true
+          fi
+          if ! site_only_path "$path"; then
+            server=true
+          fi
+        done
+        # Blank names only. A real site-only doc that the generator does
+        # not read (docs/decisions, docs/adr) keeps both flags false.
+        if [ "$seen" != true ]; then
+          site=true
+          server=true
+          reason="empty diff"
+        else
+          reason="${#files[@]} paths"
+        fi
+        publish

@@ -123,7 +123,7 @@ SUGGESTED 10 Met, 3 Unmet, 1 N/A.
 | `test` | MUST | Met | `cargo test --workspace --locked` is the public FLOSS suite, and CI runs it. | [.github/workflows/ci.yml](https://github.com/Zouhairmaj/megabase/blob/main/.github/workflows/ci.yml) |
 | `test_invocation` | SHOULD | Met | `cargo test` is the standard Rust invocation. | [README](https://github.com/Zouhairmaj/megabase/blob/main/README.md) |
 | `test_most` | SUGGESTED | Unmet | Codecov on main (2026-10-09) reports 51.32% line coverage and no branch coverage, which is not most branches. | [Codecov](https://codecov.io/gh/Zouhairmaj/megabase) |
-| `test_continuous_integration` | SUGGESTED | Met | GitHub Actions runs the test suite on pull requests and on pushes to main. | [.github/workflows/ci.yml](https://github.com/Zouhairmaj/megabase/blob/main/.github/workflows/ci.yml) |
+| `test_continuous_integration` | SUGGESTED | Met | GitHub Actions runs the workspace test suite on pull requests that change the server and on every push to main. A site-only pull request runs the site crate tests instead. | [.github/workflows/ci.yml](https://github.com/Zouhairmaj/megabase/blob/main/.github/workflows/ci.yml) |
 
 ### New functionality testing
 
@@ -193,13 +193,13 @@ SUGGESTED 10 Met, 3 Unmet, 1 N/A.
 | `static_analysis` | MUST | Met | Before release, CI runs Clippy (beyond rustc warnings), forbids `unsafe_code`, and runs `cargo-deny` and `cargo audit` on both owned lockfiles. | [.github/workflows/ci.yml](https://github.com/Zouhairmaj/megabase/blob/main/.github/workflows/ci.yml) |
 | `static_analysis_common_vulnerabilities` | SUGGESTED | Met | GitHub code scanning default setup runs CodeQL on Rust for pull requests; that query set looks for common vulnerabilities. | [README](https://github.com/Zouhairmaj/megabase/blob/main/README.md) |
 | `static_analysis_fixed` | MUST | Met | Clippy `-D warnings`, `unsafe_code = "forbid"`, cargo-deny, and cargo-audit fail CI, so a release from green main has no open finding from those tools. | [.github/workflows/ci.yml](https://github.com/Zouhairmaj/megabase/blob/main/.github/workflows/ci.yml) |
-| `static_analysis_often` | SUGGESTED | Met | Those jobs run on every pull request and on every push to main. | [.github/workflows/ci.yml](https://github.com/Zouhairmaj/megabase/blob/main/.github/workflows/ci.yml) |
+| `static_analysis_often` | SUGGESTED | Met | Clippy, cargo-deny, and cargo-audit run on pull requests that change the server and on every push to main. A site-only pull request lints the site crate instead of the workspace. | [.github/workflows/ci.yml](https://github.com/Zouhairmaj/megabase/blob/main/.github/workflows/ci.yml) |
 
 `scorecard.yml` uploads Scorecard SARIF through `codeql-action/upload-sarif`.
 That upload is not the CodeQL analysis. The analysis is GitHub code scanning
 default setup (`CODE_SCANNING_IS_STEADY_STATE_DEFAULT_SETUP`), which extracted
 Rust and uploaded results on this change. There is no `codeql.yml` in the
-repository.
+repository, so the pull-request path filter cannot skip CodeQL.
 
 ### Dynamic code analysis
 
