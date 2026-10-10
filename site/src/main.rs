@@ -1005,7 +1005,7 @@ mod tests {
             )
             .expect("version fixture");
         });
-        let needle = r#"<a class="version-badge" href="https://github.com/Zouhairmaj/megabase/releases/tag/v1.2.3" rel="noopener noreferrer">v1.2.3</a>"#;
+        let needle = r#"<a class="version-badge" href="https://github.com/Zouhairmaj/megabase/releases/tag/v1.2.3" rel="noopener noreferrer" title="v1.2.3"><span class="version-badge-label">v1.2.3</span></a>"#;
         for rel in [
             "index.html",
             "manifesto/index.html",
@@ -1579,16 +1579,10 @@ mod tests {
                 while let Some(rel_idx) = find_term(&lower[from..], needle) {
                     let idx = from + rel_idx;
                     from = idx + needle.len();
-                    // bcrypt's work factor is "cost 10" or "cost-10". That is not spend copy.
-                    if needle == "cost" {
-                        let rest = text[idx + needle.len()..].trim_start();
-                        let rest = rest.strip_prefix('-').unwrap_or(rest).trim_start();
-                        let bytes = rest.as_bytes();
-                        let work_factor = bytes.starts_with(b"10")
-                            && bytes.get(2).is_none_or(|b| !b.is_ascii_digit());
-                        if work_factor {
-                            continue;
-                        }
+                    // bcrypt's work factor is "cost 10", or "cost-10" next to
+                    // hash/bcrypt. Other "cost-10" phrases are spend copy.
+                    if needle == "cost" && is_bcrypt_work_factor(&text, idx) {
+                        continue;
                     }
                     let end = (idx + 80).min(text.len());
                     hits.push(format!(
@@ -1600,6 +1594,42 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// True for bcrypt's cost factor, not for a price written as `cost-10`.
+    fn is_bcrypt_work_factor(text: &str, idx: usize) -> bool {
+        let rest = text[idx + "cost".len()..].trim_start();
+        let hyphenated = rest.starts_with('-');
+        let rest = rest.strip_prefix('-').unwrap_or(rest).trim_start();
+        let bytes = rest.as_bytes();
+        let ten = bytes.starts_with(b"10") && bytes.get(2).is_none_or(|b| !b.is_ascii_digit());
+        if !ten {
+            return false;
+        }
+        if !hyphenated {
+            return true;
+        }
+        let after = rest
+            .get(2..)
+            .unwrap_or("")
+            .trim_start()
+            .to_ascii_lowercase();
+        if after.starts_with("hash") || after.starts_with("bcrypt") {
+            return true;
+        }
+        let start = idx.saturating_sub(1200);
+        text[start..idx].to_ascii_lowercase().contains("bcrypt")
+    }
+
+    #[test]
+    fn hyphenated_cost_without_bcrypt_context_is_spend_copy() {
+        let spend = "the plan is cost-10 tokens per query";
+        let idx = spend.find("cost").unwrap();
+        assert!(!is_bcrypt_work_factor(spend, idx));
+        let hash = "stores a new cost-10 hash";
+        assert!(is_bcrypt_work_factor(hash, hash.find("cost").unwrap()));
+        let spaced = "bcrypt hash (cost 10) and does not log the password";
+        assert!(is_bcrypt_work_factor(spaced, spaced.find("cost").unwrap()));
     }
 
     fn find_term(haystack: &str, needle: &str) -> Option<usize> {

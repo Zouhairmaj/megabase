@@ -163,6 +163,8 @@ a:hover {
   display: inline-flex;
   align-items: center;
   flex-shrink: 0;
+  max-width: 100%;
+  min-width: 0;
   padding: 4px 8px;
   border: 1px solid var(--implemented);
   background: #00d89214;
@@ -173,6 +175,12 @@ a:hover {
   letter-spacing: 1px;
   white-space: nowrap;
   text-decoration: none;
+}
+
+.version-badge-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .version-badge:hover {
@@ -2330,5 +2338,6 @@ body:has(#licensing-and-credits:target) .toc-list a[href="#licensing-and-credits
   .version-badge {
     padding: 2px 4px;
     letter-spacing: 0;
+    max-width: 72px;
   }
 }

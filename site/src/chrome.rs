@@ -147,25 +147,25 @@ pub fn read_workspace_version(repo_root: &Path) -> io::Result<String> {
     })
 }
 
-/// Version string from a workspace manifest's `[workspace.package]` table.
+/// Version string from `[workspace.package] version` or a dotted
+/// `package.version` key under `[workspace]`.
 pub fn parse_workspace_version(toml: &str) -> Option<String> {
-    let mut in_package = false;
+    let mut table: Vec<String> = Vec::new();
     for raw in toml.lines() {
         let line = strip_toml_comment(raw).trim();
         if line.is_empty() {
             continue;
         }
-        if line.starts_with('[') && line.ends_with(']') {
-            in_package = line == "[workspace.package]";
-            continue;
-        }
-        if !in_package {
+        if line.starts_with('[') {
+            table = toml_table_path(line);
             continue;
         }
         let Some((key, value)) = toml_key_value(line) else {
             continue;
         };
-        if key != "version" {
+        let mut path = table.clone();
+        path.extend(dotted_parts(key));
+        if path != ["workspace", "package", "version"] {
             continue;
         }
         let quoted = unquote(value)?;
@@ -175,6 +175,30 @@ pub fn parse_workspace_version(toml: &str) -> Option<String> {
         return None;
     }
     None
+}
+
+fn toml_table_path(header: &str) -> Vec<String> {
+    let Some(inner) = header
+        .strip_prefix('[')
+        .and_then(|rest| rest.strip_suffix(']'))
+    else {
+        return Vec::new();
+    };
+    let inner = inner.trim();
+    // Array-of-tables headers are not the workspace package table.
+    if inner.starts_with('[') {
+        return Vec::new();
+    }
+    dotted_parts(inner)
+}
+
+fn dotted_parts(value: &str) -> Vec<String> {
+    value
+        .split('.')
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .map(str::to_string)
+        .collect()
 }
 
 fn strip_toml_comment(line: &str) -> &str {
@@ -272,7 +296,7 @@ pub fn header(paths: &Paths, logo: &str, version: &str) -> String {
         r#"<header class="site-header">
   <div class="brand-lockup">
     <a class="brand" href="{home}">{logo}<span class="wordmark">MEGABASE</span></a>
-    <a class="version-badge" href="{release}" rel="noopener noreferrer">{version_text}</a>
+    <a class="version-badge" href="{release}" rel="noopener noreferrer" title="{version_text}"><span class="version-badge-label">{version_text}</span></a>
   </div>
   <nav class="nav-desktop" aria-label="Primary">{desktop}</nav>
   <details class="nav-mobile">
@@ -429,6 +453,14 @@ tokio = { version = "1.40" }
     }
 
     #[test]
+    fn parses_dotted_workspace_package_version() {
+        let toml = "[workspace]\nmembers = []\npackage.version = \"0.1.6\"\n";
+        assert_eq!(parse_workspace_version(toml).as_deref(), Some("0.1.6"));
+        let root = "workspace.package.version = '2.0.1'\n";
+        assert_eq!(parse_workspace_version(root).as_deref(), Some("2.0.1"));
+    }
+
+    #[test]
     fn accepts_prerelease_and_single_quotes() {
         let toml = "[workspace.package]\nversion = '1.2.3-rc.1+build.7'\n";
         assert_eq!(
@@ -471,13 +503,13 @@ tokio = { version = "1.40" }
     fn header_places_one_release_badge_beside_the_wordmark() {
         let html = header(&Paths::home(false), "<svg></svg>", "1.2.3");
         let badge = html
-            .find(r#"<a class="version-badge" href="https://github.com/Zouhairmaj/megabase/releases/tag/v1.2.3" rel="noopener noreferrer">v1.2.3</a>"#)
+            .find(r#"<a class="version-badge" href="https://github.com/Zouhairmaj/megabase/releases/tag/v1.2.3" rel="noopener noreferrer" title="v1.2.3"><span class="version-badge-label">v1.2.3</span></a>"#)
             .expect("badge");
         let brand_open = html.find(r#"<a class="brand""#).expect("brand");
         let brand_close = html[brand_open..].find("</a>").expect("brand close") + brand_open;
         let nav = html.find(r#"class="nav-desktop""#).expect("nav");
         assert!(brand_close < badge && badge < nav);
-        assert_eq!(html.matches("version-badge").count(), 1);
+        assert_eq!(html.matches("class=\"version-badge\"").count(), 1);
         let footer = footer(&Paths::home(false), "<svg></svg>");
         assert!(!footer.contains("version-badge"));
     }
