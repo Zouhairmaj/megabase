@@ -198,6 +198,19 @@ Physically impossible for the agent (repository settings or credentials):
       `v0.1.0`) so that release gains signed assets (it shipped without
       binaries). Scorecard Signed-Releases looks at the last five
       GitHub Releases.
+- [ ] Set `squash_merge_commit_title` to `PR_TITLE`
+      (Settings → General → Pull Requests, or
+      `gh api -X PATCH repos/Zouhairmaj/megabase -f squash_merge_commit_title=PR_TITLE`).
+      The value on 2026-10-10 is `COMMIT_OR_PR_TITLE`. A one-commit
+      squash then keeps the branch subject. #207 merged as
+      `[rest] filtering: ...` instead of
+      `feat(rest): add imatch, in, is, like, lt, and not filters`, and
+      release-please skipped it (`unexpected token ' ' at 1:7`). This
+      token cannot update repository settings (HTTP 403
+      `Resource not accessible by integration`). #207's body now
+      contains `BEGIN_COMMIT_OVERRIDE` /
+      `END_COMMIT_OVERRIDE` so release-please can take the pull request
+      title. Do not pass a different `--subject` on `gh pr merge --squash`.
 - [ ] Update GOAL.md §10 and §11 so the decisions record is
       `docs/decisions/`, matching this file and
       [decision 0020](docs/decisions/0020-one-file-per-decision.md).

@@ -101,12 +101,19 @@ release-please (`release-please-config.json`):
 **true**. Use `release-type: simple` (not `rust`): the rust strategy
 walks workspace members and fails on `version.workspace = true`
 ([googleapis/release-please#2478](https://github.com/googleapis/release-please/issues/2478)).
-A TOML extra-file updater bumps `[workspace.package].version`; member
-crates inherit. The Release workflow runs `cargo update -w` on
-`release-please--branches--*` and commits `Cargo.lock` if workspace
-member versions drifted, so `--locked` CI (Build, Codecov, Bencher,
-Protected paths, Judge) stays green. That commit is pushed with the token the tree probe
-selected.
+A TOML extra-file updater bumps `[workspace.package].version` on the
+file release-please read; member crates inherit. That read is cached by
+branch name (`main`), not by SHA
+([0030](decisions/0030-release-version-only.md)). A run can cache an
+older `main` tree and then commit onto a newer SHA, so the cached
+`Cargo.toml` overwrites dependencies that landed in between. The
+lockfile job restores `Cargo.toml` from the merge-base with the default
+branch, sets only `[workspace.package].version` from
+`.release-please-manifest.json`, runs `cargo update -w`, and commits
+`Cargo.toml` and `Cargo.lock` when those version fields changed.
+`megabase-guard` rejects any other edit in those files. `--locked` CI
+(Build, Codecov, Bencher, Protected paths, Judge) stays green. That
+commit is pushed with the token the tree probe selected.
 `RELEASE_PLEASE_TOKEN` is used only when that probe can create a git
 tree, so the push starts workflows. A fine-grained PAT owned by
 `megabase-agent` cannot write this public repository.
@@ -138,6 +145,14 @@ minutes) and is configurable via `LOCKFILE_CHECK_ATTEMPTS` and
 `LOCKFILE_CHECK_SLEEP_SECONDS`
 ([0026](decisions/0026-lockfile-judge-matrix-checks.md)). PR titles use `chore: release ${version}` (no `main` scope);
 `semantic-pr.yml` also allows scope `main` as a fallback.
+Squash merges must use the pull request title as the commit subject
+(`squash_merge_commit_title=PR_TITLE`). `COMMIT_OR_PR_TITLE` keeps a
+single commit's subject, so a `[component] unit:` squash is not a
+conventional commit and release-please skips it. Do not pass a
+different `--subject` to `gh pr merge --squash`. A merged pull request
+whose subject is already wrong can still be included by putting
+`BEGIN_COMMIT_OVERRIDE` / `END_COMMIT_OVERRIDE` around one conventional
+commit in the pull request body.
 `bootstrap-sha` is the Phase 0 merge (`7aa41e8`, exclusive): commits
 before it (`Day 0`, `[phase0]`, `[brand]`) are not conventional and
 must not fail the Release job. `release-as` is `0.1.0` for that
@@ -158,9 +173,11 @@ Cadence:
 - **Hotfix** for a severe regression, without waiting for Monday.
 
 Only the **orchestrator** merges release PRs, and only after reviewer
-approval of the current head SHA and green CI. The lockfile is part of
-the release PR (`cargo update -w` on the release branch). If it is still
-stale, run `cargo update -w` on that branch. Each GitHub Release body
+approval of the current head SHA and green CI. The release PR's
+`Cargo.toml` and `Cargo.lock` are version bumps only. The Release
+workflow restores `Cargo.toml` from the merge-base and runs
+`cargo update -w` on the release branch. If that commit is still
+missing, do the same on that branch. Each GitHub Release body
 is annotated with the coverage / conformance delta versus the previous
 tag. The same Release workflow attaches musl-static linux `x86_64`
 and `aarch64` binaries, `SHA256SUMS`, Sigstore signatures, and SLSA
