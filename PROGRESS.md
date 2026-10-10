@@ -67,20 +67,10 @@ Accepted with [proposal 0001](docs/proposals/0001-external-review.md).
 
 Do not start a level until the previous threshold holds.
 
-### Level 1 validation requirements
+### Level 1 validation
 
-Level 1 is marked validated only when all of these hold
-([#199](https://github.com/Zouhairmaj/megabase/issues/199)):
-
-- **Minimum cases per unit.** Every in-scope Level 1 unit has at least
-  **3** linked judge cases. Level 1 cannot be marked validated while any
-  in-scope unit has fewer.
-- **Hidden suite.** The hidden suite
-  ([#114](https://github.com/Zouhairmaj/megabase/issues/114)) has
-  published a pass/fail count. Level 1 cannot be marked validated before
-  that.
-- **Totals and regressions.** The ≥95% threshold uses totals. A regression
-  still fails the judge on a pull request.
+Requirements: [decision 0036](docs/decisions/0036-level-1-validation-requirements.md).
+Level 1 is not yet validated.
 
 ## Decisions
 
