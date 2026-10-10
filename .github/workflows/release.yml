@@ -367,26 +367,40 @@ jobs:
           from_history() {
             jq -r --arg s "$1" '([.runs[] | select(.sha == $s)][0] // empty) as $r | if $r == null or $r == "" then empty else "\($r.percent) \($r.passing) \($r.cases)" end' /tmp/judge-history.json
           }
+          # 0 and a line: measured. 1: no Judge publication. 2: operational
+          # failure (API, download, or the conformance command). Callers
+          # must not turn status 2 into "not measured".
           from_artifact() {
             local run_id="$1" sha="$2" dest line
             dest="/tmp/judge-${sha}"
             rm -rf "$dest"
             if ! gh run download "$run_id" --repo "$GITHUB_REPOSITORY" --name judge-results --dir "$dest"; then
-              return 1
+              echo "downloading judge-results for ${sha} failed" >&2
+              return 2
             fi
             local file
             file="$(find "$dest" -name judge-results.json -print -quit)"
             if [ -z "$file" ]; then
               return 1
             fi
-            line="$(cargo run --quiet --locked -p megabase-coverage -- conformance "$file")"
+            if ! line="$(cargo run --quiet --locked -p megabase-coverage -- conformance "$file")"; then
+              echo "conformance command failed for ${sha}" >&2
+              return 2
+            fi
+            if [ -z "$line" ]; then
+              echo "conformance command returned no result for ${sha}" >&2
+              return 2
+            fi
             printf '%s\n' "$line"
           }
           # $2 is "wait" for the release commit (Judge may still be running)
           # and "once" for an older tag.
           measure() {
-            local sha="$1" mode="$2" hit status conclusion run_id json attempts i
-            hit="$(from_history "$sha" || true)"
+            local sha="$1" mode="$2" hit status conclusion run_id json attempts i art_rc
+            if ! hit="$(from_history "$sha")"; then
+              echo "reading judge history failed for ${sha}" >&2
+              return 2
+            fi
             if [ -n "$hit" ]; then
               printf '%s\n' "$hit"
               return 0
@@ -396,16 +410,32 @@ jobs:
               attempts=50
             fi
             for i in $(seq 1 "$attempts"); do
-              json="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow judge.yml --commit "$sha" --limit 1 --json databaseId,status,conclusion)"
-              status="$(jq -r '.[0].status // empty' <<<"$json")"
-              conclusion="$(jq -r '.[0].conclusion // empty' <<<"$json")"
-              run_id="$(jq -r '.[0].databaseId // empty' <<<"$json")"
+              if ! json="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow judge.yml --commit "$sha" --limit 1 --json databaseId,status,conclusion)"; then
+                echo "listing Judge runs failed for ${sha}" >&2
+                return 2
+              fi
+              if ! status="$(jq -r '.[0].status // empty' <<<"$json")"; then
+                echo "reading Judge run status failed for ${sha}" >&2
+                return 2
+              fi
+              if ! conclusion="$(jq -r '.[0].conclusion // empty' <<<"$json")"; then
+                echo "reading Judge run conclusion failed for ${sha}" >&2
+                return 2
+              fi
+              if ! run_id="$(jq -r '.[0].databaseId // empty' <<<"$json")"; then
+                echo "reading Judge run id failed for ${sha}" >&2
+                return 2
+              fi
               if [ "$status" = "completed" ] && [ "$conclusion" = "success" ] && [ -n "$run_id" ]; then
-                if hit="$(from_artifact "$run_id" "$sha")"; then
+                # A failed `if` test leaves status 0, so read the command
+                # status itself. 1 stays "no publication"; 2 stays an error.
+                hit="$(from_artifact "$run_id" "$sha")"
+                art_rc=$?
+                if [ "$art_rc" -eq 0 ]; then
                   printf '%s\n' "$hit"
                   return 0
                 fi
-                return 1
+                return "$art_rc"
               fi
               if [ "$mode" != "wait" ]; then
                 return 1
@@ -417,6 +447,22 @@ jobs:
               sleep 60
             done
             return 1
+          }
+          # $1 is the variable to set. Status 1 clears it. Status 2 aborts.
+          record_measure() {
+            local sha="$2" mode="$3" value rc
+            set +e
+            value="$(measure "$sha" "$mode")"
+            rc=$?
+            set -e
+            if [ "$rc" -eq 2 ]; then
+              echo "conformance measurement failed for ${sha}" >&2
+              exit 1
+            fi
+            if [ "$rc" -ne 0 ]; then
+              value=""
+            fi
+            printf -v "$1" '%s' "$value"
           }
           coverage_text() {
             jq -r '"coverage \(.percent.coverage)% (\(.totals.implemented)/\(.totals.units) units implemented)"' "$1"
@@ -440,12 +486,7 @@ jobs:
           if [ "$CUR_SHA" = "$GITHUB_SHA" ]; then
             CUR_MODE=wait
           fi
-          CUR_CONF=""
-          if CUR_CONF="$(measure "$CUR_SHA" "$CUR_MODE")"; then
-            :
-          else
-            CUR_CONF=""
-          fi
+          record_measure CUR_CONF "$CUR_SHA" "$CUR_MODE"
           {
             echo
             echo "## Coverage and conformance"
@@ -455,12 +496,7 @@ jobs:
             if [ -n "${PREV:-}" ] && git cat-file -e "${PREV}:coverage/summary.json" 2>/dev/null; then
               git show "${PREV}:coverage/summary.json" > /tmp/prev.json
               PREV_SHA="$(git rev-parse "${PREV}^{commit}")"
-              PREV_CONF=""
-              if PREV_CONF="$(measure "$PREV_SHA" once)"; then
-                :
-              else
-                PREV_CONF=""
-              fi
+              record_measure PREV_CONF "$PREV_SHA" once
               bullet "Previous release (\`${PREV}\`)" /tmp/prev.json "$PREV_CONF"
               cov_delta="$(jq -s -r '.[0].percent.coverage - .[1].percent.coverage | . * 10 | round / 10' /tmp/cur.json /tmp/prev.json)"
               if [ -n "$CUR_CONF" ] && [ -n "$PREV_CONF" ]; then
