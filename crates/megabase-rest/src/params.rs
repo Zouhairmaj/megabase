@@ -1706,7 +1706,7 @@ fn bump_str<'a>(at: &At<'a>, token: &str) -> At<'a> {
     cursor
 }
 
-/// Build the read statement for `query` in `schema`.
+/// Build the JSON read statement for `query` in `schema`.
 ///
 /// `column_types` is `(name, format_type)` in `attnum` order. Values, JSON
 /// keys, and limit/offset integers are bound parameters. The `FROM` target
@@ -1715,12 +1715,33 @@ fn bump_str<'a>(at: &At<'a>, token: &str) -> At<'a> {
 /// # Errors
 ///
 /// Returns [`UnsafeType`] when a filter's catalog type cannot be spliced.
+#[cfg(test)]
 pub(crate) fn build_read_sql(
     schema: &str,
     relation: &str,
     query: &ReadQuery,
     column_types: &[(&str, &str)],
     rels: &HashMap<String, Relationship>,
+) -> Result<ReadSql, UnsafeType> {
+    build_read_sql_as(schema, relation, query, column_types, rels, false)
+}
+
+/// [`build_read_sql`] with the body shaped as CSV when `csv` is set.
+///
+/// The CSV body is `asCsvF` from `SqlFragment.hs`: the key row of the first
+/// result row, a newline, then each row's record text without its
+/// parentheses, joined by newlines.
+///
+/// # Errors
+///
+/// Returns [`UnsafeType`] when a filter's catalog type cannot be spliced.
+pub(crate) fn build_read_sql_as(
+    schema: &str,
+    relation: &str,
+    query: &ReadQuery,
+    column_types: &[(&str, &str)],
+    rels: &HashMap<String, Relationship>,
+    csv: bool,
 ) -> Result<ReadSql, UnsafeType> {
     let mut params = Vec::new();
     let relation_ident = quote_ident(relation);
@@ -1794,13 +1815,27 @@ pub(crate) fn build_read_sql(
         // megabase:unit rest:query-param:offset
         push_page(&mut inner, &mut params, &query.page);
     }
-    let sql = format!(
-        "WITH _megabase_src AS MATERIALIZED ({inner}) \
-         SELECT (SELECT pg_catalog.count(*) FROM _megabase_src), \
-         coalesce((SELECT json_agg(t.row ORDER BY t.rn) FROM \
-         (SELECT to_json(_megabase_src) AS row, row_number() OVER () AS rn \
-         FROM _megabase_src) t), '[]'::json)::text"
-    );
+    let sql = if csv {
+        format!(
+            "WITH _megabase_src AS MATERIALIZED ({inner}) \
+             SELECT (SELECT pg_catalog.count(*) FROM _megabase_src), \
+             (SELECT coalesce(string_agg(a.k, ','), '') FROM \
+             (SELECT json_object_keys(r)::text AS k FROM \
+             (SELECT row_to_json(hh) AS r FROM _megabase_src AS hh LIMIT 1) s) a) \
+             || E'\\n' || \
+             coalesce((SELECT string_agg(x.line, E'\\n' ORDER BY x.rn) FROM \
+             (SELECT substring(t::text, 2, length(t::text) - 2) AS line, \
+             row_number() OVER () AS rn FROM _megabase_src AS t) x), '')"
+        )
+    } else {
+        format!(
+            "WITH _megabase_src AS MATERIALIZED ({inner}) \
+             SELECT (SELECT pg_catalog.count(*) FROM _megabase_src), \
+             coalesce((SELECT json_agg(t.row ORDER BY t.rn) FROM \
+             (SELECT to_json(_megabase_src) AS row, row_number() OVER () AS rn \
+             FROM _megabase_src) t), '[]'::json)::text"
+        )
+    };
     let offset = query.page.offset.parse::<i64>().unwrap_or(0);
     let _ = (&query.columns, &query.on_conflict);
     Ok(ReadSql {
@@ -2517,6 +2552,26 @@ mod tests {
         .unwrap();
         assert_eq!(sql.params, vec!["victim-secret') or true--"]);
         assert!(!sql.sql.contains("victim-secret"));
+    }
+
+    #[test]
+    fn csv_read_uses_key_row_and_record_text() {
+        let query = parse_get_query("id=eq.1").unwrap();
+        let sql = build_read_sql_as(
+            "public",
+            "todos",
+            &query,
+            &[("id", "integer")],
+            &HashMap::new(),
+            true,
+        )
+        .unwrap();
+        assert!(sql.sql.contains("json_object_keys(r)"));
+        assert!(sql
+            .sql
+            .contains("substring(t::text, 2, length(t::text) - 2)"));
+        assert!(!sql.sql.contains("json_agg"));
+        assert_eq!(sql.params, vec!["1"]);
     }
 
     #[test]

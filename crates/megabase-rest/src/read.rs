@@ -21,7 +21,7 @@ use serde_json::{Map, Value};
 use crate::filter::{quote_ident, UnsafeType};
 use crate::mutate::mutate;
 use crate::openapi::document;
-use crate::params::{build_read_sql, parse_get_query, where_clause, QueryFail, Relationship};
+use crate::params::{build_read_sql_as, parse_get_query, where_clause, QueryFail, Relationship};
 use crate::prefer::{set_applied, Count, Prefer, Scope};
 use crate::query::path_decode;
 use crate::RestState;
@@ -208,15 +208,16 @@ async fn relation_route(
         return *response;
     }
     let shape = if matches!(*method, Method::GET | Method::HEAD) {
-        ReadShape::from_accept(headers.get(header::ACCEPT))
+        match negotiate_read(method, path, headers.get(header::ACCEPT)) {
+            Ok(shape) => shape,
+            Err(response) => return *response,
+        }
     } else {
-        None
-    };
-    if shape.is_none() {
         if let Some(unit) = reject_accept(headers.get(header::ACCEPT)) {
             return unimplemented_unit(method, path, unit);
         }
-    }
+        None
+    };
     if method == Method::GET && headers.get(header::RANGE).is_some() {
         return not_implemented(method, path);
     }
@@ -587,6 +588,94 @@ fn jwt_failure(error: &JwtError) -> Response {
     response
 }
 
+/// Negotiate the body shape of a `GET`/`HEAD` relation read from `Accept`.
+///
+/// Types with no handler on a table or view are skipped, as `negotiateContent`
+/// does: `text/plain` and `text/xml` (no custom aggregate is registered) and
+/// types PostgREST does not know. The rest go to [`ReadShape::from_accept`] and
+/// [`reject_accept`]. When nothing is left the answer is 406 `PGRST107`, also
+/// for a header whose every type has `q=0`. `Ok(None)` is plain JSON.
+fn negotiate_read(
+    method: &Method,
+    path: &str,
+    value: Option<&axum::http::HeaderValue>,
+) -> Result<Option<ReadShape>, Box<Response>> {
+    let Some(text) = header_str(value) else {
+        return Ok(None);
+    };
+    let listed: Vec<&str> = text
+        .split(',')
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .collect();
+    let mut kept: Vec<&str> = Vec::new();
+    let mut skipped: Vec<String> = Vec::new();
+    for part in listed.iter().copied().filter(|part| quality(part) > 0.0) {
+        let essence = part
+            .split(';')
+            .next()
+            .unwrap_or("")
+            .trim()
+            .to_ascii_lowercase();
+        // megabase:unit rest:media-type:text/plain
+        // megabase:unit rest:media-type:text/xml
+        let unknown = axum::http::HeaderValue::from_str(part)
+            .is_ok_and(|entry| reject_accept(Some(&entry)) == Some(""));
+        if matches!(essence.as_str(), "text/plain" | "text/xml") || unknown {
+            skipped.push(essence);
+        } else {
+            kept.push(part);
+        }
+    }
+    if kept.is_empty() {
+        if listed.is_empty() {
+            return Ok(None);
+        }
+        let types = if skipped.is_empty() {
+            // Every type has `q=0`: nothing is acceptable.
+            listed
+                .iter()
+                .map(|part| part.split(';').next().unwrap_or("").trim())
+                .collect::<Vec<_>>()
+                .join(", ")
+                .to_ascii_lowercase()
+        } else {
+            skipped.join(", ")
+        };
+        return Err(Box::new(pgrst(
+            StatusCode::NOT_ACCEPTABLE,
+            "PGRST107",
+            &format!("None of these media types are available: {types}"),
+            None,
+            None,
+        )));
+    }
+    let Ok(kept) = axum::http::HeaderValue::from_str(&kept.join(", ")) else {
+        return Ok(None);
+    };
+    if let Some(shape) = ReadShape::from_accept(Some(&kept)) {
+        return Ok(Some(shape));
+    }
+    match reject_accept(Some(&kept)) {
+        Some(unit) => Err(Box::new(unimplemented_unit(method, path, unit))),
+        None => Ok(None),
+    }
+}
+
+/// The `q` weight of one `Accept` entry; absent or malformed is 1.
+fn quality(part: &str) -> f32 {
+    part.split(';')
+        .skip(1)
+        .find_map(|param| {
+            let (name, value) = param.split_once('=')?;
+            name.trim()
+                .eq_ignore_ascii_case("q")
+                .then(|| value.trim().parse::<f32>().ok())
+                .flatten()
+        })
+        .map_or(1.0, |q| q.clamp(0.0, 1.0))
+}
+
 /// How a GET or HEAD read runs and what it returns.
 #[derive(Clone, Copy)]
 struct ReadMode {
@@ -601,6 +690,8 @@ pub(crate) enum ReadShape {
     Object,
     ObjectStripped,
     ArrayStripped,
+    /// `text/csv`: the builtin `asCsvF` handler.
+    Csv,
 }
 
 /// The preferred `Accept` entry: its lowercase essence and whether it carries
@@ -617,7 +708,8 @@ fn preferred_accept(value: Option<&axum::http::HeaderValue>) -> Option<(String, 
         let mut stripped = false;
         let mut quality = 1.0_f32;
         for param in pieces {
-            let param = param.trim();
+            let compact: String = param.split_whitespace().collect();
+            let param = compact.as_str();
             if param.eq_ignore_ascii_case("nulls=stripped") {
                 stripped = true;
             } else if let Some((name, number)) = param.split_once('=') {
@@ -672,6 +764,8 @@ impl ReadShape {
             ("application/vnd.pgrst.array+json" | "application/vnd.pgrst.array", true) => {
                 Some(Self::ArrayStripped)
             }
+            // megabase:unit rest:media-type:text/csv
+            ("text/csv", _) => Some(Self::Csv),
             _ => None,
         }
     }
@@ -681,7 +775,7 @@ impl ReadShape {
     }
 
     fn stripped(self) -> bool {
-        !matches!(self, Self::Object)
+        matches!(self, Self::ObjectStripped | Self::ArrayStripped)
     }
 
     /// `MediaType.hs` `toContentType`: the mime plus `; charset=utf-8`.
@@ -692,6 +786,7 @@ impl ReadShape {
                 "application/vnd.pgrst.object+json;nulls=stripped; charset=utf-8"
             }
             Self::ArrayStripped => "application/vnd.pgrst.array+json;nulls=stripped; charset=utf-8",
+            Self::Csv => "text/csv; charset=utf-8",
         }
     }
 }
@@ -712,6 +807,8 @@ pub(crate) fn reject_accept(value: Option<&axum::http::HeaderValue>) -> Option<&
         "application/vnd.pgrst.array+json" | "application/vnd.pgrst.array" if nulls_stripped => {
             Some("rest:media-type:application/vnd.pgrst.array+json;nulls=stripped")
         }
+        // Plain alias of `application/json` upstream.
+        "application/vnd.pgrst.array+json" => None,
         "application/geo+json" => Some("rest:media-type:application/geo+json"),
         "application/octet-stream" => Some("rest:media-type:application/octet-stream"),
         "application/openapi+json" => Some("rest:media-type:application/openapi+json"),
@@ -965,8 +1062,15 @@ async fn read_rows(
         let rel = load_relationship(&mut tx, schema, relation, name, session.anon).await?;
         rels.insert(name.to_string(), rel);
     }
-    let built = build_read_sql(schema, relation, read, &column_types, &rels)
-        .map_err(|error| Box::new(unsafe_type(&error)))?;
+    let built = build_read_sql_as(
+        schema,
+        relation,
+        read,
+        &column_types,
+        &rels,
+        shape == Some(ReadShape::Csv),
+    )
+    .map_err(|error| Box::new(unsafe_type(&error)))?;
     let request_path = format!("/{relation}");
     set_request_context(&mut tx, session, http_method, &request_path, schema).await?;
     let mut query = sqlx::query_as::<sqlx::Postgres, (i64, String)>(&built.sql);
@@ -992,7 +1096,8 @@ async fn read_rows(
         ),
         None => None,
     };
-    if let Some(shape) = shape {
+    // CSV is built in SQL (`asCsvF`); only the JSON shapes are post-processed.
+    if let Some(shape) = shape.filter(|shape| *shape != ReadShape::Csv) {
         if shape.singular() {
             singular_check(row.0)?;
         }
@@ -1717,6 +1822,89 @@ mod tests {
         let (status, body, _) = send(app, request).await;
         assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
         assert_eq!(body["unit"], "rest:media-type:application/geo+json");
+    }
+
+    #[tokio::test]
+    async fn text_plain_and_xml_are_406_on_a_relation() {
+        for (accept, listed) in [
+            ("text/plain", "text/plain"),
+            ("text/xml;q=0.5", "text/xml"),
+            ("text/plain, text/xml", "text/plain, text/xml"),
+        ] {
+            let app = router(RestState::from_config(&Config::default()));
+            let request = Request::builder()
+                .uri("/rest/v1/todos")
+                .header(header::ACCEPT, accept)
+                .body(Body::empty())
+                .unwrap();
+            let (status, body, _) = send(app, request).await;
+            assert_eq!(status, StatusCode::NOT_ACCEPTABLE);
+            assert_eq!(body["code"], "PGRST107");
+            assert_eq!(
+                body["message"],
+                format!("None of these media types are available: {listed}")
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn csv_accept_reaches_the_pool_check() {
+        for accept in [
+            "text/csv",
+            "text/plain, text/csv",
+            "text/csv; charset=utf-8",
+        ] {
+            let app = router(RestState::from_config(&Config::default()));
+            let request = Request::builder()
+                .uri("/rest/v1/todos")
+                .header(header::ACCEPT, accept)
+                .body(Body::empty())
+                .unwrap();
+            let (status, _, _) = send(app, request).await;
+            assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{accept}");
+        }
+    }
+
+    #[test]
+    fn negotiation_picks_the_first_handled_type() {
+        let pick = |text: &'static str| {
+            negotiate_read(
+                &Method::GET,
+                "/todos",
+                Some(&HeaderValue::from_static(text)),
+            )
+        };
+        assert!(matches!(pick("text/xml, application/json"), Ok(None)));
+        assert!(matches!(
+            pick("text/xml, text/csv"),
+            Ok(Some(ReadShape::Csv))
+        ));
+        assert!(matches!(
+            pick("application/x-unknown, text/csv"),
+            Ok(Some(ReadShape::Csv))
+        ));
+        assert!(matches!(
+            pick("application/json;q=0.1, text/csv;q=0.9"),
+            Ok(Some(ReadShape::Csv))
+        ));
+        assert!(matches!(pick("text/csv;q=0, application/json"), Ok(None)));
+        assert_eq!(
+            pick("application/geo+json").unwrap_err().status(),
+            StatusCode::NOT_IMPLEMENTED
+        );
+        assert_eq!(
+            pick("text/csv;q=0").unwrap_err().status(),
+            StatusCode::NOT_ACCEPTABLE
+        );
+        assert!(matches!(pick("application/vnd.pgrst.array+json"), Ok(None)));
+        assert_eq!(
+            pick("application/vnd.pgrst.array+json;nulls = stripped").unwrap(),
+            Some(ReadShape::ArrayStripped)
+        );
+        assert!(matches!(
+            negotiate_read(&Method::GET, "/todos", None),
+            Ok(None)
+        ));
     }
 
     #[tokio::test]

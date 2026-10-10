@@ -2,12 +2,12 @@
   "schema": 1,
   "totals": {
     "units": 1024,
-    "implemented": 165,
+    "implemented": 168,
     "tested": 91,
     "conformant": 0
   },
   "percent": {
-    "coverage": 16.1,
+    "coverage": 16.4,
     "conformance": 0.0,
     "done": 0.0
   },
@@ -316,7 +316,7 @@
     },
     "rest": {
       "units": 93,
-      "implemented": 86,
+      "implemented": 89,
       "tested": 31,
       "conformant": 0,
       "groups": {
@@ -346,7 +346,7 @@
         },
         "media-types": {
           "units": 13,
-          "implemented": 6,
+          "implemented": 9,
           "tested": 1,
           "conformant": 0
         },
@@ -679,6 +679,9 @@
     "rest:media-type:application/vnd.pgrst.array+json;nulls=stripped": "implemented",
     "rest:media-type:application/vnd.pgrst.object+json": "tested",
     "rest:media-type:application/vnd.pgrst.object+json;nulls=stripped": "implemented",
+    "rest:media-type:text/csv": "implemented",
+    "rest:media-type:text/plain": "implemented",
+    "rest:media-type:text/xml": "implemented",
     "rest:order-modifier:asc": "implemented",
     "rest:order-modifier:desc": "implemented",
     "rest:order-modifier:nullsfirst": "implemented",
