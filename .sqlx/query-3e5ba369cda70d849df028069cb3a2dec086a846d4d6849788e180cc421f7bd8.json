@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE auth.oauth_consents SET revoked_at = $3\n                         WHERE user_id = $1 AND client_id = $2\n                           AND revoked_at IS NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "3e5ba369cda70d849df028069cb3a2dec086a846d4d6849788e180cc421f7bd8"
+}

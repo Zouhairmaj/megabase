@@ -16,13 +16,17 @@ other names. There is no `.env.example` in this tree; the judge uses
 | --- | --- |
 | MEGABASE_HOST | Bind address. Default `0.0.0.0`. |
 | MEGABASE_PORT | HTTP port. Default `8000`. |
-| DATABASE_URL | PostgreSQL connection string. PostgreSQL stays external; Megabase does not bundle it. When set, startup installs the Auth SQL objects listed in [`specs/auth/database.md`](../specs/auth/database.md) (idempotent DDL, 30-second deadline) and opens two sqlx pools (10 connections each, 30-second acquire): one for Auth and one for REST horizontal filters. Signup, logout, the password and refresh-token grants on `POST /auth/v1/token`, and served admin routes share the Auth pool. `GET /rest/v1/{relation}` filters in [`specs/rest/filtering.md`](../specs/rest/filtering.md) use the REST pool. SIGINT and SIGTERM close both pools after the drain described under HTTP limits. Omit it to skip schema install (the HTTP server still starts; admin, signup, logout, and those token grants then return 500, and a served REST filter returns 503). The judge sets this to the dedicated `megabase` database (`just judge-up` / CI), never to the official stack's `postgres` database. |
+| DATABASE_URL | PostgreSQL connection string. PostgreSQL stays external; Megabase does not bundle it. When set, startup installs the Auth SQL objects listed in [`specs/auth/database.md`](../specs/auth/database.md) (idempotent DDL, 30-second deadline) and opens two sqlx pools (10 connections each, 30-second acquire): one for Auth and one for REST horizontal filters. Signup, logout, the password and refresh-token grants on `POST /auth/v1/token`, the user routes, and served admin routes share the Auth pool. `GET /rest/v1/{relation}` filters in [`specs/rest/filtering.md`](../specs/rest/filtering.md) use the REST pool. SIGINT and SIGTERM close both pools after the drain described under HTTP limits. Omit it to skip schema install (the HTTP server still starts; admin, signup, logout, token, and user calls that need the database then return 500, and a served REST filter returns 503). The judge sets this to the dedicated `megabase` database (`just judge-up` / CI), never to the official stack's `postgres` database. |
 | MEGABASE_HTTP_TIMEOUT_MS | Whole-request deadline in milliseconds. Default `150000`, the functions `read_timeout` in `vendor/supabase/docker/volumes/api/kong.yml`. `0` and non-integers abort startup. A request that exceeds it returns 504. |
 | MEGABASE_REQUEST_BODY_LIMIT_BYTES | Maximum request body in bytes. Default `52428800`, `FILE_SIZE_LIMIT` in `vendor/supabase/docker/docker-compose.yml`. A non-integer aborts startup. A larger body returns 413. |
 | JWT_SECRET | HS256 secret for verifying and signing JWTs (same name as the self-hosted demo stack). Raw UTF-8 bytes, not base64, and not a default. Omit it and the process still starts so `/_megabase/health` and `GET /auth/v1/health` work; verification and signing then fail with `Server lacks JWT secret`. Email signup then returns 500 `Server lacks JWT secret` and does not insert a user. A present value shorter than 32 bytes, including empty, aborts startup before listen: `JWT_SECRET is N bytes; HMAC-SHA-256 keys shorter than 32 bytes are disabled`. Length is bytes, not an entropy check. Required for `/auth/v1/admin` (a missing Bearer token is still 401). |
-| GOTRUE_JWT_ADMIN_ROLES | Comma-separated JWT `role` values that may call `/auth/v1/admin`. When unset, `service_role,supabase_admin`, same as GoTrue. An empty value falls back to that pair. Signup settings do not use this allow-list. |
-| GOTRUE_OAUTH_SERVER_ENABLED | GoTrue flag. Default `false`. When false, admin OAuth client routes return 404 `feature_disabled`. |
-| GOTRUE_CUSTOM_OAUTH_ENABLED | GoTrue flag. Default `true`. When false, admin custom-provider routes return 404 `feature_disabled`. |
+| GOTRUE_JWT_ADMIN_ROLES | Comma-separated JWT `role` values that may call `/auth/v1/admin`. When unset, `service_role,supabase_admin`, same as GoTrue. An empty value falls back to that pair. Signup settings do not use this allow-list. On `PUT /auth/v1/user`, a role in this list ignores the token audience when the request audience is chosen. |
+| GOTRUE_JWT_ADMIN_GROUP_NAME | GoTrue `JWT.AdminGroupName`. Default `admin`. `PUT /auth/v1/user` accepts `app_metadata` only when the user's `role` equals this value and the user's `aud` equals `GOTRUE_JWT_AUD`. This is not the admin-route allow-list. |
+| GOTRUE_OAUTH_SERVER_ENABLED | GoTrue flag. Default `false`. Accepted values are `true`, `1`, `false`, and `0`. Any other value falls back to the default and does not abort startup. When false, admin OAuth client routes and `GET`/`DELETE /auth/v1/user/oauth/grants` return 404 `feature_disabled`. |
+| GOTRUE_CUSTOM_OAUTH_ENABLED | GoTrue flag. Default `true`. Accepted values are `true`, `1`, `false`, and `0`. Any other value falls back to the default and does not abort startup. When false, admin custom-provider routes return 404 `feature_disabled`, and `GET /auth/v1/user/identities/authorize?provider=custom:…` returns 400 `validation_failed`. |
+| GOTRUE_SECURITY_MANUAL_LINKING_ENABLED | GoTrue flag. Default `false`. Accepted values match Go's bool parser (`1`, `t`, `T`, `true`, `0`, `f`, `F`, `false`, any case). Any other value aborts startup. When false, `GET /auth/v1/user/identities/authorize` and `DELETE /auth/v1/user/identities/{identity_id}` return 404 `manual_linking_disabled` after the bearer check. |
+| GOTRUE_SECURITY_UPDATE_PASSWORD_REQUIRE_REAUTHENTICATION | GoTrue flag. Default `false`. Accepted values match Go's bool parser (`1`, `t`, `T`, `true`, `0`, `f`, `F`, `false`, any case). Any other value aborts startup. When true, `PUT /auth/v1/user` with `password` returns 501. |
+| GOTRUE_SECURITY_UPDATE_PASSWORD_REQUIRE_CURRENT_PASSWORD | GoTrue flag. Default `false`. Accepted values match Go's bool parser (`1`, `t`, `T`, `true`, `0`, `f`, `F`, `false`, any case). Any other value aborts startup. When true, `PUT /auth/v1/user` with `password` returns 501. |
 | GOTRUE_URI_ALLOW_LIST | Comma-separated redirect globs for `POST /auth/v1/admin/generate_link`. `*` and `?` do not cross `.` or `/`; `**` does. When this is unset or blank, `ADDITIONAL_REDIRECT_URLS` is used instead. A pattern with an unescaped `[` `]` `{` or `}` is not implemented: a redirect that must be checked against it returns 501. |
 
 ## JWT verification
@@ -42,24 +46,35 @@ and JWKS rotation are not implemented.
 
 The first `/auth/v1/admin` GET/DELETE batch (issue #6, spec
 [`specs/auth/admin.md`](../specs/auth/admin.md)) verifies the Bearer token
-with this secret. Logout verifies it the same way.
+with this secret. Logout and the user routes verify it the same way.
 
 ## Auth HTTP
 
 Spec: [`specs/auth/endpoints.md`](../specs/auth/endpoints.md).
 
 Served on `/auth/v1`: `GET /health`, `GET /settings`, autoconfirm email
-`POST /signup`, `POST /logout`, and the password and refresh-token grants on
-`POST /token`. Invite, recover, resend, and reauthenticate return 501 with
-their unit id. The admin routes in
+`POST /signup`, `POST /logout`, `POST /token` (password and refresh-token
+grants), `GET /user`, and `PUT /user`. Identity authorize
+(`GET /user/identities/authorize`) and unlink
+(`DELETE /user/identities/{identity_id}`), and the OAuth grant list and
+revoke (`GET` and `DELETE /user/oauth/grants`), are served when their flags
+in the table above are on. Spec:
+[`specs/auth/user.md`](../specs/auth/user.md) and
+[`specs/auth/token.md`](../specs/auth/token.md). Invite, recover, resend,
+and reauthenticate return 501 with their unit id. `PUT /user` returns 501
+for an email change, a phone change while SMS autoconfirm is off, and a
+password change while reauthentication or the current password is
+required. `GET /user/identities/authorize` returns 501 once the provider
+is enabled. The admin routes in
 [`specs/auth/admin.md`](../specs/auth/admin.md) return GoTrue statuses.
 Every other `/auth/v1` path returns 501 `MEGABASE_NOT_IMPLEMENTED`.
 `GET /rest/v1/{relation}` serves the horizontal filters in
 [`specs/rest/filtering.md`](../specs/rest/filtering.md). Every other REST
 route returns 501 `MEGABASE_NOT_IMPLEMENTED`.
 
-Signup, logout, and the password and refresh-token grants need `DATABASE_URL` (the Auth SQL from
-[`specs/auth/database.md`](../specs/auth/database.md)) and `JWT_SECRET`.
+Signup, logout, token, and the user routes need `DATABASE_URL` (the Auth
+SQL from [`specs/auth/database.md`](../specs/auth/database.md)) and
+`JWT_SECRET`.
 When `GOTRUE_*` is unset, signup and settings flags match the judge
 reference stack, not GoTrue's zero values: email and phone providers on,
 anonymous off, `disable_signup` false, mailer autoconfirm on (the judge
@@ -124,7 +139,7 @@ Same URL layout as the Supabase gateway ([ADR 0002](adr/0002-gateway-layout.md))
 
 Routes that are not served yet answer HTTP 501 with
 `code: MEGABASE_NOT_IMPLEMENTED`. Served Auth admin routes and Auth health,
-settings, autoconfirm email signup, logout, and the password and
-refresh-token grants on `POST /auth/v1/token` are the exception.
+settings, autoconfirm email signup, logout, token, and the user routes
+are the exception.
 
 How to build or run the container image is in [Install](install.md).

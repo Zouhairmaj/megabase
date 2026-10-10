@@ -2,12 +2,12 @@
   "schema": 1,
   "totals": {
     "units": 1024,
-    "implemented": 79,
-    "tested": 52,
+    "implemented": 85,
+    "tested": 58,
     "conformant": 0
   },
   "percent": {
-    "coverage": 7.7,
+    "coverage": 8.3,
     "conformance": 0.0,
     "done": 0.0
   },
@@ -18,8 +18,8 @@
   "components": {
     "auth": {
       "units": 152,
-      "implemented": 59,
-      "tested": 48,
+      "implemented": 65,
+      "tested": 54,
       "conformant": 0,
       "groups": {
         "admin": {
@@ -84,8 +84,8 @@
         },
         "user": {
           "units": 6,
-          "implemented": 0,
-          "tested": 0,
+          "implemented": 6,
+          "tested": 6,
           "conformant": 0
         },
         "verify": {
@@ -564,6 +564,8 @@
     "auth:route:DELETE /auth/v1/admin/users/{user_id}": "tested",
     "auth:route:DELETE /auth/v1/admin/users/{user_id}/factors/{factor_id}": "tested",
     "auth:route:DELETE /auth/v1/admin/users/{user_id}/passkeys/{passkey_id}": "tested",
+    "auth:route:DELETE /auth/v1/user/identities/{identity_id}": "tested",
+    "auth:route:DELETE /auth/v1/user/oauth/grants": "tested",
     "auth:route:GET /auth/v1/admin/audit": "tested",
     "auth:route:GET /auth/v1/admin/custom-providers": "tested",
     "auth:route:GET /auth/v1/admin/custom-providers/{identifier}": "tested",
@@ -577,12 +579,16 @@
     "auth:route:GET /auth/v1/admin/users/{user_id}/passkeys": "implemented",
     "auth:route:GET /auth/v1/health": "tested",
     "auth:route:GET /auth/v1/settings": "tested",
+    "auth:route:GET /auth/v1/user": "tested",
+    "auth:route:GET /auth/v1/user/identities/authorize": "tested",
+    "auth:route:GET /auth/v1/user/oauth/grants": "tested",
     "auth:route:POST /auth/v1/admin/custom-providers": "implemented",
     "auth:route:POST /auth/v1/admin/generate_link": "implemented",
     "auth:route:POST /auth/v1/admin/oauth/clients": "implemented",
     "auth:route:POST /auth/v1/logout": "tested",
     "auth:route:POST /auth/v1/signup": "tested",
     "auth:route:POST /auth/v1/token": "tested",
+    "auth:route:PUT /auth/v1/user": "tested",
     "auth:sql-function:auth.email()": "tested",
     "auth:sql-function:auth.jwt()": "tested",
     "auth:sql-function:auth.role()": "tested",

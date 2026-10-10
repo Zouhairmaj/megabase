@@ -1,7 +1,8 @@
 // Ported from supabase/auth internal/api/signup.go, internal/api/token.go,
-// internal/api/token_refresh.go, internal/models/user.go, sessions.go,
-// refresh_token.go, amr.go, internal/tokens/service.go, and
-// internal/crypto/crypto.go (MIT), pin v2.197.0.
+// internal/api/token_refresh.go, internal/api/user.go, internal/api/identity.go,
+// internal/api/oauthserver/handlers.go, internal/models/user.go, sessions.go,
+// refresh_token.go, amr.go, oauth_consent.go, oauth_client.go,
+// internal/tokens/service.go, and internal/crypto/crypto.go (MIT), pin v2.197.0.
 
 //! Auth users, identities, sessions, and legacy refresh tokens.
 //!
@@ -10,7 +11,7 @@
 //! confirmation tokens (not NULL), phone NULL, and `email_confirmed_at` set.
 //! Refresh tokens are the legacy 12-character form (algorithm version 0).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
@@ -153,6 +154,56 @@ pub struct Subject {
     pub banned_until: Option<SystemTime>,
 }
 
+/// Writes from `PUT /user` after the HTTP checks have passed.
+///
+/// `password_hash` is already bcrypt. `phone` is E.164 without a leading `+`.
+pub struct UserUpdate {
+    pub user_id: Uuid,
+    pub session_id: Option<Uuid>,
+    pub data: Option<Map<String, Value>>,
+    pub app_data: Option<Map<String, Value>>,
+    pub password_hash: Option<String>,
+    pub phone: Option<String>,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum UserUpdateError {
+    #[error(transparent)]
+    Store(#[from] StoreError),
+    #[error("user missing")]
+    Missing,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum UnlinkError {
+    #[error(transparent)]
+    Store(#[from] StoreError),
+    #[error("user missing")]
+    Missing,
+    #[error("identity missing")]
+    NotFound,
+    #[error("email conflict")]
+    EmailConflict,
+    #[error("single identity")]
+    Single,
+}
+
+/// One active OAuth consent joined to its client.
+#[derive(Clone, Debug)]
+pub struct OAuthGrantView {
+    pub client_id: Uuid,
+    pub name: String,
+    pub uri: String,
+    pub logo_uri: String,
+    pub scopes: Vec<String>,
+    pub granted_at: SystemTime,
+}
+
+pub enum RevokeGrant {
+    Revoked,
+    Missing,
+}
+
 /// Auth persistence. The variant is private so tests and HTTP share one type
 /// without exposing the in-memory fixture layout.
 #[derive(Clone)]
@@ -187,6 +238,23 @@ struct MemoryDb {
     users: HashMap<Uuid, UserRecord>,
     sessions: HashMap<Uuid, Uuid>,
     refresh_tokens: HashMap<String, LegacyRefresh>,
+    oauth_clients: HashMap<Uuid, MemoryClient>,
+    oauth_consents: Vec<MemoryConsent>,
+}
+
+struct MemoryClient {
+    name: String,
+    uri: String,
+    logo_uri: String,
+    deleted: bool,
+}
+
+struct MemoryConsent {
+    user_id: Uuid,
+    client_id: Uuid,
+    scopes: String,
+    granted_at: SystemTime,
+    revoked: bool,
 }
 
 impl Backend {
@@ -202,6 +270,8 @@ impl Backend {
                 users: HashMap::new(),
                 sessions: HashMap::new(),
                 refresh_tokens: HashMap::new(),
+                oauth_clients: HashMap::new(),
+                oauth_consents: Vec::new(),
             }))),
         }
     }
@@ -446,6 +516,306 @@ impl Backend {
             }
         }
     }
+
+    /// Full user row, including the generated `confirmed_at` column.
+    pub async fn load_user(&self, user_id: Uuid) -> Result<Option<UserRecord>, StoreError> {
+        match &self.inner {
+            BackendKind::None => Err(StoreError::Unavailable),
+            BackendKind::Memory(db) => {
+                let db = db.lock().await;
+                Ok(db.users.get(&user_id).cloned().map(|mut user| {
+                    reload_confirmed_at(&mut user);
+                    user
+                }))
+            }
+            BackendKind::Postgres(pg) => {
+                timed(async {
+                    let mut conn = pg.pool.acquire().await?;
+                    find_user_by_id(&mut conn, user_id).await
+                })
+                .await
+            }
+        }
+    }
+
+    /// Verified MFA factor with a session that is not AAL2.
+    ///
+    /// GoTrue refuses email, phone, and password changes in that case.
+    pub async fn mfa_blocks_sensitive_update(
+        &self,
+        user_id: Uuid,
+        session_id: Option<Uuid>,
+    ) -> Result<bool, StoreError> {
+        match &self.inner {
+            BackendKind::None => Err(StoreError::Unavailable),
+            BackendKind::Memory(_) => Ok(false),
+            BackendKind::Postgres(pg) => {
+                timed(async {
+                    let mut conn = pg.pool.acquire().await?;
+                    let verified = sqlx::query!(
+                        "SELECT id FROM auth.mfa_factors
+                         WHERE user_id = $1 AND status::text = 'verified'
+                         LIMIT 1",
+                        user_id,
+                    )
+                    .fetch_optional(&mut *conn)
+                    .await?
+                    .is_some();
+                    if !verified {
+                        return Ok(false);
+                    }
+                    let Some(session_id) = session_id else {
+                        return Ok(true);
+                    };
+                    let row = sqlx::query!(
+                        "SELECT COALESCE(aal::text, 'aal1') AS \"aal!\"
+                         FROM auth.sessions WHERE id = $1",
+                        session_id,
+                    )
+                    .fetch_optional(&mut *conn)
+                    .await?;
+                    let aal = row.map(|row| row.aal).unwrap_or_else(|| "aal1".to_string());
+                    Ok(aal != "aal2")
+                })
+                .await
+            }
+        }
+    }
+
+    /// Another non-SSO user in `aud` already owns `email` (identity or `users.email`).
+    pub async fn email_owned_by_other(
+        &self,
+        email: &str,
+        aud: &str,
+        user_id: Uuid,
+    ) -> Result<bool, StoreError> {
+        match &self.inner {
+            BackendKind::None => Err(StoreError::Unavailable),
+            BackendKind::Memory(db) => {
+                let db = db.lock().await;
+                Ok(email_taken(&db, email, aud, user_id))
+            }
+            BackendKind::Postgres(pg) => {
+                let email = email.to_string();
+                let aud = aud.to_string();
+                timed(async move {
+                    let mut conn = pg.pool.acquire().await?;
+                    let instance = Uuid::nil();
+                    let row = sqlx::query!(
+                        "SELECT (
+                            EXISTS (
+                                SELECT 1 FROM auth.identities i
+                                JOIN auth.users u ON u.id = i.user_id
+                                WHERE lower(COALESCE(i.email, '')) = $1
+                                  AND u.aud = $2
+                                  AND u.id <> $3
+                                  AND u.is_sso_user = false
+                                  AND u.instance_id = $4
+                                  AND i.provider NOT LIKE 'sso:%'
+                            )
+                            OR EXISTS (
+                                SELECT 1 FROM auth.users
+                                WHERE instance_id = $4
+                                  AND lower(COALESCE(email, '')) = $1
+                                  AND aud = $2
+                                  AND id <> $3
+                                  AND is_sso_user = false
+                            )
+                         ) AS \"taken!\"",
+                        email,
+                        aud,
+                        user_id,
+                        instance,
+                    )
+                    .fetch_one(&mut *conn)
+                    .await?;
+                    Ok(row.taken)
+                })
+                .await
+            }
+        }
+    }
+
+    /// Another non-SSO user in `aud` already has this phone.
+    pub async fn phone_taken(&self, phone: &str, aud: &str) -> Result<bool, StoreError> {
+        match &self.inner {
+            BackendKind::None => Err(StoreError::Unavailable),
+            BackendKind::Memory(db) => {
+                let db = db.lock().await;
+                Ok(db.find_phone(phone, aud).is_some())
+            }
+            BackendKind::Postgres(pg) => {
+                let phone = phone.to_string();
+                let aud = aud.to_string();
+                timed(async move {
+                    let mut conn = pg.pool.acquire().await?;
+                    Ok(find_phone(&mut conn, &phone, &aud).await?.is_some())
+                })
+                .await
+            }
+        }
+    }
+
+    /// Metadata, password, and autoconfirmed phone changes from `PUT /user`.
+    pub async fn update_user(&self, update: UserUpdate) -> Result<UserRecord, UserUpdateError> {
+        match &self.inner {
+            BackendKind::None => Err(StoreError::Unavailable.into()),
+            BackendKind::Memory(db) => memory_update_user(db, update).await,
+            BackendKind::Postgres(pg) => postgres_update_user(pg, update).await,
+        }
+    }
+
+    /// `DELETE /user/identities/{identity_id}` after manual linking is enabled.
+    pub async fn unlink_identity(
+        &self,
+        user_id: Uuid,
+        identity_id: Uuid,
+        autoconfirm: bool,
+    ) -> Result<IdentityRecord, UnlinkError> {
+        match &self.inner {
+            BackendKind::None => Err(StoreError::Unavailable.into()),
+            BackendKind::Memory(db) => {
+                let mut db = db.lock().await;
+                let Some(user) = db.users.get(&user_id).cloned() else {
+                    return Err(UnlinkError::Missing);
+                };
+                let aud = user.aud.clone();
+                let plan = plan_unlink(&user, identity_id, autoconfirm, &|email| {
+                    user_has_email(&db, email, &aud)
+                })?;
+                remember_audit(
+                    &user,
+                    "identity_unlinked",
+                    "user",
+                    Some(unlink_traits(&plan.removed)),
+                );
+                let removed = plan.removed;
+                db.users.insert(user_id, plan.user);
+                Ok(removed)
+            }
+            BackendKind::Postgres(pg) => {
+                postgres_unlink(pg, user_id, identity_id, autoconfirm).await
+            }
+        }
+    }
+
+    /// Active OAuth consents for `GET /user/oauth/grants`, newest first.
+    pub async fn list_oauth_grants(
+        &self,
+        user_id: Uuid,
+    ) -> Result<Vec<OAuthGrantView>, StoreError> {
+        match &self.inner {
+            BackendKind::None => Err(StoreError::Unavailable),
+            BackendKind::Memory(db) => {
+                let db = db.lock().await;
+                Ok(memory_grants(&db, user_id))
+            }
+            BackendKind::Postgres(pg) => {
+                timed(async {
+                    let mut conn = pg.pool.acquire().await?;
+                    let rows = sqlx::query!(
+                        "SELECT c.id,
+                                COALESCE(c.client_name, '') AS \"name!\",
+                                COALESCE(c.client_uri, '') AS \"uri!\",
+                                COALESCE(c.logo_uri, '') AS \"logo_uri!\",
+                                s.scopes,
+                                s.granted_at
+                         FROM auth.oauth_consents s
+                         JOIN auth.oauth_clients c
+                           ON c.id = s.client_id AND c.deleted_at IS NULL
+                         WHERE s.user_id = $1 AND s.revoked_at IS NULL
+                         ORDER BY s.granted_at DESC",
+                        user_id,
+                    )
+                    .fetch_all(&mut *conn)
+                    .await?;
+                    Ok(rows
+                        .into_iter()
+                        .map(|row| OAuthGrantView {
+                            client_id: row.id,
+                            name: row.name,
+                            uri: row.uri,
+                            logo_uri: row.logo_uri,
+                            scopes: parse_scopes(&row.scopes),
+                            granted_at: from_ts(row.granted_at),
+                        })
+                        .collect())
+                })
+                .await
+            }
+        }
+    }
+
+    /// `DELETE /user/oauth/grants?client_id=`.
+    pub async fn revoke_oauth_grant(
+        &self,
+        user_id: Uuid,
+        client_id: Uuid,
+    ) -> Result<RevokeGrant, StoreError> {
+        match &self.inner {
+            BackendKind::None => Err(StoreError::Unavailable),
+            BackendKind::Memory(db) => {
+                let mut db = db.lock().await;
+                let Some(consent) = db.oauth_consents.iter_mut().find(|consent| {
+                    consent.user_id == user_id && consent.client_id == client_id && !consent.revoked
+                }) else {
+                    return Ok(RevokeGrant::Missing);
+                };
+                consent.revoked = true;
+                if let Some(user) = db.users.get(&user_id).cloned() {
+                    remember_audit(
+                        &user,
+                        "token_revoked",
+                        "token",
+                        Some(revoke_traits(client_id)),
+                    );
+                }
+                Ok(RevokeGrant::Revoked)
+            }
+            BackendKind::Postgres(pg) => {
+                timed(async {
+                    let mut tx = pg.pool.begin().await?;
+                    let now = ts(SystemTime::now());
+                    let updated = sqlx::query!(
+                        "UPDATE auth.oauth_consents SET revoked_at = $3
+                         WHERE user_id = $1 AND client_id = $2
+                           AND revoked_at IS NULL",
+                        user_id,
+                        client_id,
+                        now,
+                    )
+                    .execute(&mut *tx)
+                    .await?
+                    .rows_affected();
+                    if updated == 0 {
+                        tx.commit().await?;
+                        return Ok(RevokeGrant::Missing);
+                    }
+                    sqlx::query!(
+                        "DELETE FROM auth.sessions
+                         WHERE user_id = $1 AND oauth_client_id = $2",
+                        user_id,
+                        client_id,
+                    )
+                    .execute(&mut *tx)
+                    .await?;
+                    if let Some(user) = find_user_by_id(&mut tx, user_id).await? {
+                        insert_audit(
+                            &mut tx,
+                            &user,
+                            "token_revoked",
+                            "token",
+                            Some(revoke_traits(client_id)),
+                        )
+                        .await?;
+                    }
+                    tx.commit().await?;
+                    Ok(RevokeGrant::Revoked)
+                })
+                .await
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -520,6 +890,106 @@ impl Backend {
             .expect("phone fixture user");
         user.phone = phone.to_string();
         user.phone_confirmed_at = confirmed.then(SystemTime::now);
+    }
+
+    pub async fn add_identity_for_test(
+        &self,
+        email: &str,
+        provider: &str,
+        identity_email: &str,
+        verified: bool,
+    ) -> Uuid {
+        let BackendKind::Memory(db) = &self.inner else {
+            panic!("identity fixture is memory-only");
+        };
+        let mut db = db.lock().await;
+        let user = db
+            .users
+            .values_mut()
+            .find(|user| user.email.eq_ignore_ascii_case(email) && user.aud == "authenticated")
+            .expect("identity fixture user");
+        let now = SystemTime::now();
+        let id = Uuid::new_v4();
+        let mut data = Map::new();
+        data.insert("sub".into(), json!(Uuid::new_v4().to_string()));
+        data.insert("email".into(), json!(identity_email.to_lowercase()));
+        data.insert("email_verified".into(), json!(verified));
+        data.insert("phone_verified".into(), json!(false));
+        user.identities.push(IdentityRecord {
+            id,
+            provider_id: Uuid::new_v4().to_string(),
+            user_id: user.id,
+            identity_data: Value::Object(data),
+            provider: provider.into(),
+            email: identity_email.to_lowercase(),
+            last_sign_in_at: Some(now),
+            created_at: now,
+            updated_at: now,
+        });
+        id
+    }
+
+    pub async fn insert_oauth_grant_for_test(
+        &self,
+        email: &str,
+        name: &str,
+        scopes: &str,
+        deleted: bool,
+    ) -> Uuid {
+        let BackendKind::Memory(db) = &self.inner else {
+            panic!("oauth grant fixture is memory-only");
+        };
+        let mut db = db.lock().await;
+        let user_id = db
+            .users
+            .values()
+            .find(|user| user.email.eq_ignore_ascii_case(email) && user.aud == "authenticated")
+            .expect("oauth grant fixture user")
+            .id;
+        let client_id = Uuid::new_v4();
+        db.oauth_clients.insert(
+            client_id,
+            MemoryClient {
+                name: name.into(),
+                uri: "https://client.example".into(),
+                logo_uri: String::new(),
+                deleted,
+            },
+        );
+        db.oauth_consents.push(MemoryConsent {
+            user_id,
+            client_id,
+            scopes: scopes.into(),
+            granted_at: SystemTime::now(),
+            revoked: false,
+        });
+        client_id
+    }
+
+    pub async fn set_sso_for_test(&self, email: &str) {
+        let BackendKind::Memory(db) = &self.inner else {
+            panic!("sso fixture is memory-only");
+        };
+        let mut db = db.lock().await;
+        let user = db
+            .users
+            .values_mut()
+            .find(|user| user.email.eq_ignore_ascii_case(email) && user.aud == "authenticated")
+            .expect("sso fixture user");
+        user.is_sso_user = true;
+    }
+
+    pub async fn set_anonymous_for_test(&self, email: &str) {
+        let BackendKind::Memory(db) = &self.inner else {
+            panic!("anonymous fixture is memory-only");
+        };
+        let mut db = db.lock().await;
+        let user = db
+            .users
+            .values_mut()
+            .find(|user| user.email.eq_ignore_ascii_case(email) && user.aud == "authenticated")
+            .expect("anonymous fixture user");
+        user.is_anonymous = true;
     }
 }
 
@@ -631,10 +1101,27 @@ impl MemoryDb {
             .iter()
             .any(|identity| identity.provider == EMAIL_PROVIDER)
         {
-            let (shown, meta) =
-                shown_signup_identity(&new_identity(user.id, &user.email, &cmd.data, now));
+            let stored = new_identity(user.id, &user.email, &cmd.data, now);
+            let (shown, meta) = shown_signup_identity(&stored);
             user.user_metadata = meta;
             user.identities.push(shown);
+            let issued = grant_session(user, now);
+            if let Some(identity) = user
+                .identities
+                .iter_mut()
+                .find(|identity| identity.id == stored.id)
+            {
+                *identity = stored;
+            }
+            self.track(&issued);
+            remember_audit(
+                &issued.user,
+                "user_signedup",
+                "team",
+                Some(provider_traits()),
+            );
+            remember_audit(&issued.user, "login", "account", Some(provider_traits()));
+            return Ok(issued);
         } else {
             set_email_verified(&mut user.user_metadata);
         }
@@ -653,7 +1140,8 @@ impl MemoryDb {
     fn insert_new(&mut self, cmd: &SignupCommand, password_hash: String) -> IssuedSession {
         let now = SystemTime::now();
         let id = Uuid::new_v4();
-        let (shown, meta) = shown_signup_identity(&new_identity(id, &cmd.email, &cmd.data, now));
+        let stored = new_identity(id, &cmd.email, &cmd.data, now);
+        let (shown, meta) = shown_signup_identity(&stored);
         let mut user = UserRecord {
             id,
             aud: cmd.aud.clone(),
@@ -678,6 +1166,9 @@ impl MemoryDb {
         self.track(&issued);
         remember_audit(&user, "user_signedup", "team", Some(provider_traits()));
         remember_audit(&user, "login", "account", Some(provider_traits()));
+        // The signup response shows the post-confirm identity. The row keeps
+        // `email_verified: false`, which `GET /user` reloads.
+        user.identities = vec![stored];
         self.users.insert(id, user);
         issued
     }
@@ -980,12 +1471,15 @@ impl Pg {
     }
 }
 
-async fn timed<T>(fut: impl Future<Output = Result<T, StoreError>>) -> Result<T, StoreError> {
+async fn timed<T, E>(fut: impl Future<Output = Result<T, E>>) -> Result<T, E>
+where
+    E: From<StoreError>,
+{
     match tokio::time::timeout(QUERY_DEADLINE, fut).await {
         Ok(result) => result,
         Err(_) => {
             tracing::error!("auth database operation timed out");
-            Err(StoreError::TimedOut)
+            Err(StoreError::TimedOut.into())
         }
     }
 }
@@ -1617,7 +2111,12 @@ fn audit_payload(user: &UserRecord, action: &str, log_type: &str, traits: Option
     let mut payload = Map::new();
     payload.insert("action".into(), json!(action));
     payload.insert("actor_id".into(), json!(user.id.to_string()));
-    payload.insert("actor_username".into(), json!(user.email));
+    let username = if user.phone.is_empty() {
+        user.email.as_str()
+    } else {
+        user.phone.as_str()
+    };
+    payload.insert("actor_username".into(), json!(username));
     payload.insert("actor_via_sso".into(), json!(user.is_sso_user));
     payload.insert("log_type".into(), json!(log_type));
     if let Some(traits) = traits {
@@ -1626,15 +2125,30 @@ fn audit_payload(user: &UserRecord, action: &str, log_type: &str, traits: Option
     Value::Object(payload)
 }
 
-fn remember_audit(user: &UserRecord, action: &str, log_type: &str, traits: Option<Value>) {
-    let traits = traits.unwrap_or(Value::Null);
-    tracing::debug!(
-        user_id = %user.id,
-        action,
-        log_type,
-        %traits,
-        "auth audit"
-    );
+/// Memory-store stand-in for `insert_audit`.
+///
+/// The database row keeps the actor id and traits. The process log names the
+/// action only, so user ids, identity ids, emails, and phones are not written
+/// here.
+fn remember_audit(_user: &UserRecord, action: &str, log_type: &str, traits: Option<Value>) {
+    drop(traits);
+    tracing::debug!(action, log_type, "auth audit");
+}
+
+pub(crate) async fn password_matches(password: &str, hash: &str) -> Result<bool, StoreError> {
+    if hash.is_empty() {
+        return Ok(false);
+    }
+    let password = password.to_string();
+    let hash = hash.to_string();
+    tokio::task::spawn_blocking(move || bcrypt::verify(password, &hash))
+        .await
+        .map_err(|_| StoreError::Hash)?
+        .map_err(|_| StoreError::Hash)
+}
+
+pub(crate) async fn hash_new_password(password: String) -> Result<String, StoreError> {
+    hash_password(password).await
 }
 
 async fn hash_password(password: String) -> Result<String, StoreError> {
@@ -1680,6 +2194,575 @@ fn base32_lower(data: &[u8]) -> String {
         out.push(ALPHABET[index] as char);
     }
     out
+}
+
+fn email_taken(db: &MemoryDb, email: &str, aud: &str, user_id: Uuid) -> bool {
+    if email.is_empty() {
+        return false;
+    }
+    db.users.values().any(|user| {
+        if user.id == user_id || user.is_sso_user || user.aud != aud {
+            return false;
+        }
+        user.email.eq_ignore_ascii_case(email)
+            || user.identities.iter().any(|identity| {
+                !identity.provider.starts_with("sso:") && identity.email.eq_ignore_ascii_case(email)
+            })
+    })
+}
+
+/// `users.email` already belongs to some non-SSO user in `aud`, including self.
+fn user_has_email(db: &MemoryDb, email: &str, aud: &str) -> bool {
+    if email.is_empty() {
+        return false;
+    }
+    db.users
+        .values()
+        .any(|user| !user.is_sso_user && user.aud == aud && user.email.eq_ignore_ascii_case(email))
+}
+
+fn merge_meta(target: &mut Value, updates: &Map<String, Value>) {
+    let Some(map) = target.as_object_mut() else {
+        *target = Value::Object(updates.clone());
+        return;
+    };
+    for (key, value) in updates {
+        if value.is_null() {
+            map.remove(key);
+        } else {
+            map.insert(key.clone(), value.clone());
+        }
+    }
+}
+
+fn apply_user_update(user: &mut UserRecord, update: &UserUpdate) {
+    let now = SystemTime::now();
+    let mut wrote = false;
+    if let Some(hash) = &update.password_hash {
+        user.password_hash.clone_from(hash);
+        wrote = true;
+    }
+    if let Some(data) = &update.data {
+        merge_meta(&mut user.user_metadata, data);
+        wrote = true;
+    }
+    if let Some(data) = &update.app_data {
+        merge_meta(&mut user.app_metadata, data);
+        wrote = true;
+    }
+    if let Some(phone) = &update.phone {
+        apply_phone(user, phone, now);
+        wrote = true;
+    }
+    if wrote {
+        user.updated_at = now;
+    }
+}
+
+fn apply_phone(user: &mut UserRecord, phone: &str, now: SystemTime) {
+    user.phone = phone.to_string();
+    user.phone_confirmed_at = Some(now);
+    user.is_anonymous = false;
+    let provider_id = user.id.to_string();
+    if let Some(identity) = user
+        .identities
+        .iter_mut()
+        .find(|identity| identity.provider == "phone" && identity.provider_id == provider_id)
+    {
+        let mut patch = Map::new();
+        patch.insert("phone".into(), json!(phone));
+        patch.insert("phone_verified".into(), json!(true));
+        merge_meta(&mut identity.identity_data, &patch);
+        identity.updated_at = now;
+    } else {
+        user.identities.push(phone_identity(user.id, phone, now));
+    }
+}
+
+fn phone_identity(user_id: Uuid, phone: &str, now: SystemTime) -> IdentityRecord {
+    let mut claims = Map::new();
+    claims.insert("sub".into(), json!(user_id.to_string()));
+    claims.insert("email_verified".into(), json!(false));
+    claims.insert("phone".into(), json!(phone));
+    claims.insert("phone_verified".into(), json!(true));
+    IdentityRecord {
+        id: Uuid::new_v4(),
+        provider_id: user_id.to_string(),
+        user_id,
+        identity_data: Value::Object(claims),
+        provider: "phone".into(),
+        email: String::new(),
+        last_sign_in_at: Some(now),
+        created_at: now,
+        updated_at: now,
+    }
+}
+
+struct UnlinkPlan {
+    user: UserRecord,
+    removed: IdentityRecord,
+    clear_tokens: bool,
+}
+
+fn plan_unlink(
+    user: &UserRecord,
+    identity_id: Uuid,
+    autoconfirm: bool,
+    email_exists: &dyn Fn(&str) -> bool,
+) -> Result<UnlinkPlan, UnlinkError> {
+    if user.identities.len() <= 1 {
+        return Err(UnlinkError::Single);
+    }
+    let mut next = user.clone();
+    let index = next
+        .identities
+        .iter()
+        .position(|identity| identity.id == identity_id)
+        .ok_or(UnlinkError::NotFound)?;
+    let removed = next.identities.remove(index);
+    let mut clear_tokens = false;
+    if removed.provider == "phone" {
+        next.phone.clear();
+        next.phone_confirmed_at = None;
+    } else if !next
+        .identities
+        .iter()
+        .any(|identity| identity.email.eq_ignore_ascii_case(&next.email))
+    {
+        let mut ranked = next.identities.clone();
+        ranked.sort_by(|left, right| {
+            email_rank(left)
+                .cmp(&email_rank(right))
+                .then_with(|| left.created_at.cmp(&right.created_at))
+                .then_with(|| left.id.cmp(&right.id))
+        });
+        let Some(primary) = ranked
+            .into_iter()
+            .find(|identity| !email_exists(&identity.email))
+        else {
+            return Err(UnlinkError::EmailConflict);
+        };
+        let new_email = primary.email.to_lowercase();
+        let verified = identity_email_verified(&primary);
+        next.email = new_email.clone();
+        clear_tokens = true;
+        if new_email.is_empty() || (!verified && !autoconfirm) {
+            next.email_confirmed_at = None;
+            let mut patch = Map::new();
+            patch.insert("email_verified".into(), json!(false));
+            merge_meta(&mut next.user_metadata, &patch);
+        }
+    }
+    refresh_providers(&mut next);
+    next.updated_at = SystemTime::now();
+    Ok(UnlinkPlan {
+        user: next,
+        removed,
+        clear_tokens,
+    })
+}
+
+fn email_rank(identity: &IdentityRecord) -> u8 {
+    if identity.email.is_empty() {
+        2
+    } else if identity_email_verified(identity) {
+        0
+    } else {
+        1
+    }
+}
+
+fn identity_email_verified(identity: &IdentityRecord) -> bool {
+    identity
+        .identity_data
+        .get("email_verified")
+        .and_then(Value::as_bool)
+        == Some(true)
+}
+
+fn refresh_providers(user: &mut UserRecord) {
+    let mut ordered: Vec<&IdentityRecord> = user.identities.iter().collect();
+    ordered.sort_by(|left, right| {
+        left.created_at
+            .cmp(&right.created_at)
+            .then_with(|| left.id.cmp(&right.id))
+    });
+    let mut providers = Vec::new();
+    for identity in ordered {
+        if !providers
+            .iter()
+            .any(|provider| provider == &identity.provider)
+        {
+            providers.push(identity.provider.clone());
+        }
+    }
+    let mut patch = Map::new();
+    patch.insert("providers".into(), json!(providers));
+    if let Some(provider) = providers.first() {
+        patch.insert("provider".into(), json!(provider));
+    }
+    merge_meta(&mut user.app_metadata, &patch);
+}
+
+fn unlink_traits(identity: &IdentityRecord) -> Value {
+    json!({
+        "identity_id": identity.id.to_string(),
+        "provider": identity.provider,
+        "provider_id": identity.provider_id,
+    })
+}
+
+fn revoke_traits(client_id: Uuid) -> Value {
+    json!({
+        "oauth_client_id": client_id.to_string(),
+        "action": "revoke_oauth_grant",
+    })
+}
+
+fn parse_scopes(scopes: &str) -> Vec<String> {
+    scopes
+        .split(' ')
+        .map(str::trim)
+        .filter(|scope| !scope.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+fn memory_grants(db: &MemoryDb, user_id: Uuid) -> Vec<OAuthGrantView> {
+    let mut rows: Vec<&MemoryConsent> = db
+        .oauth_consents
+        .iter()
+        .filter(|consent| consent.user_id == user_id && !consent.revoked)
+        .collect();
+    rows.sort_by_key(|consent| std::cmp::Reverse(consent.granted_at));
+    rows.into_iter()
+        .filter_map(|consent| {
+            let client = db.oauth_clients.get(&consent.client_id)?;
+            if client.deleted {
+                return None;
+            }
+            Some(OAuthGrantView {
+                client_id: consent.client_id,
+                name: client.name.clone(),
+                uri: client.uri.clone(),
+                logo_uri: client.logo_uri.clone(),
+                scopes: parse_scopes(&consent.scopes),
+                granted_at: consent.granted_at,
+            })
+        })
+        .collect()
+}
+
+async fn memory_update_user(
+    db: &Mutex<MemoryDb>,
+    update: UserUpdate,
+) -> Result<UserRecord, UserUpdateError> {
+    let mut db = db.lock().await;
+    let Some(mut user) = db.users.get(&update.user_id).cloned() else {
+        return Err(UserUpdateError::Missing);
+    };
+    finish_user_update(&mut db, &mut user, &update);
+    reload_confirmed_at(&mut user);
+    db.users.insert(user.id, user.clone());
+    Ok(user)
+}
+
+fn finish_user_update(db: &mut MemoryDb, user: &mut UserRecord, update: &UserUpdate) {
+    let before_phone = update.phone.is_some().then(|| user.clone());
+    let password = update.password_hash.is_some();
+    apply_user_update(user, update);
+    if password {
+        let scope = if update.session_id.is_some() {
+            LogoutScope::Others
+        } else {
+            LogoutScope::Global
+        };
+        apply_logout(db, user.id, update.session_id, scope);
+        let actor = before_phone.as_ref().unwrap_or(user);
+        remember_audit(actor, "user_updated_password", "user", None);
+    }
+    if let Some(actor) = &before_phone {
+        remember_audit(actor, "user_modified", "user", None);
+    }
+    remember_audit(user, "user_modified", "user", None);
+}
+
+async fn postgres_update_user(pg: &Pg, update: UserUpdate) -> Result<UserRecord, UserUpdateError> {
+    timed(async move {
+        let mut tx = pg.pool.begin().await.map_err(StoreError::from)?;
+        let Some(mut user) = find_user_by_id(&mut tx, update.user_id).await? else {
+            return Err(UserUpdateError::Missing);
+        };
+        let before_phone = update.phone.is_some().then(|| user.clone());
+        let before: Vec<(Uuid, Value)> = user
+            .identities
+            .iter()
+            .map(|identity| (identity.id, identity.identity_data.clone()))
+            .collect();
+        apply_user_update(&mut user, &update);
+        if let Some(hash) = &update.password_hash {
+            clear_password_row(&mut tx, &user, hash).await?;
+            let scope = if update.session_id.is_some() {
+                LogoutScope::Others
+            } else {
+                LogoutScope::Global
+            };
+            exec_logout(&mut tx, user.id, update.session_id, scope).await?;
+            let actor = before_phone.as_ref().unwrap_or(&user);
+            insert_audit(&mut tx, actor, "user_updated_password", "user", None).await?;
+        }
+        if update.data.is_some() || update.app_data.is_some() || update.phone.is_some() {
+            write_profile(&mut tx, &user).await?;
+        }
+        for identity in &user.identities {
+            if let Some((_, previous)) = before.iter().find(|(id, _)| *id == identity.id) {
+                if previous != &identity.identity_data {
+                    let updated_at = ts(identity.updated_at);
+                    sqlx::query!(
+                        "UPDATE auth.identities
+                         SET identity_data = $2::jsonb, updated_at = $3::timestamptz
+                         WHERE id = $1::uuid",
+                        identity.id,
+                        identity.identity_data,
+                        updated_at,
+                    )
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(StoreError::from)?;
+                }
+            } else {
+                insert_identity(&mut tx, identity)
+                    .await
+                    .map_err(write_to_store)?;
+            }
+        }
+        if let Some(actor) = &before_phone {
+            insert_audit(&mut tx, actor, "user_modified", "user", None).await?;
+        }
+        insert_audit(&mut tx, &user, "user_modified", "user", None).await?;
+        let user_id = user.id;
+        tx.commit().await.map_err(StoreError::from)?;
+        let mut conn = pg.pool.acquire().await.map_err(StoreError::from)?;
+        find_user_by_id(&mut conn, user_id)
+            .await?
+            .ok_or(UserUpdateError::Missing)
+    })
+    .await
+}
+
+async fn clear_password_row(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    user: &UserRecord,
+    hash: &str,
+) -> Result<(), StoreError> {
+    let updated_at = ts(user.updated_at);
+    sqlx::query!(
+        "UPDATE auth.users SET
+            encrypted_password = $3,
+            confirmation_token = '',
+            confirmation_sent_at = NULL,
+            recovery_token = '',
+            recovery_sent_at = NULL,
+            email_change_token_current = '',
+            email_change_token_new = '',
+            email_change_sent_at = NULL,
+            phone_change_token = '',
+            phone_change_sent_at = NULL,
+            reauthentication_token = '',
+            reauthentication_sent_at = NULL,
+            updated_at = $4::timestamptz
+         WHERE instance_id = $1::uuid AND id = $2::uuid",
+        Uuid::nil(),
+        user.id,
+        hash,
+        updated_at,
+    )
+    .execute(&mut **tx)
+    .await?;
+    sqlx::query!(
+        "DELETE FROM auth.one_time_tokens WHERE user_id = $1",
+        user.id,
+    )
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
+}
+
+async fn write_profile(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    user: &UserRecord,
+) -> Result<(), StoreError> {
+    let updated_at = ts(user.updated_at);
+    let phone_confirmed_at = user.phone_confirmed_at.map(ts);
+    sqlx::query!(
+        "UPDATE auth.users SET
+            raw_app_meta_data = $3::jsonb,
+            raw_user_meta_data = $4::jsonb,
+            phone = NULLIF($5, ''),
+            phone_confirmed_at = $6::timestamptz,
+            is_anonymous = $7,
+            updated_at = $8::timestamptz
+         WHERE instance_id = $1::uuid AND id = $2::uuid",
+        Uuid::nil(),
+        user.id,
+        user.app_metadata,
+        user.user_metadata,
+        user.phone,
+        phone_confirmed_at,
+        user.is_anonymous,
+        updated_at,
+    )
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
+}
+
+async fn postgres_unlink(
+    pg: &Pg,
+    user_id: Uuid,
+    identity_id: Uuid,
+    autoconfirm: bool,
+) -> Result<IdentityRecord, UnlinkError> {
+    timed(async move {
+        let mut tx = pg.pool.begin().await.map_err(StoreError::from)?;
+        let Some(user) = find_user_by_id(&mut tx, user_id).await? else {
+            return Err(UnlinkError::Missing);
+        };
+        let mut taken = HashSet::new();
+        for identity in &user.identities {
+            if email_row_exists(&mut tx, &identity.email, &user.aud).await? {
+                taken.insert(identity.email.to_lowercase());
+            }
+        }
+        let plan = plan_unlink(&user, identity_id, autoconfirm, &|email| {
+            taken.contains(&email.to_lowercase())
+        })?;
+        insert_audit(
+            &mut tx,
+            &user,
+            "identity_unlinked",
+            "user",
+            Some(unlink_traits(&plan.removed)),
+        )
+        .await?;
+        sqlx::query!(
+            "DELETE FROM auth.identities WHERE id = $1::uuid AND user_id = $2::uuid",
+            plan.removed.id,
+            user_id,
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(StoreError::from)?;
+        write_unlinked_user(&mut tx, &plan).await?;
+        let removed = plan.removed;
+        tx.commit().await.map_err(StoreError::from)?;
+        Ok(removed)
+    })
+    .await
+}
+
+async fn email_row_exists(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    email: &str,
+    aud: &str,
+) -> Result<bool, StoreError> {
+    if email.is_empty() {
+        return Ok(false);
+    }
+    let email = email.to_lowercase();
+    let row = sqlx::query!(
+        r#"SELECT EXISTS (
+            SELECT 1 FROM auth.users
+            WHERE instance_id = $1::uuid
+              AND lower(email) = $2
+              AND aud = $3
+              AND is_sso_user = false
+        ) AS "taken!""#,
+        Uuid::nil(),
+        email,
+        aud,
+    )
+    .fetch_one(&mut **tx)
+    .await?;
+    Ok(row.taken)
+}
+
+async fn write_unlinked_user(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    plan: &UnlinkPlan,
+) -> Result<(), StoreError> {
+    let user = &plan.user;
+    let updated_at = ts(user.updated_at);
+    let email_confirmed_at = user.email_confirmed_at.map(ts);
+    let phone_confirmed_at = user.phone_confirmed_at.map(ts);
+    if plan.clear_tokens {
+        sqlx::query!(
+            "UPDATE auth.users SET
+                email = NULLIF($3, ''),
+                phone = NULLIF($4, ''),
+                email_confirmed_at = $5::timestamptz,
+                phone_confirmed_at = $6::timestamptz,
+                raw_app_meta_data = $7::jsonb,
+                raw_user_meta_data = $8::jsonb,
+                updated_at = $9::timestamptz,
+                confirmation_token = '',
+                confirmation_sent_at = NULL,
+                recovery_token = '',
+                recovery_sent_at = NULL,
+                email_change = '',
+                email_change_token_current = '',
+                email_change_token_new = '',
+                email_change_sent_at = NULL,
+                email_change_confirm_status = 0,
+                phone_change = '',
+                phone_change_token = '',
+                phone_change_sent_at = NULL,
+                reauthentication_token = '',
+                reauthentication_sent_at = NULL
+             WHERE instance_id = $1::uuid AND id = $2::uuid",
+            Uuid::nil(),
+            user.id,
+            user.email,
+            user.phone,
+            email_confirmed_at,
+            phone_confirmed_at,
+            user.app_metadata,
+            user.user_metadata,
+            updated_at,
+        )
+        .execute(&mut **tx)
+        .await?;
+        sqlx::query!(
+            "DELETE FROM auth.one_time_tokens WHERE user_id = $1",
+            user.id,
+        )
+        .execute(&mut **tx)
+        .await?;
+    } else {
+        sqlx::query!(
+            "UPDATE auth.users SET
+                email = NULLIF($3, ''),
+                phone = NULLIF($4, ''),
+                email_confirmed_at = $5::timestamptz,
+                phone_confirmed_at = $6::timestamptz,
+                raw_app_meta_data = $7::jsonb,
+                raw_user_meta_data = $8::jsonb,
+                updated_at = $9::timestamptz
+             WHERE instance_id = $1::uuid AND id = $2::uuid",
+            Uuid::nil(),
+            user.id,
+            user.email,
+            user.phone,
+            email_confirmed_at,
+            phone_confirmed_at,
+            user.app_metadata,
+            user.user_metadata,
+            updated_at,
+        )
+        .execute(&mut **tx)
+        .await?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]
