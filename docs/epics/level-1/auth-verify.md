@@ -10,9 +10,9 @@ Specs go in `specs/auth/<unit>.md` (GOAL.md section 5). Mark served code with `/
 
 | State | Unit id | Upstream source |
 |---|---|---|
-| ⬜ | `auth:route:GET /auth/v1/verify` | [internal/api/api.go:271](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/api.go#L271) |
-| ⬜ | `auth:route:POST /auth/v1/verify` | [internal/api/api.go:272](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/api.go#L272) |
-| ⬜ | `auth:verify-type:email_change` | [internal/api/verify.go:156](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/verify.go#L156) |
-| ⬜ | `auth:verify-type:invite` | [internal/api/verify.go:152](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/verify.go#L152) |
-| ⬜ | `auth:verify-type:recovery` | [internal/api/verify.go:154](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/verify.go#L154) |
-| ⬜ | `auth:verify-type:signup` | [internal/api/verify.go:152](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/verify.go#L152) |
+| 🟨 | `auth:route:GET /auth/v1/verify` | [internal/api/api.go:271](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/api.go#L271) |
+| 🟨 | `auth:route:POST /auth/v1/verify` | [internal/api/api.go:272](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/api.go#L272) |
+| 🟨 | `auth:verify-type:email_change` | [internal/api/verify.go:156](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/verify.go#L156) |
+| 🟨 | `auth:verify-type:invite` | [internal/api/verify.go:152](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/verify.go#L152) |
+| 🟨 | `auth:verify-type:recovery` | [internal/api/verify.go:154](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/verify.go#L154) |
+| 🟨 | `auth:verify-type:signup` | [internal/api/verify.go:152](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/verify.go#L152) |

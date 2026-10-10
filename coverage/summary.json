@@ -2,12 +2,12 @@
   "schema": 1,
   "totals": {
     "units": 1024,
-    "implemented": 59,
+    "implemented": 65,
     "tested": 48,
     "conformant": 0
   },
   "percent": {
-    "coverage": 5.8,
+    "coverage": 6.3,
     "conformance": 0.0,
     "done": 0.0
   },
@@ -18,7 +18,7 @@
   "components": {
     "auth": {
       "units": 152,
-      "implemented": 59,
+      "implemented": 65,
       "tested": 48,
       "conformant": 0,
       "groups": {
@@ -90,7 +90,7 @@
         },
         "verify": {
           "units": 10,
-          "implemented": 0,
+          "implemented": 6,
           "tested": 0,
           "conformant": 0
         },
@@ -577,12 +577,14 @@
     "auth:route:GET /auth/v1/admin/users/{user_id}/passkeys": "implemented",
     "auth:route:GET /auth/v1/health": "tested",
     "auth:route:GET /auth/v1/settings": "tested",
+    "auth:route:GET /auth/v1/verify": "implemented",
     "auth:route:POST /auth/v1/admin/custom-providers": "implemented",
     "auth:route:POST /auth/v1/admin/generate_link": "implemented",
     "auth:route:POST /auth/v1/admin/oauth/clients": "implemented",
     "auth:route:POST /auth/v1/logout": "tested",
     "auth:route:POST /auth/v1/signup": "tested",
     "auth:route:POST /auth/v1/token": "tested",
+    "auth:route:POST /auth/v1/verify": "implemented",
     "auth:sql-function:auth.email()": "tested",
     "auth:sql-function:auth.jwt()": "tested",
     "auth:sql-function:auth.role()": "tested",
@@ -614,6 +616,10 @@
     "auth:sql-table:auth.sso_sessions": "tested",
     "auth:sql-table:auth.users": "tested",
     "auth:sql-table:auth.webauthn_challenges": "implemented",
-    "auth:sql-table:auth.webauthn_credentials": "implemented"
+    "auth:sql-table:auth.webauthn_credentials": "implemented",
+    "auth:verify-type:email_change": "implemented",
+    "auth:verify-type:invite": "implemented",
+    "auth:verify-type:recovery": "implemented",
+    "auth:verify-type:signup": "implemented"
   }
 }

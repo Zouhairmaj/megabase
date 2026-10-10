@@ -3,10 +3,11 @@
 
 //! `/auth/v1` routes served by this crate.
 //!
-//! Health, settings, autoconfirm email signup, logout, and
-//! `POST /token` (password and refresh-token grants) are implemented.
-//! Invite, recover, resend, reauthenticate, phone signup, anonymous signup,
-//! and mailer confirmation stay HTTP 501.
+//! Health, settings, autoconfirm email signup, logout,
+//! `POST /token` (password and refresh-token grants), and
+//! `GET`/`POST /verify` (signup, invite, recovery, email change) are
+//! implemented. Invite, recover, resend, reauthenticate, phone signup,
+//! anonymous signup, and the other verify types stay HTTP 501.
 
 use std::sync::OnceLock;
 use std::time::SystemTime;
@@ -51,6 +52,10 @@ pub(crate) fn router(state: AuthState) -> Router {
         .route("/auth/v1/logout", post(logout))
         .route("/auth/v1/recover", post(recover))
         .route("/auth/v1/resend", post(resend))
+        .route(
+            "/auth/v1/verify",
+            get(crate::verify::verify_get).post(crate::verify::verify_post),
+        )
         .with_state(state)
 }
 
@@ -223,6 +228,7 @@ async fn signup(State(state): State<AuthState>, headers: HeaderMap, body: Body) 
         &issued.user,
         issued.session_id,
         issued.amr_at,
+        &issued.amr_method,
         &state.config.jwt_issuer,
         now,
         state.config.jwt_exp_seconds,
@@ -429,7 +435,7 @@ fn validate_pkce(method: &str, challenge: &str) -> Result<(), GoTrueError> {
     Ok(())
 }
 
-fn validate_email(email: &str) -> Result<String, GoTrueError> {
+pub(crate) fn validate_email(email: &str) -> Result<String, GoTrueError> {
     if email.is_empty() {
         return Err(validation("An email address is required"));
     }

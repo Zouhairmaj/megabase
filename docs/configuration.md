@@ -16,7 +16,7 @@ other names. There is no `.env.example` in this tree; the judge uses
 | --- | --- |
 | MEGABASE_HOST | Bind address. Default `0.0.0.0`. |
 | MEGABASE_PORT | HTTP port. Default `8000`. |
-| DATABASE_URL | PostgreSQL connection string. PostgreSQL stays external; Megabase does not bundle it. When set, startup installs the Auth SQL objects listed in [`specs/auth/database.md`](../specs/auth/database.md) (idempotent DDL, 30-second deadline) and opens one sqlx pool (10 connections, 30-second acquire). Signup, logout, the password and refresh-token grants on `POST /auth/v1/token`, and served admin routes share that pool. SIGINT and SIGTERM close that pool after the drain described under HTTP limits. Omit it to skip schema install (the HTTP server still starts; admin, signup, logout, and those token grants then return 500). The judge sets this to the dedicated `megabase` database (`just judge-up` / CI), never to the official stack's `postgres` database. |
+| DATABASE_URL | PostgreSQL connection string. PostgreSQL stays external; Megabase does not bundle it. When set, startup installs the Auth SQL objects listed in [`specs/auth/database.md`](../specs/auth/database.md) (idempotent DDL, 30-second deadline) and opens one sqlx pool (10 connections, 30-second acquire). Signup, logout, verify, the password and refresh-token grants on `POST /auth/v1/token`, and served admin routes share that pool. SIGINT and SIGTERM close that pool after the drain described under HTTP limits. Omit it to skip schema install (the HTTP server still starts; admin, signup, logout, verify, and those token grants then return 500). The judge sets this to the dedicated `megabase` database (`just judge-up` / CI), never to the official stack's `postgres` database. |
 | MEGABASE_HTTP_TIMEOUT_MS | Whole-request deadline in milliseconds. Default `150000`, the functions `read_timeout` in `vendor/supabase/docker/volumes/api/kong.yml`. `0` and non-integers abort startup. A request that exceeds it returns 504. |
 | MEGABASE_REQUEST_BODY_LIMIT_BYTES | Maximum request body in bytes. Default `52428800`, `FILE_SIZE_LIMIT` in `vendor/supabase/docker/docker-compose.yml`. A non-integer aborts startup. A larger body returns 413. |
 | JWT_SECRET | HS256 secret for verifying and signing JWTs (same name as the self-hosted demo stack). Raw UTF-8 bytes, not base64, and not a default. Omit it and the process still starts so `/_megabase/health` and `GET /auth/v1/health` work; verification and signing then fail with `Server lacks JWT secret`. Email signup then returns 500 `Server lacks JWT secret` and does not insert a user. A present value shorter than 32 bytes, including empty, aborts startup before listen: `JWT_SECRET is N bytes; HMAC-SHA-256 keys shorter than 32 bytes are disabled`. Length is bytes, not an entropy check. Required for `/auth/v1/admin` (a missing Bearer token is still 401). |
@@ -49,21 +49,26 @@ with this secret. Logout verifies it the same way.
 Spec: [`specs/auth/endpoints.md`](../specs/auth/endpoints.md).
 
 Served on `/auth/v1`: `GET /health`, `GET /settings`, autoconfirm email
-`POST /signup`, `POST /logout`, and the password and refresh-token grants on
-`POST /token`. Invite, recover, resend, and reauthenticate return 501 with
-their unit id. The admin routes in
+`POST /signup`, `POST /logout`, the password and refresh-token grants on
+`POST /token`, and `GET`/`POST /verify` for the signup, invite, recovery,
+and email-change types. Invite, recover, resend, and reauthenticate return
+501 with their unit id. Magic link, SMS, phone change, the `email` OTP
+type, and PKCE on verify do too. The admin routes in
 [`specs/auth/admin.md`](../specs/auth/admin.md) return GoTrue statuses.
 Every other `/auth/v1` path, and all of REST, returns 501
 `MEGABASE_NOT_IMPLEMENTED`.
 
-Signup, logout, and the password and refresh-token grants need `DATABASE_URL` (the Auth SQL from
-[`specs/auth/database.md`](../specs/auth/database.md)) and `JWT_SECRET`.
+Signup, logout, verify, and the password and refresh-token grants need `DATABASE_URL` (the Auth SQL from
+[`specs/auth/database.md`](../specs/auth/database.md)) and `JWT_SECRET`
+(verify needs the secret only when it issues a session).
 When `GOTRUE_*` is unset, signup and settings flags match the judge
 reference stack, not GoTrue's zero values: email and phone providers on,
 anonymous off, `disable_signup` false, mailer autoconfirm on (the judge
 overlay has no mail server), phone autoconfirm on, SMS provider empty,
 SAML and passkeys off, audience and role `authenticated`, expiry 3600
-seconds, issuer `http://localhost:8000/auth/v1`, password minimum 6. Bool
+seconds, issuer `http://localhost:8000/auth/v1`, password minimum 6,
+`GOTRUE_SITE_URL` `http://localhost:3000`, mailer OTP expiry 86400 seconds,
+secure email change on. Bool
 overrides accept Go's `1`/`t`/`true`/`0`/`f`/`false`.
 `GOTRUE_PASSWORD_MIN_LENGTH` below 6 is raised to 6. External OAuth
 provider flags (`GOTRUE_EXTERNAL_GITHUB_ENABLED` and the rest of the

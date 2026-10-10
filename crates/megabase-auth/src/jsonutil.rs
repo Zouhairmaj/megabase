@@ -122,6 +122,7 @@ pub fn access_claims(
     user: &UserRecord,
     session_id: Uuid,
     amr_at: SystemTime,
+    amr_method: &str,
     issuer: &str,
     now: i64,
     expires_in: i64,
@@ -142,7 +143,7 @@ pub fn access_claims(
     payload.insert("aal".into(), json!("aal1"));
     payload.insert(
         "amr".into(),
-        json!([{ "method": "password", "timestamp": unix_secs(amr_at) }]),
+        json!([{ "method": amr_method, "timestamp": unix_secs(amr_at) }]),
     );
     payload.insert("session_id".into(), json!(session_id.to_string()));
     payload.insert("is_anonymous".into(), json!(user.is_anonymous));

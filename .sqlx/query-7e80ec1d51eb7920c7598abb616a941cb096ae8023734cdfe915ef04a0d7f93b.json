@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE auth.users SET\n              email = $1,\n              encrypted_password = $2,\n              email_confirmed_at = $3,\n              confirmation_token = $4,\n              recovery_token = $5,\n              email_change = $6,\n              email_change_token_current = $7,\n              email_change_token_new = $8,\n              email_change_confirm_status = $9,\n              raw_user_meta_data = $10,\n              raw_app_meta_data = $11,\n              last_sign_in_at = $12,\n              updated_at = $13,\n              is_anonymous = $14\n           WHERE instance_id = $15 AND id = $16",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Varchar",
+        "Varchar",
+        "Timestamptz",
+        "Varchar",
+        "Varchar",
+        "Varchar",
+        "Varchar",
+        "Varchar",
+        "Int2",
+        "Jsonb",
+        "Jsonb",
+        "Timestamptz",
+        "Timestamptz",
+        "Bool",
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "7e80ec1d51eb7920c7598abb616a941cb096ae8023734cdfe915ef04a0d7f93b"
+}
