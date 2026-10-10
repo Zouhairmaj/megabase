@@ -7,6 +7,15 @@ use serde_json::Value;
 pub const FALLBACK_STAGE: &str = "Phase 0 · bootstrap";
 pub const FALLBACK_STAGE_SHORT: &str = "Phase 0";
 
+/// Standalone conformance percentages stay on [`Metrics`].
+///
+/// Set this to `true` to show them again. While it is `false`, the home
+/// status panel, the home treemap header, the status-page stat card, the
+/// Day 0 strip, and the docs status total row omit that percentage. Unit
+/// counts and coverage stay. The README conformance badge remains the live
+/// Judge publication ([decision 0032](../../docs/decisions/0032-hide-standalone-conformance-percent.md)).
+pub const SHOW_CONFORMANCE_PERCENT: bool = false;
+
 /// Stable visual order, matching the Megabase crate layout.
 pub const COMPONENT_ORDER: &[&str] = &[
     "rest",

@@ -13,8 +13,10 @@ Extends the root `AGENTS.md`; it does not relax it.
   commit the generated files so `check` can reject drift. The committed
   `coverage/judge-results.json` is the regression baseline (decision
   0030). Generated prose does not quote its pass count as the
-  conformance score. That score is the Judge publication on `gh-pages`
-  and megabase.sh. `judge-history.json` on that branch is the
+  conformance score. That percentage is the README conformance badge
+  on `gh-pages`. megabase.sh/status shows units passing and coverage,
+  not a standalone conformance percentage (decision 0032).
+  `judge-history.json` on that branch is the
   per-commit record release notes use.
   Colors:
   `#e05d44` below 50%, `#fe7d37` from 50% to under 90%, `#00D892` at 90%

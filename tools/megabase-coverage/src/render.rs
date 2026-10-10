@@ -299,9 +299,11 @@ with a recorded reason (blocked or unexposed by the gateway, hosted-platform pag
 judge case covers it, and *conformant* when every such case matches the reference stack. Coverage = implemented ÷ units; \
 conformance = identical judge cases ÷ judge cases; component percentages count conformant units. The README picture is the \
 treemap PNG published to the `gh-pages` branch after Judge on `main`. The conformance percentage is the shields badge \
-above and [megabase.sh/status](https://megabase.sh/status/), not a figure in this block. `coverage/judge-results.json` \
+above, not a figure in this block and not a standalone percentage on the website Status page \
+([decision 0032](docs/decisions/0032-hide-standalone-conformance-percent.md)). `coverage/judge-results.json` \
 on `main` is the regression baseline ([decision 0030](docs/decisions/0030-conformance-is-the-live-judge-score.md)). \
-The website Status page is rebuilt from that same Judge publication.</sup>\n",
+The website Status page shows units passing and coverage from that same Judge publication \
+([megabase.sh/status](https://megabase.sh/status/)).</sup>\n",
         units.total,
         units.excluded.len()
     );
@@ -421,7 +423,7 @@ fn progress_status(summary: &Summary) -> String {
     );
     let _ = writeln!(
         s,
-        "- Conformance is the live Judge score on [megabase.sh/status](https://megabase.sh/status/) and the [conformance badge](https://github.com/Zouhairmaj/megabase#status). This block does not copy that number. `coverage/judge-results.json` on `main` is the regression baseline ([decision 0030](docs/decisions/0030-conformance-is-the-live-judge-score.md))."
+        "- Conformance is the README [conformance badge](https://github.com/Zouhairmaj/megabase#status), not a standalone percentage on [megabase.sh/status](https://megabase.sh/status/). This block does not copy that number. `coverage/judge-results.json` on `main` is the regression baseline ([decision 0030](docs/decisions/0030-conformance-is-the-live-judge-score.md), [decision 0032](docs/decisions/0032-hide-standalone-conformance-percent.md))."
     );
     s
 }
@@ -668,7 +670,11 @@ mod tests {
         assert!(!readme.contains("src=\"coverage/treemap.svg\""));
         let progress = std::fs::read_to_string(tree.root.join("PROGRESS.md")).unwrap();
         assert!(progress.contains("https://megabase.sh/status/"));
+        assert!(progress.contains("not a standalone percentage"));
+        assert!(!progress.contains("live Judge score on [megabase.sh/status]"));
         assert!(!progress.contains("conformance 0%"));
+        assert!(readme.contains("not a standalone percentage on the website Status page"));
+        assert!(!readme.contains("shields badge above and [megabase.sh/status]"));
         let compat = std::fs::read_to_string(tree.root.join("docs/COMPATIBILITY.md")).unwrap();
         assert!(!compat.contains("| Conformant |"));
     }
