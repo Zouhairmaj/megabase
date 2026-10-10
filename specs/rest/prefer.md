@@ -1,6 +1,6 @@
 # REST: prefer
 
-Status: partial (1/2 served)
+Status: partial (10/16 served)
 Unit ids: `rest:prefer:` + `count=exact|planned|estimated`,
 `handling=strict|lenient`, `max-affected=*`, `missing=default|null`,
 `resolution=merge-duplicates|ignore-duplicates`,
@@ -35,16 +35,17 @@ value nor a `timezone=` / `max-affected=` prefix is *invalid*.
 | `handling=lenient` | Invalid tokens are ignored. Without `handling` they are ignored too. |
 | `count=exact` | `GET`/`HEAD`: `Content-Range` carries the filtered row count, e.g. `0-1/5`. `206` when the page is shorter than the total, else `200`. |
 | `count=planned` | Same, with the planner's `Plan Rows` from `EXPLAIN (FORMAT JSON)`. |
-| `count=estimated` | Same as exact. No `db-max-rows` is configured, so the estimate never takes over. |
+| `count=estimated` | Exact up to `db-max-rows` (1000, as in the reference stack); above that, the planner's estimate. |
 | `max-affected=*` | `PATCH`/`DELETE` under `handling=strict`: more affected rows than `n` rolls the write back and gives `400` `PGRST124`, details `The query affects N rows`. Without strict it is ignored. |
 | `missing=default` | `POST`/`PATCH`: payload keys that are absent take the column default (`pg_get_expr`) instead of `NULL`. |
 | `missing=null` | The default behavior: absent keys are `NULL`. |
 | `resolution=merge-duplicates` | `POST` with `on_conflict` (or the primary key): `ON CONFLICT (...) DO UPDATE SET col = EXCLUDED.col`. |
 | `resolution=ignore-duplicates` | Same target, `DO NOTHING`. |
 
-`Preference-Applied` lists, in order: resolution (POST with a conflict
-target), missing (POST/PATCH), count (reads), handling, `max-affected`
-(PATCH/DELETE under strict).
+`Preference-Applied` echoes every parsed preference on a successful resource
+response, like `prefAppliedHeader`, in order: resolution (writes: only POST
+with a conflict target), missing, count (reads), handling, `max-affected`
+(under strict).
 
 ## Edge cases
 
@@ -57,7 +58,9 @@ target), missing (POST/PATCH), count (reads), handling, `max-affected`
 ## Out of scope (still 501)
 
 `return=*`, `tx=*`, `timezone=*` (any route), every preference on
-`/rest/v1/rpc/*`, and `PUT` ignoring `resolution` (always merge upstream).
+`/rest/v1/rpc/*`.
+
+`PUT` ignores `resolution` and always merges, like upstream.
 
 ## Judge cases
 

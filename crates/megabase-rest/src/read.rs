@@ -693,9 +693,12 @@ async fn read_relation(
             };
             set_applied(
                 &mut response,
+                // `prefAppliedHeader` echoes every parsed preference.
                 prefer.applied(Scope {
+                    resolution: true,
+                    missing: true,
                     count: true,
-                    ..Scope::default()
+                    max_affected: true,
                 }),
             );
             profile_header(&mut response, schema);
@@ -722,12 +725,15 @@ fn out_of_bounds(offset: i64, total: i64) -> Response {
     response
 }
 
+/// The reference stack's `PGRST_DB_MAX_ROWS` (Supabase `.env.example`).
+const DB_MAX_ROWS: i64 = 1000;
+
 // megabase:unit rest:prefer:count=exact
 // megabase:unit rest:prefer:count=planned
 // megabase:unit rest:prefer:count=estimated
-/// Total rows behind the filters. `exact` and `estimated` count: no
-/// `db-max-rows` is configured, so the estimate never takes over
-/// (`Statements.hs` `mainRead`). `planned` reads the planner's row estimate.
+/// Total rows behind the filters. `exact` counts. `estimated` counts up to
+/// `DB_MAX_ROWS`, then reads the planner's row estimate like `planned`
+/// (`Statements.hs` `mainRead`).
 async fn count_total(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     schema: &str,
@@ -744,7 +750,27 @@ async fn count_total(
         Some(filter) => (format!(" WHERE {}", filter.sql), filter.params),
         None => (String::new(), Vec::new()),
     };
-    if mode == Count::Planned {
+    let mut planned = mode == Count::Planned;
+    if mode == Count::Estimated {
+        // `Statements.hs`: count up to `db-max-rows + 1`, then trust the planner.
+        let sql = format!(
+            "SELECT pg_catalog.count(*)::bigint FROM (SELECT 1 FROM {from}{where_sql} LIMIT {}) AS _megabase_count",
+            DB_MAX_ROWS + 1
+        );
+        let mut query = sqlx::query_scalar::<sqlx::Postgres, i64>(&sql);
+        for param in &params {
+            query = query.bind(param);
+        }
+        let limited = query
+            .fetch_one(&mut **tx)
+            .await
+            .map_err(|error| Box::new(query_failure(&error, anon)))?;
+        if limited <= DB_MAX_ROWS {
+            return Ok(limited);
+        }
+        planned = true;
+    }
+    if planned {
         let sql = format!("EXPLAIN (FORMAT JSON) SELECT 1 FROM {from}{where_sql}");
         let mut query = sqlx::query(&sql);
         for param in &params {
@@ -759,7 +785,16 @@ async fn count_total(
         let rows = serde_json::from_str::<Value>(&plan)
             .ok()
             .and_then(|plan| plan[0]["Plan"]["Plan Rows"].as_i64());
-        return Ok(rows.unwrap_or(0));
+        return rows.ok_or_else(|| {
+            tracing::error!("rest planned count: no Plan Rows in EXPLAIN output");
+            Box::new(pgrst(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "PGRST000",
+                "Database connection error.",
+                Some("could not read the planned row count"),
+                None,
+            ))
+        });
     }
     let sql = format!("SELECT pg_catalog.count(*)::bigint FROM {from}{where_sql}");
     let mut query = sqlx::query_scalar::<sqlx::Postgres, i64>(&sql);

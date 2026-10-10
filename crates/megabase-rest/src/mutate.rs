@@ -316,7 +316,8 @@ pub(crate) async fn mutate(
     let mut response = mutation_response(&kind, count, schema);
     let applied = prefer.applied(Scope {
         resolution: matches!(kind, Kind::Create) && !conflict.is_empty(),
-        missing: matches!(kind, Kind::Create | Kind::Update),
+        // `prefAppliedHeader` echoes every parsed preference, applied or not.
+        missing: true,
         count: false,
         max_affected: matches!(kind, Kind::Update | Kind::Delete),
     });
@@ -342,6 +343,12 @@ async fn column_defaults(
     keys: &[String],
     anon: bool,
 ) -> Result<Vec<(String, String)>, Box<Response>> {
+    // Deparse under the write-time path so names resolve as they will in the write.
+    sqlx::query("SELECT set_config('search_path', $1, true)")
+        .bind(schema)
+        .execute(&mut **tx)
+        .await
+        .map_err(|error| Box::new(query_failure(&error, anon)))?;
     let rows: Vec<(String, String)> = sqlx::query_as(
         "SELECT a.attname::text, pg_get_expr(d.adbin, d.adrelid)
          FROM pg_attribute AS a
