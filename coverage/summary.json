@@ -2,12 +2,12 @@
   "schema": 1,
   "totals": {
     "units": 1024,
-    "implemented": 121,
+    "implemented": 129,
     "tested": 87,
     "conformant": 0
   },
   "percent": {
-    "coverage": 11.8,
+    "coverage": 12.6,
     "conformance": 0.0,
     "done": 0.0
   },
@@ -18,13 +18,13 @@
   "components": {
     "auth": {
       "units": 152,
-      "implemented": 71,
+      "implemented": 79,
       "tested": 60,
       "conformant": 0,
       "groups": {
         "admin": {
           "units": 28,
-          "implemented": 20,
+          "implemented": 28,
           "tested": 11,
           "conformant": 0
         },
@@ -586,10 +586,18 @@
     "auth:route:POST /auth/v1/admin/custom-providers": "implemented",
     "auth:route:POST /auth/v1/admin/generate_link": "implemented",
     "auth:route:POST /auth/v1/admin/oauth/clients": "implemented",
+    "auth:route:POST /auth/v1/admin/oauth/clients/{client_id}/regenerate_secret": "implemented",
+    "auth:route:POST /auth/v1/admin/sso/providers": "implemented",
+    "auth:route:POST /auth/v1/admin/users": "implemented",
     "auth:route:POST /auth/v1/logout": "tested",
     "auth:route:POST /auth/v1/signup": "tested",
     "auth:route:POST /auth/v1/token": "tested",
     "auth:route:POST /auth/v1/verify": "tested",
+    "auth:route:PUT /auth/v1/admin/custom-providers/{identifier}": "implemented",
+    "auth:route:PUT /auth/v1/admin/oauth/clients/{client_id}": "implemented",
+    "auth:route:PUT /auth/v1/admin/sso/providers/{idp_id}": "implemented",
+    "auth:route:PUT /auth/v1/admin/users/{user_id}": "implemented",
+    "auth:route:PUT /auth/v1/admin/users/{user_id}/factors/{factor_id}": "implemented",
     "auth:route:PUT /auth/v1/user": "tested",
     "auth:sql-function:auth.email()": "tested",
     "auth:sql-function:auth.jwt()": "tested",

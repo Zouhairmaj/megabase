@@ -30,9 +30,9 @@ use uuid::Uuid;
 
 use super::{
     empty_as_none, generate_password, go_json, hash_password, limit_body, load_factors,
-    load_one_sso, load_user_json, parse_user_id, random_bytes, sso_json,
-    validate_admin_email, validate_attribute_mapping, validate_auth_params, validate_claims,
-    validate_redirect_uri, write_audit, GenerateLinkError,
+    load_one_sso, load_user_json, parse_user_id, random_bytes, sso_json, validate_admin_email,
+    validate_attribute_mapping, validate_auth_params, validate_claims, validate_redirect_uri,
+    write_audit, GenerateLinkError,
 };
 use crate::admin::{
     is_uuid, nil_instance, oauth_client_json, pool, require_admin, require_custom_oauth,
@@ -82,9 +82,8 @@ fn db_err<E>(message: &'static str) -> impl Fn(E) -> AuthError + Copy {
 fn validate_phone(phone: &str) -> Result<String, AuthError> {
     let phone = phone.strip_prefix('+').unwrap_or(phone).replace(' ', "");
     let bytes = phone.as_bytes();
-    let ok = (2..=15).contains(&bytes.len())
-        && bytes[0] != b'0'
-        && bytes.iter().all(u8::is_ascii_digit);
+    let ok =
+        (2..=15).contains(&bytes.len()) && bytes[0] != b'0' && bytes.iter().all(u8::is_ascii_digit);
     if ok {
         Ok(phone)
     } else {
@@ -336,7 +335,7 @@ struct AdminUserParams {
 /// `bcrypt.Cost` acceptance: version, two-digit cost, 53 hash characters.
 fn bcrypt_hash_ok(hash: &str) -> bool {
     let bytes = hash.as_bytes();
-    if !hash.is_ascii() || bytes.len() != 60|| bytes[0] != b'$' || bytes[1] != b'2' {
+    if !hash.is_ascii() || bytes.len() != 60 || bytes[0] != b'$' || bytes[1] != b'2' {
         return false;
     }
     let rest = &hash[2..];
@@ -346,7 +345,9 @@ fn bcrypt_hash_ok(hash: &str) -> bool {
     };
     let (cost, tail) = rest.split_at(2.min(rest.len()));
     cost.bytes().all(|b| b.is_ascii_digit())
-        && cost.parse::<u32>().is_ok_and(|cost| (4..=31).contains(&cost))
+        && cost
+            .parse::<u32>()
+            .is_ok_and(|cost| (4..=31).contains(&cost))
         && tail.starts_with('$')
 }
 
@@ -397,7 +398,10 @@ pub(crate) async fn create_user(
         }
         providers.push("phone");
     }
-    let hash_given = params.password_hash.as_deref().is_some_and(|h| !h.is_empty());
+    let hash_given = params
+        .password_hash
+        .as_deref()
+        .is_some_and(|h| !h.is_empty());
     if params.password.is_some() && hash_given {
         return Err(AuthError::validation(
             400,
@@ -428,9 +432,8 @@ pub(crate) async fn create_user(
     };
     let user_id = match params.id.as_deref().filter(|id| !id.is_empty()) {
         Some(raw) => {
-            let id = Uuid::parse_str(raw).map_err(|_| {
-                AuthError::validation(400, "ID must conform to the uuid v4 format")
-            })?;
+            let id = Uuid::parse_str(raw)
+                .map_err(|_| AuthError::validation(400, "ID must conform to the uuid v4 format"))?;
             if id.is_nil() {
                 return Err(AuthError::validation(400, "ID cannot be a nil uuid").into());
             }
@@ -750,11 +753,13 @@ pub(crate) async fn update_user(
                     .fetch_one(&mut *tx)
                     .await?;
             let merged = merge_meta(stored.or(current.raw_app_meta_data.clone()), updates);
-            sqlx::query("UPDATE auth.users SET raw_app_meta_data = $2, updated_at = NOW() WHERE id = $1")
-                .bind(id)
-                .bind(&merged)
-                .execute(&mut *tx)
-                .await?;
+            sqlx::query(
+                "UPDATE auth.users SET raw_app_meta_data = $2, updated_at = NOW() WHERE id = $1",
+            )
+            .bind(id)
+            .bind(&merged)
+            .execute(&mut *tx)
+            .await?;
         }
         if let Some(updates) = &params.user_metadata {
             let (stored,): (Option<Value>,) =
@@ -763,11 +768,13 @@ pub(crate) async fn update_user(
                     .fetch_one(&mut *tx)
                     .await?;
             let merged = merge_meta(stored.or(current.raw_user_meta_data.clone()), updates);
-            sqlx::query("UPDATE auth.users SET raw_user_meta_data = $2, updated_at = NOW() WHERE id = $1")
-                .bind(id)
-                .bind(&merged)
-                .execute(&mut *tx)
-                .await?;
+            sqlx::query(
+                "UPDATE auth.users SET raw_user_meta_data = $2, updated_at = NOW() WHERE id = $1",
+            )
+            .bind(id)
+            .bind(&merged)
+            .execute(&mut *tx)
+            .await?;
         }
         if let Some(nanos) = ban {
             apply_ban(&mut tx, id, nanos).await?;
@@ -906,12 +913,14 @@ pub(crate) async fn update_factor(
         .map_err(db_err("Database error updating factor"))?;
     let fail = db_err("Database error updating factor");
     if let Some(name) = params.friendly_name.as_deref().filter(|n| !n.is_empty()) {
-        sqlx::query("UPDATE auth.mfa_factors SET friendly_name = $2, updated_at = NOW() WHERE id = $1")
-            .bind(factor_id)
-            .bind(name)
-            .execute(&mut *tx)
-            .await
-            .map_err(&fail)?;
+        sqlx::query(
+            "UPDATE auth.mfa_factors SET friendly_name = $2, updated_at = NOW() WHERE id = $1",
+        )
+        .bind(factor_id)
+        .bind(name)
+        .execute(&mut *tx)
+        .await
+        .map_err(&fail)?;
     }
     if let Some(phone) = params.phone.as_deref().filter(|p| !p.is_empty()) {
         if factor.0 == "phone" {
@@ -1006,10 +1015,16 @@ impl SsoParams {
             ));
         } else if !url.is_empty() {
             if !url.starts_with('/') && !valid_request_uri(url) {
-                return Err(AuthError::validation(400, "metadata_url is not a valid URL"));
+                return Err(AuthError::validation(
+                    400,
+                    "metadata_url is not a valid URL",
+                ));
             }
             if !url.to_ascii_lowercase().starts_with("https://") {
-                return Err(AuthError::validation(400, "metadata_url is not a HTTPS URL"));
+                return Err(AuthError::validation(
+                    400,
+                    "metadata_url is not a HTTPS URL",
+                ));
             }
         }
         let format = self.name_id();
@@ -1077,7 +1092,9 @@ fn parse_saml_metadata(xml: &str) -> Result<String, GenerateLinkError> {
         })
         .unwrap_or_default();
     if entity.is_empty() {
-        return Err(AuthError::validation(400, "SAML Metadata does not contain an EntityID").into());
+        return Err(
+            AuthError::validation(400, "SAML Metadata does not contain an EntityID").into(),
+        );
     }
     let idp = regex::Regex::new(r"<(?:[A-Za-z0-9_.-]+:)?IDPSSODescriptor\b")
         .map_err(|_| unsupported())?
@@ -1100,16 +1117,15 @@ fn parse_saml_metadata(xml: &str) -> Result<String, GenerateLinkError> {
     Ok(entity)
 }
 
-async fn domain_owner(
-    db: &sqlx::PgPool,
-    domain: &str,
-) -> Result<Option<Uuid>, AuthError> {
-    sqlx::query_as::<_, (Uuid,)>("SELECT sso_provider_id FROM auth.sso_domains WHERE domain = $1 LIMIT 1")
-        .bind(domain)
-        .fetch_optional(db)
-        .await
-        .map(|row| row.map(|(id,)| id))
-        .map_err(db_err("Database error finding SSO Identity Provider"))
+async fn domain_owner(db: &sqlx::PgPool, domain: &str) -> Result<Option<Uuid>, AuthError> {
+    sqlx::query_as::<_, (Uuid,)>(
+        "SELECT sso_provider_id FROM auth.sso_domains WHERE domain = $1 LIMIT 1",
+    )
+    .bind(domain)
+    .fetch_optional(db)
+    .await
+    .map(|row| row.map(|(id,)| id))
+    .map_err(db_err("Database error finding SSO Identity Provider"))
 }
 
 // megabase:unit auth:route:POST /auth/v1/admin/sso/providers
@@ -1511,7 +1527,11 @@ fn validate_oauth_update(params: &OAuthUpdate) -> Result<(), AuthError> {
             ));
         }
     }
-    if params.client_name.as_deref().is_some_and(|name| name.len() > 1024) {
+    if params
+        .client_name
+        .as_deref()
+        .is_some_and(|name| name.len() > 1024)
+    {
         return Err(bad("client_name cannot exceed 1024 characters".into()));
     }
     for (field, value) in [
@@ -1524,7 +1544,7 @@ fn validate_oauth_update(params: &OAuthUpdate) -> Result<(), AuthError> {
         if value.len() > 2048 {
             return Err(bad(format!("{field} cannot exceed 2048 characters")));
         }
-        if !valid_request_uri(value) &&!value.starts_with('/') {
+        if !valid_request_uri(value) && !value.starts_with('/') {
             return Err(bad(format!("{field} must be a valid URL")));
         }
     }
@@ -1727,7 +1747,10 @@ pub(crate) async fn update_custom_provider(
     .await
     .map_err(db_err("Error retrieving custom OAuth provider"))?
     .ok_or_else(|| {
-        AuthError::not_found("custom_provider_not_found", "Custom OAuth provider not found")
+        AuthError::not_found(
+            "custom_provider_not_found",
+            "Custom OAuth provider not found",
+        )
     })?;
     if let Some(name) = nonempty(&update.name) {
         row.name = name.to_string();
