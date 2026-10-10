@@ -224,6 +224,7 @@ jobs:
         run: |
           git fetch --no-tags origin main
           BASE_SHA="$(git rev-parse origin/main)"
+          # Same latency model as .github/workflows/bencher.yml (percentage, 3.0).
           bencher run \
             --project megabase \
             --ci-on-the-fly \
