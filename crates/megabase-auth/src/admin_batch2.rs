@@ -42,6 +42,10 @@ use crate::http::{json_ok, json_status, AuthError};
 use crate::routes::request_aud;
 use crate::state::AuthState;
 
+/// Issue #8 admin writes. A child module, so it reuses this file's helpers.
+#[path = "admin_batch3.rs"]
+pub(crate) mod batch3;
+
 const AUTH_PREFIX: &str = "/auth/v1";
 const USER_NOT_FOUND: &str = "User not found";
 const DUPLICATE_EMAIL: &str = "A user with this email address has already been registered";

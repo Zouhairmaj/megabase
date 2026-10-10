@@ -239,13 +239,13 @@ async fn unimplemented_auth_paths_stay_501() {
     let (status, body, _) = send(
         state(),
         "POST",
-        "/auth/v1/admin/users",
+        "/auth/v1/admin/unimplemented",
         Some(&demo_service()),
     )
     .await;
     assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
     assert_eq!(body["code"], "MEGABASE_NOT_IMPLEMENTED");
-    assert_eq!(body["unit"], "POST /auth/v1/admin/users");
+    assert_eq!(body["unit"], "POST /auth/v1/admin/unimplemented");
 }
 
 #[tokio::test]
@@ -253,13 +253,13 @@ async fn unimplemented_methods_on_registered_admin_paths_are_501() {
     for (method, path, unit) in [
         (
             "PUT",
-            "/auth/v1/admin/custom-providers/custom:example",
-            "PUT /auth/v1/admin/custom-providers/custom:example",
+            "/auth/v1/admin/custom-providers",
+            "PUT /auth/v1/admin/custom-providers",
         ),
         (
-            "PUT",
-            "/auth/v1/admin/sso/providers/11111111-1111-1111-1111-111111111111",
-            "PUT /auth/v1/admin/sso/providers/11111111-1111-1111-1111-111111111111",
+            "POST",
+            "/auth/v1/admin/users/11111111-1111-1111-1111-111111111111/factors",
+            "POST /auth/v1/admin/users/11111111-1111-1111-1111-111111111111/factors",
         ),
     ] {
         let (status, body, _) = send(state(), method, path, Some(&demo_service())).await;
