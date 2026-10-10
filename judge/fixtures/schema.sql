@@ -125,8 +125,11 @@ insert into public.profiles (id, display_name) values
   ('00000000-0000-4000-8000-0000000000a1', 'owner-a'),
   ('00000000-0000-4000-8000-0000000000b2', 'owner-b');
 
+-- owner-b's own note makes `user_id=not.eq.<owner-b>` observable: a working
+-- filter returns nothing to owner-b, and an ignored filter returns this row.
 insert into public.notes (id, user_id, body) values
-  ('00000000-0000-4000-8000-0000000000c3', '00000000-0000-4000-8000-0000000000a1', 'victim-secret');
+  ('00000000-0000-4000-8000-0000000000c3', '00000000-0000-4000-8000-0000000000a1', 'victim-secret'),
+  ('00000000-0000-4000-8000-0000000000d6', '00000000-0000-4000-8000-0000000000b2', 'owner-b-note');
 
 insert into public.note_comments (note_id, user_id, body)
 select id, user_id, 'comment-secret'

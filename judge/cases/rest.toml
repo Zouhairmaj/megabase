@@ -195,7 +195,7 @@ headers = { Authorization = "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQ
 
 [[case]]
 id = "rest.adversarial.rls.cross-user-not"
-description = "A not filter does not bypass the owner policy"
+description = "A not filter excludes the caller's own note and does not reveal the other user's note"
 units = ["rest:route:GET /rest/v1/{relation}", "rest:filter-operator:not", "rest:filter-operator:eq"]
 [[case.step]]
 method = "GET"
