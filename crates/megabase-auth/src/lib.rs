@@ -6,7 +6,8 @@
 //! generate-link reads and creates in that epic. Issue #15 serves health,
 //! settings, autoconfirm email signup, and logout. Issue #17 serves
 //! `POST /token` for the password and refresh-token grants. Issue #19
-//! serves `GET` and `PUT /user`, identity unlink, and the OAuth grant list.
+//! serves `GET` and `PUT /user`, identity authorize and unlink, and the
+//! OAuth grant list and revoke.
 //! Every other Auth path returns `MEGABASE_NOT_IMPLEMENTED`. Database objects
 //! listed in `specs/auth/database.md` are installed when `DATABASE_URL` is
 //! set.
