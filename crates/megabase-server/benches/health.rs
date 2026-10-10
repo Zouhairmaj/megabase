@@ -39,22 +39,18 @@ fn gateway(c: &mut Criterion) {
     group.bench_function("GET /_megabase/health", |b| {
         b.iter(|| {
             rt.block_on(async {
-                // Two requests per iteration. This commit checks that a 2×
-                // slowdown alerts. The following commit restores one request.
-                for _ in 0..2 {
-                    let response = health_router
-                        .clone()
-                        .oneshot(
-                            Request::builder()
-                                .uri(HEALTH_PATH)
-                                .body(Body::empty())
-                                .expect("health request"),
-                        )
-                        .await
-                        .expect("health oneshot");
-                    assert_eq!(response.status(), StatusCode::OK);
-                    black_box(response.status());
-                }
+                let response = health_router
+                    .clone()
+                    .oneshot(
+                        Request::builder()
+                            .uri(HEALTH_PATH)
+                            .body(Body::empty())
+                            .expect("health request"),
+                    )
+                    .await
+                    .expect("health oneshot");
+                assert_eq!(response.status(), StatusCode::OK);
+                black_box(response.status())
             })
         });
     });
@@ -63,20 +59,18 @@ fn gateway(c: &mut Criterion) {
     group.bench_function("GET /rest/v1/todos", |b| {
         b.iter(|| {
             rt.block_on(async {
-                for _ in 0..2 {
-                    let response = rest_router
-                        .clone()
-                        .oneshot(
-                            Request::builder()
-                                .uri("/rest/v1/todos")
-                                .body(Body::empty())
-                                .expect("rest request"),
-                        )
-                        .await
-                        .expect("rest oneshot");
-                    assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
-                    black_box(response.status());
-                }
+                let response = rest_router
+                    .clone()
+                    .oneshot(
+                        Request::builder()
+                            .uri("/rest/v1/todos")
+                            .body(Body::empty())
+                            .expect("rest request"),
+                    )
+                    .await
+                    .expect("rest oneshot");
+                assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
+                black_box(response.status())
             })
         });
     });
