@@ -4,7 +4,6 @@
 //! and it does not trust Megabase HTTP for schema or row state.
 
 use std::collections::BTreeMap;
-use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
 use anyhow::{bail, Context, Result};
@@ -192,35 +191,44 @@ pub fn prepare(admin_url: &str, megabase_url: &str, fixtures: &str) -> Result<()
     Ok(())
 }
 
+/// Collapse whitespace and `--` comments and lowercase keywords and
+/// identifiers, leaving `'literal'` and `"identifier"` contents untouched.
 pub fn normalize_sql(sql: &str) -> String {
-    static COMMENT: OnceLock<regex::Regex> = OnceLock::new();
-    static WS: OnceLock<regex::Regex> = OnceLock::new();
-    let without_line_comments = COMMENT
-        .get_or_init(|| regex::Regex::new(r"--[^\n]*").expect("comment regex"))
-        .replace_all(sql, " ");
-    let compact = WS
-        .get_or_init(|| regex::Regex::new(r"\s+").expect("ws regex"))
-        .replace_all(&without_line_comments, " ");
-    lowercase_sql_outside_literals(compact.trim())
-}
-
-/// Lowercase SQL keywords and identifiers, but keep `'quoted'` literal case
-/// so `'email'` and `'EMAIL'` do not compare equal.
-fn lowercase_sql_outside_literals(sql: &str) -> String {
     let mut result = String::with_capacity(sql.len());
-    let mut in_literal = false;
     let mut chars = sql.chars().peekable();
+    let mut pending_space = false;
     while let Some(ch) = chars.next() {
-        if ch == '\'' {
-            result.push(ch);
-            if in_literal && chars.peek() == Some(&'\'') {
-                result.push(chars.next().expect("escaped quote"));
-            } else {
-                in_literal = !in_literal;
+        if ch == '\'' || ch == '"' {
+            if pending_space && !result.is_empty() {
+                result.push(' ');
             }
-        } else if in_literal {
+            pending_space = false;
             result.push(ch);
+            // Copy through the closing quote; a doubled quote is an escape.
+            while let Some(inner) = chars.next() {
+                result.push(inner);
+                if inner == ch {
+                    if chars.peek() == Some(&ch) {
+                        result.extend(chars.next());
+                    } else {
+                        break;
+                    }
+                }
+            }
+        } else if ch == '-' && chars.peek() == Some(&'-') {
+            for skipped in chars.by_ref() {
+                if skipped == '\n' {
+                    break;
+                }
+            }
+            pending_space = true;
+        } else if ch.is_whitespace() {
+            pending_space = true;
         } else {
+            if pending_space && !result.is_empty() {
+                result.push(' ');
+            }
+            pending_space = false;
             result.extend(ch.to_lowercase());
         }
     }
@@ -300,7 +308,8 @@ fn table_catalog(client: &mut Client, rel: &Relation) -> Result<Option<TableCata
            JOIN pg_namespace n ON n.oid = c.relnamespace
            CROSS JOIN LATERAL aclexplode(c.relacl) x
            LEFT JOIN pg_roles r ON r.oid = x.grantee
-          WHERE n.nspname = $1 AND c.relname = $2",
+          WHERE n.nspname = $1 AND c.relname = $2
+            AND x.grantee <> c.relowner",
         &[&rel.schema, &rel.name],
     )?;
     let column_acls = client.query(
@@ -313,7 +322,8 @@ fn table_catalog(client: &mut Client, rel: &Relation) -> Result<Option<TableCata
            CROSS JOIN LATERAL aclexplode(a.attacl) x
            LEFT JOIN pg_roles r ON r.oid = x.grantee
           WHERE n.nspname = $1 AND c.relname = $2
-            AND a.attnum > 0 AND NOT a.attisdropped",
+            AND a.attnum > 0 AND NOT a.attisdropped
+            AND x.grantee <> c.relowner",
         &[&rel.schema, &rel.name],
     )?;
     let mut acls: Vec<String> = table_acls
@@ -926,6 +936,23 @@ mod tests {
             normalize_sql("current_setting('EMAIL')")
         );
         assert_eq!(normalize_sql("it''s Fine"), "it''s fine");
+    }
+
+    #[test]
+    fn sql_normalization_keeps_literal_whitespace_and_comment_markers() {
+        assert_ne!(
+            normalize_sql("tenant_key = 'a  b'"),
+            normalize_sql("tenant_key = 'a b'")
+        );
+        assert_eq!(
+            normalize_sql("x =  'a -- b\n c'  -- tail"),
+            "x = 'a -- b\n c'"
+        );
+        assert_ne!(
+            normalize_sql("(tenant = 'a  b'::text)"),
+            normalize_sql("(tenant = 'a b'::text)")
+        );
+        assert_ne!(normalize_sql("\"A  b\""), normalize_sql("\"A b\""));
     }
 
     #[test]
