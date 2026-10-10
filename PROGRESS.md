@@ -317,12 +317,24 @@ Physically impossible for the agent (repository settings or credentials):
 - [x] Allow GitHub Actions to create and approve pull requests
       (Settings → Actions → General → Workflow permissions;
       `can_approve_pull_request_reviews=true`. Run 37961663758 predates it.)
-- [ ] Set secret `RELEASE_PLEASE_TOKEN` (PAT or GitHub App) so lockfile
-      pushes on the release branch start required checks natively
-      (`GITHUB_TOKEN` pushes do not trigger `push`/`pull_request`
-      workflows). Preferred even though Release now
-      `workflow_dispatch`es those checks when the secret is unset.
-      Exact steps: `HUMAN_LOG.md` Pending, 2026-10-09.
+- [ ] Grant `RELEASE_PLEASE_TOKEN` the permissions release-please uses.
+      Fine-grained PAT or GitHub App for `Zouhairmaj/megabase`:
+      **Contents: Read and write** and **Pull requests: Read and write**.
+      Contents write is what
+      [Create a tree](https://docs.github.com/rest/git/trees#create-a-tree)
+      and
+      [Create a release](https://docs.github.com/rest/releases/releases#create-a-release)
+      require. The tree probe and the release commit only add
+      `.release-please-manifest.json`, `CHANGELOG.md`, and `Cargo.toml`
+      on top of `base_tree`; they do not change `.github/workflows`, so
+      this flow does not need Workflows write. A 403 on that tree call
+      is what release-please prints as `Error adding to tree`. Run
+      38003872424 failed with `Resource not accessible by personal
+      access token` on create-a-release after pull request #144 merged,
+      which is the same Contents write gap. Classic PAT: `repo`. The
+      Release workflow probes the tree call and falls back to
+      `GITHUB_TOKEN` only on HTTP 403 or 404. Lockfile pushes keep using
+      this secret so required checks start natively.
 - [ ] Allow `github-actions` to publish GitHub Releases / tags on `main`
 - [ ] Enforce CODEOWNERS
 - [x] Coverage commits on `main` are not used. Shields JSON is
