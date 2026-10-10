@@ -3457,6 +3457,38 @@ async fn postgres_verify(pg: &Pg, request: &VerifyRequest) -> Result<VerifyOutco
         }
         Located::Found(found) => found,
     };
+    // Serialize concurrent redemptions of this user, then read the token again.
+    // The first lookup takes no lock, so two transactions can both see it.
+    let locked = sqlx::query!(
+        "SELECT id FROM auth.users WHERE instance_id = $1 AND id = $2 FOR UPDATE",
+        Uuid::nil(),
+        found.user_id,
+    )
+    .fetch_optional(&mut *tx)
+    .await?;
+    if locked.is_none() {
+        tx.commit().await?;
+        return Ok(if request.hash_path {
+            link_expired()
+        } else {
+            token_invalid()
+        });
+    }
+    let found = match locate_postgres(&mut tx, request).await? {
+        Located::Found(again) if again.user_id == found.user_id => again,
+        Located::Reject(rejected) => {
+            tx.commit().await?;
+            return Ok(rejected);
+        }
+        Located::Found(_) => {
+            tx.commit().await?;
+            return Ok(if request.hash_path {
+                link_expired()
+            } else {
+                token_invalid()
+            });
+        }
+    };
     let Some(mut user) = find_user_by_id(&mut tx, found.user_id).await? else {
         tx.commit().await?;
         return Ok(if request.hash_path {

@@ -746,6 +746,24 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn one_token_redeems_once_when_two_requests_race() {
+        let backend = Backend::memory();
+        backend
+            .plant_verification_for_test("race@example.com", "racehash", PlantFlags::default())
+            .await;
+        let router = app(true, backend);
+        let body = r#"{"type":"signup","token_hash":"racehash"}"#;
+        let left = call(router.clone(), "POST", "/auth/v1/verify", Some(body));
+        let right = call(router, "POST", "/auth/v1/verify", Some(body));
+        let (left, right) = tokio::join!(left, right);
+        let wins = [left.0, right.0]
+            .into_iter()
+            .filter(|status| *status == StatusCode::OK)
+            .count();
+        assert_eq!(wins, 1, "left {} right {}", left.0, right.0);
+    }
+
+    #[tokio::test]
     async fn signup_invite_recovery_and_email_change_issue_otp_sessions() {
         let backend = Backend::memory();
         let email = "person@example.com";
