@@ -239,26 +239,45 @@ jobs:
           TOKEN_SOURCE: ${{ needs.release-please.outputs.token_source }}
           PUSHED_WITH: ${{ steps.commit.outputs.pushed_with }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-          LOCKFILE_CHECK_ATTEMPTS: 60
+          LOCKFILE_CHECK_ATTEMPTS: 180
           LOCKFILE_CHECK_SLEEP_SECONDS: 6
         run: |
           set -euo pipefail
           SHA="$(git rev-parse HEAD)"
+          # Judge is satisfied by the aggregate name or by any matrix job
+          # `Judge (<service>)`. The aggregate starts only after those jobs
+          # finish (judge.yml), which is later than this wait. `Judge build`
+          # and `Judge services` do not count. Lockfile required checks
+          # still posts a check named exactly `Judge`.
           REQUIRED='["Build","Codecov","Bencher","Protected paths","Judge"]'
-          ATTEMPTS="${LOCKFILE_CHECK_ATTEMPTS:-60}"
+          ATTEMPTS="${LOCKFILE_CHECK_ATTEMPTS:-180}"
           SLEEP_SECS="${LOCKFILE_CHECK_SLEEP_SECONDS:-6}"
 
-          missing_required() {
-            local CHECK_RUNS
+          read_checks() {
             CHECK_RUNS="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${SHA}/check-runs?per_page=100")"
-            jq -r --argjson required "${REQUIRED}" '
+            COUNT="$(jq '.total_count' <<< "${CHECK_RUNS}")"
+            MISSING="$(jq -r --argjson required "${REQUIRED}" '
               [.check_runs[].name] as $started
-              | $required - $started
+              | [
+                  $required[] as $name
+                  | if $name == "Judge" then
+                      if any($started[]; . == "Judge" or startswith("Judge (")) then
+                        empty
+                      else
+                        $name
+                      end
+                    elif any($started[]; . == $name) then
+                      empty
+                    else
+                      $name
+                    end
+                ]
               | join(", ")
-            ' <<< "${CHECK_RUNS}"
+            ' <<< "${CHECK_RUNS}")"
           }
 
-          if [ -z "$(missing_required)" ]; then
+          read_checks
+          if [ -z "${MISSING}" ]; then
             echo "Required checks already started on ${SHA}."
             exit 0
           fi
@@ -290,15 +309,9 @@ jobs:
             fi
           fi
 
-          echo "Waiting for required check runs on ${SHA} (${BRANCH}): ${REQUIRED} (${ATTEMPTS} attempts, ${SLEEP_SECS}s)"
+          echo "Waiting for required check runs on ${SHA} (${BRANCH}): ${REQUIRED} (Judge also accepts Judge (…) matrix jobs; ${ATTEMPTS} attempts, ${SLEEP_SECS}s)"
           for i in $(seq 1 "${ATTEMPTS}"); do
-            CHECK_RUNS="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${SHA}/check-runs?per_page=100")"
-            COUNT="$(jq '.total_count' <<< "${CHECK_RUNS}")"
-            MISSING="$(jq -r --argjson required "${REQUIRED}" '
-              [.check_runs[].name] as $started
-              | $required - $started
-              | join(", ")
-            ' <<< "${CHECK_RUNS}")"
+            read_checks
             echo "attempt ${i}/${ATTEMPTS}: ${COUNT} check runs; missing required: ${MISSING:-none}"
             if [ -z "${MISSING}" ]; then
               jq '.check_runs | map(.name)' <<< "${CHECK_RUNS}"
@@ -306,7 +319,7 @@ jobs:
             fi
             sleep "${SLEEP_SECS}"
           done
-          echo "::error::Required checks did not start for ${SHA} (need Build, Codecov, Bencher, Protected paths, Judge). A GITHUB_TOKEN push does not trigger push/pull_request workflows. The job dispatches CI/Bencher/Judge or Lockfile required checks; if that also failed, set RELEASE_PLEASE_TOKEN as described under Human-only actions in PROGRESS.md."
+          echo "::error::Required checks did not start for ${SHA} (need Build, Codecov, Bencher, Protected paths, and Judge or a Judge (…) matrix job). A GITHUB_TOKEN push does not trigger push/pull_request workflows. The job dispatches CI/Bencher/Judge or Lockfile required checks; if that also failed, set RELEASE_PLEASE_TOKEN to a classic PAT (repo and workflow scopes) as described under Human-only actions in PROGRESS.md. A fine-grained PAT cannot write this public user-owned repository."
           exit 1
 
   annotate-release:
