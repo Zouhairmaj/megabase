@@ -55,6 +55,7 @@ jobs:
         with:
           persist-credentials: false
           submodules: recursive
+          fetch-depth: 0   # full history for TOTAL COMMITS
 
       # Apply the artifact when the Judge commit is this checkout or an
       # ancestor of it. Main usually moves during the Judge run, so an
@@ -181,6 +182,8 @@ jobs:
       - name: Generate site
         id: site
         if: steps.match.outputs.match == 'true'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}   # TOTAL PRS via search API
         run: |
           cargo run --manifest-path site/Cargo.toml --release -- --repo-root . --out _site
           test -f _site/coverage/summary.json

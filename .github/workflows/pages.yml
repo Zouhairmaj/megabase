@@ -75,6 +75,7 @@ jobs:
           # Vendor submodules are not site inputs. Pull requests skip them.
           # Push and workflow_dispatch keep the previous recursive checkout.
           submodules: ${{ github.event_name == 'pull_request' && 'false' || 'recursive' }}
+          fetch-depth: 0   # full history for TOTAL COMMITS
 
       - name: Install Rust
         if: needs.changes.result != 'success' || needs.changes.outputs.site != 'false'
@@ -109,6 +110,8 @@ jobs:
 
       - name: Generate site
         if: needs.changes.result != 'success' || needs.changes.outputs.site != 'false'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}   # TOTAL PRS via search API
         run: cargo run --manifest-path site/Cargo.toml --locked --release -- --repo-root . --out _site
 
       - name: Upload site
