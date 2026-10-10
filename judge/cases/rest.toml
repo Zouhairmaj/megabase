@@ -432,3 +432,191 @@ units = ["rest:query-param:on_conflict", "rest:query-param:select", "rest:query-
 method = "GET"
 path = "/rest/v1/todos?on_conflict=id&select=id&order=id"
 
+# Prefer return / timezone / tx (issue #39, feature PR #269). Writes use the
+# service_role key because anon and authenticated cannot write todos.
+[[case]]
+id = "rest.prefer.return.minimal.insert"
+description = "return=minimal on a create answers 201 with an empty body"
+units = ["rest:prefer:return=minimal"]
+[[case.step]]
+method = "POST"
+path = "/rest/v1/todos"
+key = "service_role"
+headers = { Prefer = "return=minimal" }
+json = { title = "prefer-minimal" }
+
+[[case]]
+id = "rest.prefer.return.minimal.update"
+description = "return=minimal on an update answers 204"
+units = ["rest:prefer:return=minimal"]
+[[case.step]]
+method = "PATCH"
+path = "/rest/v1/todos?title=eq.run%20the%20judge"
+key = "service_role"
+headers = { Prefer = "return=minimal" }
+json = { priority = 1 }
+
+[[case]]
+id = "rest.prefer.return.minimal.delete"
+description = "return=minimal on a delete answers 204"
+units = ["rest:prefer:return=minimal"]
+[[case.step]]
+method = "DELETE"
+path = "/rest/v1/todos?title=eq.prefer-minimal-delete"
+key = "service_role"
+headers = { Prefer = "return=minimal" }
+
+[[case]]
+id = "rest.prefer.return.representation.insert"
+description = "return=representation on a create answers 201 with the row"
+units = ["rest:prefer:return=representation"]
+[[case.step]]
+method = "POST"
+path = "/rest/v1/todos?select=title,done,priority"
+key = "service_role"
+headers = { Prefer = "return=representation" }
+json = { title = "prefer-representation" }
+
+[[case]]
+id = "rest.prefer.return.representation.update"
+description = "return=representation on an update answers 200 with the rows"
+units = ["rest:prefer:return=representation"]
+[[case.step]]
+method = "PATCH"
+path = "/rest/v1/todos?title=eq.write%20the%20spec&select=title,priority"
+key = "service_role"
+headers = { Prefer = "return=representation" }
+json = { priority = 2 }
+
+[[case]]
+id = "rest.prefer.return.representation.delete"
+description = "return=representation on a delete of no rows answers 200 []"
+units = ["rest:prefer:return=representation"]
+[[case.step]]
+method = "DELETE"
+path = "/rest/v1/todos?title=eq.prefer-no-such-row&select=id"
+key = "service_role"
+headers = { Prefer = "return=representation" }
+
+[[case]]
+id = "rest.prefer.return.headers-only.insert"
+description = "return=headers-only on a create answers 201 with Location and no body"
+units = ["rest:prefer:return=headers-only"]
+[[case.step]]
+method = "POST"
+path = "/rest/v1/todos"
+key = "service_role"
+headers = { Prefer = "return=headers-only" }
+json = { title = "prefer-headers-only" }
+
+[[case]]
+id = "rest.prefer.return.headers-only.update"
+description = "return=headers-only on an update answers 204"
+units = ["rest:prefer:return=headers-only"]
+[[case.step]]
+method = "PATCH"
+path = "/rest/v1/todos?title=eq.port%20the%20unit"
+key = "service_role"
+headers = { Prefer = "return=headers-only" }
+json = { priority = 3 }
+
+[[case]]
+id = "rest.prefer.return.headers-only.delete"
+description = "return=headers-only on a delete answers 204"
+units = ["rest:prefer:return=headers-only"]
+[[case.step]]
+method = "DELETE"
+path = "/rest/v1/todos?title=eq.prefer-headers-only-delete"
+key = "service_role"
+headers = { Prefer = "return=headers-only" }
+
+[[case]]
+id = "rest.prefer.timezone.read"
+description = "timezone=UTC on a read is echoed in Preference-Applied"
+units = ["rest:prefer:timezone=*"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?select=id&order=id"
+headers = { Prefer = "timezone=UTC" }
+
+[[case]]
+id = "rest.prefer.timezone.named"
+description = "A named zone is echoed in Preference-Applied"
+units = ["rest:prefer:timezone=*"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?select=id&order=id"
+headers = { Prefer = "timezone=America/Los_Angeles" }
+
+[[case]]
+id = "rest.prefer.timezone.rpc"
+description = "timezone=* applies to an RPC call"
+units = ["rest:prefer:timezone=*"]
+[[case.step]]
+method = "POST"
+path = "/rest/v1/rpc/add_numbers"
+headers = { Prefer = "timezone=Asia/Tokyo" }
+json = { a = 1, b = 2 }
+
+[[case]]
+id = "rest.prefer.timezone.invalid"
+description = "An unknown timezone is a database error"
+units = ["rest:prefer:timezone=*"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?select=id"
+headers = { Prefer = "timezone=Not/AZone" }
+
+# tx=commit and tx=rollback: the reference stack leaves PGRST_DB_TX_END at
+# commit, so the token is ignored and the write persists.
+[[case]]
+id = "rest.prefer.tx.commit"
+description = "tx=commit persists the write and is not echoed"
+units = ["rest:prefer:tx=commit"]
+[[case.step]]
+method = "POST"
+path = "/rest/v1/todos"
+key = "service_role"
+headers = { Prefer = "tx=commit, return=minimal" }
+json = { title = "prefer-tx-commit" }
+
+[[case]]
+id = "rest.prefer.tx.commit.read"
+description = "tx=commit on a read is ignored"
+units = ["rest:prefer:tx=commit"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?select=id&order=id"
+headers = { Prefer = "tx=commit" }
+
+[[case]]
+id = "rest.prefer.tx.rollback"
+description = "tx=rollback is ignored without an override, so the write persists"
+units = ["rest:prefer:tx=rollback"]
+[[case.step]]
+method = "POST"
+path = "/rest/v1/todos"
+key = "service_role"
+headers = { Prefer = "tx=rollback, return=minimal" }
+json = { title = "prefer-tx-rollback" }
+
+[[case]]
+id = "rest.prefer.tx.rollback.read"
+description = "tx=rollback on a read is ignored"
+units = ["rest:prefer:tx=rollback"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?select=id&order=id"
+headers = { Prefer = "tx=rollback" }
+
+[[case]]
+id = "rest.prefer.tx.rollback.update"
+description = "tx=rollback on an update still applies the change"
+units = ["rest:prefer:tx=rollback"]
+[[case.step]]
+method = "PATCH"
+path = "/rest/v1/todos?title=eq.run%20the%20judge"
+key = "service_role"
+headers = { Prefer = "tx=rollback, return=representation" }
+json = { priority = 1 }
+
