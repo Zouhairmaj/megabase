@@ -9,14 +9,13 @@ use crate::metrics::{self, CatalogRow, Metrics, CATALOG};
 use crate::treemap;
 use crate::GITHUB;
 
-const COMMITS_URL: &str = "https://github.com/Zouhairmaj/megabase/commits/main/";
-const PULLS_URL: &str = "https://github.com/Zouhairmaj/megabase/pulls?q=is%3Apr";
-
 pub fn home(paths: &Paths, metrics: &Metrics, counts: &PublicCounts) -> String {
     let treemap = treemap_block(metrics);
     let scope = home_scope_cards(metrics);
     let faq = home_faq();
     let lede = live_status_lede(metrics);
+    let commits_url = format!("{GITHUB}/commits/main/");
+    let pulls_url = format!("{GITHUB}/pulls?q=is%3Apr");
     format!(
         r#"<main id="main" class="home-main">
 <section class="hero">
@@ -181,9 +180,9 @@ pub fn home(paths: &Paths, metrics: &Metrics, counts: &PublicCounts) -> String {
         status = paths.page("status"),
         github = GITHUB,
         coverage = esc(&metrics.coverage_label()),
-        commits_url = COMMITS_URL,
+        commits_url = commits_url,
         commits = esc(&count_label(counts.commits)),
-        pulls_url = PULLS_URL,
+        pulls_url = pulls_url,
         pulls = esc(&count_label(counts.pull_requests)),
         how = paths.page("how-it-works"),
         lede = esc(&lede),

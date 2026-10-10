@@ -5,8 +5,9 @@
 //! yields `None`, which the page renders as an em dash. The generator
 //! never invents a count.
 
+use std::io::Write;
 use std::path::Path;
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 /// Commit and pull-request totals for the home stats band.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -77,8 +78,8 @@ fn pull_request_count() -> Option<u64> {
     let token = std::env::var("GITHUB_TOKEN")
         .ok()
         .filter(|token| !token.is_empty())?;
-    let auth = format!("Authorization: Bearer {token}");
-    let output = Command::new("curl")
+    let auth = format!("Authorization: Bearer {token}\n");
+    let mut child = Command::new("curl")
         .args([
             "--silent",
             "--show-error",
@@ -92,11 +93,24 @@ fn pull_request_count() -> Option<u64> {
             "-H",
             "X-GitHub-Api-Version: 2022-11-28",
             "-H",
-            &auth,
+            "@-",
             "https://api.github.com/search/issues?q=repo%3AZouhairmaj%2Fmegabase+is%3Apr",
         ])
-        .output()
+        .env_remove("GITHUB_TOKEN")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
         .ok()?;
+    let written = child
+        .stdin
+        .take()
+        .and_then(|mut stdin| stdin.write_all(auth.as_bytes()).ok());
+    if written.is_none() {
+        let _ = child.kill();
+        let _ = child.wait();
+        return None;
+    }
+    let output = child.wait_with_output().ok()?;
     if !output.status.success() {
         return None;
     }
@@ -110,8 +124,14 @@ fn pull_request_count() -> Option<u64> {
 }
 
 /// Reads `total_count` from a GitHub search response.
+///
+/// Returns `None` when GitHub marks the results incomplete, because the
+/// total may then be understated.
 pub fn parse_search_total(body: &str) -> Option<u64> {
     let value: serde_json::Value = serde_json::from_str(body).ok()?;
+    if value.get("incomplete_results").and_then(|v| v.as_bool()) == Some(true) {
+        return None;
+    }
     value.get("total_count")?.as_u64()
 }
 
@@ -148,6 +168,10 @@ mod tests {
         assert_eq!(
             parse_search_total(r#"{"total_count": 106, "items": []}"#),
             Some(106)
+        );
+        assert_eq!(
+            parse_search_total(r#"{"total_count": 106, "incomplete_results": true}"#),
+            None
         );
         assert_eq!(parse_search_total("{}"), None);
         assert_eq!(parse_search_total("not json"), None);
