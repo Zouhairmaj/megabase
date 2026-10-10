@@ -747,20 +747,46 @@ mod tests {
 
     #[tokio::test]
     async fn one_token_redeems_once_when_two_requests_race() {
+        // Invite hashing yields after the first lookup and before the recheck,
+        // so both requests still see the token. PostgreSQL takes the same
+        // order: locate, `SELECT … FOR UPDATE` on `auth.users`, locate again.
         let backend = Backend::memory();
         backend
-            .plant_verification_for_test("race@example.com", "racehash", PlantFlags::default())
+            .plant_verification_for_test(
+                "race@example.com",
+                "racehash",
+                PlantFlags {
+                    kind: VerifyKind::Invite,
+                    invited: true,
+                    ..PlantFlags::default()
+                },
+            )
             .await;
         let router = app(true, backend);
-        let body = r#"{"type":"signup","token_hash":"racehash"}"#;
-        let left = call(router.clone(), "POST", "/auth/v1/verify", Some(body));
-        let right = call(router, "POST", "/auth/v1/verify", Some(body));
-        let (left, right) = tokio::join!(left, right);
-        let wins = [left.0, right.0]
-            .into_iter()
-            .filter(|status| *status == StatusCode::OK)
+        let barrier = std::sync::Arc::new(tokio::sync::Barrier::new(2));
+        let body = r#"{"type":"invite","token_hash":"racehash"}"#;
+        let once = |router: Router, barrier: std::sync::Arc<tokio::sync::Barrier>| async move {
+            barrier.wait().await;
+            call(router, "POST", "/auth/v1/verify", Some(body)).await
+        };
+        let (left, right) = tokio::join!(
+            once(router.clone(), std::sync::Arc::clone(&barrier)),
+            once(router, barrier),
+        );
+        let outcomes = [left.0, right.0];
+        let wins = outcomes
+            .iter()
+            .filter(|status| **status == StatusCode::OK)
             .count();
         assert_eq!(wins, 1, "left {} right {}", left.0, right.0);
+        assert!(
+            outcomes.contains(&StatusCode::FORBIDDEN),
+            "left {} {:?} right {} {:?}",
+            left.0,
+            left.1,
+            right.0,
+            right.1
+        );
     }
 
     #[tokio::test]

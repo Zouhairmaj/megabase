@@ -114,6 +114,13 @@ user's token columns. Email change with secure email change on tries the
 current token, then the new token, and hides a row whose audience differs
 when the compared address is equal.
 
+PostgreSQL locks `auth.users` with `SELECT … FOR UPDATE` after the first
+lookup, then looks the token up again before it changes token columns or
+deletes `auth.one_time_tokens`. A second redemption of the same token waits
+for that lock and then sees the cleared token, so one token issues one
+session. The memory backend re-reads the token under its mutex after any
+invite password hash, which is the same order.
+
 ## Out of scope
 
 `auth:verify-type:email`, `auth:verify-type:magiclink`,
