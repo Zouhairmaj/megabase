@@ -123,8 +123,9 @@ GoTrue's default API shape (no `X-Supabase-Api-Version: 2024-01-01`):
   to check; `local` and `others` then log out everywhere.
 - Phone signup, anonymous signup when that provider is enabled, and email
   signup when `mailer_autoconfirm` is false return 501 before any write.
-- A wrong method on a registered path is 405. Any other `/auth/v1` path
-  is 501 with unit `"<METHOD> <path>"`.
+- A wrong method on a registered path is 405. `GET`/`POST /verify` is
+  specified in [`verify.md`](verify.md). Any other `/auth/v1` path is 501
+  with unit `"<METHOD> <path>"`.
 
 ## Out of scope
 

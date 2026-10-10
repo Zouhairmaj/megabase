@@ -24,8 +24,6 @@ pub struct AuthState {
     /// `GOTRUE_JWT_ADMIN_GROUP_NAME`. GoTrue turns an empty value into `admin`.
     pub admin_group_name: String,
     pub admin_roles: Vec<String>,
-    /// `SITE_URL` / `GOTRUE_SITE_URL`. Reference stack default `http://localhost:3000`.
-    pub site_url: String,
     /// `GOTRUE_URI_ALLOW_LIST`, or `ADDITIONAL_REDIRECT_URLS` when that is unset.
     /// Comma-separated redirect globs. Empty when neither variable is set.
     pub uri_allow_list: Vec<String>,
@@ -36,14 +34,14 @@ pub struct AuthState {
     pub mailer_recovery_path: String,
     pub mailer_email_change_path: String,
     pub otp_length: usize,
-    pub secure_email_change: bool,
     pub cursor_pagination: bool,
     /// Signup and settings flags. Unset `GOTRUE_*` follows the reference stack.
     pub config: AuthConfig,
     /// Shared Auth pool. `try_from_env` leaves this empty. `megabase_server::run`
     /// replaces it with `Backend::connect` before `router_with_state`, and
-    /// closes it on shutdown. Signup, logout, the password and refresh-token
-    /// grants, and admin routes use that pool. `router()` does not connect.
+    /// closes it on shutdown. Signup, logout, verify, the password and
+    /// refresh-token grants, and admin routes use that pool. `router()` does
+    /// not connect.
     pub backend: Backend,
 }
 
@@ -84,11 +82,6 @@ impl AuthState {
             )?,
             admin_group_name: admin_group_name(&lookup),
             admin_roles: admin_roles(&lookup),
-            site_url: first_nonempty(
-                &lookup,
-                &["GOTRUE_SITE_URL", "SITE_URL"],
-                "http://localhost:3000",
-            ),
             uri_allow_list: uri_allow_list(&lookup),
             api_external_url: first_nonempty(
                 &lookup,
@@ -100,10 +93,6 @@ impl AuthState {
             mailer_recovery_path: mailer_path(&lookup, "RECOVERY"),
             mailer_email_change_path: mailer_path(&lookup, "EMAIL_CHANGE"),
             otp_length: otp_length(lookup("GOTRUE_MAILER_OTP_LENGTH").as_deref()),
-            secure_email_change: env_bool(
-                lookup("GOTRUE_MAILER_SECURE_EMAIL_CHANGE_ENABLED").as_deref(),
-                true,
-            ),
             cursor_pagination: env_bool(
                 lookup("GOTRUE_EXPERIMENTAL_CURSOR_PAGINATION_ENABLED").as_deref(),
                 false,
@@ -132,7 +121,6 @@ impl AuthState {
             password_require_current: defaults.password_require_current,
             admin_group_name: defaults.admin_group_name,
             admin_roles: defaults.admin_roles,
-            site_url: defaults.site_url,
             uri_allow_list: defaults.uri_allow_list,
             api_external_url: defaults.api_external_url,
             mailer_confirmation_path: defaults.mailer_confirmation_path,
@@ -140,7 +128,6 @@ impl AuthState {
             mailer_recovery_path: defaults.mailer_recovery_path,
             mailer_email_change_path: defaults.mailer_email_change_path,
             otp_length: defaults.otp_length,
-            secure_email_change: defaults.secure_email_change,
             cursor_pagination: defaults.cursor_pagination,
             config,
             backend,
@@ -254,7 +241,7 @@ mod tests {
         assert!(!state.is_admin_role(Some("anon")));
         assert!(state.config.mailer_autoconfirm);
         assert!(state.config.email_enabled);
-        assert_eq!(state.site_url, "http://localhost:3000");
+        assert_eq!(state.config.site_url, "http://localhost:3000");
         assert!(state.uri_allow_list.is_empty());
         assert_eq!(state.api_external_url, "http://localhost:8000/auth/v1");
         assert_eq!(state.mailer_confirmation_path, "/auth/v1/verify");
@@ -262,7 +249,7 @@ mod tests {
         assert_eq!(state.mailer_recovery_path, "/auth/v1/verify");
         assert_eq!(state.mailer_email_change_path, "/auth/v1/verify");
         assert_eq!(state.otp_length, 6);
-        assert!(state.secure_email_change);
+        assert!(state.config.secure_email_change);
         assert!(!state.cursor_pagination);
     }
 
@@ -277,6 +264,13 @@ mod tests {
         assert!(state.oauth_server_enabled);
         assert!(!state.custom_oauth_enabled);
         assert_eq!(state.admin_roles.len(), 2);
+        let shared = AuthState::from_lookup(|key| match key {
+            "SITE_URL" => Some("https://app.example".into()),
+            "GOTRUE_MAILER_SECURE_EMAIL_CHANGE_ENABLED" => Some("f".into()),
+            _ => None,
+        });
+        assert_eq!(shared.config.site_url, "https://app.example");
+        assert!(!shared.config.secure_email_change);
     }
 
     #[test]

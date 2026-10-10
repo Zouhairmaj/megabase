@@ -1,0 +1,76 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT confirmation_token, confirmation_sent_at, recovery_token, recovery_sent_at,\n                  email_change, email_change_token_current, email_change_token_new,\n                  email_change_sent_at, email_change_confirm_status, invited_at\n           FROM auth.users\n           WHERE id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "confirmation_token",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "confirmation_sent_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 2,
+        "name": "recovery_token",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 3,
+        "name": "recovery_sent_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 4,
+        "name": "email_change",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 5,
+        "name": "email_change_token_current",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 6,
+        "name": "email_change_token_new",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 7,
+        "name": "email_change_sent_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 8,
+        "name": "email_change_confirm_status",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 9,
+        "name": "invited_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "05a1b4f81727f19dbabaf389c7d1baeb5216ce68ac2bb03d0374229b866fd037"
+}

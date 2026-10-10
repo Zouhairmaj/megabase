@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO auth.mfa_amr_claims (\n                id, session_id, created_at, updated_at, authentication_method\n             ) VALUES (\n                $1::uuid, $2::uuid, $3::timestamptz, $3::timestamptz, $4\n             )",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Timestamptz",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "2b21f02e908c62481b3e9dc1ec8f6d3a6c699e316a2cd1a909c50d55087402bb"
+}

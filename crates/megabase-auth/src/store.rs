@@ -1,8 +1,9 @@
 // Ported from supabase/auth internal/api/signup.go, internal/api/token.go,
-// internal/api/token_refresh.go, internal/api/user.go, internal/api/identity.go,
-// internal/api/oauthserver/handlers.go, internal/models/user.go, sessions.go,
-// refresh_token.go, amr.go, oauth_consent.go, oauth_client.go,
-// internal/tokens/service.go, and internal/crypto/crypto.go (MIT), pin v2.197.0.
+// internal/api/token_refresh.go, internal/api/verify.go, internal/api/user.go,
+// internal/api/identity.go, internal/api/oauthserver/handlers.go,
+// internal/models/user.go, sessions.go, refresh_token.go, one_time_token.go,
+// amr.go, oauth_consent.go, oauth_client.go, internal/tokens/service.go,
+// and internal/crypto/crypto.go (MIT), pin v2.197.0.
 
 //! Auth users, identities, sessions, and legacy refresh tokens.
 //!
@@ -17,6 +18,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use serde_json::{json, Map, Value};
+use sha2::{Digest, Sha224};
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
@@ -118,11 +120,50 @@ pub struct IssuedSession {
     pub refresh_token: String,
     pub session_id: Uuid,
     pub amr_at: SystemTime,
+    /// AMR `method` claim. Password and refresh grants use `password`.
+    /// Verify uses `otp`.
+    pub amr_method: String,
 }
 
 pub enum SignupResult {
     Created(Box<IssuedSession>),
     AlreadyExists,
+}
+/// Verification type `GET`/`POST /verify` accepts for this issue.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum VerifyKind {
+    Signup,
+    Invite,
+    Recovery,
+    EmailChange,
+    /// Email plus OTP for a type this crate does not confirm.
+    Other,
+}
+
+/// One verify attempt. `token_hash` is already the stored hash: the raw
+/// `token_hash` field, the GET `token` query value, or SHA-224 of email+OTP.
+pub struct VerifyRequest {
+    pub kind: VerifyKind,
+    pub token_hash: String,
+    /// True for GET and for POST that sent only `token_hash`.
+    pub hash_path: bool,
+    pub email: String,
+    pub aud: String,
+    pub autoconfirm: bool,
+    pub secure_email_change: bool,
+    pub otp_exp_seconds: u64,
+}
+
+/// Result of a verify that the database could answer.
+pub enum VerifyOutcome {
+    Session(Box<IssuedSession>),
+    /// First half of a secure email change. No session.
+    SingleConfirmation,
+    Rejected {
+        status: u16,
+        error_code: &'static str,
+        message: &'static str,
+    },
 }
 
 /// Password-grant lookup. Phone numbers are stored without a leading `+`.
@@ -238,6 +279,9 @@ struct MemoryDb {
     users: HashMap<Uuid, UserRecord>,
     sessions: HashMap<Uuid, Uuid>,
     refresh_tokens: HashMap<String, LegacyRefresh>,
+    /// Confirmation, recovery, and email-change columns keyed by user id.
+    tokens: HashMap<Uuid, UserTokens>,
+    one_time: Vec<OneTimeToken>,
     oauth_clients: HashMap<Uuid, MemoryClient>,
     oauth_consents: Vec<MemoryConsent>,
 }
@@ -270,6 +314,8 @@ impl Backend {
                 users: HashMap::new(),
                 sessions: HashMap::new(),
                 refresh_tokens: HashMap::new(),
+                tokens: HashMap::new(),
+                one_time: Vec::new(),
                 oauth_clients: HashMap::new(),
                 oauth_consents: Vec::new(),
             }))),
@@ -514,6 +560,18 @@ impl Backend {
                 let token = token.to_string();
                 timed(refresh_postgres(pg, &token)).await
             }
+        }
+    }
+
+    /// Confirm a signup, invite, recovery, or email-change one-time token.
+    ///
+    /// `Err` is a database failure. A bad or expired token is
+    /// [`VerifyOutcome::Rejected`] so the HTTP layer can keep GoTrue's status.
+    pub async fn verify(&self, request: &VerifyRequest) -> Result<VerifyOutcome, StoreError> {
+        match &self.inner {
+            BackendKind::None => Err(StoreError::Unavailable),
+            BackendKind::Memory(db) => memory_verify(db, request).await,
+            BackendKind::Postgres(pg) => timed(postgres_verify(pg, request)).await,
         }
     }
 
@@ -991,6 +1049,113 @@ impl Backend {
             .expect("anonymous fixture user");
         user.is_anonymous = true;
     }
+    /// Insert an unconfirmed user and a one-time token the verify tests can redeem.
+    pub async fn plant_verification_for_test(
+        &self,
+        email: &str,
+        request_hash: &str,
+        flags: PlantFlags,
+    ) {
+        let BackendKind::Memory(db) = &self.inner else {
+            panic!("verify fixture is memory-only");
+        };
+        let now = flags.sent_at;
+        let id = Uuid::new_v4();
+        let email = email.to_lowercase();
+        let mut user = UserRecord {
+            id,
+            aud: "authenticated".into(),
+            role: "authenticated".into(),
+            email: email.clone(),
+            phone: String::new(),
+            email_confirmed_at: flags.confirmed.then_some(now),
+            last_sign_in_at: None,
+            app_metadata: app_metadata(),
+            user_metadata: json!({ "email_verified": flags.confirmed }),
+            identities: vec![new_identity(id, &email, &Map::new(), now)],
+            created_at: now,
+            updated_at: now,
+            is_anonymous: false,
+            banned_until: flags
+                .banned
+                .then(|| SystemTime::now() + Duration::from_secs(3600)),
+            is_sso_user: false,
+            password_hash: flags.password_hash,
+            phone_confirmed_at: None,
+            confirmed_at: None,
+        };
+        if flags.confirmed {
+            set_email_verified(&mut user.user_metadata);
+            if let Some(identity) = user.identities.first_mut() {
+                set_email_verified(&mut identity.identity_data);
+            }
+        }
+        let ott = ott_name(flags.kind, flags.email_change_current);
+        let mut tokens = UserTokens {
+            invited_at: flags.invited.then_some(now),
+            email_change: flags.email_change,
+            email_change_confirm_status: flags.confirm_status,
+            ..UserTokens::default()
+        };
+        match flags.kind {
+            VerifyKind::Signup | VerifyKind::Invite => {
+                tokens.confirmation_token = request_hash.to_string();
+                tokens.confirmation_sent_at = Some(now);
+            }
+            VerifyKind::Recovery => {
+                tokens.recovery_token = request_hash.to_string();
+                tokens.recovery_sent_at = Some(now);
+            }
+            VerifyKind::EmailChange => {
+                tokens.email_change_sent_at = Some(now);
+                if flags.email_change_current {
+                    tokens.email_change_token_current = request_hash.to_string();
+                } else {
+                    tokens.email_change_token_new = request_hash.to_string();
+                }
+            }
+            VerifyKind::Other => {}
+        }
+        let mut db = db.lock().await;
+        db.one_time.push(OneTimeToken {
+            user_id: id,
+            token_type: ott.into(),
+            token_hash: request_hash.to_string(),
+        });
+        db.tokens.insert(id, tokens);
+        db.users.insert(id, user);
+    }
+}
+
+/// Knobs for [`Backend::plant_verification_for_test`].
+#[cfg(test)]
+pub struct PlantFlags {
+    pub kind: VerifyKind,
+    pub invited: bool,
+    pub confirmed: bool,
+    pub password_hash: String,
+    pub email_change: String,
+    pub sent_at: SystemTime,
+    pub banned: bool,
+    pub confirm_status: i16,
+    pub email_change_current: bool,
+}
+
+#[cfg(test)]
+impl Default for PlantFlags {
+    fn default() -> Self {
+        Self {
+            kind: VerifyKind::Signup,
+            invited: false,
+            confirmed: false,
+            password_hash: String::new(),
+            email_change: String::new(),
+            sent_at: SystemTime::now(),
+            banned: false,
+            confirm_status: 0,
+            email_change_current: false,
+        }
+    }
 }
 
 async fn memory_signup(
@@ -1190,6 +1355,7 @@ fn grant_session(user: &mut UserRecord, now: SystemTime) -> IssuedSession {
         refresh_token,
         session_id,
         amr_at: now,
+        amr_method: "password".into(),
     }
 }
 
@@ -1242,6 +1408,7 @@ fn refresh_memory(db: &mut MemoryDb, token: &str) -> RefreshStatus {
                     refresh_token: child_token,
                     session_id,
                     amr_at: row.amr_at,
+                    amr_method: "password".into(),
                 }),
                 rotated: false,
             };
@@ -1273,6 +1440,7 @@ fn refresh_memory(db: &mut MemoryDb, token: &str) -> RefreshStatus {
             refresh_token,
             session_id: row.session_id,
             amr_at: row.amr_at,
+            amr_method: "password".into(),
         }),
         rotated: true,
     }
@@ -1422,6 +1590,7 @@ async fn refresh_postgres_tx(
             refresh_token: issued_token,
             session_id,
             amr_at,
+            amr_method: "password".into(),
         }),
         rotated,
     })
@@ -1769,11 +1938,12 @@ async fn insert_session_rows(
             "INSERT INTO auth.mfa_amr_claims (
                 id, session_id, created_at, updated_at, authentication_method
              ) VALUES (
-                $1::uuid, $2::uuid, $3::timestamptz, $3::timestamptz, 'password'
+                $1::uuid, $2::uuid, $3::timestamptz, $3::timestamptz, $4
              )",
             amr_id,
             issued.session_id,
             amr_at,
+            issued.amr_method,
         )
         .execute(&mut **tx)
         .await
@@ -2761,6 +2931,936 @@ async fn write_unlinked_user(
         )
         .execute(&mut **tx)
         .await?;
+    }
+    Ok(())
+}
+
+const OTT_CONFIRMATION: &str = "confirmation_token";
+const OTT_RECOVERY: &str = "recovery_token";
+const OTT_EMAIL_CURRENT: &str = "email_change_token_current";
+const OTT_EMAIL_NEW: &str = "email_change_token_new";
+pub(crate) const SINGLE_CONFIRMATION: &str =
+    "Confirmation link accepted. Please proceed to confirm link sent to the other email";
+
+#[derive(Clone, Debug, Default)]
+struct UserTokens {
+    confirmation_token: String,
+    confirmation_sent_at: Option<SystemTime>,
+    recovery_token: String,
+    recovery_sent_at: Option<SystemTime>,
+    email_change: String,
+    email_change_token_current: String,
+    email_change_token_new: String,
+    email_change_sent_at: Option<SystemTime>,
+    email_change_confirm_status: i16,
+    invited_at: Option<SystemTime>,
+}
+
+struct OneTimeToken {
+    user_id: Uuid,
+    token_type: String,
+    token_hash: String,
+}
+
+#[derive(Clone, Copy)]
+enum MatchedSide {
+    Confirmation,
+    Recovery,
+    EmailCurrent,
+    EmailNew,
+}
+
+struct Found {
+    user_id: Uuid,
+    side: MatchedSide,
+}
+
+enum Located {
+    Found(Found),
+    Reject(VerifyOutcome),
+}
+
+struct AuditNote {
+    action: &'static str,
+    log_type: &'static str,
+    traits: Option<Value>,
+}
+
+enum ClearOtt {
+    All,
+    Only(&'static str),
+}
+
+enum Mutated {
+    Session,
+    Single,
+}
+
+#[cfg(test)]
+fn ott_name(kind: VerifyKind, current: bool) -> &'static str {
+    match kind {
+        VerifyKind::Signup | VerifyKind::Invite | VerifyKind::Other => OTT_CONFIRMATION,
+        VerifyKind::Recovery => OTT_RECOVERY,
+        VerifyKind::EmailChange if current => OTT_EMAIL_CURRENT,
+        VerifyKind::EmailChange => OTT_EMAIL_NEW,
+    }
+}
+
+fn hash_types(kind: VerifyKind) -> (&'static str, &'static str) {
+    match kind {
+        VerifyKind::Signup | VerifyKind::Invite => (OTT_CONFIRMATION, ""),
+        VerifyKind::Recovery => (OTT_RECOVERY, ""),
+        VerifyKind::EmailChange => (OTT_EMAIL_CURRENT, OTT_EMAIL_NEW),
+        VerifyKind::Other => ("", ""),
+    }
+}
+
+pub(crate) fn email_otp_hash(email: &str, otp: &str) -> String {
+    let mut hasher = Sha224::new();
+    hasher.update(email.as_bytes());
+    hasher.update(otp.as_bytes());
+    hex_lower(&hasher.finalize())
+}
+
+fn hex_lower(bytes: &[u8]) -> String {
+    const HEX: &[u8] = b"0123456789abcdef";
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        out.push(HEX[(byte >> 4) as usize] as char);
+        out.push(HEX[(byte & 0x0f) as usize] as char);
+    }
+    out
+}
+
+fn link_expired() -> VerifyOutcome {
+    VerifyOutcome::Rejected {
+        status: 403,
+        error_code: "otp_expired",
+        message: "Email link is invalid or has expired",
+    }
+}
+
+fn token_invalid() -> VerifyOutcome {
+    VerifyOutcome::Rejected {
+        status: 403,
+        error_code: "otp_expired",
+        message: "Token has expired or is invalid",
+    }
+}
+
+fn user_banned() -> VerifyOutcome {
+    VerifyOutcome::Rejected {
+        status: 403,
+        error_code: "user_banned",
+        message: "User is banned",
+    }
+}
+
+fn otp_expired(sent_at: SystemTime, exp_seconds: u64, now: SystemTime) -> bool {
+    sent_at
+        .checked_add(Duration::from_secs(exp_seconds))
+        .is_none_or(|deadline| now > deadline)
+}
+
+fn otp_valid(actual: &str, expected: &str, sent_at: Option<SystemTime>, exp_seconds: u64) -> bool {
+    if expected.is_empty() {
+        return false;
+    }
+    let Some(sent_at) = sent_at else {
+        return false;
+    };
+    let prefixed = format!("pkce_{actual}");
+    !otp_expired(sent_at, exp_seconds, SystemTime::now())
+        && (actual == expected || prefixed == expected)
+}
+
+fn sent_at_for(kind: VerifyKind, tokens: &UserTokens) -> Option<SystemTime> {
+    match kind {
+        VerifyKind::Signup | VerifyKind::Invite => tokens.confirmation_sent_at,
+        VerifyKind::Recovery => tokens.recovery_sent_at,
+        VerifyKind::EmailChange => tokens.email_change_sent_at,
+        VerifyKind::Other => None,
+    }
+}
+
+fn side_from_type(token_type: &str) -> Option<MatchedSide> {
+    match token_type {
+        OTT_CONFIRMATION => Some(MatchedSide::Confirmation),
+        OTT_RECOVERY => Some(MatchedSide::Recovery),
+        OTT_EMAIL_CURRENT => Some(MatchedSide::EmailCurrent),
+        OTT_EMAIL_NEW => Some(MatchedSide::EmailNew),
+        _ => None,
+    }
+}
+
+fn needs_invite_password(user: &UserRecord, tokens: &UserTokens, kind: VerifyKind) -> bool {
+    matches!(kind, VerifyKind::Signup | VerifyKind::Invite)
+        && user.password_hash.is_empty()
+        && tokens.invited_at.is_some()
+}
+
+fn locate_memory(db: &MemoryDb, request: &VerifyRequest) -> Located {
+    if request.hash_path {
+        locate_hash_memory(db, request)
+    } else if request.kind == VerifyKind::EmailChange {
+        locate_email_change_memory(db, request)
+    } else {
+        locate_email_memory(db, request)
+    }
+}
+
+fn locate_hash_memory(db: &MemoryDb, request: &VerifyRequest) -> Located {
+    let (first, second) = hash_types(request.kind);
+    if first.is_empty() {
+        return Located::Reject(VerifyOutcome::Rejected {
+            status: 400,
+            error_code: "validation_failed",
+            message: "Invalid email verification type",
+        });
+    }
+    let Some(ott) = db.one_time.iter().find(|row| {
+        row.token_hash == request.token_hash
+            && (row.token_type == first || row.token_type == second)
+    }) else {
+        return Located::Reject(link_expired());
+    };
+    let Some(side) = side_from_type(&ott.token_type) else {
+        return Located::Reject(link_expired());
+    };
+    let Some(user) = db.users.get(&ott.user_id) else {
+        return Located::Reject(link_expired());
+    };
+    if login_banned(user.banned_until) {
+        return Located::Reject(user_banned());
+    }
+    let tokens = db.tokens.get(&user.id);
+    let sent = tokens.and_then(|tokens| sent_at_for(request.kind, tokens));
+    if sent.is_none_or(|sent| otp_expired(sent, request.otp_exp_seconds, SystemTime::now())) {
+        return Located::Reject(link_expired());
+    }
+    Located::Found(Found {
+        user_id: user.id,
+        side,
+    })
+}
+
+fn locate_email_memory(db: &MemoryDb, request: &VerifyRequest) -> Located {
+    let Some(user) = db.find_email(&request.email, &request.aud) else {
+        return Located::Reject(token_invalid());
+    };
+    if login_banned(user.banned_until) {
+        return Located::Reject(user_banned());
+    }
+    let tokens = db.tokens.get(&user.id).cloned().unwrap_or_default();
+    let side = match request.kind {
+        VerifyKind::Signup | VerifyKind::Invite
+            if otp_valid(
+                &request.token_hash,
+                &tokens.confirmation_token,
+                tokens.confirmation_sent_at,
+                request.otp_exp_seconds,
+            ) =>
+        {
+            MatchedSide::Confirmation
+        }
+        VerifyKind::Recovery
+            if otp_valid(
+                &request.token_hash,
+                &tokens.recovery_token,
+                tokens.recovery_sent_at,
+                request.otp_exp_seconds,
+            ) =>
+        {
+            MatchedSide::Recovery
+        }
+        _ => return Located::Reject(token_invalid()),
+    };
+    Located::Found(Found {
+        user_id: user.id,
+        side,
+    })
+}
+
+fn locate_email_change_memory(db: &MemoryDb, request: &VerifyRequest) -> Located {
+    let hash = &request.token_hash;
+    let prefixed = format!("pkce_{hash}");
+    let found = if request.secure_email_change {
+        find_ott(db, hash, OTT_EMAIL_CURRENT)
+            .or_else(|| find_ott(db, &prefixed, OTT_EMAIL_CURRENT))
+            .and_then(|ott| accept_email_change_user(db, ott, &request.email, &request.aud, false))
+    } else {
+        None
+    };
+    let found = found.or_else(|| {
+        find_ott(db, hash, OTT_EMAIL_NEW)
+            .or_else(|| find_ott(db, &prefixed, OTT_EMAIL_NEW))
+            .and_then(|ott| accept_email_change_user(db, ott, &request.email, &request.aud, true))
+    });
+    let Some(user_id) = found else {
+        return Located::Reject(token_invalid());
+    };
+    let Some(user) = db.users.get(&user_id) else {
+        return Located::Reject(token_invalid());
+    };
+    if login_banned(user.banned_until) {
+        return Located::Reject(user_banned());
+    }
+    let tokens = db.tokens.get(&user_id).cloned().unwrap_or_default();
+    let current_ok = otp_valid(
+        hash,
+        &tokens.email_change_token_current,
+        tokens.email_change_sent_at,
+        request.otp_exp_seconds,
+    );
+    let new_ok = otp_valid(
+        hash,
+        &tokens.email_change_token_new,
+        tokens.email_change_sent_at,
+        request.otp_exp_seconds,
+    );
+    let side = if current_ok {
+        MatchedSide::EmailCurrent
+    } else if new_ok {
+        MatchedSide::EmailNew
+    } else {
+        return Located::Reject(token_invalid());
+    };
+    Located::Found(Found { user_id, side })
+}
+
+fn find_ott<'a>(db: &'a MemoryDb, hash: &str, token_type: &str) -> Option<&'a OneTimeToken> {
+    db.one_time
+        .iter()
+        .find(|row| row.token_hash == hash && row.token_type == token_type)
+}
+
+fn accept_email_change_user(
+    db: &MemoryDb,
+    ott: &OneTimeToken,
+    email: &str,
+    aud: &str,
+    compare_new: bool,
+) -> Option<Uuid> {
+    let user = db.users.get(&ott.user_id)?;
+    let stored = if compare_new {
+        user_tokens_email_change(db, user.id)
+    } else {
+        user.email.clone()
+    };
+    if user.aud != aud && stored.eq_ignore_ascii_case(email) {
+        return None;
+    }
+    Some(user.id)
+}
+
+fn user_tokens_email_change(db: &MemoryDb, user_id: Uuid) -> String {
+    db.tokens
+        .get(&user_id)
+        .map(|tokens| tokens.email_change.clone())
+        .unwrap_or_default()
+}
+
+async fn memory_verify(
+    db: &Mutex<MemoryDb>,
+    request: &VerifyRequest,
+) -> Result<VerifyOutcome, StoreError> {
+    let needs_password = {
+        let guard = db.lock().await;
+        match locate_memory(&guard, request) {
+            Located::Reject(rejected) => return Ok(rejected),
+            Located::Found(found) => {
+                let user = guard.users.get(&found.user_id);
+                let tokens = guard.tokens.get(&found.user_id);
+                user.is_some_and(|user| {
+                    needs_invite_password(
+                        user,
+                        tokens.unwrap_or(&UserTokens::default()),
+                        request.kind,
+                    )
+                })
+            }
+        }
+    };
+    let password_hash = if needs_password {
+        Some(hash_password(secure_alphanumeric(64)).await?)
+    } else {
+        None
+    };
+    let mut guard = db.lock().await;
+    let Located::Found(found) = locate_memory(&guard, request) else {
+        return Ok(token_invalid());
+    };
+    let user_id = found.user_id;
+    let mut user = guard
+        .users
+        .remove(&user_id)
+        .ok_or(StoreError::Unavailable)?;
+    let mut tokens = guard.tokens.remove(&user_id).unwrap_or_default();
+    let mut audits = Vec::new();
+    let (mutated, clear) = mutate_user(
+        &mut user,
+        &mut tokens,
+        found.side,
+        request,
+        password_hash.as_deref(),
+        SystemTime::now(),
+        &mut audits,
+    )?;
+    match clear {
+        ClearOtt::All => guard.one_time.retain(|row| row.user_id != user_id),
+        ClearOtt::Only(token_type) => guard
+            .one_time
+            .retain(|row| !(row.user_id == user_id && row.token_type == token_type)),
+    }
+    for note in &audits {
+        remember_audit(&user, note.action, note.log_type, note.traits.clone());
+    }
+    let outcome = match mutated {
+        Mutated::Single => VerifyOutcome::SingleConfirmation,
+        Mutated::Session => {
+            user.last_sign_in_at = Some(SystemTime::now());
+            user.updated_at = SystemTime::now();
+            reload_confirmed_at(&mut user);
+            let mut issued = grant_session(&mut user, SystemTime::now());
+            issued.amr_method = "otp".into();
+            guard.track(&issued);
+            VerifyOutcome::Session(Box::new(issued))
+        }
+    };
+    guard.tokens.insert(user_id, tokens);
+    guard.users.insert(user_id, user);
+    Ok(outcome)
+}
+
+fn mutate_user(
+    user: &mut UserRecord,
+    tokens: &mut UserTokens,
+    side: MatchedSide,
+    request: &VerifyRequest,
+    password_hash: Option<&str>,
+    now: SystemTime,
+    audits: &mut Vec<AuditNote>,
+) -> Result<(Mutated, ClearOtt), StoreError> {
+    user.updated_at = now;
+    match request.kind {
+        VerifyKind::Signup | VerifyKind::Invite => {
+            if needs_invite_password(user, tokens, request.kind) {
+                user.password_hash = password_hash.unwrap_or("").to_string();
+                if user.password_hash.is_empty() {
+                    return Err(StoreError::Hash);
+                }
+            }
+            audits.push(AuditNote {
+                action: "user_signedup",
+                log_type: "team",
+                traits: Some(provider_traits()),
+            });
+            confirm_user(user, tokens, now);
+            Ok((Mutated::Session, ClearOtt::All))
+        }
+        VerifyKind::Recovery => {
+            tokens.recovery_token.clear();
+            if user.email_confirmed_at.is_none() {
+                audits.push(AuditNote {
+                    action: "user_signedup",
+                    log_type: "team",
+                    traits: Some(provider_traits()),
+                });
+                confirm_user(user, tokens, now);
+            } else {
+                audits.push(AuditNote {
+                    action: "login",
+                    log_type: "account",
+                    traits: None,
+                });
+            }
+            Ok((Mutated::Session, ClearOtt::All))
+        }
+        VerifyKind::EmailChange => {
+            if !request.autoconfirm
+                && request.secure_email_change
+                && tokens.email_change_confirm_status == 0
+                && !user.email.is_empty()
+            {
+                tokens.email_change_confirm_status = 1;
+                let only = match side {
+                    MatchedSide::EmailCurrent => {
+                        tokens.email_change_token_current.clear();
+                        OTT_EMAIL_CURRENT
+                    }
+                    _ => {
+                        tokens.email_change_token_new.clear();
+                        OTT_EMAIL_NEW
+                    }
+                };
+                return Ok((Mutated::Single, ClearOtt::Only(only)));
+            }
+            audits.push(AuditNote {
+                action: "user_modified",
+                log_type: "user",
+                traits: None,
+            });
+            apply_email_change(user, tokens, now);
+            Ok((Mutated::Session, ClearOtt::All))
+        }
+        VerifyKind::Other => Err(StoreError::Unavailable),
+    }
+}
+
+fn confirm_user(user: &mut UserRecord, tokens: &mut UserTokens, now: SystemTime) {
+    tokens.confirmation_token.clear();
+    user.email_confirmed_at = Some(now);
+    set_email_verified(&mut user.user_metadata);
+    for identity in &mut user.identities {
+        if !identity.email.is_empty() && identity.email == user.email {
+            set_email_verified(&mut identity.identity_data);
+        }
+    }
+}
+
+fn apply_email_change(user: &mut UserRecord, tokens: &mut UserTokens, now: SystemTime) {
+    let new_email = tokens.email_change.clone();
+    if let Some(identity) = user
+        .identities
+        .iter_mut()
+        .find(|identity| identity.provider == EMAIL_PROVIDER)
+    {
+        identity.email = new_email.clone();
+        identity.updated_at = now;
+        if let Value::Object(map) = &mut identity.identity_data {
+            map.insert("email".into(), json!(new_email));
+            map.insert("email_verified".into(), json!(true));
+        }
+    } else if !new_email.is_empty() {
+        let mut identity = new_identity(user.id, &new_email, &Map::new(), now);
+        set_email_verified(&mut identity.identity_data);
+        user.identities.push(identity);
+    }
+    user.is_anonymous = false;
+    user.email = new_email;
+    tokens.email_change.clear();
+    tokens.email_change_token_current.clear();
+    tokens.email_change_token_new.clear();
+    tokens.email_change_confirm_status = 0;
+    if user.email_confirmed_at.is_none() {
+        confirm_user(user, tokens, now);
+    }
+    refresh_providers(user);
+}
+
+async fn postgres_verify(pg: &Pg, request: &VerifyRequest) -> Result<VerifyOutcome, StoreError> {
+    let mut tx = pg.pool.begin().await?;
+    let found = match locate_postgres(&mut tx, request).await? {
+        Located::Reject(rejected) => {
+            tx.commit().await?;
+            return Ok(rejected);
+        }
+        Located::Found(found) => found,
+    };
+    // Serialize concurrent redemptions of this user, then read the token again.
+    // The first lookup takes no lock, so two transactions can both see it.
+    let locked = sqlx::query!(
+        "SELECT id FROM auth.users WHERE instance_id = $1 AND id = $2 FOR UPDATE",
+        Uuid::nil(),
+        found.user_id,
+    )
+    .fetch_optional(&mut *tx)
+    .await?;
+    if locked.is_none() {
+        tx.commit().await?;
+        return Ok(if request.hash_path {
+            link_expired()
+        } else {
+            token_invalid()
+        });
+    }
+    let found = match locate_postgres(&mut tx, request).await? {
+        Located::Found(again) if again.user_id == found.user_id => again,
+        Located::Reject(rejected) => {
+            tx.commit().await?;
+            return Ok(rejected);
+        }
+        Located::Found(_) => {
+            tx.commit().await?;
+            return Ok(if request.hash_path {
+                link_expired()
+            } else {
+                token_invalid()
+            });
+        }
+    };
+    let Some(mut user) = find_user_by_id(&mut tx, found.user_id).await? else {
+        tx.commit().await?;
+        return Ok(if request.hash_path {
+            link_expired()
+        } else {
+            token_invalid()
+        });
+    };
+    let mut tokens = load_user_tokens(&mut tx, found.user_id).await?;
+    let password_hash = if needs_invite_password(&user, &tokens, request.kind) {
+        Some(hash_password(secure_alphanumeric(64)).await?)
+    } else {
+        None
+    };
+    let mut audits = Vec::new();
+    let now = SystemTime::now();
+    let (mutated, clear) = mutate_user(
+        &mut user,
+        &mut tokens,
+        found.side,
+        request,
+        password_hash.as_deref(),
+        now,
+        &mut audits,
+    )?;
+    if matches!(mutated, Mutated::Session) {
+        user.last_sign_in_at = Some(now);
+        reload_confirmed_at(&mut user);
+    }
+    persist_user(&mut tx, &user, &tokens).await?;
+    persist_identities(&mut tx, &user).await?;
+    clear_ott_postgres(&mut tx, user.id, &clear).await?;
+    for note in &audits {
+        insert_audit(
+            &mut tx,
+            &user,
+            note.action,
+            note.log_type,
+            note.traits.clone(),
+        )
+        .await?;
+    }
+    let outcome = match mutated {
+        Mutated::Single => VerifyOutcome::SingleConfirmation,
+        Mutated::Session => {
+            let Some(mut stored) = find_user_by_id(&mut tx, user.id).await? else {
+                return Err(StoreError::Unavailable);
+            };
+            stored.last_sign_in_at = user.last_sign_in_at;
+            let mut issued = grant_session(&mut stored, now);
+            issued.amr_method = "otp".into();
+            insert_session_rows(&mut tx, &issued)
+                .await
+                .map_err(write_to_store)?;
+            VerifyOutcome::Session(Box::new(issued))
+        }
+    };
+    tx.commit().await?;
+    Ok(outcome)
+}
+
+async fn locate_postgres(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    request: &VerifyRequest,
+) -> Result<Located, StoreError> {
+    if request.hash_path {
+        locate_hash_postgres(tx, request).await
+    } else if request.kind == VerifyKind::EmailChange {
+        locate_email_change_postgres(tx, request).await
+    } else {
+        locate_email_postgres(tx, request).await
+    }
+}
+
+async fn locate_hash_postgres(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    request: &VerifyRequest,
+) -> Result<Located, StoreError> {
+    let (first, second) = hash_types(request.kind);
+    if first.is_empty() {
+        return Ok(Located::Reject(VerifyOutcome::Rejected {
+            status: 400,
+            error_code: "validation_failed",
+            message: "Invalid email verification type",
+        }));
+    }
+    let row = sqlx::query!(
+        r#"SELECT user_id, token_type::text AS "token_type!"
+           FROM auth.one_time_tokens
+           WHERE token_hash = $1
+             AND (token_type::text = $2 OR token_type::text = $3)
+           LIMIT 1"#,
+        request.token_hash,
+        first,
+        second,
+    )
+    .fetch_optional(&mut **tx)
+    .await?;
+    let Some(row) = row else {
+        return Ok(Located::Reject(link_expired()));
+    };
+    let Some(side) = side_from_type(&row.token_type) else {
+        return Ok(Located::Reject(link_expired()));
+    };
+    let Some(user) = find_user_by_id(&mut *tx, row.user_id).await? else {
+        return Ok(Located::Reject(link_expired()));
+    };
+    if login_banned(user.banned_until) {
+        return Ok(Located::Reject(user_banned()));
+    }
+    let tokens = load_user_tokens(&mut *tx, user.id).await?;
+    let sent = sent_at_for(request.kind, &tokens);
+    if sent.is_none_or(|sent| otp_expired(sent, request.otp_exp_seconds, SystemTime::now())) {
+        return Ok(Located::Reject(link_expired()));
+    }
+    Ok(Located::Found(Found {
+        user_id: user.id,
+        side,
+    }))
+}
+
+async fn locate_email_postgres(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    request: &VerifyRequest,
+) -> Result<Located, StoreError> {
+    let Some(user) = find_email(&mut *tx, &request.email, &request.aud).await? else {
+        return Ok(Located::Reject(token_invalid()));
+    };
+    if login_banned(user.banned_until) {
+        return Ok(Located::Reject(user_banned()));
+    }
+    let tokens = load_user_tokens(&mut *tx, user.id).await?;
+    let side = match request.kind {
+        VerifyKind::Signup | VerifyKind::Invite
+            if otp_valid(
+                &request.token_hash,
+                &tokens.confirmation_token,
+                tokens.confirmation_sent_at,
+                request.otp_exp_seconds,
+            ) =>
+        {
+            MatchedSide::Confirmation
+        }
+        VerifyKind::Recovery
+            if otp_valid(
+                &request.token_hash,
+                &tokens.recovery_token,
+                tokens.recovery_sent_at,
+                request.otp_exp_seconds,
+            ) =>
+        {
+            MatchedSide::Recovery
+        }
+        _ => return Ok(Located::Reject(token_invalid())),
+    };
+    Ok(Located::Found(Found {
+        user_id: user.id,
+        side,
+    }))
+}
+
+async fn locate_email_change_postgres(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    request: &VerifyRequest,
+) -> Result<Located, StoreError> {
+    let prefixed = format!("pkce_{}", request.token_hash);
+    let mut user_id = None;
+    if request.secure_email_change {
+        user_id = ott_user_id(&mut *tx, &request.token_hash, OTT_EMAIL_CURRENT).await?;
+        if user_id.is_none() {
+            user_id = ott_user_id(&mut *tx, &prefixed, OTT_EMAIL_CURRENT).await?;
+        }
+        if let Some(id) = user_id {
+            if let Some(user) = find_user_by_id(&mut *tx, id).await? {
+                if user.aud != request.aud && user.email.eq_ignore_ascii_case(&request.email) {
+                    user_id = None;
+                }
+            }
+        }
+    }
+    if user_id.is_none() {
+        user_id = ott_user_id(&mut *tx, &request.token_hash, OTT_EMAIL_NEW).await?;
+        if user_id.is_none() {
+            user_id = ott_user_id(&mut *tx, &prefixed, OTT_EMAIL_NEW).await?;
+        }
+        if let Some(id) = user_id {
+            if let Some(user) = find_user_by_id(&mut *tx, id).await? {
+                let tokens = load_user_tokens(&mut *tx, id).await?;
+                if user.aud != request.aud
+                    && tokens.email_change.eq_ignore_ascii_case(&request.email)
+                {
+                    user_id = None;
+                }
+            }
+        }
+    }
+    let Some(user_id) = user_id else {
+        return Ok(Located::Reject(token_invalid()));
+    };
+    let Some(user) = find_user_by_id(&mut *tx, user_id).await? else {
+        return Ok(Located::Reject(token_invalid()));
+    };
+    if login_banned(user.banned_until) {
+        return Ok(Located::Reject(user_banned()));
+    }
+    let tokens = load_user_tokens(&mut *tx, user_id).await?;
+    let side = if otp_valid(
+        &request.token_hash,
+        &tokens.email_change_token_current,
+        tokens.email_change_sent_at,
+        request.otp_exp_seconds,
+    ) {
+        MatchedSide::EmailCurrent
+    } else if otp_valid(
+        &request.token_hash,
+        &tokens.email_change_token_new,
+        tokens.email_change_sent_at,
+        request.otp_exp_seconds,
+    ) {
+        MatchedSide::EmailNew
+    } else {
+        return Ok(Located::Reject(token_invalid()));
+    };
+    Ok(Located::Found(Found { user_id, side }))
+}
+
+async fn ott_user_id(
+    conn: &mut sqlx::PgConnection,
+    token_hash: &str,
+    token_type: &str,
+) -> Result<Option<Uuid>, StoreError> {
+    let row = sqlx::query!(
+        r#"SELECT user_id
+           FROM auth.one_time_tokens
+           WHERE token_hash = $1 AND token_type::text = $2
+           LIMIT 1"#,
+        token_hash,
+        token_type,
+    )
+    .fetch_optional(&mut *conn)
+    .await?;
+    Ok(row.map(|row| row.user_id))
+}
+
+async fn load_user_tokens(
+    conn: &mut sqlx::PgConnection,
+    user_id: Uuid,
+) -> Result<UserTokens, StoreError> {
+    let row = sqlx::query!(
+        r#"SELECT confirmation_token, confirmation_sent_at, recovery_token, recovery_sent_at,
+                  email_change, email_change_token_current, email_change_token_new,
+                  email_change_sent_at, email_change_confirm_status, invited_at
+           FROM auth.users
+           WHERE id = $1"#,
+        user_id,
+    )
+    .fetch_optional(&mut *conn)
+    .await?;
+    let Some(row) = row else {
+        return Ok(UserTokens::default());
+    };
+    Ok(UserTokens {
+        confirmation_token: row.confirmation_token.unwrap_or_default(),
+        confirmation_sent_at: row.confirmation_sent_at.map(from_ts),
+        recovery_token: row.recovery_token.unwrap_or_default(),
+        recovery_sent_at: row.recovery_sent_at.map(from_ts),
+        email_change: row.email_change.unwrap_or_default(),
+        email_change_token_current: row.email_change_token_current.unwrap_or_default(),
+        email_change_token_new: row.email_change_token_new.unwrap_or_default(),
+        email_change_sent_at: row.email_change_sent_at.map(from_ts),
+        email_change_confirm_status: row.email_change_confirm_status.unwrap_or(0),
+        invited_at: row.invited_at.map(from_ts),
+    })
+}
+
+async fn persist_user(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    user: &UserRecord,
+    tokens: &UserTokens,
+) -> Result<(), StoreError> {
+    let instance = Uuid::nil();
+    let confirmed = user.email_confirmed_at.map(ts);
+    let signed_in = user.last_sign_in_at.map(ts);
+    let updated = ts(user.updated_at);
+    sqlx::query!(
+        r#"UPDATE auth.users SET
+              email = $1,
+              encrypted_password = $2,
+              email_confirmed_at = $3,
+              confirmation_token = $4,
+              recovery_token = $5,
+              email_change = $6,
+              email_change_token_current = $7,
+              email_change_token_new = $8,
+              email_change_confirm_status = $9,
+              raw_user_meta_data = $10,
+              raw_app_meta_data = $11,
+              last_sign_in_at = $12,
+              updated_at = $13,
+              is_anonymous = $14
+           WHERE instance_id = $15 AND id = $16"#,
+        user.email,
+        user.password_hash,
+        confirmed,
+        tokens.confirmation_token,
+        tokens.recovery_token,
+        tokens.email_change,
+        tokens.email_change_token_current,
+        tokens.email_change_token_new,
+        tokens.email_change_confirm_status,
+        user.user_metadata,
+        user.app_metadata,
+        signed_in,
+        updated,
+        user.is_anonymous,
+        instance,
+        user.id,
+    )
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
+}
+
+async fn persist_identities(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    user: &UserRecord,
+) -> Result<(), StoreError> {
+    for identity in &user.identities {
+        let updated = ts(identity.updated_at);
+        let result = sqlx::query!(
+            r#"UPDATE auth.identities
+               SET identity_data = $1, updated_at = $2
+               WHERE id = $3"#,
+            identity.identity_data,
+            updated,
+            identity.id,
+        )
+        .execute(&mut **tx)
+        .await?;
+        if result.rows_affected() == 0 {
+            insert_identity(tx, identity)
+                .await
+                .map_err(write_to_store)?;
+        }
+    }
+    Ok(())
+}
+
+async fn clear_ott_postgres(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    user_id: Uuid,
+    clear: &ClearOtt,
+) -> Result<(), StoreError> {
+    match clear {
+        ClearOtt::All => {
+            sqlx::query!(
+                "DELETE FROM auth.one_time_tokens WHERE user_id = $1",
+                user_id,
+            )
+            .execute(&mut **tx)
+            .await?;
+        }
+        ClearOtt::Only(token_type) => {
+            sqlx::query!(
+                r#"DELETE FROM auth.one_time_tokens
+                   WHERE user_id = $1 AND token_type::text = $2"#,
+                user_id,
+                *token_type,
+            )
+            .execute(&mut **tx)
+            .await?;
+        }
     }
     Ok(())
 }

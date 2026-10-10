@@ -5,9 +5,10 @@
 //! serves the admin user, SSO, OAuth client, custom-provider, and
 //! generate-link reads and creates in that epic. Issue #15 serves health,
 //! settings, autoconfirm email signup, and logout. Issue #17 serves
-//! `POST /token` for the password and refresh-token grants. Issue #19
-//! serves `GET` and `PUT /user`, identity authorize and unlink, and the
-//! OAuth grant list and revoke.
+//! `POST /token` for the password and refresh-token grants. Issue #21
+//! serves `GET`/`POST /verify` for signup, invite, recovery, and email
+//! change. Issue #19 serves `GET` and `PUT /user`, identity authorize and
+//! unlink, and the OAuth grant list and revoke.
 //! Every other Auth path returns `MEGABASE_NOT_IMPLEMENTED`. Database objects
 //! listed in `specs/auth/database.md` are installed when `DATABASE_URL` is
 //! set.
@@ -24,6 +25,7 @@ mod state;
 mod store;
 mod token;
 mod user;
+mod verify;
 
 pub use config::AuthConfig;
 pub use schema::{install_schema, SchemaError};

@@ -377,6 +377,7 @@ fn session_response(
         &issued.user,
         issued.session_id,
         issued.amr_at,
+        &issued.amr_method,
         &state.config.jwt_issuer,
         now,
         expires_in,

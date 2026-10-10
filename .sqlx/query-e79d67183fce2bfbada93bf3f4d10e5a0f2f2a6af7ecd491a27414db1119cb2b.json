@@ -1,0 +1,30 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT user_id, token_type::text AS \"token_type!\"\n           FROM auth.one_time_tokens\n           WHERE token_hash = $1\n             AND (token_type::text = $2 OR token_type::text = $3)\n           LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "user_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "token_type!",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      null
+    ]
+  },
+  "hash": "e79d67183fce2bfbada93bf3f4d10e5a0f2f2a6af7ecd491a27414db1119cb2b"
+}

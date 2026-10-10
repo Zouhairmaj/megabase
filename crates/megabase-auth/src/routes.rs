@@ -4,9 +4,11 @@
 //! `/auth/v1` routes served by this crate.
 //!
 //! Health, settings, autoconfirm email signup, logout,
-//! `POST /token` (password and refresh-token grants), and the user routes
-//! are implemented. Invite, recover, resend, reauthenticate, phone signup,
-//! anonymous signup, and mailer confirmation stay HTTP 501.
+//! `POST /token` (password and refresh-token grants),
+//! `GET`/`POST /verify` (signup, invite, recovery, email change), and the
+//! user routes are implemented. Invite, recover, resend, reauthenticate,
+//! phone signup, anonymous signup, the other verify types, and mailer
+//! confirmation stay HTTP 501.
 
 use std::sync::OnceLock;
 use std::time::SystemTime;
@@ -51,6 +53,10 @@ pub(crate) fn router(state: AuthState) -> Router {
         .route("/auth/v1/logout", post(logout))
         .route("/auth/v1/recover", post(recover))
         .route("/auth/v1/resend", post(resend))
+        .route(
+            "/auth/v1/verify",
+            get(crate::verify::verify_get).post(crate::verify::verify_post),
+        )
         .route(
             "/auth/v1/user",
             get(crate::user::user_get).put(crate::user::user_update),
@@ -239,6 +245,7 @@ async fn signup(State(state): State<AuthState>, headers: HeaderMap, body: Body) 
         &issued.user,
         issued.session_id,
         issued.amr_at,
+        &issued.amr_method,
         &state.config.jwt_issuer,
         now,
         state.config.jwt_exp_seconds,
