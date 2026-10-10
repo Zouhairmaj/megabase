@@ -343,7 +343,7 @@ jobs:
           key: coverage-conformance
       # Coverage (implemented ÷ units) is in the tag's summary.json.
       # Conformance is not: that field is the regression baseline.
-      # Decision 0029. Read gh-pages judge-history.json, then the Judge
+      # Decision 0030. Read gh-pages judge-history.json, then the Judge
       # artifact for the commit. Never print the baseline's 0%.
       - name: Append coverage and conformance delta
         env:
@@ -396,7 +396,7 @@ jobs:
           # $2 is "wait" for the release commit (Judge may still be running)
           # and "once" for an older tag.
           measure() {
-            local sha="$1" mode="$2" hit status conclusion run_id json attempts i art_rc
+            local sha="$1" mode="$2" hit run_id json attempts i art_rc successes cid names pending total
             if ! hit="$(from_history "$sha")"; then
               echo "reading judge history failed for ${sha}" >&2
               return 2
@@ -410,30 +410,30 @@ jobs:
               attempts=50
             fi
             for i in $(seq 1 "$attempts"); do
-              # One SHA can have more than one Judge run. Prefer the newest
-              # success; otherwise keep the newest run so an in-progress
-              # attempt still waits and a failure stays "not measured".
+              # One SHA can have several Judge runs. Use the newest completed
+              # success that published judge-results. A newer failure or
+              # cancellation must not hide that artifact.
               if ! json="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow judge.yml --commit "$sha" --limit 50 --json databaseId,status,conclusion,createdAt)"; then
                 echo "listing Judge runs failed for ${sha}" >&2
                 return 2
               fi
-              if ! json="$(jq -c 'def newest: sort_by(.createdAt // "") | last; ( [ .[] | select(.status == "completed" and .conclusion == "success" and .databaseId != null) ] | newest ) as $ok | if $ok != null then [ $ok ] else ( [ .[] ] | newest | if . == null then [] else [.] end ) end' <<<"$json")"; then
+              if ! successes="$(jq -c '[.[] | select(.status == "completed" and .conclusion == "success" and .databaseId != null)] | sort_by(.createdAt // "", .databaseId) | reverse' <<<"$json")"; then
                 echo "selecting Judge run failed for ${sha}" >&2
                 return 2
               fi
-              if ! status="$(jq -r '.[0].status // empty' <<<"$json")"; then
-                echo "reading Judge run status failed for ${sha}" >&2
-                return 2
-              fi
-              if ! conclusion="$(jq -r '.[0].conclusion // empty' <<<"$json")"; then
-                echo "reading Judge run conclusion failed for ${sha}" >&2
-                return 2
-              fi
-              if ! run_id="$(jq -r '.[0].databaseId // empty' <<<"$json")"; then
-                echo "reading Judge run id failed for ${sha}" >&2
-                return 2
-              fi
-              if [ "$status" = "completed" ] && [ "$conclusion" = "success" ] && [ -n "$run_id" ]; then
+              run_id=""
+              while IFS= read -r cid; do
+                [ -n "$cid" ] || continue
+                if ! names="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/runs/${cid}/artifacts?per_page=100" --jq '.artifacts[] | select(.name == "judge-results" and (.expired != true)) | .name')"; then
+                  echo "listing Judge artifacts failed for run ${cid}" >&2
+                  return 2
+                fi
+                if [ -n "$names" ]; then
+                  run_id="$cid"
+                  break
+                fi
+              done < <(jq -r '.[].databaseId' <<<"$successes")
+              if [ -n "$run_id" ]; then
                 # A failed `if` test leaves status 0, so read the command
                 # status itself. 1 stays "no publication"; 2 stays an error.
                 hit="$(from_artifact "$run_id" "$sha")"
@@ -444,14 +444,23 @@ jobs:
                 fi
                 return "$art_rc"
               fi
-              if [ "$mode" != "wait" ]; then
-                return 1
+              # No completed success has judge-results. Wait only while a
+              # run can still publish. A finished run without the artifact
+              # is "not measured".
+              if ! pending="$(jq -r '[.[] | select(.status != "completed")] | length' <<<"$json")"; then
+                echo "reading Judge run status failed for ${sha}" >&2
+                return 2
               fi
-              if [ "$status" = "completed" ] && [ "$conclusion" != "success" ]; then
-                return 1
+              if ! total="$(jq -r 'length' <<<"$json")"; then
+                echo "reading Judge run status failed for ${sha}" >&2
+                return 2
               fi
-              echo "Waiting for Judge on ${sha} (status=${status:-none}, attempt ${i}/${attempts})" >&2
-              sleep 60
+              if [ "$mode" = "wait" ] && { [ "$total" -eq 0 ] || [ "$pending" -gt 0 ]; }; then
+                echo "Waiting for Judge on ${sha} (pending=${pending}, attempt ${i}/${attempts})" >&2
+                sleep 60
+                continue
+              fi
+              return 1
             done
             return 1
           }
