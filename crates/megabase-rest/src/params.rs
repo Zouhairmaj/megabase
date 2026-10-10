@@ -106,6 +106,25 @@ impl ReadQuery {
         }
         Some(out)
     }
+
+    /// `SELECT … FROM source AS relation [ORDER BY …]` for a mutation's
+    /// `return=representation` body. Values are appended to `params`.
+    pub(crate) fn representation_select(
+        &self,
+        source: &str,
+        relation: &str,
+        params: &mut Vec<String>,
+    ) -> String {
+        let relation_ident = quote_ident(relation);
+        let mut select_sql = String::new();
+        push_select(&mut select_sql, params, &relation_ident, &self.select);
+        let mut sql = format!("SELECT {select_sql} FROM {source} AS {relation_ident}");
+        if !self.orders.is_empty() {
+            sql.push(' ');
+            push_order(&mut sql, params, &relation_ident, &self.orders);
+        }
+        sql
+    }
 }
 
 /// SQL for one read, plus the `Content-Range` offset.

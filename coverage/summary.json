@@ -2,12 +2,12 @@
   "schema": 1,
   "totals": {
     "units": 1024,
-    "implemented": 134,
+    "implemented": 140,
     "tested": 87,
     "conformant": 0
   },
   "percent": {
-    "coverage": 13.1,
+    "coverage": 13.7,
     "conformance": 0.0,
     "done": 0.0
   },
@@ -316,7 +316,7 @@
     },
     "rest": {
       "units": 93,
-      "implemented": 55,
+      "implemented": 61,
       "tested": 27,
       "conformant": 0,
       "groups": {
@@ -358,7 +358,7 @@
         },
         "prefer": {
           "units": 16,
-          "implemented": 0,
+          "implemented": 6,
           "tested": 0,
           "conformant": 0
         },
@@ -668,6 +668,12 @@
     "rest:filter-operator:sl": "tested",
     "rest:filter-operator:sr": "tested",
     "rest:filter-operator:wfts": "tested",
+    "rest:prefer:return=headers-only": "implemented",
+    "rest:prefer:return=minimal": "implemented",
+    "rest:prefer:return=representation": "implemented",
+    "rest:prefer:timezone=*": "implemented",
+    "rest:prefer:tx=commit": "implemented",
+    "rest:prefer:tx=rollback": "implemented",
     "rest:query-param:and": "tested",
     "rest:query-param:columns": "tested",
     "rest:query-param:limit": "tested",

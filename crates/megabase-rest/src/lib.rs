@@ -7,14 +7,16 @@
 //! [`specs/rest/filtering.md`](../../../specs/rest/filtering.md) and
 //! [`specs/rest/query-params.md`](../../../specs/rest/query-params.md).
 //! RPC is specified in [`specs/rest/rpc.md`](../../../specs/rest/rpc.md).
-//! Embeds, `Prefer`, and the other media types return
-//! `MEGABASE_NOT_IMPLEMENTED`.
+//! `Prefer` serves `return`, `timezone` and `tx`
+//! ([`specs/rest/prefer.md`](../../../specs/rest/prefer.md)). Embeds, the other
+//! preferences, and the other media types return `MEGABASE_NOT_IMPLEMENTED`.
 
 mod db;
 mod filter;
 mod mutate;
 mod openapi;
 mod params;
+mod prefer;
 mod query;
 mod read;
 mod rpc;
