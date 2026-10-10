@@ -103,7 +103,7 @@ In scope: **1024 units**. Excluded: **76** upstream items.
 | Auth | scim | 2 | 3 | 0 | 0 | 0 |
 | Auth | sso | 2 | 3 | 0 | 0 | 0 |
 | Auth | token | 1–2 | 6 | 3 | 3 | 0 |
-| Auth | user | 1–2 | 6 | 0 | 0 | 0 |
+| Auth | user | 1–2 | 6 | 6 | 1 | 0 |
 | Auth | verify | 1–2 | 10 | 0 | 0 | 0 |
 | Auth | well-known | 2 | 3 | 0 | 0 | 0 |
 | Realtime | client-events | 3 | 3 | 0 | 0 | 0 |

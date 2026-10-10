@@ -2,12 +2,12 @@
   "schema": 1,
   "totals": {
     "units": 1024,
-    "implemented": 49,
-    "tested": 47,
+    "implemented": 55,
+    "tested": 48,
     "conformant": 0
   },
   "percent": {
-    "coverage": 4.8,
+    "coverage": 5.4,
     "conformance": 0.0,
     "done": 0.0
   },
@@ -18,8 +18,8 @@
   "components": {
     "auth": {
       "units": 152,
-      "implemented": 49,
-      "tested": 47,
+      "implemented": 55,
+      "tested": 48,
       "conformant": 0,
       "groups": {
         "admin": {
@@ -84,8 +84,8 @@
         },
         "user": {
           "units": 6,
-          "implemented": 0,
-          "tested": 0,
+          "implemented": 6,
+          "tested": 1,
           "conformant": 0
         },
         "verify": {
@@ -564,15 +564,21 @@
     "auth:route:DELETE /auth/v1/admin/users/{user_id}": "tested",
     "auth:route:DELETE /auth/v1/admin/users/{user_id}/factors/{factor_id}": "tested",
     "auth:route:DELETE /auth/v1/admin/users/{user_id}/passkeys/{passkey_id}": "tested",
+    "auth:route:DELETE /auth/v1/user/identities/{identity_id}": "implemented",
+    "auth:route:DELETE /auth/v1/user/oauth/grants": "implemented",
     "auth:route:GET /auth/v1/admin/audit": "tested",
     "auth:route:GET /auth/v1/admin/custom-providers": "tested",
     "auth:route:GET /auth/v1/admin/custom-providers/{identifier}": "tested",
     "auth:route:GET /auth/v1/admin/oauth/clients": "tested",
     "auth:route:GET /auth/v1/health": "tested",
     "auth:route:GET /auth/v1/settings": "tested",
+    "auth:route:GET /auth/v1/user": "tested",
+    "auth:route:GET /auth/v1/user/identities/authorize": "implemented",
+    "auth:route:GET /auth/v1/user/oauth/grants": "implemented",
     "auth:route:POST /auth/v1/logout": "tested",
     "auth:route:POST /auth/v1/signup": "tested",
     "auth:route:POST /auth/v1/token": "tested",
+    "auth:route:PUT /auth/v1/user": "implemented",
     "auth:sql-function:auth.email()": "tested",
     "auth:sql-function:auth.jwt()": "tested",
     "auth:sql-function:auth.role()": "tested",
