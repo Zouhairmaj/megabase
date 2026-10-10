@@ -410,8 +410,15 @@ jobs:
               attempts=50
             fi
             for i in $(seq 1 "$attempts"); do
-              if ! json="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow judge.yml --commit "$sha" --limit 1 --json databaseId,status,conclusion)"; then
+              # One SHA can have more than one Judge run. Prefer the newest
+              # success; otherwise keep the newest run so an in-progress
+              # attempt still waits and a failure stays "not measured".
+              if ! json="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow judge.yml --commit "$sha" --limit 50 --json databaseId,status,conclusion,createdAt)"; then
                 echo "listing Judge runs failed for ${sha}" >&2
+                return 2
+              fi
+              if ! json="$(jq -c 'def newest: sort_by(.createdAt // "") | last; ( [ .[] | select(.status == "completed" and .conclusion == "success" and .databaseId != null) ] | newest ) as $ok | if $ok != null then [ $ok ] else ( [ .[] ] | newest | if . == null then [] else [.] end ) end' <<<"$json")"; then
+                echo "selecting Judge run failed for ${sha}" >&2
                 return 2
               fi
               if ! status="$(jq -r '.[0].status // empty' <<<"$json")"; then
