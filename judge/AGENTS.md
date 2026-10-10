@@ -18,6 +18,10 @@ bootstrap exception. Architecture and commands are in
   and does not import Megabase crates.
 - **Never** delete, loosen or skip a case, or add an `ignore` that hides a
   real difference.
+- **Held-out suite** (`megabase-judge hidden`): cases are not files in
+  this tree. Do not log, upload, or commit a seed, a sealed blob's
+  plaintext, or a per-case diff. The weekly workflow publishes counts
+  only. `hidden-open` stays out of CI.
 - A new normalization rule must apply to both stacks equally and be
   documented in `NORMALIZATION.md` in the same PR.
 - Harness tests: `cargo test -p megabase-judge`.

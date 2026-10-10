@@ -19,8 +19,9 @@ agreement). CI runs it on every pull request.
 
 ### Always rejected
 
-- Edits to `GOAL.md` (except the lead-approved Design and Documentation
-  sections on the Phase 0 bootstrap branch) or `MANIFESTO.md`.
+- Edits to `GOAL.md` or `MANIFESTO.md`, except the lead-approved Design
+  and Documentation sections on the Phase 0 bootstrap branch, and except
+  a logged owner edit on `review/*` (below).
 - Edits to `HUMAN_LOG.md` except the bootstrap case and the `review/*`
   pending/completed exception below.
 - Edits to `vendor/`, `vendor.toml` or `.gitmodules` after bootstrap.
@@ -84,6 +85,18 @@ or append after existing completed entries). A shrink does not have to
 add a Completed entry. Format text and earlier completed entries stay
 unchanged. Mid-item Pending truncations and continuation-line growth
 are rejected.
+
+### Logged owner edits
+
+On a `review/*` branch, a modification of `GOAL.md` or `MANIFESTO.md` is
+allowed only when that same diff also passes the `HUMAN_LOG.md` rule
+above and the new Completed suffix contains the file name in backticks
+(`` `GOAL.md` `` or `` `MANIFESTO.md` ``). A longer path, the same
+name without backticks, or a continuation of an earlier entry does not
+count. Deletions stay rejected. Any
+other branch cannot use this exception. This is the logged human
+approval `CODEOWNERS` describes. The reviewer agent still reviews the
+pull request.
 
 ## Consequences
 
