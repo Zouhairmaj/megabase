@@ -718,7 +718,6 @@ pub fn render(
         .count();
     let total = units.len();
     let coverage_pct = pct(implemented, total);
-    let conformant_pct = pct(conformant, total);
     let metric_pct = pct(metric_done, total);
 
     let chrome_h = match heading {
@@ -742,7 +741,7 @@ pub fn render(
 
     let aria = match &heading {
         Heading::Status => {
-            format!("Supabase components: {conformant_pct:.1}% conformant ({conformant}/{total})")
+            format!("Supabase components: {conformant} of {total} units conformant")
         }
         Heading::Title(t) => format!("{t} — {metric_pct:.1}% ({metric_done}/{total})"),
     };
@@ -772,15 +771,8 @@ pub fn render(
             &format!("{coverage_pct:.1}%"),
             metric_badge_color(&pal, coverage_pct),
         ) + 8.0;
-        cursor_x += draw_badge(
-            &mut svg,
-            &pal,
-            cursor_x,
-            badge_y,
-            "conformance",
-            &format!("{conformant_pct:.1}%"),
-            metric_badge_color(&pal, conformant_pct),
-        ) + 8.0;
+        // Decision 0032: no standalone conformance percentage here. The
+        // README shields badge (live Judge score) is that number.
         draw_badge(
             &mut svg,
             &pal,
@@ -799,7 +791,7 @@ pub fn render(
     let title_size = 14.0_f32;
     let title_text = match &heading {
         Heading::Status => {
-            format!("Supabase components: {conformant_pct:.1}% conformant ({conformant}/{total})")
+            format!("Supabase components: {conformant} of {total} units conformant")
         }
         Heading::Title(t) => format!("{t}: {metric_pct:.1}% ({metric_done}/{total})"),
     };
@@ -1039,8 +1031,8 @@ mod tests {
             800.0,
             Theme::Dark,
         );
-        assert!(svg.contains("Supabase components: 0.0% conformant (0/7)"));
-        assert!(svg.contains("aria-label=\"Supabase components: 0.0% conformant (0/7)\""));
+        assert!(svg.contains("Supabase components: 0 of 7 units conformant"));
+        assert!(svg.contains("aria-label=\"Supabase components: 0 of 7 units conformant\""));
         assert!(!svg.contains("1,024"));
         assert!(!svg.contains("1024"));
         assert!(!svg.contains("334"));
@@ -1144,7 +1136,7 @@ mod tests {
         );
         let n: usize = spec.iter().map(|(_, n)| n).sum();
         assert_eq!(svg.matches("data-unit=\"").count(), n);
-        assert!(svg.contains(&format!("conformant (0/{n})")));
+        assert!(svg.contains(&format!("0 of {n} units conformant")));
         assert!(svg.contains("rx=\"3\""));
     }
 }
