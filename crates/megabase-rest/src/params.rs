@@ -1560,22 +1560,24 @@ fn bump_str<'a>(at: &At<'a>, token: &str) -> At<'a> {
     cursor
 }
 
-/// Build the read statement for `query`.
+/// Build the read statement for `query` in `schema`.
 ///
 /// `column_types` is `(name, format_type)` in `attnum` order. Values, JSON
-/// keys, and limit/offset integers are bound parameters.
+/// keys, and limit/offset integers are bound parameters. The `FROM` target
+/// is `"schema"."relation"`.
 ///
 /// # Errors
 ///
 /// Returns [`UnsafeType`] when a filter's catalog type cannot be spliced.
 pub(crate) fn build_read_sql(
+    schema: &str,
     relation: &str,
     query: &ReadQuery,
     column_types: &[(&str, &str)],
 ) -> Result<ReadSql, UnsafeType> {
     let mut params = Vec::new();
     let relation_ident = quote_ident(relation);
-    let schema = quote_ident("public");
+    let schema = quote_ident(schema);
     let mut select_sql = String::new();
     // megabase:unit rest:query-param:select
     push_select(&mut select_sql, &mut params, &relation_ident, &query.select);
@@ -2111,7 +2113,7 @@ mod tests {
     #[test]
     fn sql_orders_limits_and_binds_filter_values() {
         let query = parse_get_query("select=id,title&order=id.desc&limit=1&offset=2").unwrap();
-        let sql = build_read_sql("todos", &query, &[]).unwrap();
+        let sql = build_read_sql("public", "todos", &query, &[]).unwrap();
         assert!(sql.sql.contains("\"todos\".\"id\", \"todos\".\"title\""));
         assert!(sql.sql.contains("ORDER BY \"todos\".\"id\" DESC"));
         assert!(sql.sql.contains("LIMIT ($1::bigint) OFFSET ($2::bigint)"));
@@ -2119,18 +2121,18 @@ mod tests {
         assert_eq!(sql.offset, 2);
 
         let query = parse_get_query("or=(id.eq.1,id.eq.3)&order=id").unwrap();
-        let sql = build_read_sql("todos", &query, &[]).unwrap();
+        let sql = build_read_sql("public", "todos", &query, &[]).unwrap();
         assert!(sql.sql.contains(" OR "));
         assert_eq!(sql.params, vec!["1", "3"]);
         assert!(!sql.sql.contains("drop"));
 
         let query = parse_get_query("columns=id,title&order=id").unwrap();
-        let sql = build_read_sql("todos", &query, &[]).unwrap();
+        let sql = build_read_sql("public", "todos", &query, &[]).unwrap();
         assert!(sql.sql.contains("\"todos\".*"));
         assert!(!sql.sql.contains("\"todos\".\"id\","));
 
         let query = parse_get_query("body=eq.victim-secret') or true--&select=body").unwrap();
-        let sql = build_read_sql("notes", &query, &[("body", "text")]).unwrap();
+        let sql = build_read_sql("public", "notes", &query, &[("body", "text")]).unwrap();
         assert_eq!(sql.params, vec!["victim-secret') or true--"]);
         assert!(!sql.sql.contains("victim-secret"));
     }
@@ -2162,7 +2164,7 @@ mod tests {
     fn json_select_uses_the_last_key_as_the_alias() {
         let query =
             parse_get_query("select=data->a,data->>b::text,data->1,data->1->mycol->>2").unwrap();
-        let sql = build_read_sql("todos", &query, &[]).unwrap();
+        let sql = build_read_sql("public", "todos", &query, &[]).unwrap();
         assert!(sql.sql.contains("\"todos\".\"data\"->$1 AS \"a\""));
         assert!(sql
             .sql

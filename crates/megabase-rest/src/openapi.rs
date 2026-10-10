@@ -361,7 +361,7 @@ fn table_path(table: &TableDoc) -> Value {
     );
     let mut path = Map::new();
     path.insert("get".to_string(), Value::Object(get));
-    if table.insertable || table.updatable || table.deletable {
+    if table.insertable {
         let post_params = vec![
             json!({"$ref": format!("#/parameters/body.{}", table.name)}),
             json!({"$ref": "#/parameters/select"}),
@@ -374,7 +374,8 @@ fn table_path(table: &TableDoc) -> Value {
             json!({"201": {"description": "Created"}}),
         );
         path.insert("post".to_string(), Value::Object(post));
-
+    }
+    if table.updatable {
         let mut patch_params = filters.clone();
         patch_params.push(json!({"$ref": format!("#/parameters/body.{}", table.name)}));
         patch_params.push(json!({"$ref": "#/parameters/preferReturn"}));
@@ -385,7 +386,8 @@ fn table_path(table: &TableDoc) -> Value {
             json!({"204": {"description": "No Content"}}),
         );
         path.insert("patch".to_string(), Value::Object(patch));
-
+    }
+    if table.deletable {
         let mut delete_params = filters;
         delete_params.push(json!({"$ref": "#/parameters/preferReturn"}));
         let mut delete = operation;
@@ -535,33 +537,22 @@ fn global_parameters() -> Map<String, Value> {
 }
 
 fn prefer_parameter(name: &str, description: &str, values: &[&str]) -> Value {
-    let mut schema = Map::new();
-    schema.insert("in".to_string(), json!("header"));
-    schema.insert("type".to_string(), json!("string"));
-    if !values.is_empty() {
-        schema.insert(
-            "enum".to_string(),
-            Value::Array(values.iter().map(|value| json!(value)).collect()),
-        );
-    }
-    json!({
+    let mut value = json!({
         "name": name,
         "description": description,
         "required": false,
         "type": "string",
         "in": "header",
-        "enum": if values.is_empty() { Value::Null } else { json!(values) },
-    })
-    .as_object()
-    .map(|map| {
-        let mut out = map.clone();
-        if values.is_empty() {
-            out.remove("enum");
+    });
+    if !values.is_empty() {
+        if let Some(object) = value.as_object_mut() {
+            object.insert(
+                "enum".to_string(),
+                Value::Array(values.iter().map(|item| json!(item)).collect()),
+            );
         }
-        let _ = schema;
-        Value::Object(out)
-    })
-    .unwrap_or(Value::Null)
+    }
+    value
 }
 
 fn query_parameter(name: &str, description: &str, location: &str, default: Option<&str>) -> Value {
@@ -651,5 +642,44 @@ mod tests {
             .as_object()
             .unwrap()
             .is_empty());
+        assert!(document["paths"]["/todos"].get("post").is_some());
+        assert!(document["paths"]["/todos"].get("patch").is_some());
+        assert!(document["paths"]["/todos"].get("delete").is_some());
+    }
+
+    #[test]
+    fn mutation_methods_follow_each_privilege() {
+        let column = ColumnDoc {
+            name: "id".to_string(),
+            pg_type: "integer".to_string(),
+            nullable: false,
+            primary_key: true,
+            description: None,
+        };
+        let cases = [
+            (true, false, false, true, false, false),
+            (false, true, false, false, true, false),
+            (false, false, true, false, false, true),
+        ];
+        for (insertable, updatable, deletable, post, patch, delete) in cases {
+            let table = TableDoc {
+                name: "todos".to_string(),
+                description: None,
+                insertable,
+                updatable,
+                deletable,
+                columns: vec![ColumnDoc {
+                    name: column.name.clone(),
+                    pg_type: column.pg_type.clone(),
+                    nullable: column.nullable,
+                    primary_key: column.primary_key,
+                    description: None,
+                }],
+            };
+            let path = swagger_document(None, &[table])["paths"]["/todos"].clone();
+            assert_eq!(path.get("post").is_some(), post);
+            assert_eq!(path.get("patch").is_some(), patch);
+            assert_eq!(path.get("delete").is_some(), delete);
+        }
     }
 }

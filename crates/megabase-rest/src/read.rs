@@ -179,13 +179,13 @@ async fn relation_route(
     if let Some(unit) = reject_prefer(headers.get("prefer")) {
         return unimplemented_unit(method, path, unit);
     }
-    if method == Method::GET {
+    if matches!(method, &Method::GET | &Method::HEAD) {
         if let Some(unit) = reject_accept(headers.get(header::ACCEPT)) {
             return unimplemented_unit(method, path, unit);
         }
-        if headers.get(header::RANGE).is_some() {
-            return not_implemented(method, path);
-        }
+    }
+    if method == Method::GET && headers.get(header::RANGE).is_some() {
+        return not_implemented(method, path);
     }
     let pool = state.pool.as_ref();
     match *method {
@@ -247,11 +247,8 @@ async fn relation_route(
         }
         Method::DELETE => {
             // megabase:unit rest:route:DELETE /rest/v1/{relation}
-            let Some(pool) = pool else {
-                return database_unavailable();
-            };
             mutate(
-                Some(pool),
+                pool,
                 &schema,
                 relation,
                 &session,
@@ -660,7 +657,7 @@ async fn read_rows(
         .iter()
         .map(|(name, pg_type)| (name.as_str(), pg_type.as_str()))
         .collect();
-    let built = build_read_sql(relation, read, &column_types)
+    let built = build_read_sql(schema, relation, read, &column_types)
         .map_err(|error| Box::new(unsafe_type(&error)))?;
     let request_path = format!("/{relation}");
     set_request_context(&mut tx, session, http_method, &request_path, schema).await?;
@@ -1322,6 +1319,51 @@ mod tests {
         let (status, body, _) = send(app, request).await;
         assert_eq!(status, StatusCode::METHOD_NOT_ALLOWED);
         assert_eq!(body["code"], "PGRST105");
+    }
+
+    #[tokio::test]
+    async fn head_object_accept_is_501() {
+        let app = router(RestState::from_config(&Config::default()));
+        let request = Request::builder()
+            .method("HEAD")
+            .uri("/rest/v1/todos")
+            .header(header::ACCEPT, "application/vnd.pgrst.object+json")
+            .body(Body::empty())
+            .unwrap();
+        let (status, body, _) = send(app, request).await;
+        assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
+        assert_eq!(
+            body["unit"],
+            "rest:media-type:application/vnd.pgrst.object+json"
+        );
+    }
+
+    #[tokio::test]
+    async fn patch_limit_stays_501() {
+        let app = router(RestState::from_config(&Config::default()));
+        let request = Request::builder()
+            .method("PATCH")
+            .uri("/rest/v1/todos?limit=1")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from("{}"))
+            .unwrap();
+        let (status, body, _) = send(app, request).await;
+        assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
+        assert_eq!(body["code"], "MEGABASE_NOT_IMPLEMENTED");
+        assert_eq!(body["unit"], "PATCH /rest/v1/todos");
+    }
+
+    #[tokio::test]
+    async fn delete_offset_stays_501() {
+        let app = router(RestState::from_config(&Config::default()));
+        let request = Request::builder()
+            .method("DELETE")
+            .uri("/rest/v1/todos?id=eq.1&offset=2")
+            .body(Body::empty())
+            .unwrap();
+        let (status, body, _) = send(app, request).await;
+        assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
+        assert_eq!(body["unit"], "DELETE /rest/v1/todos");
     }
 
     #[tokio::test]

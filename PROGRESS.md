@@ -96,7 +96,7 @@ None.
 
 ### Judge disputes
 
-None.
+- `rest.insert.rls-denied`: the reference database `postgres` grants `INSERT` on `public.todos` to `anon` (Supabase default privileges), so PostgREST returns `42501` with `new row violates row-level security policy for table "todos"`. The `megabase` database only has the fixture `GRANT SELECT`, so the same `anon` role returns `42501` `permission denied for table todos`. The SQL is the insert the role is allowed to run. Aligning those grants belongs in `judge/` prepare, which this branch does not change.
 
 ## Phase 0
 

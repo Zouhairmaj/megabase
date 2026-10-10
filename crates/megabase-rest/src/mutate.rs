@@ -76,6 +76,11 @@ pub(crate) async fn mutate(
             None,
         );
     }
+    // A limited write is not served. `where_clause` drops the page, so
+    // executing it would change every matching row.
+    if matches!(kind, Kind::Update | Kind::Delete) && query.limits_rows() {
+        return unimplemented_unit(method, &format!("/rest/v1/{relation}"), "");
+    }
     let payload = if matches!(kind, Kind::Delete) {
         None
     } else {
@@ -465,12 +470,28 @@ fn quote_list(names: &[String]) -> String {
 }
 
 /// `json_to_record` is `$1`. Filter placeholders that started at `$1` move up.
+///
+/// `$digits` inside a double-quoted identifier stays put. A doubled quote
+/// (`""`) is still that identifier, not its end.
 fn shift_placeholders(sql: &str, by: usize) -> String {
     let mut out = String::with_capacity(sql.len());
     let bytes = sql.as_bytes();
     let mut index = 0;
+    let mut quoted = false;
     while index < bytes.len() {
-        if bytes[index] == b'$' {
+        let byte = bytes[index];
+        if byte == b'"' {
+            out.push('"');
+            if quoted && index + 1 < bytes.len() && bytes[index + 1] == b'"' {
+                out.push('"');
+                index += 2;
+                continue;
+            }
+            quoted = !quoted;
+            index += 1;
+            continue;
+        }
+        if !quoted && byte == b'$' {
             let start = index + 1;
             let mut end = start;
             while end < bytes.len() && bytes[end].is_ascii_digit() {
@@ -484,7 +505,7 @@ fn shift_placeholders(sql: &str, by: usize) -> String {
                 continue;
             }
         }
-        out.push(bytes[index] as char);
+        out.push(byte as char);
         index += 1;
     }
     out
@@ -679,5 +700,42 @@ mod tests {
         );
         assert!(built.sql.contains("VALUES (1)"));
         assert_eq!(built.params, vec!["{}".to_string()]);
+    }
+
+    #[test]
+    fn shift_placeholders_leaves_dollars_inside_identifiers() {
+        let shifted = shift_placeholders(r#""todos"."a$1" = $1 AND "a""b$2" = $2"#, 1);
+        assert_eq!(shifted, r#""todos"."a$1" = $2 AND "a""b$2" = $3"#);
+
+        let query = parse_get_query("a$1=eq.1").expect("filter");
+        let payload = Payload {
+            raw: r#"{"title":"x"}"#.to_string(),
+            object: true,
+            keys: vec!["title".to_string()],
+        };
+        let built = write_sql(
+            "public",
+            "todos",
+            &Kind::Update,
+            &["title".to_string()],
+            &payload,
+            &query,
+            &[("a$1", "text"), ("title", "text")],
+            &[],
+            &[],
+        )
+        .expect("sql");
+        assert!(
+            built.sql.contains(r#""a$1""#),
+            "identifier must keep its dollar: {}",
+            built.sql
+        );
+        assert!(
+            !built.sql.contains(r#""a$2""#),
+            "identifier must not be renumbered: {}",
+            built.sql
+        );
+        assert!(built.sql.contains("$2"));
+        assert_eq!(built.params, vec![r#"{"title":"x"}"#, "1"]);
     }
 }

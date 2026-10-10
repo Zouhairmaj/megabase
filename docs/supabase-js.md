@@ -3,7 +3,7 @@ title: supabase-js compatibility
 description: Point supabase-js at your local Megabase URL. A `.select()` read is served when the database is configured. Auth health, settings, signup, logout, and the password and refresh-token grants are served.
 section: use
 order: 1
-card: Point supabase-js at your local Megabase URL. Resource reads and writes are served. Embeds, Prefer, and most other routes still return 501.
+card: Point supabase-js at your local Megabase URL. Resource reads, inserts, updates, and deletes are served. Embeds, Prefer (including `.upsert()`), and most other routes still return 501.
 tag: 501
 ---
 
@@ -12,7 +12,7 @@ tag: 501
 The goal is that an existing supabase-js app can point at Megabase without changing a line of code. That is the target, not the state.
 
 > [!NOTE]
-> Storage, Realtime, Functions, and most Auth routes still return 501. A supabase-js read sends `select=*`. `.from().select()`, a chained `.eq()`, and `.insert()`, `.update()`, `.upsert()`, and `.delete()` are served resource routes when `DATABASE_URL` is set ([resources](../specs/rest/resources.md), [filtering](../specs/rest/filtering.md), [query parameters](../specs/rest/query-params.md)). Embeds and `Prefer` stay 501. `GET /auth/v1/health`, `GET /auth/v1/settings`, autoconfirm email signup, logout, and the password and refresh-token grants on `POST /auth/v1/token` are served when `DATABASE_URL` and `JWT_SECRET` are set (health and settings do not need them). See [Configuration](configuration.md).
+> Storage, Realtime, Functions, and most Auth routes still return 501. A supabase-js read sends `select=*`. `.from().select()`, a chained `.eq()`, and `.insert()`, `.update()`, and `.delete()` are served resource routes when `DATABASE_URL` is set ([resources](../specs/rest/resources.md), [filtering](../specs/rest/filtering.md), [query parameters](../specs/rest/query-params.md)). `.upsert()` sends `Prefer: resolution=merge-duplicates` and stays 501. Embeds and `Prefer` stay 501. `GET /auth/v1/health`, `GET /auth/v1/settings`, autoconfirm email signup, logout, and the password and refresh-token grants on `POST /auth/v1/token` are served when `DATABASE_URL` and `JWT_SECRET` are set (health and settings do not need them). See [Configuration](configuration.md).
 
 ## Point the client
 
@@ -30,7 +30,7 @@ const { data, error } = await supabase.from('todos').select()
 // rows of public.todos when DATABASE_URL is set
 ```
 
-`from('todos').select()` is a served read of `public.todos` when `DATABASE_URL` is set. Inserts, updates, upserts, and deletes on that table are served too. Embeds and `Prefer` stay 501. Level 1 (see the Roadmap) is the REST and Auth email/password target; the Auth routes in [Configuration](configuration.md) are served.
+`from('todos').select()` is a served read of `public.todos` when `DATABASE_URL` is set. Inserts, updates, and deletes on that table are served too. `.upsert()` sends `Prefer` resolution and stays 501. Embeds and `Prefer` stay 501. Level 1 (see the Roadmap) is the REST and Auth email/password target; the Auth routes in [Configuration](configuration.md) are served.
 
 ## What “compatible” means
 
