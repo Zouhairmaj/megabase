@@ -581,3 +581,158 @@ units = ["auth:route:DELETE /auth/v1/admin/users/{user_id}/passkeys/{passkey_id}
 method = "DELETE"
 path = "/auth/v1/admin/users/00000000-0000-0000-0000-000000000001/passkeys/00000000-0000-0000-0000-000000000002"
 key = "service_role"
+
+[[case]]
+id = "auth.verify.get.missing-type"
+description = "GET /verify without a type is a validation error"
+units = ["auth:route:GET /auth/v1/verify"]
+[[case.step]]
+method = "GET"
+path = "/auth/v1/verify"
+
+[[case]]
+id = "auth.verify.get.missing-token"
+description = "GET /verify with a type and no token is a validation error"
+units = ["auth:route:GET /auth/v1/verify"]
+[[case.step]]
+method = "GET"
+path = "/auth/v1/verify?type=signup"
+
+[[case]]
+id = "auth.verify.get.signup-expired"
+description = "GET /verify signup with an unknown token redirects as an expired link"
+units = ["auth:route:GET /auth/v1/verify", "auth:verify-type:signup"]
+[[case.step]]
+method = "GET"
+path = "/auth/v1/verify?type=signup&token=deadbeef"
+
+[[case]]
+id = "auth.verify.get.invite-expired"
+description = "GET /verify invite with an unknown token redirects as an expired link"
+units = ["auth:route:GET /auth/v1/verify", "auth:verify-type:invite"]
+[[case.step]]
+method = "GET"
+path = "/auth/v1/verify?type=invite&token=deadbeef"
+
+[[case]]
+id = "auth.verify.get.recovery-expired"
+description = "GET /verify recovery with an unknown token redirects as an expired link"
+units = ["auth:route:GET /auth/v1/verify", "auth:verify-type:recovery"]
+[[case.step]]
+method = "GET"
+path = "/auth/v1/verify?type=recovery&token=deadbeef"
+
+[[case]]
+id = "auth.verify.get.email-change-expired"
+description = "GET /verify email_change with an unknown token redirects as an expired link"
+units = ["auth:route:GET /auth/v1/verify", "auth:verify-type:email_change"]
+[[case.step]]
+method = "GET"
+path = "/auth/v1/verify?type=email_change&token=deadbeef"
+
+[[case]]
+id = "auth.verify.get.invalid-type"
+description = "GET /verify with an unknown type redirects the validation error"
+units = ["auth:route:GET /auth/v1/verify"]
+[[case.step]]
+method = "GET"
+path = "/auth/v1/verify?type=nope&token=deadbeef"
+
+[[case]]
+id = "auth.verify.post.missing-type"
+description = "POST /verify without a type is a validation error"
+units = ["auth:route:POST /auth/v1/verify"]
+[[case.step]]
+method = "POST"
+path = "/auth/v1/verify"
+json = {}
+
+[[case]]
+id = "auth.verify.post.token-xor"
+description = "POST /verify requires exactly one of token or token_hash"
+units = ["auth:route:POST /auth/v1/verify"]
+[[case.step]]
+method = "POST"
+path = "/auth/v1/verify"
+json = { type = "signup" }
+
+[[case]]
+id = "auth.verify.post.both-tokens"
+description = "POST /verify rejects token and token_hash together"
+units = ["auth:route:POST /auth/v1/verify"]
+[[case.step]]
+method = "POST"
+path = "/auth/v1/verify"
+json = { type = "signup", token = "1", token_hash = "2" }
+
+[[case]]
+id = "auth.verify.post.token-without-address"
+description = "POST /verify with only a token requires an email or phone"
+units = ["auth:route:POST /auth/v1/verify"]
+[[case.step]]
+method = "POST"
+path = "/auth/v1/verify"
+json = { type = "signup", token = "123456" }
+
+[[case]]
+id = "auth.verify.post.hash-with-email"
+description = "POST /verify token_hash rejects an extra email"
+units = ["auth:route:POST /auth/v1/verify"]
+[[case.step]]
+method = "POST"
+path = "/auth/v1/verify"
+json = { type = "signup", token_hash = "abc", email = "a@b.com" }
+
+[[case]]
+id = "auth.verify.post.invalid-email"
+description = "POST /verify rejects an email that is not an address"
+units = ["auth:route:POST /auth/v1/verify"]
+[[case.step]]
+method = "POST"
+path = "/auth/v1/verify"
+json = { type = "signup", token = "123456", email = "not-an-email" }
+
+[[case]]
+id = "auth.verify.post.invalid-type"
+description = "POST /verify token_hash rejects an unknown type"
+units = ["auth:route:POST /auth/v1/verify"]
+[[case.step]]
+method = "POST"
+path = "/auth/v1/verify"
+json = { type = "nope", token_hash = "deadbeef" }
+
+[[case]]
+id = "auth.verify.post.signup-expired"
+description = "POST /verify signup rejects an unknown token hash"
+units = ["auth:route:POST /auth/v1/verify", "auth:verify-type:signup"]
+[[case.step]]
+method = "POST"
+path = "/auth/v1/verify"
+json = { type = "signup", token_hash = "deadbeef" }
+
+[[case]]
+id = "auth.verify.post.invite-expired"
+description = "POST /verify invite rejects an unknown token hash"
+units = ["auth:route:POST /auth/v1/verify", "auth:verify-type:invite"]
+[[case.step]]
+method = "POST"
+path = "/auth/v1/verify"
+json = { type = "invite", token_hash = "deadbeef" }
+
+[[case]]
+id = "auth.verify.post.recovery-expired"
+description = "POST /verify recovery rejects an unknown token hash"
+units = ["auth:route:POST /auth/v1/verify", "auth:verify-type:recovery"]
+[[case.step]]
+method = "POST"
+path = "/auth/v1/verify"
+json = { type = "recovery", token_hash = "deadbeef" }
+
+[[case]]
+id = "auth.verify.post.email-change-expired"
+description = "POST /verify email_change rejects an unknown token hash"
+units = ["auth:route:POST /auth/v1/verify", "auth:verify-type:email_change"]
+[[case.step]]
+method = "POST"
+path = "/auth/v1/verify"
+json = { type = "email_change", token_hash = "deadbeef" }
