@@ -45,6 +45,17 @@ jobs:
           submodules: true
           persist-credentials: false
 
+      # Toolchain + cache so Claude can build, fmt, clippy and test before pushing.
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+
+      - name: Rust cache
+        # Default key: restores the registry cache saved by main pushes.
+        uses: ./.github/actions/rust-cache
+
       - name: Run Claude Code
         id: claude
         uses: anthropics/claude-code-action@2dca132ff0e0c4094ce6048b422c6915a071210b # v1.0.247
@@ -64,5 +75,5 @@ jobs:
           additional_permissions: |
             actions: read
           claude_args: |
-            --allowedTools "mcp__github__create_pull_request,mcp__github__update_pull_request,mcp__github__get_pull_request,Bash(gh pr create:*),Bash(gh pr edit:*),Bash(gh pr view:*),Bash(gh pr list:*)"
-            --append-system-prompt "Follow AGENTS.md and GOAL.md. Write Rust only. Never modify vendor/, vendor.toml, or .gitmodules. Modify protected paths (judge/, .github/, tools/megabase-guard/, CODEOWNERS) only when the issue explicitly requires it, and only when the current branch already starts with `review/` (the workflow starts protected-path issues on `review/issue-<n>-<slug>`); never touch protected paths on an issue-* branch. Do not run raw `git push`/`git switch`/`git checkout` to change branches — push only through the action's git-push wrapper (origin HEAD). Leave humans-only files (GOAL.md, MANIFESTO.md, HUMAN_LOG.md) alone. Iteration commits use `[component] unit: what changed (coverage X→Y, conformance A→B)`. When you implement an issue, after pushing the branch, open the pull request yourself with `gh pr create` (or mcp__github__create_pull_request). Do not stop at a Create-a-PR compare link. Use a Conventional Commits title (types and scopes in .github/workflows/semantic-pr.yml). The body follows .github/pull_request_template.md and must include `Closes #<n>` for the issue. If a PR for this branch already exists, update it with `gh pr edit` (or mcp__github__update_pull_request) instead of opening another. Never include the trigger phrase in comments."
+            --allowedTools "mcp__github__create_pull_request,mcp__github__update_pull_request,mcp__github__get_pull_request,Bash(gh pr create:*),Bash(gh pr edit:*),Bash(gh pr view:*),Bash(gh pr list:*),Bash(cargo:*),Bash(rustup show:*)"
+            --append-system-prompt "Follow AGENTS.md and GOAL.md. Write Rust only. Never modify vendor/, vendor.toml, or .gitmodules. Modify protected paths (judge/, .github/, tools/megabase-guard/, CODEOWNERS) only when the issue explicitly requires it, and only when the current branch already starts with `review/` (the workflow starts protected-path issues on `review/issue-<n>-<slug>`); never touch protected paths on an issue-* branch. Do not run raw `git push`/`git switch`/`git checkout` to change branches — push only through the action's git-push wrapper (origin HEAD). Before pushing, run `cargo fmt --all`, `cargo clippy --workspace --all-targets --locked -- -D warnings` and the relevant `cargo test` targets, and fix failures. Leave humans-only files (GOAL.md, MANIFESTO.md, HUMAN_LOG.md) alone. Iteration commits use `[component] unit: what changed (coverage X→Y, conformance A→B)`. When you implement an issue, after pushing the branch, open the pull request yourself with `gh pr create` (or mcp__github__create_pull_request). Do not stop at a Create-a-PR compare link. Use a Conventional Commits title (types and scopes in .github/workflows/semantic-pr.yml). The body follows .github/pull_request_template.md and must include `Closes #<n>` for the issue. If a PR for this branch already exists, update it with `gh pr edit` (or mcp__github__update_pull_request) instead of opening another. Never include the trigger phrase in comments."
