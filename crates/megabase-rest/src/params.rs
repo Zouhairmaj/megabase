@@ -1112,6 +1112,7 @@ fn logic_tree<'a>(at: &mut At<'a>) -> Result<LogicNode, PErr> {
 }
 
 fn logic_expr<'a>(at: &mut At<'a>) -> Result<LogicNode, PErr> {
+    // megabase:unit rest:logic-operator:not
     let negated = if at.starts_with("not.") {
         *at = bump_str(at, "not.");
         true
@@ -1119,9 +1120,11 @@ fn logic_expr<'a>(at: &mut At<'a>) -> Result<LogicNode, PErr> {
         false
     };
     let op = if at.starts_with("and") {
+        // megabase:unit rest:logic-operator:and
         *at = bump_str(at, "and");
         LogicOp::And
     } else if at.starts_with("or") {
+        // megabase:unit rest:logic-operator:or
         *at = bump_str(at, "or");
         LogicOp::Or
     } else {
@@ -2214,6 +2217,27 @@ mod tests {
         ));
         assert!(matches!(
             parse_get_query("on_conflict=").unwrap_err(),
+            QueryFail::Parse { .. }
+        ));
+    }
+
+    #[test]
+    fn logic_nested_trees_bind_values_in_order() {
+        let query =
+            parse_get_query("or=(id.eq.1,and(done.eq.true,not.or(id.eq.2,id.eq.3)))").unwrap();
+        let sql = build_read_sql("public", "todos", &query, &[]).unwrap();
+        // No catalog types are passed, so leaves are bare `col = $n`.
+        assert!(sql.sql.contains(concat!(
+            r#" WHERE ("todos"."id" = $1 OR ("todos"."done" = $2 "#,
+            r#"AND NOT ("todos"."id" = $3 OR "todos"."id" = $4)))"#,
+        )));
+        assert_eq!(sql.params, vec!["1", "true", "2", "3"]);
+        assert!(matches!(
+            parse_get_query("or=()").unwrap_err(),
+            QueryFail::Parse { .. }
+        ));
+        assert!(matches!(
+            parse_get_query("and=(id.eq.1").unwrap_err(),
             QueryFail::Parse { .. }
         ));
     }
