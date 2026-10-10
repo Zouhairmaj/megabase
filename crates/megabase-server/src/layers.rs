@@ -4,6 +4,8 @@
 //! Kong's functions `read_timeout` (150000 ms) and `FILE_SIZE_LIMIT`
 //! (52428800 bytes). Request ids, panic catching, and header redaction are
 //! Megabase controls; Kong does not set those in `volumes/api/kong.yml`.
+//! The deadline uses the same 504 as `tower_http`'s timeout layer and arms
+//! its timer only while the handler is still pending.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -15,13 +17,14 @@ use axum::{
     Router,
 };
 use megabase_core::Config;
+use pin_project_lite::pin_project;
+use tower::Layer;
 use tower_http::{
     catch_panic::CatchPanicLayer,
     classify::ServerErrorsFailureClass,
     limit::RequestBodyLimitLayer,
     request_id::{MakeRequestUuid, PropagateRequestIdLayer, SetRequestIdLayer},
     sensitive_headers::SetSensitiveRequestHeadersLayer,
-    timeout::TimeoutLayer,
     trace::TraceLayer,
 };
 use tracing::Span;
@@ -45,7 +48,7 @@ pub fn sensitive_request_headers() -> [axum::http::HeaderName; 3] {
 pub fn apply_http_layers(router: Router, config: &Config) -> Router {
     let sensitive: Arc<[axum::http::HeaderName]> = Arc::from(sensitive_request_headers());
     router
-        .layer(TimeoutLayer::with_status_code(
+        .layer(DeadlineLayer::new(
             axum::http::StatusCode::GATEWAY_TIMEOUT,
             config.http_timeout,
         ))
@@ -66,6 +69,12 @@ pub fn apply_http_layers(router: Router, config: &Config) -> Router {
                         request_id = %request_id,
                     )
                 })
+                // The span already carries method, path, and request id.
+                // Default callbacks emit a second event and still wrap the body.
+                .on_request(())
+                .on_response(())
+                .on_body_chunk(())
+                .on_eos(())
                 .on_failure(
                     |error: ServerErrorsFailureClass, _latency: Duration, _span: &Span| {
                         tracing::error!(%error, "request failed");
@@ -75,6 +84,107 @@ pub fn apply_http_layers(router: Router, config: &Config) -> Router {
         .layer(SetSensitiveRequestHeadersLayer::from_shared(sensitive))
         .layer(SetRequestIdLayer::x_request_id(MakeRequestUuid))
         .layer(CatchPanicLayer::custom(|_| panic_response()))
+}
+
+/// Whole-request deadline with the same contract as `tower_http::timeout::TimeoutLayer`.
+///
+/// `TimeoutLayer` calls `tokio::time::sleep` before polling the handler, so every
+/// request registers a timer. These smoke routes finish on the first poll, and
+/// that registration was most of their latency. The timer is armed only when
+/// the handler is still pending. The deadline is still measured from `call`.
+#[derive(Clone, Copy)]
+struct DeadlineLayer {
+    status: StatusCode,
+    timeout: Duration,
+}
+
+impl DeadlineLayer {
+    fn new(status: StatusCode, timeout: Duration) -> Self {
+        Self { status, timeout }
+    }
+}
+
+impl<S> Layer<S> for DeadlineLayer {
+    type Service = Deadline<S>;
+
+    fn layer(&self, inner: S) -> Self::Service {
+        Deadline {
+            inner,
+            status: self.status,
+            timeout: self.timeout,
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+struct Deadline<S> {
+    inner: S,
+    status: StatusCode,
+    timeout: Duration,
+}
+
+impl<S, ReqBody, ResBody> tower::Service<Request<ReqBody>> for Deadline<S>
+where
+    S: tower::Service<Request<ReqBody>, Response = Response<ResBody>>,
+    ResBody: Default,
+{
+    type Response = S::Response;
+    type Error = S::Error;
+    type Future = DeadlineFuture<S::Future>;
+
+    fn poll_ready(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), Self::Error>> {
+        self.inner.poll_ready(cx)
+    }
+
+    fn call(&mut self, req: Request<ReqBody>) -> Self::Future {
+        let timeout = self.timeout;
+        DeadlineFuture {
+            inner: self.inner.call(req),
+            deadline: tokio::time::Instant::now() + timeout,
+            sleep: None,
+            status: self.status,
+        }
+    }
+}
+
+pin_project! {
+    struct DeadlineFuture<F> {
+        #[pin]
+        inner: F,
+        deadline: tokio::time::Instant,
+        sleep: Option<std::pin::Pin<Box<tokio::time::Sleep>>>,
+        status: StatusCode,
+    }
+}
+
+impl<F, ResBody, E> std::future::Future for DeadlineFuture<F>
+where
+    F: std::future::Future<Output = Result<Response<ResBody>, E>>,
+    ResBody: Default,
+{
+    type Output = Result<Response<ResBody>, E>;
+
+    fn poll(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Self::Output> {
+        let this = self.project();
+        if let std::task::Poll::Ready(result) = this.inner.poll(cx) {
+            return std::task::Poll::Ready(result);
+        }
+        let sleep = this
+            .sleep
+            .get_or_insert_with(|| Box::pin(tokio::time::sleep_until(*this.deadline)));
+        if sleep.as_mut().poll(cx).is_ready() {
+            let mut response = Response::new(ResBody::default());
+            *response.status_mut() = *this.status;
+            return std::task::Poll::Ready(Ok(response));
+        }
+        std::task::Poll::Pending
+    }
 }
 
 fn panic_response() -> Response {
