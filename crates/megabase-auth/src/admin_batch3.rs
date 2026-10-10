@@ -1880,7 +1880,7 @@ mod tests {
 
     const GOOD: &str = r#"<md:EntityDescriptor xmlns:md="urn:oasis:names:tc:SAML:2.0:metadata" entityID="https://idp.example/x"><md:IDPSSODescriptor/></md:EntityDescriptor>"#;
 
-    fn is_501(result: Result<String, GenerateLinkError>) -> bool {
+    fn is_501(result: &Result<String, GenerateLinkError>) -> bool {
         matches!(result, Err(GenerateLinkError::NotImplemented(_)))
     }
 
@@ -1892,17 +1892,17 @@ mod tests {
     #[test]
     fn saml_metadata_unplaceable_xml_is_501() {
         let truncated = r#"<EntityDescriptor entityID="x"><IDPSSODescriptor>"#;
-        assert!(is_501(parse_saml_metadata(truncated)));
+        assert!(is_501(&parse_saml_metadata(truncated)));
         let char_ref = GOOD.replace("idp.example/x", "idp.example/&#65;");
-        assert!(is_501(parse_saml_metadata(&char_ref)));
+        assert!(is_501(&parse_saml_metadata(&char_ref)));
         let comment = GOOD.replace("<md:IDPSSODescriptor/>", "<!-- <md:IDPSSODescriptor/> -->");
-        assert!(is_501(parse_saml_metadata(&comment)));
+        assert!(is_501(&parse_saml_metadata(&comment)));
         let cdata = GOOD.replace(
             "<md:IDPSSODescriptor/>",
             "<![CDATA[<md:IDPSSODescriptor/>]]>",
         );
-        assert!(is_501(parse_saml_metadata(&cdata)));
+        assert!(is_501(&parse_saml_metadata(&cdata)));
         let nested = format!("<outer>{GOOD}{GOOD}</outer>");
-        assert!(is_501(parse_saml_metadata(&nested)));
+        assert!(is_501(&parse_saml_metadata(&nested)));
     }
 }
