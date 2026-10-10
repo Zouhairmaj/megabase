@@ -266,6 +266,12 @@ fn same_path(a: &Path, b: &Path) -> bool {
     }
 }
 
+struct Shell<'a> {
+    layout: &'a str,
+    logo: &'a str,
+    version: &'a str,
+}
+
 struct SiteData<'a> {
     metrics: &'a Metrics,
     human: &'a human_log::HumanLog,
@@ -283,6 +289,7 @@ fn build(
     metrics: &Metrics,
     human: &human_log::HumanLog,
 ) -> io::Result<()> {
+    let version = chrome::read_workspace_version(repo_root)?;
     if out.exists() && !same_path(out, site_root) {
         fs::remove_dir_all(out)?;
     }
@@ -292,6 +299,11 @@ fn build(
     let logo = fs::read_to_string(site_root.join("static/logo.svg"))?
         .trim()
         .to_string();
+    let shell = Shell {
+        layout: &layout,
+        logo: &logo,
+        version: &version,
+    };
     let entries = devlog::load(repo_root)?;
     let site_docs = docs::load(repo_root)?;
     let sha = git_sha7(repo_root);
@@ -308,7 +320,7 @@ fn build(
     };
 
     for page in PAGES {
-        let html = render_page(page, &layout, &logo, repo_root, &data, None)?;
+        let html = render_page(page, &shell, repo_root, &data, None)?;
         let dest = if page.id == "404" {
             out.join("404.html")
         } else if page.dir.is_empty() {
@@ -325,14 +337,14 @@ fn build(
     }
 
     for entry in &entries {
-        let article = render_article(entry, &layout, &logo)?;
+        let article = render_article(entry, &shell)?;
         let dir = out.join("devlog").join(&entry.slug);
         fs::create_dir_all(&dir)?;
         fs::write(dir.join("index.html"), article)?;
     }
 
     for doc in &site_docs {
-        let article = render_docs_article(doc, &site_docs, &layout, &logo, metrics, &sha, &date)?;
+        let article = render_docs_article(doc, &site_docs, &shell, metrics, &sha, &date)?;
         let dir = out.join("docs").join(&doc.slug);
         fs::create_dir_all(&dir)?;
         fs::write(dir.join("index.html"), article)?;
@@ -425,8 +437,7 @@ fn rasterize_svg(svg: &str) -> io::Result<Vec<u8>> {
 
 fn render_page(
     page: &Page,
-    layout: &str,
-    logo: &str,
+    shell: &Shell<'_>,
     repo_root: &Path,
     data: &SiteData<'_>,
     loc: Option<&str>,
@@ -439,12 +450,12 @@ fn render_page(
     } else {
         Paths::nested(page.id, false)
     };
-    wrap(page, layout, logo, &paths, loc, |paths| {
+    wrap(page, shell, &paths, loc, |paths| {
         content(page, paths, repo_root, data)
     })
 }
 
-fn render_article(entry: &devlog::Entry, layout: &str, logo: &str) -> io::Result<String> {
+fn render_article(entry: &devlog::Entry, shell: &Shell<'_>) -> io::Result<String> {
     let paths = Paths::article("devlog-article");
     let title = format!("{} — Megabase", entry.title);
     let description = if entry.summary.is_empty() {
@@ -465,7 +476,7 @@ fn render_article(entry: &devlog::Entry, layout: &str, logo: &str) -> io::Result
         noindex: false,
         extra_preload: ExtraPreload::Inter,
     };
-    wrap(&page, layout, logo, &paths, Some(&loc), |paths| {
+    wrap(&page, shell, &paths, Some(&loc), |paths| {
         Ok(pages::devlog_article(paths, entry))
     })
 }
@@ -473,8 +484,7 @@ fn render_article(entry: &devlog::Entry, layout: &str, logo: &str) -> io::Result
 fn render_docs_article(
     doc: &docs::Doc,
     all: &[docs::Doc],
-    layout: &str,
-    logo: &str,
+    shell: &Shell<'_>,
     metrics: &Metrics,
     sha: &str,
     date: &str,
@@ -499,7 +509,7 @@ fn render_docs_article(
         noindex: false,
         extra_preload: ExtraPreload::Inter,
     };
-    wrap(&page, layout, logo, &paths, Some(&loc), |paths| {
+    wrap(&page, shell, &paths, Some(&loc), |paths| {
         Ok(docs::article(paths, all, doc, metrics, sha, date))
     })
 }
@@ -535,8 +545,7 @@ fn content(
 
 fn wrap(
     page: &Page,
-    layout: &str,
-    logo: &str,
+    shell: &Shell<'_>,
     paths: &Paths,
     loc: Option<&str>,
     body: impl FnOnce(&Paths) -> io::Result<String>,
@@ -565,7 +574,7 @@ fn wrap(
     vars.insert("origin".into(), ORIGIN.into());
     vars.insert("asset".into(), asset.into());
     vars.insert("github".into(), GITHUB.into());
-    vars.insert("logo".into(), logo.into());
+    vars.insert("logo".into(), shell.logo.into());
     vars.insert(
         "robots".into(),
         if page.noindex {
@@ -592,8 +601,11 @@ fn wrap(
         }
         .into(),
     );
-    vars.insert("header".into(), chrome::header(paths, logo));
-    vars.insert("footer".into(), chrome::footer(paths, logo));
+    vars.insert(
+        "header".into(),
+        chrome::header(paths, shell.logo, shell.version),
+    );
+    vars.insert("footer".into(), chrome::footer(paths, shell.logo));
     let needs_copy =
         matches!(page.kind, Kind::Docs | Kind::HowItWorks) || page.id.starts_with("docs-");
     let mut scripts = String::new();
@@ -605,7 +617,7 @@ fn wrap(
     }
     vars.insert("scripts".into(), scripts);
     vars.insert("content".into(), body(paths)?);
-    Ok(subst(layout, &vars))
+    Ok(subst(shell.layout, &vars))
 }
 
 fn preload(page: &Page, asset: &str) -> String {
@@ -883,6 +895,11 @@ mod tests {
                 fs::copy(&src, tmp_root.join(name)).expect(name);
             }
         }
+        fs::write(
+            tmp_root.join("Cargo.toml"),
+            "[workspace.package]\nversion = \"0.0.0\"\n",
+        )
+        .expect("cargo toml");
         let docs_dir = real_root.join("docs");
         if docs_dir.is_dir() {
             let dest = tmp_root.join("docs");
@@ -976,6 +993,43 @@ mod tests {
         assert!(quick.contains("callout-note"));
         assert!(quick.contains("data-copy"));
         assert!(!quick.contains("334"));
+        let _ = fs::remove_dir_all(&out);
+    }
+
+    #[test]
+    fn header_badge_uses_the_workspace_version_on_every_page() {
+        let out = generate_tmp_with(|root| {
+            fs::write(
+                root.join("Cargo.toml"),
+                "[package]\nversion = \"9.9.9\"\n\n[workspace.package]\nversion = \"1.2.3\"\n",
+            )
+            .expect("version fixture");
+        });
+        let needle = r#"<a class="version-badge" href="https://github.com/Zouhairmaj/megabase/releases/tag/v1.2.3" rel="noopener noreferrer" title="v1.2.3"><span class="version-badge-label">v1.2.3</span></a>"#;
+        for rel in [
+            "index.html",
+            "manifesto/index.html",
+            "status/index.html",
+            "docs/index.html",
+            "docs/quickstart/index.html",
+            "404.html",
+        ] {
+            let html =
+                fs::read_to_string(out.join(rel)).unwrap_or_else(|_| panic!("missing {rel}"));
+            assert!(html.contains(needle), "{rel} missing release badge");
+            assert!(
+                !html.contains("v9.9.9"),
+                "{rel} used the site package version"
+            );
+            let footer = html.split("site-footer").nth(1).expect("footer");
+            assert!(
+                !footer.contains("version-badge"),
+                "{rel} footer has a badge"
+            );
+        }
+        let css = fs::read_to_string(out.join("styles.css")).unwrap();
+        assert!(css.contains(".version-badge"));
+        assert!(css.contains("#00d89214"));
         let _ = fs::remove_dir_all(&out);
     }
 
@@ -1525,15 +1579,10 @@ mod tests {
                 while let Some(rel_idx) = find_term(&lower[from..], needle) {
                     let idx = from + rel_idx;
                     from = idx + needle.len();
-                    // bcrypt's work factor is "cost 10". That is not spend copy.
-                    if needle == "cost" {
-                        let rest = text[idx + needle.len()..].trim_start();
-                        let bytes = rest.as_bytes();
-                        let work_factor = bytes.starts_with(b"10")
-                            && bytes.get(2).is_none_or(|b| !b.is_ascii_digit());
-                        if work_factor {
-                            continue;
-                        }
+                    // bcrypt's work factor is "cost 10", or "cost-10" next to
+                    // hash/bcrypt. Other "cost-10" phrases are spend copy.
+                    if needle == "cost" && is_bcrypt_work_factor(&text, idx) {
+                        continue;
                     }
                     let end = (idx + 80).min(text.len());
                     hits.push(format!(
@@ -1545,6 +1594,58 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// True for bcrypt's cost factor, not for a price written as `cost-10`.
+    fn is_bcrypt_work_factor(text: &str, idx: usize) -> bool {
+        let rest = text[idx + "cost".len()..].trim_start();
+        let hyphenated = rest.starts_with('-');
+        let rest = rest.strip_prefix('-').unwrap_or(rest).trim_start();
+        let bytes = rest.as_bytes();
+        let ten = bytes.starts_with(b"10") && bytes.get(2).is_none_or(|b| !b.is_ascii_digit());
+        if !ten {
+            return false;
+        }
+        if !hyphenated {
+            return true;
+        }
+        let after = rest
+            .get(2..)
+            .unwrap_or("")
+            .trim_start()
+            .to_ascii_lowercase();
+        if after.starts_with("hash") || after.starts_with("bcrypt") {
+            return true;
+        }
+        let start = floor_char_boundary(text, idx.saturating_sub(1200));
+        text[start..idx].to_ascii_lowercase().contains("bcrypt")
+    }
+
+    /// Largest index at or before `index` that is a UTF-8 character boundary.
+    fn floor_char_boundary(text: &str, mut index: usize) -> usize {
+        if index > text.len() {
+            index = text.len();
+        }
+        while index > 0 && !text.is_char_boundary(index) {
+            index -= 1;
+        }
+        index
+    }
+
+    #[test]
+    fn hyphenated_cost_without_bcrypt_context_is_spend_copy() {
+        let spend = "the plan is cost-10 tokens per query";
+        let idx = spend.find("cost").unwrap();
+        assert!(!is_bcrypt_work_factor(spend, idx));
+        let hash = "stores a new cost-10 hash";
+        assert!(is_bcrypt_work_factor(hash, hash.find("cost").unwrap()));
+        let spaced = "bcrypt hash (cost 10) and does not log the password";
+        assert!(is_bcrypt_work_factor(spaced, spaced.find("cost").unwrap()));
+        // A multibyte character on the lookbehind edge must not panic, and
+        // spend copy past that edge is still spend copy.
+        let prefix = format!("é{}", "x".repeat(1198));
+        let edged = format!("{prefix} cost-10 tokens per query");
+        assert!(!is_bcrypt_work_factor(&edged, edged.find("cost").unwrap()));
     }
 
     fn find_term(haystack: &str, needle: &str) -> Option<usize> {

@@ -50,8 +50,11 @@ over *how far it is from conformant*. Everything else starts in **Backlog**.
 The public website follows the design-first rule: design in
 [Kite](https://kite.new/p/megabase-identity), LLM committee review,
 revisions, then implementation. It is a `type:feature` epic with no
-level milestone. The Status page treemap is generated at build from
-the same unit states as the README graphic. Published builds use the
+level milestone. Every page header shows the workspace release beside
+the wordmark: `v` plus `[workspace.package].version` from the root
+`Cargo.toml`, read when the site is generated, linking to that GitHub
+release tag. The Status page treemap is generated at build from the
+same unit states as the README graphic. Published builds use the
 latest Judge results from `main`.
 
 ## Regenerating the board
