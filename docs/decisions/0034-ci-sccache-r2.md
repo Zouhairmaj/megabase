@@ -41,6 +41,8 @@ Test binaries in CI are `cargo nextest` (install-action tool
 `.config/nextest.toml` profile `ci` sets `fail-fast = false`,
 `retries = 2`, and a 60s slow-timeout that terminates after three
 periods. A timeout or a test that fails every attempt fails the job.
-Codecov runs `cargo llvm-cov --no-report nextest`, then
-`cargo llvm-cov --no-report --doc`, then `cargo llvm-cov report --doctests`.
-nextest does not run doctests, so the doc command keeps them in `lcov.info`.
+Codecov keeps nextest coverage and adds doctests. `cargo llvm-cov --doc`
+and `report --doctests` need nightly (`-Z persist-doctests`), so the job
+installs nightly and runs nextest, `--doc`, and the report with
+`cargo +nightly llvm-cov`. One nightly llvm-profdata merges both.
+The Build job still executes doctests with `cargo test --doc`.

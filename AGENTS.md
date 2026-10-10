@@ -59,7 +59,8 @@ requests store compiler artifacts in the R2 bucket from `SCCACHE_BUCKET`
 receive repository secrets, so sccache stays on the local disk and the
 job still passes. `Swatinem/rust-cache` caches the Cargo registry and git
 database only. CI tests are `cargo nextest` (`.config/nextest.toml`
-profile `ci`); doctests stay `cargo test --doc`. See
+profile `ci`); doctests stay `cargo test --doc`. Codecov runs nextest
+and doctest coverage with `cargo +nightly llvm-cov`. See
 [0034](docs/decisions/0034-ci-sccache-r2.md).
 
 `fuzz/` is a standalone cargo-fuzz workspace (excluded from the root

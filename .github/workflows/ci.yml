@@ -300,14 +300,17 @@ jobs:
       - uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
         with:
           tool: cargo-llvm-cov,cargo-nextest
+      - name: Install nightly for llvm-cov doctests
+        run: rustup toolchain install nightly --profile minimal --component llvm-tools-preview
       - name: Generate lcov.info
         run: |
           set -euo pipefail
-          # nextest does not run doctests. The second command covers them,
-          # and the report merges both. Same sequence as cargo-llvm-cov's CI.
-          cargo llvm-cov --no-report --workspace --locked nextest
-          cargo llvm-cov --no-report --workspace --locked --doc
-          cargo llvm-cov report --doctests --lcov --output-path lcov.info
+          # --doc and report --doctests need nightly (-Z persist-doctests).
+          # Nextest coverage uses that same nightly so one llvm-profdata
+          # merges both. The Build job still runs doctests with cargo test --doc.
+          cargo +nightly llvm-cov --no-report --workspace --locked nextest
+          cargo +nightly llvm-cov --no-report --workspace --locked --doc
+          cargo +nightly llvm-cov report --doctests --lcov --output-path lcov.info
       - name: Upload to Codecov
         uses: codecov/codecov-action@0fb7174895f61a3b6b78fc075e0cd60383518dac # v5.5.3
         with:
