@@ -49,9 +49,6 @@ async fn dispatch(
     let mut served = Vec::new();
     for filter in &classified.filters {
         match parse_filter_value(&filter.value) {
-            Ok(ParsedFilter::Unsupported { unit }) => {
-                return MegabaseNotImplemented::new(crate::COMPONENT, unit).into_response();
-            }
             Ok(parsed) => served.push((filter.column.clone(), parsed)),
             Err(error) => {
                 return pgrst(
@@ -406,9 +403,6 @@ fn bound_filter(column: &str, parsed: &ParsedFilter, pg_type: Option<String>) ->
         ParsedFilter::IsDistinct { negated, value } => {
             (*negated, FilterBody::IsDistinct(value.clone()))
         }
-        ParsedFilter::Unsupported { .. } => {
-            unreachable!("unsupported filters return 501 before the read");
-        }
     };
     BoundFilter {
         column: column.to_string(),
@@ -678,12 +672,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn later_operator_is_501_and_does_not_query() {
+    async fn range_and_fts_filters_reach_the_database() {
         let app = router(RestState::from_config(&Config::default()));
-        let (status, body, _) =
-            send(app, get("/rest/v1/todos?priority=gt.1&priority=ov.{1,2}")).await;
-        assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
-        assert_eq!(body["unit"], "rest:filter-operator:ov");
+        let (status, body, _) = send(
+            app,
+            get("/rest/v1/todos?priority=ov.[1,4)&title=plfts(english).spec&during=nxl.[4,7)"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(body["code"], "PGRST000");
+        assert!(body["unit"].is_null());
     }
 
     #[tokio::test]
