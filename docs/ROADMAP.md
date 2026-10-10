@@ -105,14 +105,25 @@ A TOML extra-file updater bumps `[workspace.package].version`; member
 crates inherit. The Release workflow runs `cargo update -w` on
 `release-please--branches--*` and commits `Cargo.lock` if workspace
 member versions drifted, so `--locked` CI (Build, Codecov, Bencher,
-Protected paths, Judge) stays green. That commit is pushed with
-`RELEASE_PLEASE_TOKEN` when set (a user PAT or GitHub App whose pushes
-start workflows). `GITHUB_TOKEN` pushes do not trigger
-`push`/`pull_request` workflows. Token permissions are under
-Human-only actions in `PROGRESS.md`. When the secret is unset, or the
-lockfile commit was not pushed, the lockfile job `workflow_dispatch`es
-CI, Bencher, and Judge on the release branch
-(native check runs on that SHA). If that ref's workflow files lack
+Protected paths, Judge) stays green. That commit is pushed with the token the tree probe
+selected.
+`RELEASE_PLEASE_TOKEN` is used only when that probe can create a git
+tree, so the push starts workflows. A fine-grained PAT owned by
+`megabase-agent` cannot:
+[GitHub's token docs](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens)
+say only a classic PAT has write access to a public repository owned by
+another personal account, including for a collaborator. The secret has to be a classic PAT with
+the `repo` and `workflow` scopes. Otherwise, and when that push is
+denied, the push uses `GITHUB_TOKEN`, which does not trigger
+`push`/`pull_request` workflows. The pending replacement is under
+Human-only actions in `PROGRESS.md` and in `HUMAN_LOG.md`. The lockfile
+job `workflow_dispatch`es CI, Bencher, and Judge on the release branch
+unless that push used the probed release token and the branch is the
+default branch. Those three workflows run on `push` only for `main`,
+and the lockfile commit is on `release-please--branches--*`, so a
+release-token push there still dispatches (native check runs on that
+SHA). The same dispatch runs when the probe did not select the secret,
+the push was retried with `GITHUB_TOKEN`, or the commit was not pushed. If that ref's workflow files lack
 `workflow_dispatch`, it dispatches **Lockfile required checks** on the
 default branch, which checks out the lockfile SHA and reports Build,
 Codecov, Bencher, Protected paths, and Judge via the Checks API.
@@ -146,7 +157,9 @@ approval of the current head SHA and green CI. The lockfile is part of
 the release PR (`cargo update -w` on the release branch). If it is still
 stale, run `cargo update -w` on that branch. Each GitHub Release body
 is annotated with the coverage / conformance delta versus the previous
-tag. The same Release job attaches musl-static linux `x86_64` and
-`aarch64` binaries, `SHA256SUMS`, Sigstore signatures, and SLSA
-provenance, and publishes `ghcr.io/zouhairmaj/megabase:<tag>` (cosign).
+tag. The same Release workflow attaches musl-static linux `x86_64`
+and `aarch64` binaries, `SHA256SUMS`, Sigstore signatures, and SLSA
+provenance, and publishes `ghcr.io/zouhairmaj/megabase:<tag>` (cosign),
+only when the run SHA is that release tag (the push that tags this
+commit, or Release dispatched from the tag).
 Install and verify those artifacts in [Install](install.md).
