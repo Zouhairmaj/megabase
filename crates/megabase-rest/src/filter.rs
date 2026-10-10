@@ -852,6 +852,10 @@ fn optional_language(at: At<'_>) -> (At<'_>, PErr) {
 }
 
 /// WHERE predicates for served filters. Values are `$n` parameters.
+///
+/// Tests build a whole predicate through [`predicate_sql`]. The read path
+/// appends one filter at a time so select parameters keep their `$n`.
+#[cfg(test)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PredicateSql {
     pub sql: String,
@@ -905,6 +909,7 @@ pub(crate) struct UnsafeType;
 ///
 /// The driver binds text. The cast restores the coercion an `unknown` literal
 /// would get. A missing column has no cast so PostgreSQL can report `42703`.
+#[cfg(test)]
 pub(crate) fn predicate_sql(
     relation: &str,
     filters: &[BoundFilter],
@@ -915,12 +920,12 @@ pub(crate) fn predicate_sql(
         if index > 0 {
             sql.push_str(" AND ");
         }
-        push_predicate(&mut sql, &mut params, relation, filter)?;
+        append_predicate(&mut sql, &mut params, relation, filter)?;
     }
     Ok(PredicateSql { sql, params })
 }
 
-fn push_predicate(
+pub(crate) fn append_predicate(
     sql: &mut String,
     params: &mut Vec<String>,
     relation: &str,
