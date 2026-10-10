@@ -333,3 +333,35 @@ path = "/rest/v1/note_comments"
 headers = { Authorization = "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzk5NTM1NjAwLCJpYXQiOjE2NDE3NjkyMDAsImlzcyI6InN1cGFiYXNlLWRlbW8iLCJyb2xlIjoiYXV0aGVudGljYXRlZCIsInN1YiI6IjAwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDBiMiJ9.FOGAcMSnz_IW5eXgNu_2n6tEaj1K8nD0yh5YbJaOmgk", Prefer = "return=representation" }
 json = { id = "00000000-0000-4000-8000-0000000000f6", note_id = "00000000-0000-4000-8000-0000000000c3", user_id = "00000000-0000-4000-8000-0000000000b2", body = "injected-comment" }
 
+[[case]]
+id = "rest.query.and"
+description = "and combines filters on the root resource"
+units = ["rest:query-param:and", "rest:query-param:order"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?and=(done.eq.true,priority.gte.1)&order=id"
+
+[[case]]
+id = "rest.query.or"
+description = "or keeps rows that match either filter"
+units = ["rest:query-param:or", "rest:query-param:order"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?or=(id.eq.1,id.eq.3)&order=id"
+
+[[case]]
+id = "rest.query.columns"
+description = "columns is accepted on a read and does not project the row"
+units = ["rest:query-param:columns", "rest:query-param:order"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?columns=id,title&order=id"
+
+[[case]]
+id = "rest.query.on-conflict"
+description = "on_conflict is accepted on a read and does not change the row"
+units = ["rest:query-param:on_conflict", "rest:query-param:select", "rest:query-param:order"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?on_conflict=id&select=id&order=id"
+
