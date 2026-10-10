@@ -85,7 +85,7 @@ In scope: **1024 units**. Excluded: **76** upstream items.
 |---|---|---|---:|---:|---:|---:|
 | REST | aggregates | 1 | 5 | 0 | 0 | 0 |
 | REST | embedding | 1 | 2 | 0 | 0 | 0 |
-| REST | filtering | 1 | 28 | 10 | 2 | 0 |
+| REST | filtering | 1 | 28 | 20 | 4 | 0 |
 | REST | logic | 1 | 3 | 0 | 0 | 0 |
 | REST | media-types | 1 | 13 | 0 | 0 | 0 |
 | REST | ordering | 1 | 4 | 0 | 0 | 0 |
