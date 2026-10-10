@@ -27,4 +27,113 @@ create function public.add_numbers(a int, b int) returns int
 
 grant execute on function public.add_numbers(int, int) to anon, authenticated, service_role;
 
+-- RLS fixtures for adversarial cases. auth.uid() already exists on the
+-- reference database (the pinned Postgres image). The megabase database is
+-- created empty, and prepare loads this file before Megabase installs Auth
+-- SQL, so create the function only when it is missing. Do not replace the
+-- reference body: auth.sql.function.uid compares it.
+do $do$
+begin
+  if to_regprocedure('auth.uid()') is null then
+    create schema if not exists auth;
+    create function auth.uid()
+    returns uuid
+    language sql
+    stable
+    as $fn$
+      select
+      coalesce(
+        nullif(current_setting('request.jwt.claim.sub', true), ''),
+        (nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'sub')
+      )::uuid
+    $fn$;
+    grant execute on function auth.uid() to public;
+  end if;
+end
+$do$;
+
+-- Two fixed owners. Judge cases mint HS256 tokens for these subjects with
+-- the demo JWT_SECRET from vendor/supabase/docker/.env.example. service_role
+-- bypasses RLS; anon has no grant on notes or note_comments.
+create table public.profiles (
+  id uuid primary key,
+  display_name text not null
+);
+
+create table public.notes (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references public.profiles (id),
+  body text not null
+);
+
+create table public.note_comments (
+  id uuid primary key default gen_random_uuid(),
+  note_id uuid not null references public.notes (id),
+  user_id uuid not null references public.profiles (id),
+  body text not null
+);
+
+alter table public.profiles enable row level security;
+alter table public.notes enable row level security;
+alter table public.note_comments enable row level security;
+
+create policy profiles_read on public.profiles
+  for select to anon, authenticated
+  using (true);
+
+create policy notes_select on public.notes
+  for select to authenticated
+  using (user_id = (select auth.uid()));
+
+create policy notes_insert on public.notes
+  for insert to authenticated
+  with check (user_id = (select auth.uid()));
+
+create policy notes_update on public.notes
+  for update to authenticated
+  using (user_id = (select auth.uid()))
+  with check (user_id = (select auth.uid()));
+
+create policy notes_delete on public.notes
+  for delete to authenticated
+  using (user_id = (select auth.uid()));
+
+create policy note_comments_select on public.note_comments
+  for select to authenticated
+  using (user_id = (select auth.uid()));
+
+create policy note_comments_insert on public.note_comments
+  for insert to authenticated
+  with check (
+    user_id = (select auth.uid())
+    and exists (
+      select 1 from public.notes n
+      where n.id = note_id and n.user_id = (select auth.uid())
+    )
+  );
+
+-- The pinned cluster grants ALL on new public tables to anon, authenticated,
+-- and service_role. Revoke that default, then grant only what the cases
+-- assert: anon can read profiles and cannot touch notes or comments.
+revoke all on table public.profiles, public.notes, public.note_comments from anon, authenticated;
+grant select on table public.profiles to anon, authenticated;
+grant select, insert, update, delete on table public.notes to authenticated;
+grant select, insert on table public.note_comments to authenticated;
+grant all on table public.profiles, public.notes, public.note_comments to service_role;
+
+insert into public.profiles (id, display_name) values
+  ('00000000-0000-4000-8000-0000000000a1', 'owner-a'),
+  ('00000000-0000-4000-8000-0000000000b2', 'owner-b');
+
+-- owner-b's own note makes `user_id=not.eq.<owner-b>` observable: a working
+-- filter returns nothing to owner-b, and an ignored filter returns this row.
+insert into public.notes (id, user_id, body) values
+  ('00000000-0000-4000-8000-0000000000c3', '00000000-0000-4000-8000-0000000000a1', 'victim-secret'),
+  ('00000000-0000-4000-8000-0000000000d6', '00000000-0000-4000-8000-0000000000b2', 'owner-b-note');
+
+insert into public.note_comments (note_id, user_id, body)
+select id, user_id, 'comment-secret'
+from public.notes
+where body = 'victim-secret';
+
 notify pgrst, 'reload schema';
