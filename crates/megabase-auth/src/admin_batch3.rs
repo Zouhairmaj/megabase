@@ -523,16 +523,16 @@ pub(crate) async fn create_user(
     .await
     .map_err(|_| AuthError::internal("Database error creating new user"))?;
     if params.email_confirm.unwrap_or(false) {
-        confirm_email(&mut tx, user_id).await.map_err(&fail)?;
+        confirm_email(&mut tx, user_id).await.map_err(fail)?;
     }
     if params.phone_confirm.unwrap_or(false) {
-        confirm_phone(&mut tx, user_id).await.map_err(&fail)?;
+        confirm_phone(&mut tx, user_id).await.map_err(fail)?;
     }
     if let Some(nanos) = ban {
-        apply_ban(&mut tx, user_id, nanos).await.map_err(&fail)?;
+        apply_ban(&mut tx, user_id, nanos).await.map_err(fail)?;
     }
-    tx.commit().await.map_err(&fail)?;
-    let mut conn = db.acquire().await.map_err(&fail)?;
+    tx.commit().await.map_err(fail)?;
+    let mut conn = db.acquire().await.map_err(fail)?;
     let user = load_user_json(&mut conn, user_id).await?;
     Ok(json_ok(&user))
 }
@@ -920,7 +920,7 @@ pub(crate) async fn update_factor(
         .bind(name)
         .execute(&mut *tx)
         .await
-        .map_err(&fail)?;
+        .map_err(fail)?;
     }
     if let Some(phone) = params.phone.as_deref().filter(|p| !p.is_empty()) {
         if factor.0 == "phone" {
@@ -930,7 +930,7 @@ pub(crate) async fn update_factor(
                 .bind(&phone)
                 .execute(&mut *tx)
                 .await
-                .map_err(&fail)?;
+                .map_err(fail)?;
         }
     }
     write_audit(
@@ -947,8 +947,8 @@ pub(crate) async fn update_factor(
         })),
     )
     .await?;
-    tx.commit().await.map_err(&fail)?;
-    let mut conn = db.acquire().await.map_err(&fail)?;
+    tx.commit().await.map_err(fail)?;
+    let mut conn = db.acquire().await.map_err(fail)?;
     let factors = load_factors(&mut conn, user_id).await?;
     let wanted = factor_id.to_string();
     let body = factors
@@ -1074,6 +1074,24 @@ fn mapping_value(keys: &Map<String, Value>) -> Value {
 /// scanner cannot place is left to a full SAML parser, so it answers 501.
 fn parse_saml_metadata(xml: &str) -> Result<String, GenerateLinkError> {
     let unsupported = || not_impl("sso:saml_metadata_parse");
+    // Constructs the scanner cannot read faithfully: answer 501, never guess.
+    if xml.contains("<!--")
+        || xml.contains("<![CDATA[")
+        || xml.contains("<!DOCTYPE")
+        || xml.contains("<!ENTITY")
+        || xml.contains("&#")
+    {
+        return Err(unsupported());
+    }
+    let root_count = regex::Regex::new(r"<(?:[A-Za-z0-9_.-]+:)?EntityDescriptor\b")
+        .map_err(|_| unsupported())?
+        .find_iter(xml)
+        .count();
+    let closing = regex::Regex::new(r"</(?:[A-Za-z0-9_.-]+:)?EntityDescriptor\s*>\s*$")
+        .map_err(|_| unsupported())?;
+    if root_count != 1 || !closing.is_match(xml) {
+        return Err(unsupported());
+    }
     let root = regex::Regex::new(r"<(?:[A-Za-z0-9_.-]+:)?EntityDescriptor\b([^>]*)>")
         .map_err(|_| unsupported())?;
     let caps = root.captures(xml).ok_or_else(unsupported)?;
@@ -1861,4 +1879,37 @@ pub(crate) async fn update_custom_provider(
     .await
     .map_err(db_err("Error updating custom OAuth provider"))?;
     Ok(json_ok(&crate::admin::custom_provider_json(&updated)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const GOOD: &str = r#"<md:EntityDescriptor xmlns:md="urn:oasis:names:tc:SAML:2.0:metadata" entityID="https://idp.example/x"><md:IDPSSODescriptor/></md:EntityDescriptor>"#;
+
+    fn is_501(result: Result<String, GenerateLinkError>) -> bool {
+        matches!(result, Err(GenerateLinkError::NotImplemented(_)))
+    }
+
+    #[test]
+    fn saml_metadata_simple_document_parses() {
+        assert!(matches!(parse_saml_metadata(GOOD), Ok(id) if id == "https://idp.example/x"));
+    }
+
+    #[test]
+    fn saml_metadata_unplaceable_xml_is_501() {
+        let truncated = r#"<EntityDescriptor entityID="x"><IDPSSODescriptor>"#;
+        assert!(is_501(parse_saml_metadata(truncated)));
+        let char_ref = GOOD.replace("idp.example/x", "idp.example/&#65;");
+        assert!(is_501(parse_saml_metadata(&char_ref)));
+        let comment = GOOD.replace("<md:IDPSSODescriptor/>", "<!-- <md:IDPSSODescriptor/> -->");
+        assert!(is_501(parse_saml_metadata(&comment)));
+        let cdata = GOOD.replace(
+            "<md:IDPSSODescriptor/>",
+            "<![CDATA[<md:IDPSSODescriptor/>]]>",
+        );
+        assert!(is_501(parse_saml_metadata(&cdata)));
+        let nested = format!("<outer>{GOOD}{GOOD}</outer>");
+        assert!(is_501(parse_saml_metadata(&nested)));
+    }
 }

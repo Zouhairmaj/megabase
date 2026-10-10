@@ -239,13 +239,13 @@ async fn unimplemented_auth_paths_stay_501() {
     let (status, body, _) = send(
         state(),
         "POST",
-        "/auth/v1/admin/audit",
+        "/auth/v1/admin/unimplemented",
         Some(&demo_service()),
     )
     .await;
     assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
     assert_eq!(body["code"], "MEGABASE_NOT_IMPLEMENTED");
-    assert_eq!(body["unit"], "POST /auth/v1/admin/audit");
+    assert_eq!(body["unit"], "POST /auth/v1/admin/unimplemented");
 }
 
 #[tokio::test]
