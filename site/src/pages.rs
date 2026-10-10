@@ -8,11 +8,6 @@ use crate::metrics::{self, CatalogRow, Metrics, CATALOG};
 use crate::treemap;
 use crate::GITHUB;
 
-/// Standalone conformance percentages stay on [`Metrics`].
-/// Set this to `true` to show them again in the home status panel,
-/// the home treemap header, and the status-page stat card.
-const SHOW_CONFORMANCE_PERCENT: bool = false;
-
 pub fn home(paths: &Paths, metrics: &Metrics) -> String {
     let treemap = treemap_block(metrics);
     let status_panel = status_panel(metrics);
@@ -159,7 +154,7 @@ fn treemap_block(metrics: &Metrics) -> String {
         .passing
         .map(metrics::comma)
         .unwrap_or_else(|| "—".into());
-    let head = treemap_head(metrics, SHOW_CONFORMANCE_PERCENT);
+    let head = treemap_head(metrics, metrics::SHOW_CONFORMANCE_PERCENT);
     let foot_left = if metrics.has_data() {
         format!("{total} units extracted from pinned upstream source · {passing} conformant")
     } else {
@@ -234,8 +229,11 @@ fn status_panel(metrics: &Metrics) -> String {
 </aside>"#,
         alt = esc(&treemap::panel_alt(metrics)),
         passing = esc(&metrics.passing_total_label()),
-        coverage_label = coverage_row_label(SHOW_CONFORMANCE_PERCENT),
-        coverage = esc(&coverage_row_value(metrics, SHOW_CONFORMANCE_PERCENT)),
+        coverage_label = coverage_row_label(metrics::SHOW_CONFORMANCE_PERCENT),
+        coverage = esc(&coverage_row_value(
+            metrics,
+            metrics::SHOW_CONFORMANCE_PERCENT
+        )),
         stage = esc(&metrics.stage),
         legend = four_state_legend_inline(),
     )
@@ -612,21 +610,32 @@ pub fn how_it_works(paths: &Paths, metrics: &Metrics) -> String {
     <p><a class="text-link" href="{GITHUB}" rel="noopener noreferrer">Open the repository ↗</a></p>
   </section>
 </main>"#,
-        strip = day0_strip(metrics),
+        strip = day0_strip(metrics, metrics::SHOW_CONFORMANCE_PERCENT),
     )
 }
 
-fn day0_strip(metrics: &Metrics) -> String {
+fn day0_strip(metrics: &Metrics, show_conformance: bool) -> String {
+    let class = if show_conformance {
+        "day0-strip"
+    } else {
+        "day0-strip day0-strip-3"
+    };
+    let conformance = if show_conformance {
+        format!(
+            "  <div><span class=\"muted\">Conformance</span><strong>{}</strong></div>\n",
+            esc(&metrics.conformance_label())
+        )
+    } else {
+        String::new()
+    };
     format!(
-        r#"<div class="day0-strip">
+        r#"<div class="{class}">
   <div><span class="muted">Units</span><strong>{passing}</strong></div>
   <div><span class="muted">Coverage</span><strong>{coverage}</strong></div>
-  <div><span class="muted">Conformance</span><strong>{conformance}</strong></div>
-  <div><span class="muted">Stage</span><strong class="accent">{stage}</strong></div>
+{conformance}  <div><span class="muted">Stage</span><strong class="accent">{stage}</strong></div>
 </div>"#,
         passing = esc(&metrics.passing_total_label()),
         coverage = esc(&metrics.coverage_label()),
-        conformance = esc(&metrics.conformance_label()),
         stage = esc(&metrics.stage_short),
     )
 }
@@ -717,10 +726,10 @@ pub fn status(paths: &Paths, metrics: &Metrics) -> String {
   </section>
 </main>"#,
         stage = esc(&metrics.stage_short),
-        metric_class = status_metric_class(SHOW_CONFORMANCE_PERCENT),
+        metric_class = status_metric_class(metrics::SHOW_CONFORMANCE_PERCENT),
         passing = esc(&metrics.passing_total_label()),
         coverage = esc(&metrics.coverage_label()),
-        conformance_card = conformance_metric(metrics, SHOW_CONFORMANCE_PERCENT),
+        conformance_card = conformance_metric(metrics, metrics::SHOW_CONFORMANCE_PERCENT),
         humans = esc(&metrics.human_interventions_label()),
         units_headline = esc(&units_headline),
         units_sub = esc(&units_sub),
@@ -767,7 +776,7 @@ pub fn roadmap(paths: &Paths, metrics: &Metrics, extra_md: Option<&str>) -> Stri
   <p class="band"><a class="text-link" href="{status}">SEE LIVE STATUS →</a></p>
   {extra}
 </main>"#,
-        strip = day0_strip(metrics),
+        strip = day0_strip(metrics, metrics::SHOW_CONFORMANCE_PERCENT),
         levels = level_cards(metrics, false),
         status = paths.page("status"),
     )
@@ -1078,6 +1087,17 @@ mod tests {
         assert_eq!(status_metric_class(true), "metric-grid");
         assert!(conformance_metric(&live, true).contains(r#"<p class="muted">Conformance</p>"#));
 
+        let strip_off = day0_strip(&live, false);
+        assert!(strip_off.contains("day0-strip-3"));
+        assert!(!strip_off.contains("Conformance"));
+        assert!(strip_off.contains("Coverage"));
+        assert!(strip_off.contains("Stage"));
+        let strip_on = day0_strip(&live, true);
+        assert!(!strip_on.contains("day0-strip-3"));
+        assert!(
+            strip_on.contains(r#"<span class="muted">Conformance</span><strong>40.0%</strong>"#)
+        );
+
         let home = home(&Paths::home(false), &live);
         let status_html = status(&Paths::nested("status", false), &live);
         assert!(home.contains("<dt>Coverage</dt><dd>40.0%</dd>"));
@@ -1090,10 +1110,24 @@ mod tests {
         assert!(status_html.contains(r#"<p class="muted">Units done</p>"#));
         assert!(status_html.contains(r#"<p class="muted">Coverage</p>"#));
         assert!(status_html.contains(r#"<p class="muted">Human interventions</p>"#));
+        let works = how_it_works(&Paths::nested("how-it-works", false), &live);
+        let road = roadmap(&Paths::nested("roadmap", false), &live, None);
+        assert!(works.contains("day0-strip-3"));
+        assert!(road.contains("day0-strip-3"));
+        assert!(!works.contains(r#"<span class="muted">Conformance</span>"#));
+        assert!(!road.contains(r#"<span class="muted">Conformance</span>"#));
+        let docs_table = crate::docs::status_table(&live);
+        assert!(docs_table.contains("docs-total"));
+        assert!(
+            !docs_table.contains("40.0%"),
+            "docs total row must not render the standalone conformance percentage"
+        );
         let css = include_str!("../static/styles.css");
         assert!(
-            css.contains(".metric-grid-3 {\n  grid-template-columns: repeat(3, 1fr);\n}"),
-            "desktop status cards share three equal columns"
+            css.contains(
+                ".metric-grid-3,\n.day0-strip-3 {\n  grid-template-columns: repeat(3, 1fr);\n}"
+            ),
+            "desktop status cards and the day-0 strip share three equal columns"
         );
         let mobile = css
             .split("@media (max-width: 900px)")

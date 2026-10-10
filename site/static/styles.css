@@ -898,7 +898,8 @@ a:hover {
   border: 1px solid var(--border);
 }
 
-.metric-grid-3 {
+.metric-grid-3,
+.day0-strip-3 {
   grid-template-columns: repeat(3, 1fr);
 }
 

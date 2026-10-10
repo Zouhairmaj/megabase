@@ -382,19 +382,29 @@ pub fn status_table(metrics: &Metrics) -> String {
             tag = metrics::status_tag(block),
         ));
     }
-    let (tot_units, tot_conf, tot_pct) = if any {
-        (
-            metrics::comma(units_total),
-            metrics::comma(conf_total),
-            metrics.conformance_label(),
-        )
+    let (tot_units, tot_conf) = if any {
+        (metrics::comma(units_total), metrics::comma(conf_total))
     } else {
-        ("—".into(), "—".into(), "—".into())
+        ("—".into(), "—".into())
     };
+    let tot_pct = total_row_status(metrics, metrics::SHOW_CONFORMANCE_PERCENT, any);
     rows.push_str(&format!(
         r#"<div class="data-row docs-total" role="row"><span>Total</span><span></span><span></span><span>{tot_units}</span><span>{tot_conf}</span><span>{tot_pct}</span></div></div>"#
     ));
     rows
+}
+
+/// Status cell on the docs total row.
+///
+/// The conformant column stays a unit count. This cell is the only
+/// standalone percentage in the table, and it follows
+/// [`metrics::SHOW_CONFORMANCE_PERCENT`].
+fn total_row_status(metrics: &Metrics, show_conformance: bool, any: bool) -> String {
+    if show_conformance && any {
+        metrics.conformance_label()
+    } else {
+        "—".into()
+    }
 }
 
 fn short_name(row: &CatalogRow) -> &'static str {
@@ -414,6 +424,25 @@ fn short_name(row: &CatalogRow) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn total_row_status_follows_the_conformance_flag() {
+        let mut metrics = Metrics::placeholder();
+        metrics.conformance = Some(40.0);
+        metrics.components = vec![crate::metrics::ComponentBlock::from_counts(
+            "rest", "REST", 0, 0, 0, 2,
+        )];
+        assert_eq!(total_row_status(&metrics, false, true), "—");
+        assert_eq!(total_row_status(&metrics, true, true), "40.0%");
+        assert_eq!(total_row_status(&metrics, true, false), "—");
+        let table = status_table(&metrics);
+        assert!(table.contains("docs-total"));
+        assert!(
+            !table.contains("40.0%"),
+            "the published table follows SHOW_CONFORMANCE_PERCENT"
+        );
+        assert!(table.contains(">2<") || table.contains(">2</span>"));
+    }
 
     #[test]
     fn planned_items_are_not_links() {

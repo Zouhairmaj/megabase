@@ -26,4 +26,4 @@ password and refresh-token grants carry markers. Other HTTP routes are
 still 501.
 
 > [!NOTE]
-> Units passing and coverage are on [megabase.sh/status](https://megabase.sh/status/). The standalone conformance percentage is not shown on that page for now; the README conformance badge is the live Judge publication. The committed `coverage/judge-results.json` is the regression baseline, not that score ([decision 0030](decisions/0030-conformance-is-the-live-judge-score.md)).
+> Units passing and coverage are on [megabase.sh/status](https://megabase.sh/status/). The standalone conformance percentage is not shown on that page for now; the README conformance badge is the live Judge publication ([decision 0032](decisions/0032-hide-standalone-conformance-percent.md)). The committed `coverage/judge-results.json` is the regression baseline, not that score ([decision 0030](decisions/0030-conformance-is-the-live-judge-score.md)).
