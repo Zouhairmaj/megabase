@@ -48,6 +48,9 @@ jobs:
         uses: ./.github/actions/rust-cache
         with:
           workspace: site
+          key: mold
+
+      - uses: ./.github/actions/linux-mold
 
       - name: Generate site
         run: cargo run --manifest-path site/Cargo.toml --release -- --repo-root . --out _site

@@ -13,7 +13,8 @@ agent or human. This file covers only what AGENTS.md does not.
 | Mission and guardrails | `MANIFESTO.md`, `GOAL.md` (humans only) |
 | How to work in this repo | `AGENTS.md` (plus nested `AGENTS.md` per directory) |
 | What is being worked on | GitHub Project [Megabase Backlog](https://github.com/users/Zouhairmaj/projects/1) |
-| Decisions and overall state | `PROGRESS.md` |
+| Current state | `PROGRESS.md` |
+| Decisions | `docs/decisions/NNNN-slug.md` (one new file; no shared list) |
 | Compatibility contract | `docs/COMPATIBILITY.md` |
 | Graphic and UI design | [GOAL.md Design (design-first, Kite)](GOAL.md) (templates and layouts only); [Kite: Megabase identity](https://kite.new/p/megabase-identity), `docs/brand/README.md` |
 | Project docs | [GOAL.md Documentation](GOAL.md); content lives in `docs/` markdown |
