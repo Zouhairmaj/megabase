@@ -1,0 +1,25 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT (\n                            EXISTS (\n                                SELECT 1 FROM auth.identities i\n                                JOIN auth.users u ON u.id = i.user_id\n                                WHERE lower(COALESCE(i.email, '')) = $1\n                                  AND u.aud = $2\n                                  AND u.id <> $3\n                                  AND u.is_sso_user = false\n                                  AND u.instance_id = $4\n                                  AND i.provider NOT LIKE 'sso:%'\n                            )\n                            OR EXISTS (\n                                SELECT 1 FROM auth.users\n                                WHERE instance_id = $4\n                                  AND lower(COALESCE(email, '')) = $1\n                                  AND aud = $2\n                                  AND id <> $3\n                                  AND is_sso_user = false\n                            )\n                         ) AS \"taken!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "taken!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "eee77046384fb22a2aa6e333e004f071fdb657494b4361641a008ea8bb87e3af"
+}
