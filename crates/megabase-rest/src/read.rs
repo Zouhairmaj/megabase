@@ -573,10 +573,10 @@ pub(crate) enum ReadShape {
 }
 
 /// The preferred `Accept` entry: its lowercase essence and whether it carries
-/// `nulls=stripped`. Entries rank by `q` (default 1, `q=0` dropped); ties keep
-/// header order.
+/// `nulls=stripped`. Entries rank by `q` (default 1, `q=0` dropped); ties go to
+/// the more specific entry (no wildcard, `nulls=stripped`), then header order.
 fn preferred_accept(value: Option<&axum::http::HeaderValue>) -> Option<(String, bool)> {
-    let mut best: Option<(f32, String, bool)> = None;
+    let mut best: Option<(f32, i32, String, bool)> = None;
     for entry in header_str(value)?.split(',') {
         let mut pieces = entry.split(';');
         let essence = pieces.next().unwrap_or("").trim().to_ascii_lowercase();
@@ -598,11 +598,15 @@ fn preferred_accept(value: Option<&axum::http::HeaderValue>) -> Option<(String, 
         if quality <= 0.0 {
             continue;
         }
-        if best.as_ref().is_none_or(|(top, _, _)| quality > *top) {
-            best = Some((quality, essence, stripped));
+        let specificity = i32::from(stripped) - i32::from(essence.contains('*'));
+        let better = best.as_ref().is_none_or(|(top, top_specificity, _, _)| {
+            quality > *top || (quality == *top && specificity > *top_specificity)
+        });
+        if better {
+            best = Some((quality, specificity, essence, stripped));
         }
     }
-    best.map(|(_, essence, stripped)| (essence, stripped))
+    best.map(|(_, _, essence, stripped)| (essence, stripped))
 }
 
 /// The 406 `PGRST116` error for a singular read that matched `rows` rows.
@@ -1403,6 +1407,20 @@ mod tests {
         assert_eq!(
             shape("application/vnd.pgrst.object+json;q=0, application/json"),
             None
+        );
+    }
+
+    #[test]
+    fn read_shape_prefers_specific_entry_on_equal_quality() {
+        let hv = |text: &'static str| Some(HeaderValue::from_static(text));
+        let shape = |text: &'static str| ReadShape::from_accept(hv(text).as_ref());
+        assert_eq!(
+            shape("*/*, application/vnd.pgrst.object+json"),
+            Some(ReadShape::Object)
+        );
+        assert_eq!(
+            shape("application/vnd.pgrst.object+json, application/vnd.pgrst.object+json;nulls=stripped"),
+            Some(ReadShape::ObjectStripped)
         );
     }
 
