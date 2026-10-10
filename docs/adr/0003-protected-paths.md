@@ -27,7 +27,8 @@ agreement). CI runs it on every pull request.
 - Edits to `vendor/`, `vendor.toml` or `.gitmodules` after bootstrap.
 - Source files in languages other than Rust (`.py`, `.js`, `.ts`, `.go`,
   `.ex`, `.hs`, `.rb`, `.lua`, `.sh`, …) outside `vendor/`. SQL, TOML,
-  YAML, Markdown and SVG stay allowed.
+  YAML, Markdown and SVG stay allowed. The one exception is the exact
+  path `site/static/db-dither.js` (below).
 
 ### Allowed only on `review/*` branches
 
@@ -103,6 +104,20 @@ count. Deletions stay rejected. Any
 other branch cannot use this exception. This is the logged human
 approval `CODEOWNERS` describes. The reviewer agent still reviews the
 pull request.
+
+### Decorative hero canvas (issue #228)
+
+Owner Zouhair approved one client-side canvas, `site/static/db-dither.js`,
+as the site hero illustration. Product code stays Rust. The guard allows
+that exact path on any branch. A different extension, a different file,
+or a capitalised `.JS` name stays rejected.
+
+The branch `cursor/hero-dither-db-13b4` may also edit
+`tools/megabase-guard/` and append one Completed `HUMAN_LOG.md` entry,
+and only when that new entry names `` `site/static/db-dither.js` ``.
+`judge/`, `.github/`, `CODEOWNERS`, `GOAL.md` and `MANIFESTO.md` stay
+closed on that branch. After it merges, further guard edits still need
+`review/*`.
 
 ## Consequences
 

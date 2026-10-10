@@ -29,6 +29,13 @@ pub const RELEASE_PLEASE_CONFIG: &str = "release-please-config.json";
 /// base branch does not have it yet.
 pub const BOOTSTRAP_BRANCH: &str = "cursor/phase-0-bootstrap-121c";
 
+/// Owner-approved decorative canvas (issue #228). This exact path only.
+pub const DECORATIVE_JS: &str = "site/static/db-dither.js";
+
+/// The one branch that may land the guard change and the `HUMAN_LOG.md`
+/// entry for [`DECORATIVE_JS`]. Further guard edits still need `review/*`.
+pub const DECORATIVE_JS_BRANCH: &str = "cursor/hero-dither-db-13b4";
+
 /// Source extensions of languages other than Rust (GOAL.md rule 1). SQL and
 /// configuration formats are allowed.
 pub const NON_RUST_CODE: &[&str] = &[
@@ -467,10 +474,35 @@ fn release_please_config_ok(change: &Change) -> bool {
             .is_some_and(|(before, after)| is_release_as_deletion_only(before, after))
 }
 
+fn decorative_js_branch(ctx: &Context) -> bool {
+    ctx.head_ref == DECORATIVE_JS_BRANCH
+}
+
+/// A Completed append on the decorative-JS branch that names the canvas path.
+fn decorative_log_ok(change: &Change) -> bool {
+    change.path == "HUMAN_LOG.md"
+        && change.status == Status::Modified
+        && change
+            .before
+            .as_deref()
+            .zip(change.after.as_deref())
+            .is_some_and(|(before, after)| {
+                is_human_log_review_ok(before, after)
+                    && completed_suffix(before, after).is_some_and(|added| {
+                        new_completed_entry(added) && log_names_path(added, DECORATIVE_JS)
+                    })
+            })
+}
+
+fn diff_logs_decorative_js(changes: &[Change]) -> bool {
+    changes.iter().any(decorative_log_ok)
+}
+
 pub fn evaluate(changes: &[Change], ctx: &Context) -> Vec<String> {
     let bootstrap = is_bootstrap(ctx);
     let review = ctx.head_ref.starts_with(REVIEW_BRANCH_PREFIX);
     let release_please = is_release_please(ctx);
+    let decorative = decorative_js_branch(ctx);
     let mut violations = Vec::new();
     for change in changes {
         let path = change.path.as_str();
@@ -506,7 +538,13 @@ pub fn evaluate(changes: &[Change], ctx: &Context) -> Vec<String> {
                 && change.status == Status::Modified
                 && (path == "GOAL.md" || path == "MANIFESTO.md")
                 && mission_edit_is_logged(path, changes);
-            if !creating_empty_log && !bootstrap_goal && !human_log_review && !mission_logged {
+            let decorative_log = decorative && decorative_log_ok(change);
+            if !creating_empty_log
+                && !bootstrap_goal
+                && !human_log_review
+                && !mission_logged
+                && !decorative_log
+            {
                 violations.push(format!(
                     "{path}: human-owned file; only maintainers edit it"
                 ));
@@ -518,11 +556,17 @@ pub fn evaluate(changes: &[Change], ctx: &Context) -> Vec<String> {
                 ));
             }
         } else if matches(path, REVIEWED) && !bootstrap && !review {
-            violations.push(format!(
-                "{path}: reviewed path; change it on a `{REVIEW_BRANCH_PREFIX}*` branch for the reviewer agent"
-            ));
+            let decorative_guard = decorative
+                && matches(path, &["tools/megabase-guard/"])
+                && diff_logs_decorative_js(changes);
+            if !decorative_guard {
+                violations.push(format!(
+                    "{path}: reviewed path; change it on a `{REVIEW_BRANCH_PREFIX}*` branch for the reviewer agent"
+                ));
+            }
         }
-        if change.status != Status::Deleted && !path.starts_with("vendor/") {
+        if change.status != Status::Deleted && !path.starts_with("vendor/") && path != DECORATIVE_JS
+        {
             if let Some(ext) = path.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase()) {
                 if !path.ends_with('/') && NON_RUST_CODE.contains(&ext.as_str()) {
                     violations.push(format!("{path}: .{ext} source; Megabase code is Rust only"));
@@ -1023,6 +1067,70 @@ checksum = \"abc\"
             &ctx("review/ok", false)
         )
         .is_empty());
+    }
+
+    #[test]
+    fn decorative_canvas_js_is_the_only_non_rust_exception() {
+        let c = ctx("issue-228-hero", false);
+        assert!(
+            evaluate(&[add(DECORATIVE_JS)], &c).is_empty(),
+            "{:?}",
+            evaluate(&[add(DECORATIVE_JS)], &c)
+        );
+        assert!(evaluate(&[modified(DECORATIVE_JS, "a", "b")], &c).is_empty());
+        let other = evaluate(&[add("site/static/other.js")], &c);
+        assert_eq!(other.len(), 1);
+        assert!(other[0].contains("Rust only"));
+        assert_eq!(evaluate(&[add("site/static/db-dither.ts")], &c).len(), 1);
+        assert_eq!(evaluate(&[add("site/static/db-dither.JS")], &c).len(), 1);
+    }
+
+    #[test]
+    fn decorative_js_branch_may_land_the_guard_with_a_named_log_entry() {
+        let before = log_with_completed("- **Date**: 2026-10-09\n- **Action**: earlier\n");
+        let after = log_with_completed(
+            "- **Date**: 2026-10-09\n- **Action**: earlier\n\n- **Date**: 2026-10-10\n- **Action**: Owner approved `site/static/db-dither.js`.\n",
+        );
+        let log = modified("HUMAN_LOG.md", &before, &after);
+        let guard = modified("tools/megabase-guard/src/policy.rs", "old", "new");
+        let c = ctx(DECORATIVE_JS_BRANCH, false);
+        let landed = evaluate(&[log.clone(), guard.clone(), add(DECORATIVE_JS)], &c);
+        assert!(landed.is_empty(), "{landed:?}");
+        assert_eq!(
+            evaluate(
+                &[modified("tools/megabase-guard/src/policy.rs", "old", "new")],
+                &c
+            )
+            .len(),
+            1
+        );
+        let unnamed = log_with_completed(
+            "- **Date**: 2026-10-09\n- **Action**: earlier\n\n- **Date**: 2026-10-10\n- **Action**: approved the dither script.\n",
+        );
+        assert_eq!(
+            evaluate(
+                &[modified("HUMAN_LOG.md", &before, &unnamed), guard.clone()],
+                &c
+            )
+            .len(),
+            2
+        );
+        assert_eq!(
+            evaluate(&[log.clone(), add("judge/cases/a.toml")], &c).len(),
+            1
+        );
+        assert_eq!(
+            evaluate(&[log.clone(), add(".github/workflows/ci.yml")], &c).len(),
+            1
+        );
+        assert_eq!(evaluate(&[log.clone(), add("CODEOWNERS")], &c).len(), 1);
+        assert_eq!(
+            evaluate(&[log.clone(), modified("GOAL.md", "old", "new")], &c).len(),
+            1
+        );
+        let other = ctx("cursor/other", false);
+        assert_eq!(evaluate(&[log, guard], &other).len(), 2);
+        assert!(evaluate(&[add(DECORATIVE_JS)], &other).is_empty());
     }
 
     #[test]

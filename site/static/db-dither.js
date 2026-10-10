@@ -13,13 +13,31 @@
   const B = [0,32,8,40,2,34,10,42,48,16,56,24,50,18,58,26,12,44,4,36,14,46,6,38,60,28,52,20,62,30,54,22,
              3,35,11,43,1,33,9,41,51,19,59,27,49,17,57,25,15,47,7,39,13,45,5,37,63,31,55,23,61,29,53,21].map(v => v / 64);
 
-  // LED state: [disk][slot] -> 1 green, 0 grey. Every 3.2 s another judge case "passes".
+  // LED level: [disk][slot] in [0, 1]. Every 3.2 s another judge case "passes".
+  // The last 3.2 s fades those extra greens back to the initial pattern so
+  // the frame at t % LOOP == 0 matches the frame just before the wrap.
   const ORDER = [[1, 1], [2, 0], [2, 1]];
   function ledsAt(t) {
     const leds = [[1, 1], [1, 0], [0, 0]];
-    const flips = Math.floor((t % LOOP) / 3.2);
-    for (let n = 0; n < flips; n++) leds[ORDER[n][0]][ORDER[n][1]] = 1;
+    const phase = (t % LOOP) / 3.2;
+    if (phase < 3) {
+      const flips = Math.floor(phase);
+      for (let n = 0; n < flips; n++) leds[ORDER[n][0]][ORDER[n][1]] = 1;
+    } else {
+      const fade = 1 - (phase - 3);
+      for (let n = 0; n < ORDER.length; n++) leds[ORDER[n][0]][ORDER[n][1]] = fade;
+    }
     return leds;
+  }
+
+  function ledInk(level) {
+    if (level >= 1) return GREEN;
+    if (level <= 0) return GREY;
+    return [
+      Math.round(GREY[0] + (GREEN[0] - GREY[0]) * level),
+      Math.round(GREY[1] + (GREEN[1] - GREY[1]) * level),
+      Math.round(GREY[2] + (GREEN[2] - GREY[2]) * level),
+    ];
   }
 
   function shadeAt(x, y, t) {
@@ -89,10 +107,10 @@
       for (let i = 0; i < 3; i++) {
         const y = Math.round(tops[i] + h / 2 + 9 + bob);
         [cx + 22, cx + 32].forEach((x, k) => {
-          const on = leds[i][k];
-          const blink = on && Math.sin(t * SPIN * 3 + i * 2 + k) > 0.92; // tiny activity flicker
+          const level = leds[i][k];
+          const blink = level >= 1 && Math.sin(t * SPIN * 3 + i * 2 + k) > 0.92; // tiny activity flicker
           fill(Math.round(x) - 2, y - 2, 5, 5, DARK);
-          fill(Math.round(x) - 1, y - 1, 3, 3, on && !blink ? GREEN : GREY);
+          fill(Math.round(x) - 1, y - 1, 3, 3, blink ? GREY : ledInk(level));
         });
       }
       ctx.putImageData(img, 0, 0);

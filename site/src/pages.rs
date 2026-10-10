@@ -1212,6 +1212,10 @@ mod tests {
         assert!(js.contains("DARK = [11, 14, 18]"));
         assert!(js.contains("(y - curve) - pulseY"));
         assert!(js.contains("draw(4.0)"));
+        assert!(
+            js.contains("1 - (phase - 3)"),
+            "extra LEDs fade back to the initial pattern before the loop wraps"
+        );
         assert!(!js.contains("fetch("));
         assert!(!js.contains("XMLHttpRequest"));
         assert!(!js.contains("http://"));
