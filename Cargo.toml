@@ -55,6 +55,8 @@ toml = "0.8"
 ureq = { version = "2", default-features = false, features = ["json"] }
 anyhow = "1"
 base64 = "0.22"
+chacha20 = "0.10"
+hkdf = "0.12"
 hmac = "0.12"
 sha2 = "0.10"
 tokio-postgres = "0.7"
