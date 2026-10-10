@@ -158,9 +158,12 @@ Physically impossible for the agent (repository settings or credentials):
       at `0.1.1`.
 - [ ] Allow `github-actions` to publish GitHub Releases / tags on `main`
 - [x] Enforce CODEOWNERS (“Require review from Code Owners” kept;
-      `enforce_admins` disabled, Zouhair, 2026-10-10). Owner-approved
+      `enforce_admins` disabled, Zouhair, 2026-10-10). The setting is
+      on GitHub branch protection, outside git. Owner-approved
       protected pull requests are merged by admin bypass only on an
-      explicit chat instruction. Logged in `HUMAN_LOG.md`.
+      explicit chat instruction. Logged in `HUMAN_LOG.md`. Root
+      `AGENTS.md` still says that review is not required today; that
+      sentence is stale and waits for a separate `review/*` sync.
 - [x] Coverage commits on `main` are not used. Shields JSON is
       published to the `gh-pages` branch (no exception to branch
       protection).
