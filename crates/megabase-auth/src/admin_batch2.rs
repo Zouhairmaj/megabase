@@ -2257,6 +2257,15 @@ pub(crate) async fn validate_oauth_url(url: &str) -> Result<(), AuthError> {
 }
 
 fn validate_ip(ip: std::net::IpAddr) -> Result<(), AuthError> {
+    // Go `net.IP.To4` unwraps IPv4-mapped IPv6 (`::ffff:a.b.c.d`) before
+    // `IsLoopback`, `IsPrivate`, and `IsLinkLocalUnicast`. Rust's `IpAddr`
+    // checks leave those mapped addresses on the IPv6 path.
+    let ip = match ip {
+        std::net::IpAddr::V6(addr) => addr
+            .to_ipv4_mapped()
+            .map_or(std::net::IpAddr::V6(addr), std::net::IpAddr::V4),
+        addr => addr,
+    };
     if ip.is_loopback() {
         return Err(AuthError::validation(
             400,
@@ -2546,6 +2555,17 @@ mod tests {
             .unwrap_err();
         assert_eq!(
             link_local.message,
+            "URL cannot resolve to link-local addresses"
+        );
+        let mapped = validate_oauth_url("https://[::ffff:127.0.0.1]/")
+            .await
+            .unwrap_err();
+        assert_eq!(mapped.message, "URL cannot resolve to loopback addresses");
+        let mapped_meta = validate_oauth_url("https://[::ffff:169.254.169.254]/")
+            .await
+            .unwrap_err();
+        assert_eq!(
+            mapped_meta.message,
             "URL cannot resolve to link-local addresses"
         );
     }

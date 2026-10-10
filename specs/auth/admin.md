@@ -390,7 +390,8 @@ URLs must be HTTPS. The host is the authority after the last `@`
 (Go `url.URL.Hostname`); a `\` or space in that host is rejected. The host
 must not be localhost, and name lookup (non-blocking, 5 second timeout)
 must not return loopback, private, link-local, multicast, or unspecified
-addresses. `pkce_enabled` defaults true, `enabled`
+addresses. IPv4-mapped IPv6 (`::ffff:a.b.c.d`) is checked as IPv4, matching
+Go `net.IP.To4`. `pkce_enabled` defaults true, `enabled`
 defaults true, `email_optional` defaults false. Empty maps are stored as `{}`.
 Client secret is stored in plaintext when database encryption is disabled
 (the default).
