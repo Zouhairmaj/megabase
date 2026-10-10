@@ -531,9 +531,8 @@ pub(crate) async fn create_user(
     if let Some(nanos) = ban {
         apply_ban(&mut tx, user_id, nanos).await.map_err(fail)?;
     }
+    let user = load_user_json(&mut tx, user_id).await?;
     tx.commit().await.map_err(fail)?;
-    let mut conn = db.acquire().await.map_err(fail)?;
-    let user = load_user_json(&mut conn, user_id).await?;
     Ok(json_ok(&user))
 }
 
@@ -805,12 +804,8 @@ pub(crate) async fn update_user(
     if result.is_err() {
         return Err(fail().into());
     }
+    let user = load_user_json(&mut tx, id).await?;
     tx.commit().await.map_err(|_| fail())?;
-    let mut conn = db
-        .acquire()
-        .await
-        .map_err(db_err("Database error loading user"))?;
-    let user = load_user_json(&mut conn, id).await?;
     Ok(json_ok(&user))
 }
 
@@ -947,14 +942,13 @@ pub(crate) async fn update_factor(
         })),
     )
     .await?;
-    tx.commit().await.map_err(fail)?;
-    let mut conn = db.acquire().await.map_err(fail)?;
-    let factors = load_factors(&mut conn, user_id).await?;
+    let factors = load_factors(&mut tx, user_id).await?;
     let wanted = factor_id.to_string();
     let body = factors
         .into_iter()
         .find(|item| item.get("id").and_then(Value::as_str) == Some(wanted.as_str()))
         .ok_or_else(|| AuthError::not_found("mfa_factor_not_found", "Factor not found"))?;
+    tx.commit().await.map_err(fail)?;
     Ok(json_ok(&body))
 }
 
@@ -1228,10 +1222,9 @@ pub(crate) async fn create_sso_provider(
         .await
         .map_err(|_| fail())?;
     }
+    let row = load_one_sso(&mut tx, &provider_id.to_string()).await?;
+    let body = sso_json(&mut tx, &row, true).await?;
     tx.commit().await.map_err(|_| fail())?;
-    let mut conn = db.acquire().await.map_err(|_| fail())?;
-    let row = load_one_sso(&mut conn, &provider_id.to_string()).await?;
-    let body = sso_json(&mut conn, &row, true).await?;
     Ok(json_status(StatusCode::CREATED, &body))
 }
 
