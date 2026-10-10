@@ -33,18 +33,94 @@ jobs:
       # release-please failures; skipping them keeps the log clean. The
       # job still fails on real errors (config, permissions, API).
       #
-      # RELEASE_PLEASE_TOKEN is preferred: a PAT or GitHub App token that
-      # can create PRs and whose pushes start workflows. GITHUB_TOKEN can
-      # create PRs when the Actions setting is enabled, but a GITHUB_TOKEN
-      # push still does not trigger push/pull_request workflows. The
-      # lockfile job then workflow_dispatches required checks onto that
-      # SHA (see sync-lockfile).
+      # RELEASE_PLEASE_TOKEN is preferred when its tree probe succeeds:
+      # a user or GitHub App push starts workflows; GITHUB_TOKEN does not.
+      # The lockfile job dispatches required checks when that push does
+      # not happen (see sync-lockfile). Required secret permissions are
+      # in PROGRESS.md (Human-only actions).
+      #
+      # The probe POSTs /git/trees with an unreferenced tree (a "probe"
+      # blob on .release-please-manifest.json, not attached to a commit
+      # or branch; GitHub garbage-collects it). Only HTTP 403 and 404
+      # from that call fall back to FALLBACK_TOKEN. Rate limits and 5xx
+      # fail the job so a transient error is not treated as missing scopes.
+      # GH_TOKEN is the credential for the base-tree read. release-please
+      # otherwise hides the GitHub status as "Error adding to tree".
+      - name: Choose a token that can create a git tree
+        id: tree-token
+        env:
+          RELEASE_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          FALLBACK_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          tree_sha="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}" --jq .commit.tree.sha)"
+          last_probe=""
+          last_http=""
+          http_status_from() {
+            local text="$1" code
+            code="$(printf '%s\n' "$text" | sed -n 's/.*HTTP \([0-9][0-9][0-9]\).*/\1/p' | tail -n 1)"
+            if [ -n "$code" ]; then
+              printf '%s' "$code"
+              return 0
+            fi
+            printf '%s\n' "$text" | sed -n 's/.*"status": *"\([0-9][0-9][0-9]\)".*/\1/p' | head -n 1
+          }
+          can_create_tree() {
+            local token="$1"
+            local out code
+            set +e
+            out="$(GH_TOKEN="$token" gh api --method POST "repos/${GITHUB_REPOSITORY}/git/trees" \
+              -f "base_tree=${tree_sha}" \
+              -f 'tree[][path]=.release-please-manifest.json' \
+              -f 'tree[][mode]=100644' \
+              -f 'tree[][type]=blob' \
+              -f 'tree[][content]=probe' 2>&1)"
+            code=$?
+            set -e
+            if [ "$code" -eq 0 ]; then
+              last_probe=""
+              last_http="201"
+              return 0
+            fi
+            last_probe="$(printf '%s' "$out" | tr '\n' ' ' | cut -c1-500)"
+            last_http="$(http_status_from "$last_probe")"
+            return 1
+          }
+          auth_denial() {
+            case "$last_probe" in
+              *[Rr]ate\ limit*|*[Rr]ate-limit*) return 1 ;;
+            esac
+            case "$last_http" in
+              403|404) return 0 ;;
+              *) return 1 ;;
+            esac
+          }
+          if [ -n "${RELEASE_TOKEN}" ] && can_create_tree "${RELEASE_TOKEN}"; then
+            echo "source=release" >> "$GITHUB_OUTPUT"
+            echo "RELEASE_PLEASE_TOKEN can create a git tree."
+            exit 0
+          fi
+          if [ -n "${RELEASE_TOKEN}" ]; then
+            if ! auth_denial; then
+              echo "::error::RELEASE_PLEASE_TOKEN tree probe failed with HTTP ${last_http:-unknown}. This job falls back only for HTTP 403 or 404 that is not a rate limit, so this response is left to retry. GitHub response: ${last_probe}. Permissions: PROGRESS.md Human-only actions."
+              exit 1
+            fi
+            echo "::warning::RELEASE_PLEASE_TOKEN cannot create a git tree (HTTP ${last_http}; release-please would report Error adding to tree: ${GITHUB_SHA}). Falling back to GITHUB_TOKEN for this job. Permissions: PROGRESS.md Human-only actions. GitHub response: ${last_probe}"
+          fi
+          if can_create_tree "${FALLBACK_TOKEN}"; then
+            echo "source=github" >> "$GITHUB_OUTPUT"
+            echo "GITHUB_TOKEN can create a git tree."
+            exit 0
+          fi
+          echo "::error::GITHUB_TOKEN cannot create a git tree on ${GITHUB_SHA} (HTTP ${last_http:-unknown}). The release-please job needs permissions contents: write. GitHub response: ${last_probe}. Permissions: PROGRESS.md Human-only actions."
+          exit 1
       - uses: googleapis/release-please-action@5c625bfb5d1ff62eadeeb3772007f7f66fdcf071 # v4.4.0
         id: release
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
-          token: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
+          token: ${{ steps.tree-token.outputs.source == 'release' && secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
 
   sync-lockfile:
     name: Sync Cargo.lock
@@ -178,7 +254,7 @@ jobs:
             fi
             sleep "${SLEEP_SECS}"
           done
-          echo "::error::Required checks did not start for ${SHA} (need Build, Codecov, Bencher, Protected paths, Judge). A GITHUB_TOKEN push does not trigger push/pull_request workflows. The job dispatches CI/Bencher/Judge or Lockfile required checks; if that also failed, set repo secret RELEASE_PLEASE_TOKEN (PAT or GitHub App installation token with contents:write). Exact steps are in HUMAN_LOG.md."
+          echo "::error::Required checks did not start for ${SHA} (need Build, Codecov, Bencher, Protected paths, Judge). A GITHUB_TOKEN push does not trigger push/pull_request workflows. The job dispatches CI/Bencher/Judge or Lockfile required checks; if that also failed, set RELEASE_PLEASE_TOKEN as described under Human-only actions in PROGRESS.md."
           exit 1
 
   annotate-release:

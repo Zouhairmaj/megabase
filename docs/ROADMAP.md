@@ -106,10 +106,12 @@ crates inherit. The Release workflow runs `cargo update -w` on
 `release-please--branches--*` and commits `Cargo.lock` if workspace
 member versions drifted, so `--locked` CI (Build, Codecov, Bencher,
 Protected paths, Judge) stays green. That commit is pushed with
-`RELEASE_PLEASE_TOKEN` when set (preferred: a PAT or GitHub App whose
-pushes start workflows). `GITHUB_TOKEN` pushes do not trigger
-`push`/`pull_request` workflows; when the secret is unset, the lockfile
-job `workflow_dispatch`es CI, Bencher, and Judge on the release branch
+`RELEASE_PLEASE_TOKEN` when set (a user PAT or GitHub App whose pushes
+start workflows). `GITHUB_TOKEN` pushes do not trigger
+`push`/`pull_request` workflows. Token permissions are under
+Human-only actions in `PROGRESS.md`. When the secret is unset, or the
+lockfile commit was not pushed, the lockfile job `workflow_dispatch`es
+CI, Bencher, and Judge on the release branch
 (native check runs on that SHA). If that ref's workflow files lack
 `workflow_dispatch`, it dispatches **Lockfile required checks** on the
 default branch, which checks out the lockfile SHA and reports Build,
