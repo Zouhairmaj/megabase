@@ -4,6 +4,19 @@ All notable changes to Megabase are documented in this file.
 The format is produced by [release-please](https://github.com/googleapis/release-please).
 Sections: Features, Bug Fixes, Performance, Conformance/judge, Documentation.
 
+## [0.1.2](https://github.com/Zouhairmaj/megabase/compare/v0.1.1...v0.1.2) (2026-10-10)
+
+
+### Features
+
+* **auth:** serve password and refresh_token grants ([#178](https://github.com/Zouhairmaj/megabase/issues/178)) ([951df46](https://github.com/Zouhairmaj/megabase/commit/951df46078c97e9713f2f96e7ae9ee3cf7cf3319))
+* harden the gateway http stack and auth queries ([#179](https://github.com/Zouhairmaj/megabase/issues/179)) ([9e441ad](https://github.com/Zouhairmaj/megabase/commit/9e441ada58bb32f0c860d6d321790929f6db1b1b))
+
+
+### Bug Fixes
+
+* **coverage:** publish main judge results to status ([#177](https://github.com/Zouhairmaj/megabase/issues/177)) ([4a40114](https://github.com/Zouhairmaj/megabase/commit/4a4011444776d417c82f69dbeffcbcdc70112390))
+
 ## [0.1.1](https://github.com/Zouhairmaj/megabase/compare/v0.1.0...v0.1.1) (2026-10-09)
 
 
