@@ -35,6 +35,21 @@ pub struct TableCatalog {
     pub row_security: bool,
     pub indexes: Vec<String>,
     pub constraints: Vec<String>,
+    /// Sorted `grantee:privilege[*]` for the table and `column(c):grantee:privilege[*]`
+    /// for columns. Grantor and owner are not compared; `*` marks grant option.
+    pub acls: Vec<String>,
+    pub policies: Vec<Policy>,
+}
+
+/// One row-level security policy, with roles sorted and expressions normalized.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct Policy {
+    pub name: String,
+    pub command: String,
+    pub permissive: bool,
+    pub roles: Vec<String>,
+    pub using: Option<String>,
+    pub with_check: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
@@ -43,6 +58,7 @@ pub struct Column {
     pub typ: String,
     pub not_null: bool,
     pub generated: Option<String>,
+    pub default: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
@@ -232,6 +248,10 @@ fn table_catalog(client: &mut Client, rel: &Relation) -> Result<Option<TableCata
                 CASE WHEN a.attgenerated = 's'
                      THEN pg_get_expr(ad.adbin, ad.adrelid)
                      ELSE NULL
+                END,
+                CASE WHEN a.attgenerated = ''
+                     THEN pg_get_expr(ad.adbin, ad.adrelid)
+                     ELSE NULL
                 END
            FROM pg_attribute a
            JOIN pg_class c ON c.oid = a.attrelid
@@ -273,7 +293,70 @@ fn table_catalog(client: &mut Client, rel: &Relation) -> Result<Option<TableCata
           ORDER BY pg_get_constraintdef(con.oid)",
         &[&rel.schema, &rel.name],
     )?;
+    let table_acls = client.query(
+        "SELECT COALESCE(r.rolname::text, 'public') || ':' || x.privilege_type
+                || CASE WHEN x.is_grantable THEN '*' ELSE '' END
+           FROM pg_class c
+           JOIN pg_namespace n ON n.oid = c.relnamespace
+           CROSS JOIN LATERAL aclexplode(c.relacl) x
+           LEFT JOIN pg_roles r ON r.oid = x.grantee
+          WHERE n.nspname = $1 AND c.relname = $2",
+        &[&rel.schema, &rel.name],
+    )?;
+    let column_acls = client.query(
+        "SELECT 'column(' || a.attname || '):' || COALESCE(r.rolname::text, 'public')
+                || ':' || x.privilege_type
+                || CASE WHEN x.is_grantable THEN '*' ELSE '' END
+           FROM pg_attribute a
+           JOIN pg_class c ON c.oid = a.attrelid
+           JOIN pg_namespace n ON n.oid = c.relnamespace
+           CROSS JOIN LATERAL aclexplode(a.attacl) x
+           LEFT JOIN pg_roles r ON r.oid = x.grantee
+          WHERE n.nspname = $1 AND c.relname = $2
+            AND a.attnum > 0 AND NOT a.attisdropped",
+        &[&rel.schema, &rel.name],
+    )?;
+    let mut acls: Vec<String> = table_acls
+        .iter()
+        .chain(column_acls.iter())
+        .map(|row| row.get::<_, String>(0))
+        .collect();
+    acls.sort();
+    let policy_rows = client.query(
+        "SELECT p.polname::text,
+                p.polcmd::text,
+                p.polpermissive,
+                ARRAY(SELECT CASE WHEN o = 0 THEN 'public'
+                                  ELSE (SELECT rolname::text FROM pg_roles WHERE oid = o)
+                             END
+                        FROM unnest(p.polroles) AS o),
+                pg_get_expr(p.polqual, p.polrelid),
+                pg_get_expr(p.polwithcheck, p.polrelid)
+           FROM pg_policy p
+           JOIN pg_class c ON c.oid = p.polrelid
+           JOIN pg_namespace n ON n.oid = c.relnamespace
+          WHERE n.nspname = $1 AND c.relname = $2
+          ORDER BY p.polname",
+        &[&rel.schema, &rel.name],
+    )?;
+    let policies = policy_rows
+        .iter()
+        .map(|row| {
+            let mut roles: Vec<String> = row.get(3);
+            roles.sort();
+            Policy {
+                name: row.get(0),
+                command: row.get(1),
+                permissive: row.get(2),
+                roles,
+                using: row.get::<_, Option<String>>(4).map(|s| normalize_sql(&s)),
+                with_check: row.get::<_, Option<String>>(5).map(|s| normalize_sql(&s)),
+            }
+        })
+        .collect();
     Ok(Some(TableCatalog {
+        acls,
+        policies,
         columns: columns
             .iter()
             .map(|row| Column {
@@ -281,6 +364,7 @@ fn table_catalog(client: &mut Client, rel: &Relation) -> Result<Option<TableCata
                 typ: row.get(1),
                 not_null: row.get(2),
                 generated: row.get::<_, Option<String>>(3).map(|s| normalize_sql(&s)),
+                default: row.get::<_, Option<String>>(4).map(|s| normalize_sql(&s)),
             })
             .collect(),
         row_security,
@@ -583,6 +667,44 @@ fn table_diff(raw: &str, reference: &TableCatalog, megabase: &TableCatalog) -> S
             parts.push(format!("constraints only on megabase: {mb_only:?}"));
         }
     }
+    if reference.acls != megabase.acls {
+        let ref_only: Vec<_> = reference
+            .acls
+            .iter()
+            .filter(|a| !megabase.acls.contains(a))
+            .collect();
+        let mb_only: Vec<_> = megabase
+            .acls
+            .iter()
+            .filter(|a| !reference.acls.contains(a))
+            .collect();
+        if !ref_only.is_empty() {
+            parts.push(format!("acls only on the reference stack: {ref_only:?}"));
+        }
+        if !mb_only.is_empty() {
+            parts.push(format!("acls only on megabase: {mb_only:?}"));
+        }
+    }
+    if reference.policies != megabase.policies {
+        let ref_only: Vec<_> = reference
+            .policies
+            .iter()
+            .filter(|p| !megabase.policies.contains(p))
+            .collect();
+        let mb_only: Vec<_> = megabase
+            .policies
+            .iter()
+            .filter(|p| !reference.policies.contains(p))
+            .collect();
+        if !ref_only.is_empty() {
+            parts.push(format!(
+                "policies only on the reference stack: {ref_only:?}"
+            ));
+        }
+        if !mb_only.is_empty() {
+            parts.push(format!("policies only on megabase: {mb_only:?}"));
+        }
+    }
     if parts.is_empty() {
         format!("table `{raw}` catalog differs")
     } else {
@@ -879,10 +1001,13 @@ mod tests {
                 typ: "uuid".into(),
                 not_null: true,
                 generated: None,
+                default: None,
             }],
             row_security: true,
             indexes: vec!["create unique index t_pkey on auth.t using btree (id)".into()],
             constraints: vec!["primary key (id)".into()],
+            acls: vec![],
+            policies: vec![],
         };
         let b = TableCatalog {
             columns: vec![
@@ -892,15 +1017,91 @@ mod tests {
                     typ: "text".into(),
                     not_null: false,
                     generated: Some("lower((identity_data ->> 'email'::text))".into()),
+                    default: None,
                 },
             ],
             row_security: true,
             indexes: a.indexes.clone(),
             constraints: a.constraints.clone(),
+            acls: vec![],
+            policies: vec![],
         };
         let msg = table_diff("auth.identities", &a, &b);
         assert!(msg.contains("column count 1 vs 2"), "{msg}");
         assert!(msg.contains("email"), "{msg}");
+    }
+
+    fn sample_catalog() -> TableCatalog {
+        TableCatalog {
+            columns: vec![Column {
+                name: "id".into(),
+                typ: "uuid".into(),
+                not_null: true,
+                generated: None,
+                default: Some("gen_random_uuid()".into()),
+            }],
+            row_security: true,
+            indexes: vec![],
+            constraints: vec![],
+            acls: vec!["anon:SELECT".into(), "authenticated:INSERT".into()],
+            policies: vec![Policy {
+                name: "own rows".into(),
+                command: "r".into(),
+                permissive: true,
+                roles: vec!["authenticated".into()],
+                using: Some("(auth.uid() = id)".into()),
+                with_check: None,
+            }],
+        }
+    }
+
+    #[test]
+    fn matching_acls_defaults_and_policies_do_not_differ() {
+        assert_eq!(sample_catalog(), sample_catalog());
+    }
+
+    #[test]
+    fn acl_difference_fails() {
+        let a = sample_catalog();
+        let mut b = a.clone();
+        b.acls.push("anon:DELETE".into());
+        assert_ne!(a, b);
+        let msg = table_diff("public.t", &a, &b);
+        assert!(msg.contains("acls only on megabase"), "{msg}");
+        assert!(msg.contains("anon:DELETE"), "{msg}");
+    }
+
+    #[test]
+    fn column_default_difference_fails() {
+        let a = sample_catalog();
+        let mut b = a.clone();
+        b.columns[0].default = None;
+        assert_ne!(a, b);
+        let msg = table_diff("public.t", &a, &b);
+        assert!(msg.contains("gen_random_uuid()"), "{msg}");
+    }
+
+    #[test]
+    fn each_policy_field_difference_fails() {
+        let a = sample_catalog();
+        let edits: [fn(&mut Policy); 6] = [
+            |p| p.name = "other".into(),
+            |p| p.command = "w".into(),
+            |p| p.permissive = false,
+            |p| p.roles = vec!["anon".into()],
+            |p| p.using = Some("(true)".into()),
+            |p| p.with_check = Some("(true)".into()),
+        ];
+        for edit in edits {
+            let mut b = a.clone();
+            edit(&mut b.policies[0]);
+            assert_ne!(a, b);
+            let msg = table_diff("public.t", &a, &b);
+            assert!(msg.contains("policies only on"), "{msg}");
+        }
+        let mut missing = a.clone();
+        missing.policies.clear();
+        assert_ne!(a, missing);
     }
 
     #[test]
