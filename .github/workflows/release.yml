@@ -171,13 +171,21 @@ jobs:
           token: ${{ needs.release-please.outputs.token_source == 'classic' && secrets.RELEASE_PLEASE_CLASSIC_TOKEN || needs.release-please.outputs.token_source == 'release' && secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
       - name: Checkout the release-please branch
         id: branch
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
           set -euo pipefail
           git fetch origin '+refs/heads/release-please--branches--*:refs/remotes/origin/release-please--branches--*'
           mapfile -t BRANCHES < <(git for-each-ref --format='%(refname:short)' 'refs/remotes/origin/release-please--branches--*' | sed 's#^origin/##')
           if [ "${#BRANCHES[@]}" -eq 0 ]; then
-            echo "exists=false" >> "$GITHUB_OUTPUT"
-            echo "No release-please branch on origin."
+            # The release pull request is already merged and its branch is
+            # gone. The release commit on the default branch bumped
+            # Cargo.toml and left Cargo.lock behind (0.1.5). Sync that
+            # branch and push the lockfile commit there.
+            echo "No release-please branch on origin. Syncing Cargo.lock on ${DEFAULT_BRANCH}."
+            git checkout -B "${DEFAULT_BRANCH}" "origin/${DEFAULT_BRANCH}"
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "name=${DEFAULT_BRANCH}" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           BRANCH="${BRANCHES[0]}"
@@ -365,9 +373,11 @@ jobs:
           # the same check names onto this SHA via the Checks API.
           # Dispatch whenever checks are missing. A classic or release
           # token push starts pull_request workflows on the release
-          # branch. ci.yml, bencher.yml, and judge.yml listen for push
-          # only on main, so skip dispatch only when that push used
-          # classic or release and BRANCH is the default branch.
+          # branch, and push workflows on the default branch. ci.yml,
+          # bencher.yml, and judge.yml listen for push only on main, so
+          # skip dispatch only when that push used classic or release
+          # and BRANCH is the default branch. BRANCH is the default
+          # branch when the release-please branch is already gone.
           # pushed_with is github when the probe fell back or a 403
           # retry used GITHUB_TOKEN. Also dispatch when this step did
           # not push.

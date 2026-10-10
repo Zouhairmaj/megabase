@@ -111,6 +111,11 @@ lockfile job restores `Cargo.toml` from the merge-base with the default
 branch, sets only `[workspace.package].version` from
 `.release-please-manifest.json`, runs `cargo update -w`, and commits
 `Cargo.toml` and `Cargo.lock` when those version fields changed.
+When the release-please branch is already gone, that job checks out
+the default branch and pushes the lockfile commit there. The 0.1.5
+merge did not: Sync Cargo.lock exited 0 on a missing branch, and
+`cargo --locked` failed because workspace packages in `Cargo.lock`
+were still `0.1.4`.
 `megabase-guard` rejects any other edit in those files, including a
 registry package version in `Cargo.lock`. `--locked` CI
 (Build, Codecov, Bencher, Protected paths, Judge) stays green. That
@@ -128,10 +133,10 @@ falls back, or that push is denied, the push uses `GITHUB_TOKEN`, which
 does not trigger `push`/`pull_request` workflows. The lockfile
 job `workflow_dispatch`es CI, Bencher, and Judge on the release branch
 unless that push used the classic or release token and the branch is the
-default branch. Those three workflows run on `push` only for `main`,
-and the lockfile commit is on `release-please--branches--*`, so a
-classic or release token push there still dispatches (native check runs
-on that SHA). The same dispatch runs when the probe selected `GITHUB_TOKEN`,
+default branch. Those three workflows run on `push` only for `main`.
+A lockfile commit on `release-please--branches--*` still needs that
+dispatch. A lockfile commit on the default branch does not: a classic
+or release token push there starts the `push` workflows. The same dispatch runs when the probe selected `GITHUB_TOKEN`,
 the push was retried with `GITHUB_TOKEN`, or the commit was not pushed. If that ref's workflow files lack
 `workflow_dispatch`, it dispatches **Lockfile required checks** on the
 default branch, which checks out the lockfile SHA and reports Build,
