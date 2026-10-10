@@ -12,7 +12,7 @@ change this file only for current state, blocked items, and judge disputes.
 
 ## Current phase
 
-PHASE 0 COMPLETE. Level 1 feature work is in progress.
+PHASE 0 COMPLETE. Zouhair reviewed it on 2026-10-10: validated with modifications (`HUMAN_LOG.md`). Level 1 feature work is in progress. Level 1 is not validated until #199.
 
 ## Pins
 
@@ -115,7 +115,7 @@ None.
       Backlog** Status aligned with `issue-<n>-*` branches, PRs and
       `blocked` (needs repo secret `PROJECT_TOKEN`)
 
-**PHASE 0 COMPLETE — awaiting human review.**
+**PHASE 0 COMPLETE — owner review 2026-10-10: validated with modifications.** Follow-ups: #198, #199, #200, #201, #202, #203. Recorded in `HUMAN_LOG.md`.
 
 ## Human-only actions
 
@@ -157,7 +157,8 @@ Physically impossible for the agent (repository settings or credentials):
       are `0.1.2` (`54594f0`); the denied workflow push had left them
       at `0.1.1`.
 - [ ] Allow `github-actions` to publish GitHub Releases / tags on `main`
-- [ ] Enforce CODEOWNERS
+- [x] Enforce CODEOWNERS (“Require review from Code Owners” with admin
+      enforcement, Zouhair, 2026-10-10). Logged in `HUMAN_LOG.md`.
 - [x] Coverage commits on `main` are not used. Shields JSON is
       published to the `gh-pages` branch (no exception to branch
       protection).
