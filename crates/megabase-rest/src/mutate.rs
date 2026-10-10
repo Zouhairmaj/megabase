@@ -777,15 +777,16 @@ async fn primary_key(
     sqlx::query_scalar(
         "SELECT a.attname::text
          FROM pg_constraint AS k
+         CROSS JOIN LATERAL unnest(k.conkey) WITH ORDINALITY AS u(attnum, ord)
          JOIN pg_attribute AS a
-           ON a.attrelid = k.conrelid AND a.attnum = ANY (k.conkey)
+           ON a.attrelid = k.conrelid AND a.attnum = u.attnum
          JOIN pg_class AS c ON c.oid = k.conrelid
          JOIN pg_namespace AS n ON n.oid = c.relnamespace
          WHERE k.contype = 'p'
            AND n.nspname = $1
            AND c.relname = $2
            AND NOT a.attisdropped
-         ORDER BY a.attname",
+         ORDER BY u.ord",
     )
     .bind(schema)
     .bind(relation)
