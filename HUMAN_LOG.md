@@ -96,4 +96,5 @@ Each entry should include:
 - **Date**: 2026-10-11
 - **Action**: Owner Zouhair approved in chat pinning the Studio reference image `supabase/studio:2026.08.03-sha-022b374` on the `supabase` pin in `vendor.toml`, for Phase 0 review item 1.7 (issue #198).
 - **Reason**: `vendor.toml` is a protected path; agents cannot change it. The digest was verified by the Judge side beforehand.
+- **Merge**: On 2026-10-11 the owner also explicitly approved admin-merging PR #274 despite the red `Protected paths` check, which always fails on `vendor.toml` because `tools/megabase-guard` treats it as frozen after bootstrap. This is a one-off owner decision, not a guard exception.
 - **Files affected**: `vendor.toml`, `HUMAN_LOG.md`, `coverage/` (regenerated)
