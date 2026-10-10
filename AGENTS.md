@@ -9,10 +9,12 @@ Cursor Cloud Agent environment: [`.cursor/environment.json`](.cursor/environment
 
 **At the start of every session**, read `GOAL.md` (and `MANIFESTO.md` once),
 `PROGRESS.md`, `coverage/summary.json` and the
-[board](https://github.com/users/Zouhairmaj/projects/1). Before you edit a
-directory, read its own `AGENTS.md` if it has one (`crates/`, `judge/`,
-`tools/`, `site/`). Nested files add local detail and never loosen a rule
-here. Do not assume your tool loads them automatically.
+[board](https://github.com/users/Zouhairmaj/projects/1). Decisions are
+files in `docs/decisions/` (`NNNN-slug.md`); add a new file instead of
+editing a shared list. Before you edit a directory, read its own
+`AGENTS.md` if it has one (`crates/`, `judge/`, `tools/`, `site/`). Nested
+files add local detail and never loosen a rule here. Do not assume your
+tool loads them automatically.
 
 ## Commands
 
@@ -117,7 +119,9 @@ Two references, not a second style guide:
 | `crates/` | product code: one crate per component, plus `megabase-core` (shared), `megabase-server` (gateway), `megabase` (binary) |
 | `specs/<component>/<unit>.md` | written from `vendor/` before the code |
 | `tools/megabase-coverage`, `tools/megabase-backlog`, `site/` | see their `AGENTS.md` |
-| `PROGRESS.md`, `docs/adr/` | decisions, blocked items, judge disputes. Changing a GOAL.md §4 choice needs an ADR |
+| `PROGRESS.md` | current state, blocked items, judge disputes |
+| `docs/decisions/` | one file per decision (`NNNN-slug.md`). Add a file; do not edit a shared list |
+| `docs/adr/` | architecture decisions. Changing a GOAL.md §4 choice needs an ADR |
 | `judge/`, `.github/`, `tools/megabase-guard/`, `CODEOWNERS` | **only on a `review/*` branch**, approved by the reviewer agent ⛔ |
 | `vendor/`, `vendor.toml`, `.gitmodules` | **never**. This is the frozen spec; only humans bump pins ⛔ |
 | `GOAL.md`, `MANIFESTO.md`, `HUMAN_LOG.md` | **humans only** ⛔ |
@@ -197,7 +201,9 @@ The board must match reality at all times.
 - [ ] Docs are **edited in place**: rewrite the affected section, and never
       append text that restates existing content. One fact, one place.
 - [ ] An issue comment records what changed and what you learned.
-      `PROGRESS.md` holds only decisions that outlive the issue.
+      `PROGRESS.md` holds state that outlives the issue (blocked items,
+      judge disputes). A decision is a new file
+      `docs/decisions/NNNN-slug.md`, not a new row in a shared list.
 
 ## Hard rules
 

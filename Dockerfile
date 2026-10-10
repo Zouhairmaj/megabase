@@ -17,7 +17,13 @@ COPY .sqlx .sqlx
 COPY crates crates
 COPY tools tools
 COPY judge/harness judge/harness
+# mold speeds the link. The package is installed in this stage, so the flag
+# is only set where the linker exists.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends mold \
+    && rm -rf /var/lib/apt/lists/*
 ENV SQLX_OFFLINE=true
+ENV RUSTFLAGS="-C link-arg=-fuse-ld=mold"
 RUN cargo build --release --locked -p megabase -p megabase-judge --bin megabase --bin megabase-healthcheck
 
 FROM public.ecr.aws/docker/library/debian:bookworm-slim@sha256:7c7b2c966bc9ee8cedfeef67e0e279108992c77681fa595db4a9d65c06ccc587

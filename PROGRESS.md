@@ -1,7 +1,14 @@
 # Megabase progress
 
 GitHub is the source of truth for **what is being worked on**. This file is
-the source of truth for **decisions and overall state**.
+the source of truth for **current state** (phase, pins, status, level gates,
+tracking). Decisions are one file each under
+[`docs/decisions/`](docs/decisions/).
+
+GOAL.md §10 and §11 still name this file for decisions as well as state.
+GOAL.md is human-only, so that wording stays until a human updates it.
+Until then, agents follow AGENTS.md: add `docs/decisions/NNNN-slug.md`, and
+change this file only for current state, blocked items, and judge disputes.
 
 ## Current phase
 
@@ -56,203 +63,10 @@ Do not start a level until the previous threshold holds.
 
 ## Decisions
 
-All of the following were **approved by the agent coordinator**. None are
-waiting on a human.
-
-1. **Vendor pins** (2026-10-09). Latest stable tags of the nine upstream
-   repositories, recorded in `vendor.toml` and the table above.
-2. **Proposal 0001** (Accepted). Bounded compatibility contract
-   (`docs/COMPATIBILITY.md`); stronger judge (hidden tests, DB
-   side-effects, concurrency, fault injection, adversarial cases — design
-   in `judge/README.md`); level gates in the table above. Level 5 deferred.
-3. **Rust tooling** ([ADR 0001](docs/adr/0001-rust-tooling.md)). Coverage,
-   guard, backlog and judge are Rust. No Python.
-4. **Gateway layout** ([ADR 0002](docs/adr/0002-gateway-layout.md)). Kong
-   prefix matching; Studio fallback; `/_megabase/health`.
-5. **Protected paths** ([ADR 0003](docs/adr/0003-protected-paths.md)).
-   Human-owned files always rejected; frozen spec always rejected after
-   bootstrap; `judge/`, CI and the guard only on `review/*`. The Phase 0
-   bootstrap exception applies solely to branch
-   `cursor/phase-0-bootstrap-121c` while `main` still has no `vendor.toml`.
-   `release-please--branches--*` may change only `CHANGELOG.md`,
-   `.release-please-manifest.json`, `Cargo.toml`, `Cargo.lock`, and
-   delete `release-as` from `release-please-config.json`. `review/*`
-   may append or complete `HUMAN_LOG.md` Pending items (grows must
-   start a new `- ` item; shrinks must end at a `- **Date**` item)
-   and grow the Completed section.
-6. **README status is generated.** PRs run `megabase-coverage update`;
-   `check` is a required CI job. Agents keep it current. CI does not
-   commit generated files to `main` (branch protection requires a PR).
-   After Judge on `main`, `.github/workflows/pages-badges.yml` publishes
-   shields JSON to the `gh-pages` branch. `coverage/judge-results.json`
-   in git is the regression baseline; feature PRs restore it from
-   `origin/main`. Status is one
-   full-width nested treemap (`coverage/treemap.svg`, light:
-   `coverage/treemap-light.svg`); the website embeds the same files.
-   Totals come from `coverage/units.json`.
-7. **Design-first.** Rule: [GOAL.md Design (design-first, Kite)](GOAL.md).
-   Kite file: [megabase-identity](https://kite.new/p/megabase-identity).
-   Kite holds templates and layouts only, not content. Only a new layout
-   or component needs Kite first. Agent-decided, approved by the lead.
-8. **Delegation.** The maintainer delegated decisions to the agent
-   coordinator. Humans still own `GOAL.md`, `MANIFESTO.md`, `HUMAN_LOG.md`
-   and repository settings.
-9. **Repository URL.** GitHub is `Zouhairmaj/megabase`. README badges and
-   links (CI, clone, issues, verified-app submissions) use that owner, not
-   a previous placeholder.
-10. **NOTICE follows LICENSE files.** SPDX in `NOTICE` / `vendor.toml` is
-    taken from each pin's `LICENSE` file. Auth (`vendor/auth`) and Edge
-    Runtime (`vendor/edge-runtime`) are MIT. Postgres Meta's LICENSE is
-    Apache-2.0 (its `package.json` at this pin says MIT; NOTICE follows
-    LICENSE).
-11. **Versioning.** Policy lives only in
-    [`docs/ROADMAP.md`](docs/ROADMAP.md#versioning-and-releases)
-    (Phase 0 = `0.1.0`, each Level a minor, `1.0.0` at Level 5,
-    patch between gates, weekly Monday release PR). Changelog sections:
-    Features, Bug Fixes, Performance, Conformance/judge, Documentation.
-    `chore` / `ci` / `test` are hidden.
-12. **Board Status reflects reality.** Agents claim an issue (assign +
-    **In progress**, branch `issue-<n>-<slug>`, PR `Closes #<n>`) before
-    coding. `.github/workflows/board-sync.yml` mirrors Status from those
-    signals plus `blocked`. `GOAL.md` is human-owned after this PR; the
-    contract is in `AGENTS.md`. `tools/megabase-backlog` is the
-    idempotent SoT for the board: match `<!-- megabase-id -->`, GraphQL
-    Status option ids (including Blocked), sub-issues and blocked-by.
-13. **Continuous benchmarking.** Criterion benches start with a trivial
-    gateway health/route measurement. Bencher project `megabase` (created
-    on the fly if missing) tracks `main` and PRs (`rust_criterion`, t-test
-    upper boundary 0.99, `--error-on-alert`). Fork PRs skip without the
-    secret.
-14. **Documentation.** Rule: [GOAL.md Documentation](GOAL.md).
-    `docs/` markdown (megabase.sh/docs) is a first-class deliverable and
-    the content source of truth. New doc pages reuse the Kite article
-    template (no new mockup). Same-PR updates; truthful; reviewers block
-    stale or missing docs. Agent-decided, approved by the lead.
-15. **release-please + Docker pins.** Workspace versions use
-    `version.workspace = true`, so release-please's `rust` strategy
-    errors (`value at path package.version is not tagged`). Config uses
-    `release-type: simple` and bumps `[workspace.package].version` only.
-    `bootstrap-sha` is the Phase 0 merge (`7aa41e8`, exclusive) so
-    changelog collection skips non-conventional `Day 0` / `[phase0]` /
-    `[brand]` commits. The first release is still Phase 0 at `0.1.0`
-    (`release-as`). The v0.1.0 release PR must delete `release-as`
-    before it merges.
-    Container `FROM` lines are pinned by digest (root image via
-    `public.ecr.aws/docker/library`, and `.cursor/Dockerfile`). Cloud Agent `rustup-init` and
-    `cargo-binstall` downloads in `.cursor/Dockerfile` are pinned by
-    SHA-256 and verified before exec (no `curl|sh`). That pin is the
-    two bootstrap binaries only; the `stable` toolchain they install and
-    later `cargo binstall` tool fetches remain unpinned.
-16. **README coverage/conformance badge colors.** Owner-specified
-    traffic-light steps for the shields.io endpoint JSON only:
-    `#e05d44` below 50%, `#fe7d37` from 50% to under 90%, `#00D892` at
-    90% and above (`flat-square`). Treemap chips and generated SVG
-    badges stay on the brand greens in `docs/brand/README.md`.
-17. **Owned lockfiles.** Scorecard/OSV flagged RUSTSEC-2026-0206
-    (`rustybuzz` unmaintained) and RUSTSEC-2026-0192 (`ttf-parser`
-    unmaintained) in `site/Cargo.lock`, not the workspace lockfile and
-    not `vendor/`. `site/` is excluded from the workspace, so root
-    `cargo audit` missed them. Fix: `resvg` 0.45 → 0.48 (harfrust +
-    skrifa). `just audit` and the CI `cargo-audit` matrix (#157) each
-    pass `--file` for every owned lockfile (`Cargo.lock`,
-    `site/Cargo.lock`); a workspace-only run misses `site/`. `vendor/**`
-    lockfiles stay frozen; do not add an OSV ignore unless a finding
-    exists only there.
-18. **Judge databases are separate** (2026-10-09, issue #113). Side-effect
-    checks compare the official cluster's `postgres` database with a
-    dedicated `megabase` database on the same instance (`megabase-judge
-    prepare` on host port 54322, then `DATABASE_URL=…/megabase`). Sharing
-    one database would make catalog and row comparisons vacuous or
-    inverted. Level 1
-    snapshots `auth.users` and `public.todos` after mutating HTTP cases
-    (per-case row delta) and compares `auth` table/function catalogs
-    including `pg_get_constraintdef`. A required catalog object missing
-    on both databases fails; `auth.sso_sessions` is required absent
-    (`absent = true`). A missing fixture snapshot table on the reference
-    still aborts. `storage.objects` stays Level 2.
-19. **Signed releases.** When release-please creates a GitHub Release (or
-    a human dispatches Release with an existing tag), CI builds musl-static
-    linux `x86_64` and `aarch64` `megabase` binaries, writes `SHA256SUMS`,
-    signs blobs keylessly with Sigstore (`cosign sign-blob`), attaches SLSA
-    provenance (`.intoto.jsonl` via `actions/attest-build-provenance`), and
-    publishes `ghcr.io/zouhairmaj/megabase` tagged with the version
-    (`cosign sign`). `id-token: write` is only on that signing job. Install
-    and verify: [`docs/install.md`](docs/install.md). Goal: OpenSSF Scorecard
-    Packaging and Signed-Releases.
-20. **No coverage push to `main`; judge images off Docker Hub.** The
-    `Update coverage on main` job only rewrote
-    `coverage/judge-results.json` (PRs already commit regenerated
-    coverage). It is removed. Live badge JSON is published to the
-    `gh-pages` branch and `_site/coverage/` for shields.io. Judge
-    compose pulls digest-pinned images from `public.ecr.aws` / `ghcr.io`
-    so anonymous Docker Hub 429s do not fail CI. Root `Dockerfile`
-    `FROM` lines use `public.ecr.aws/docker/library` at the same
-    digests. `cargo deny` runs on the runner (`taiki-e/install-action`),
-    not via `EmbarkStudios/cargo-deny-action` (that action builds
-    `docker.io/library/rust` and hits the same anonymous 429). When
-    `DOCKERHUB_TOKEN` is set, Judge, the container image job, cargo-deny,
-    and the lockfile compose job log in to Docker Hub first
-    (`docker/login-action` v4.6.0, via
-    `.github/actions/dockerhub-login`) and skip login when the secret is
-    empty. A timeout talking to `auth.docker.io` is retried, then
-    ignored, so the digest-pinned mirrors still pull. The ECR library
-    Kong image has no `/entrypoint.sh`. The compose override uses
-    `entrypoint: !override` (Compose would otherwise append the vendor
-    entrypoint, which execs the missing path and leaves `supabase-kong`
-    unhealthy) and rewrites that one path to `/docker-entrypoint.sh`.
-    Pages badge publication is `.github/workflows/pages-badges.yml`
-    (`workflow_run` only, no cache action). It checks out the default
-    branch and does not set `actions/checkout` `ref` from the triggering
-    run (Scorecard Dangerous-Workflow treats that ref as an untrusted
-    checkout). It applies the Judge JSON as data only when that checkout
-    is the Judge commit, then publishes shields JSON only. A newer
-    `main` waits for the next Judge run. `.github/workflows/pages.yml`
-    is push and `workflow_dispatch` only, checks out the event SHA, and
-    does not download `gh-pages` or a Judge artifact. It saves the
-    default-branch Rust cache on pushes to `main`. `pages-badges.yml`
-    does not deploy the site.
-21. **Auth HTTP defaults follow the reference stack** (2026-10-09, issue
-    #15). The judge starts Megabase with `JWT_SECRET` and `DATABASE_URL`
-    only, so unset `GOTRUE_*` must match `vendor/supabase/docker/.env.example`
-    plus `judge/compose.override.yml` (`GOTRUE_MAILER_AUTOCONFIRM=true`),
-    not GoTrue's zero values. Email and phone providers default on,
-    anonymous users off, signup enabled, phone autoconfirm on, audience
-    and default group `authenticated`, expiry 3600, issuer
-    `http://localhost:8000/auth/v1`. Signup settings do not parse
-    `GOTRUE_JWT_ADMIN_ROLES`. `/auth/v1/admin` keeps the GoTrue unset
-    default from issue #6 (`service_role,supabase_admin`). bcrypt cost is
-    10 (Go's `DefaultCost`).
-    An unset `JWT_SECRET` fails signup before insert. A present secret
-    shorter than 32 bytes aborts startup (decision in #170). Phone signup,
-    anonymous signup, and email signup with autoconfirm off stay HTTP 501.
-22. **Rust agent ergonomics** (2026-10-09). Cloud Agent setup warms the
-    registry and check cache (`cargo fetch`, then
-    `cargo check --workspace --all-targets`, in `.cursor/environment.json`).
-    Agents iterate with per-crate `cargo check` / `cargo clippy` and run
-    full tests only before pushing. `[workspace.lints.clippy]` denies the
-    clone and borrow lints; CI clippy stays `-D warnings`. `deny.toml`
-    bans external crates that are not on the `[bans] allow` list (the
-    current lockfile graph, plus `sqlx` and `jsonwebtoken`). Propose a
-    new crate with the steps in that file.
-23. **Rust supply-chain and API checks** (2026-10-09). Workspace
-    package metadata, `[workspace.dependencies]`, and
-    `lints.workspace = true` were already in place (decision 22). This
-    adds `[workspace.lints.rust] unsafe_code = "forbid"` and moves the
-    remaining direct deps (`bcrypt`, `chrono`, `uuid`, `criterion`)
-    into `[workspace.dependencies]`. `site/` repeats the forbid lint
-    because it stays outside the workspace. `fuzz/` does not: the
-    libfuzzer harness emits `unsafe`. `cargo-vet` 0.10 imports Mozilla,
-    Google, and Bytecode Alliance audits; everything else is an
-    exemption in `supply-chain/config.toml` (36 audited, 184 exempted
-    at introduction). CI runs `cargo vet --locked`. Unused dependencies
-    use `cargo-machete` (stable). `cargo-udeps` needs nightly, so it is
-    not the CI tool. `cargo hack check --each-feature` runs only on
-    workspace crates that declare features, so it does not rebuild the
-    workspace while none do. API style for new code is the short list
-    in `AGENTS.md` (Pragmatic Rust Guidelines and Rust API Guidelines):
-    newtypes, dedicated error types, `Result` for input failures, and
-    rustdoc. `megabase-server` no longer depends on `megabase-pooler`;
-    Supavisor has no Kong prefix (ADR 0002) and the crate was unused.
+One file per decision in [`docs/decisions/`](docs/decisions/). Add
+`NNNN-slug.md` with the next free number. Do not append to a list in this
+file. Aligning GOAL.md §10 and §11 with that rule is a human follow-up
+under Human-only actions.
 
 ## Tracking
 
@@ -313,12 +127,24 @@ Physically impossible for the agent (repository settings or credentials):
 - [x] Allow GitHub Actions to create and approve pull requests
       (Settings → Actions → General → Workflow permissions;
       `can_approve_pull_request_reviews=true`. Run 37961663758 predates it.)
-- [ ] Set secret `RELEASE_PLEASE_TOKEN` (PAT or GitHub App) so lockfile
-      pushes on the release branch start required checks natively
-      (`GITHUB_TOKEN` pushes do not trigger `push`/`pull_request`
-      workflows). Preferred even though Release now
-      `workflow_dispatch`es those checks when the secret is unset.
-      Exact steps: `HUMAN_LOG.md` Pending, 2026-10-09.
+- [ ] Grant `RELEASE_PLEASE_TOKEN` the permissions release-please uses.
+      Fine-grained PAT or GitHub App for `Zouhairmaj/megabase`:
+      **Contents: Read and write** and **Pull requests: Read and write**.
+      Contents write is what
+      [Create a tree](https://docs.github.com/rest/git/trees#create-a-tree)
+      and
+      [Create a release](https://docs.github.com/rest/releases/releases#create-a-release)
+      require. The tree probe and the release commit only add
+      `.release-please-manifest.json`, `CHANGELOG.md`, and `Cargo.toml`
+      on top of `base_tree`; they do not change `.github/workflows`, so
+      this flow does not need Workflows write. A 403 on that tree call
+      is what release-please prints as `Error adding to tree`. Run
+      38003872424 failed with `Resource not accessible by personal
+      access token` on create-a-release after pull request #144 merged,
+      which is the same Contents write gap. Classic PAT: `repo`. The
+      Release workflow probes the tree call and falls back to
+      `GITHUB_TOKEN` only on HTTP 403 or 404. Lockfile pushes keep using
+      this secret so required checks start natively.
 - [ ] Allow `github-actions` to publish GitHub Releases / tags on `main`
 - [ ] Enforce CODEOWNERS
 - [x] Coverage commits on `main` are not used. Shields JSON is
@@ -355,6 +181,10 @@ Physically impossible for the agent (repository settings or credentials):
       `v0.1.0`) so that release gains signed assets (it shipped without
       binaries). Scorecard Signed-Releases looks at the last five
       GitHub Releases.
+- [ ] Update GOAL.md §10 and §11 so the decisions record is
+      `docs/decisions/`, matching this file and
+      [decision 0020](docs/decisions/0020-one-file-per-decision.md).
+      GOAL.md is human-owned. Agents do not edit it to close that gap.
 
 Log each of these in `HUMAN_LOG.md` when it is done. The delegation of
 decisions itself is a human intervention to log.

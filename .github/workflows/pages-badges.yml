@@ -10,6 +10,7 @@ name: Publish coverage badges
 # actions/checkout ref from the triggering run: Scorecard
 # Dangerous-Workflow treats that ref as an untrusted checkout. The
 # Judge file below is data, interpreted by the default-branch tools.
+# Policy for applying that data: status::judge_results_apply.
 
 on:
   workflow_run:
@@ -20,7 +21,9 @@ permissions:
   contents: read
 
 concurrency:
-  group: pages-badges
+  # Same group as pages.yml so a baseline site deploy cannot overlap
+  # this job and put the all-fail summary back on megabase.sh.
+  group: pages
   cancel-in-progress: false
 
 jobs:
@@ -46,12 +49,14 @@ jobs:
           persist-credentials: false
           submodules: recursive
 
-      # Publish only when this checkout is the commit Judge ran. A newer
-      # main is left for the next Judge run. Do not check that commit out.
-      - name: Judge commit matches checkout
+      # Apply the artifact when the Judge commit is this checkout or an
+      # ancestor of it. Main usually moves during the Judge run, so an
+      # equality check drops the results. Do not check that commit out.
+      - name: Judge commit is contained in checkout
         id: match
         env:
           JUDGE_SHA: ${{ github.event.workflow_run.head_sha }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           checked_out="$(git rev-parse HEAD)"
@@ -59,10 +64,31 @@ jobs:
             echo "Judge SHA is not a commit id" >&2
             exit 1
           fi
+          if [[ ! "$checked_out" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "Checkout SHA is not a commit id" >&2
+            exit 1
+          fi
           if [ "$checked_out" = "$JUDGE_SHA" ]; then
             echo "match=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Retry a transient compare failure. Do not treat it as match=false:
+          # a green skip is how results were dropped. The last failure exits.
+          status=""
+          attempt=1
+          until status="$(gh api --jq '.status // empty' "repos/${GITHUB_REPOSITORY}/compare/${JUDGE_SHA}...${checked_out}")"; do
+            if [ "$attempt" -ge 3 ]; then
+              echo "Compare API failed for $JUDGE_SHA...$checked_out" >&2
+              exit 1
+            fi
+            sleep $((attempt * 2))
+            attempt=$((attempt + 1))
+          done
+          if [ "$status" = "ahead" ] || [ "$status" = "identical" ]; then
+            echo "Judge commit $JUDGE_SHA is contained in $checked_out ($status). Applying results as data."
+            echo "match=true" >> "$GITHUB_OUTPUT"
           else
-            echo "Judge results are for $JUDGE_SHA; checkout is $checked_out. Skipping publish."
+            echo "Judge results are for $JUDGE_SHA; checkout is $checked_out ($status). Skipping publish."
             echo "match=false" >> "$GITHUB_OUTPUT"
           fi
 
@@ -93,34 +119,42 @@ jobs:
         if: steps.match.outputs.match == 'true'
         run: |
           cargo run --manifest-path site/Cargo.toml --release -- --repo-root . --out _site
-          if [ -f _site/coverage/badge-coverage.json ]; then
-            echo "shields=true" >> "$GITHUB_OUTPUT"
-          fi
+          test -f _site/coverage/summary.json
+          test -f _site/coverage/badge-coverage.json
+          test -f _site/coverage/badge-conformance.json
+          test -f _site/coverage/treemap.png
+          test -f _site/coverage/treemap-light.png
+          echo "shields=true" >> "$GITHUB_OUTPUT"
 
-      - name: Upload coverage JSON
+      - name: Upload site
         if: steps.match.outputs.match == 'true'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: coverage-json
-          path: _site/coverage
+          name: pages-site
+          path: _site
           if-no-files-found: error
           retention-days: 1
 
   deploy:
-    name: Publish shields JSON
+    name: Publish shields JSON and site
     needs: build
     if: needs.build.result == 'success' && needs.build.outputs.shields == 'true'
     runs-on: ubuntu-latest
-    # Does not check the repository out. The site itself is
-    # deployed only by pages.yml from the event SHA.
+    # Does not check the repository out. The Judge JSON was already
+    # interpreted by the default-branch tools in the build job.
     permissions:
       contents: write
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - name: Download coverage JSON
+      - name: Download site
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
-          name: coverage-json
-          path: _site/coverage
+          name: pages-site
+          path: _site
 
       - name: Publish shields JSON to gh-pages
         uses: peaceiris/actions-gh-pages@84c30a85c19949d7eee79c4ff27748b70285e453 # v4.1.0
@@ -131,6 +165,20 @@ jobs:
           user_name: github-actions[bot]
           user_email: 41898282+github-actions[bot]@users.noreply.github.com
           commit_message: "ci(coverage): publish shields JSON"
-          # This branch is only shields JSON. The site is deployed by
-          # actions/deploy-pages, so the orphan commit is the whole branch.
+          # This branch is shields JSON plus the README treemap PNGs.
+          # The site HTML is deployed by actions/deploy-pages.
           force_orphan: true
+
+      - name: Configure Pages
+        uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5
+        with:
+          enablement: true
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3
+        with:
+          path: _site
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5
