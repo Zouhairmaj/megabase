@@ -41,7 +41,7 @@ optional `alias:` prefix and a `!left` or `!inner` suffix on `<name>`.
 ## Out of scope (still 501)
 
 Join hints (`!fk_name`, column hints), spread (`...name(...)`), nested
-embeds, filters/order/limit on embedded resources, many-to-many through a
+embeds, empty embeds (`notes()`, filter-only upstream), filters/order/limit on embedded resources, many-to-many through a
 junction table, self-references, several candidate keys (`PGRST201`), and
 embeds in write responses.
 

@@ -764,6 +764,10 @@ fn try_relation<'a>(at: &mut At<'a>) -> Result<Option<SelectItem>, PErr> {
         return Ok(Some(SelectItem::Defer(QueryFail::Route)));
     }
     let inner_text = &at.input[open..at.byte - 1];
+    // An empty embed (`notes()`) means "filter only" upstream; not served yet.
+    if inner_text.trim().is_empty() {
+        return Ok(Some(SelectItem::Defer(QueryFail::Route)));
+    }
     let select = match parse_select(inner_text)? {
         ParsedSelect::Ready(select) if !matches!(select, SelectList::Mixed(_)) => select,
         ParsedSelect::Ready(_) => return Ok(Some(SelectItem::Defer(QueryFail::Route))),
@@ -2166,6 +2170,12 @@ mod tests {
             parse_get_query("select=notes!fk(body)").unwrap_err(),
             QueryFail::Route
         ));
+        for empty in ["select=id,notes()", "select=notes!inner()", "select=notes( )"] {
+            assert!(matches!(
+                parse_get_query(empty).unwrap_err(),
+                QueryFail::Route
+            ));
+        }
         assert!(matches!(
             parse_get_query("select=notes(a(b))").unwrap_err(),
             QueryFail::Route
