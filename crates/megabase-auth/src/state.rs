@@ -17,8 +17,6 @@ pub struct AuthState {
     pub oauth_server_enabled: bool,
     pub custom_oauth_enabled: bool,
     pub admin_roles: Vec<String>,
-    /// `SITE_URL` / `GOTRUE_SITE_URL`. Reference stack default `http://localhost:3000`.
-    pub site_url: String,
     /// `GOTRUE_URI_ALLOW_LIST`, or `ADDITIONAL_REDIRECT_URLS` when that is unset.
     /// Comma-separated redirect globs. Empty when neither variable is set.
     pub uri_allow_list: Vec<String>,
@@ -29,7 +27,6 @@ pub struct AuthState {
     pub mailer_recovery_path: String,
     pub mailer_email_change_path: String,
     pub otp_length: usize,
-    pub secure_email_change: bool,
     pub cursor_pagination: bool,
     /// Signup and settings flags. Unset `GOTRUE_*` follows the reference stack.
     pub config: AuthConfig,
@@ -65,7 +62,6 @@ impl AuthState {
             oauth_server_enabled: env_bool(lookup("GOTRUE_OAUTH_SERVER_ENABLED").as_deref(), false),
             custom_oauth_enabled: env_bool(lookup("GOTRUE_CUSTOM_OAUTH_ENABLED").as_deref(), true),
             admin_roles: admin_roles(&lookup),
-            site_url: config.site_url.clone(),
             uri_allow_list: uri_allow_list(&lookup),
             api_external_url: first_nonempty(
                 &lookup,
@@ -77,7 +73,6 @@ impl AuthState {
             mailer_recovery_path: mailer_path(&lookup, "RECOVERY"),
             mailer_email_change_path: mailer_path(&lookup, "EMAIL_CHANGE"),
             otp_length: otp_length(lookup("GOTRUE_MAILER_OTP_LENGTH").as_deref()),
-            secure_email_change: config.secure_email_change,
             cursor_pagination: env_bool(
                 lookup("GOTRUE_EXPERIMENTAL_CURSOR_PAGINATION_ENABLED").as_deref(),
                 false,
@@ -102,7 +97,6 @@ impl AuthState {
             oauth_server_enabled: defaults.oauth_server_enabled,
             custom_oauth_enabled: defaults.custom_oauth_enabled,
             admin_roles: defaults.admin_roles,
-            site_url: config.site_url.clone(),
             uri_allow_list: defaults.uri_allow_list,
             api_external_url: defaults.api_external_url,
             mailer_confirmation_path: defaults.mailer_confirmation_path,
@@ -110,7 +104,6 @@ impl AuthState {
             mailer_recovery_path: defaults.mailer_recovery_path,
             mailer_email_change_path: defaults.mailer_email_change_path,
             otp_length: defaults.otp_length,
-            secure_email_change: config.secure_email_change,
             cursor_pagination: defaults.cursor_pagination,
             config,
             backend,
@@ -209,7 +202,7 @@ mod tests {
         assert!(!state.is_admin_role(Some("anon")));
         assert!(state.config.mailer_autoconfirm);
         assert!(state.config.email_enabled);
-        assert_eq!(state.site_url, "http://localhost:3000");
+        assert_eq!(state.config.site_url, "http://localhost:3000");
         assert!(state.uri_allow_list.is_empty());
         assert_eq!(state.api_external_url, "http://localhost:8000/auth/v1");
         assert_eq!(state.mailer_confirmation_path, "/auth/v1/verify");
@@ -217,7 +210,7 @@ mod tests {
         assert_eq!(state.mailer_recovery_path, "/auth/v1/verify");
         assert_eq!(state.mailer_email_change_path, "/auth/v1/verify");
         assert_eq!(state.otp_length, 6);
-        assert!(state.secure_email_change);
+        assert!(state.config.secure_email_change);
         assert!(!state.cursor_pagination);
     }
 
@@ -237,9 +230,7 @@ mod tests {
             "GOTRUE_MAILER_SECURE_EMAIL_CHANGE_ENABLED" => Some("f".into()),
             _ => None,
         });
-        assert_eq!(shared.site_url, shared.config.site_url);
-        assert_eq!(shared.site_url, "https://app.example");
-        assert!(!shared.secure_email_change);
+        assert_eq!(shared.config.site_url, "https://app.example");
         assert!(!shared.config.secure_email_change);
     }
 

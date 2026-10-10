@@ -531,7 +531,7 @@ async fn apply_link(
             })
         }
         "email_change_current" | "email_change_new" => {
-            if !state.secure_email_change && link_type == "email_change_current" {
+            if !state.config.secure_email_change && link_type == "email_change_current" {
                 return Err(AuthError::validation(
                     400,
                     "Enable secure email change to generate link for current email",
@@ -954,14 +954,14 @@ fn link_referrer(
         .and_then(|value| value.to_str().ok())
         .unwrap_or("");
     let allow = state.uri_allow_list.as_slice();
-    let mut referrer = if redirect_ok(&state.site_url, primary, allow)? {
+    let mut referrer = if redirect_ok(&state.config.site_url, primary, allow)? {
         primary.to_string()
-    } else if redirect_ok(&state.site_url, referer, allow)? {
+    } else if redirect_ok(&state.config.site_url, referer, allow)? {
         referer.to_string()
     } else {
-        state.site_url.clone()
+        state.config.site_url.clone()
     };
-    if redirect_ok(&state.site_url, body_redirect, allow)? {
+    if redirect_ok(&state.config.site_url, body_redirect, allow)? {
         referrer = body_redirect.to_string();
     }
     Ok(referrer)
@@ -2747,7 +2747,7 @@ mod tests {
 
     fn referrer_state(allow: Vec<String>) -> AuthState {
         let mut state = AuthState::from_lookup(|_| None);
-        state.site_url = "https://example.com".into();
+        state.config.site_url = "https://example.com".into();
         state.uri_allow_list = allow;
         state
     }

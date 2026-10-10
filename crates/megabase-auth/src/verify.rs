@@ -76,7 +76,7 @@ pub(crate) async fn verify_get(
         return error.into_response();
     }
     let redirect = match redirect_target(
-        &state.site_url,
+        &state.config.site_url,
         &state.uri_allow_list,
         query_param(query, "redirect_to").as_deref(),
         headers
@@ -109,7 +109,7 @@ pub(crate) async fn verify_get(
         email: String::new(),
         aud: request_aud(&headers, &state.config),
         autoconfirm: state.config.mailer_autoconfirm,
-        secure_email_change: state.secure_email_change,
+        secure_email_change: state.config.secure_email_change,
         otp_exp_seconds: state.config.mailer_otp_exp_seconds,
     };
     match state.backend.verify(&request).await {
@@ -193,7 +193,7 @@ pub(crate) async fn verify_post(
         email: prepared.email,
         aud: request_aud(&headers, &state.config),
         autoconfirm: state.config.mailer_autoconfirm,
-        secure_email_change: state.secure_email_change,
+        secure_email_change: state.config.secure_email_change,
         otp_exp_seconds: state.config.mailer_otp_exp_seconds,
     };
     match state.backend.verify(&request).await {
