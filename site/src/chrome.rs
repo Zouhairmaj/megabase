@@ -294,9 +294,9 @@ pub fn header(paths: &Paths, logo: &str, version: &str) -> String {
 
     format!(
         r#"<header class="site-header">
-  <div class="brand-lockup">
-    <a class="brand" href="{home}">{logo}<span class="wordmark">MEGABASE</span></a>
-    <a class="version-badge" href="{release}" rel="noopener noreferrer" title="{version_text}"><span class="version-badge-label">{version_text}</span></a>
+  <div class="brand">
+    <a class="brand-home" href="{home}">{logo}<span class="wordmark">MEGABASE</span></a>
+    <a class="version-pill" href="{release}" rel="noopener noreferrer">{version_text}</a>
   </div>
   <nav class="nav-desktop" aria-label="Primary">{desktop}</nav>
   <details class="nav-mobile">
@@ -502,15 +502,18 @@ tokio = { version = "1.40" }
     #[test]
     fn header_places_one_release_badge_beside_the_wordmark() {
         let html = header(&Paths::home(false), "<svg></svg>", "1.2.3");
+        let wordmark = html
+            .find(r#"<span class="wordmark">MEGABASE</span>"#)
+            .expect("wordmark");
         let badge = html
-            .find(r#"<a class="version-badge" href="https://github.com/Zouhairmaj/megabase/releases/tag/v1.2.3" rel="noopener noreferrer" title="v1.2.3"><span class="version-badge-label">v1.2.3</span></a>"#)
-            .expect("badge");
-        let brand_open = html.find(r#"<a class="brand""#).expect("brand");
-        let brand_close = html[brand_open..].find("</a>").expect("brand close") + brand_open;
+            .find(r#"<a class="version-pill" href="https://github.com/Zouhairmaj/megabase/releases/tag/v1.2.3" rel="noopener noreferrer">v1.2.3</a>"#)
+            .expect("pill");
         let nav = html.find(r#"class="nav-desktop""#).expect("nav");
-        assert!(brand_close < badge && badge < nav);
-        assert_eq!(html.matches("class=\"version-badge\"").count(), 1);
+        assert!(wordmark < badge && badge < nav);
+        assert!(html.contains(r#"<div class="brand">"#));
+        assert_eq!(html.matches("class=\"version-pill\"").count(), 1);
+        assert!(!html.contains("version-badge"));
         let footer = footer(&Paths::home(false), "<svg></svg>");
-        assert!(!footer.contains("version-badge"));
+        assert!(!footer.contains("version-pill"));
     }
 }

@@ -1007,7 +1007,7 @@ mod tests {
             )
             .expect("version fixture");
         });
-        let needle = r#"<a class="version-badge" href="https://github.com/Zouhairmaj/megabase/releases/tag/v1.2.3" rel="noopener noreferrer" title="v1.2.3"><span class="version-badge-label">v1.2.3</span></a>"#;
+        let needle = r#"<a class="version-pill" href="https://github.com/Zouhairmaj/megabase/releases/tag/v1.2.3" rel="noopener noreferrer">v1.2.3</a>"#;
         for rel in [
             "index.html",
             "manifesto/index.html",
@@ -1024,14 +1024,13 @@ mod tests {
                 "{rel} used the site package version"
             );
             let footer = html.split("site-footer").nth(1).expect("footer");
-            assert!(
-                !footer.contains("version-badge"),
-                "{rel} footer has a badge"
-            );
+            assert!(!footer.contains("version-pill"), "{rel} footer has a badge");
         }
         let css = fs::read_to_string(out.join("styles.css")).unwrap();
-        assert!(css.contains(".version-badge"));
-        assert!(css.contains("#00d89214"));
+        assert!(css.contains(".version-pill"));
+        assert!(css.contains("rgba(0, 216, 146, 0.08)"));
+        assert!(css.contains("border-radius: 0"));
+        assert!(css.contains("#005441"));
         let _ = fs::remove_dir_all(&out);
     }
 
