@@ -27,6 +27,13 @@ concurrency:
 permissions:
   contents: read
 
+env:
+  # Composite actions cannot read secrets or vars. Empty on fork PRs.
+  SCCACHE_R2_ACCESS_KEY_ID: ${{ secrets.SCCACHE_R2_ACCESS_KEY_ID }}
+  SCCACHE_R2_SECRET_ACCESS_KEY: ${{ secrets.SCCACHE_R2_SECRET_ACCESS_KEY }}
+  SCCACHE_BUCKET_NAME: ${{ vars.SCCACHE_BUCKET }}
+  SCCACHE_ENDPOINT_URL: ${{ vars.SCCACHE_ENDPOINT }}
+
 jobs:
   changes:
     name: Path filter
@@ -76,6 +83,9 @@ jobs:
           toolchain: stable
           components: rustfmt, clippy
 
+      - uses: ./.github/actions/sccache
+        if: needs.changes.result != 'success' || needs.changes.outputs.site != 'false'
+
       # Trusted event SHA only. Do not download gh-pages or a
       # workflow_run artifact here: this job saves the default-branch
       # Rust cache. Live badges and the Judge-aware site are published
@@ -109,3 +119,7 @@ jobs:
           path: _site
           if-no-files-found: error
           retention-days: 1
+
+      - name: sccache stats
+        if: always() && !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.site != 'false')
+        run: sccache --show-stats

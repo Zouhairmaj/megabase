@@ -1,0 +1,66 @@
+# Shared compiler cache for every job that invokes rustc.
+# Same-repository runs use Cloudflare R2. Fork pull requests do not receive
+# repository secrets, so they keep sccache's local disk and still pass.
+# SCCACHE_GHA_ENABLED is set false below. sccache rejects two remote
+# backends, and the shared cache this action is for is R2.
+name: sccache
+description: >
+  Install sccache and point it at R2 when the bucket variables and keys
+  are set. Otherwise use the local disk.
+
+runs:
+  using: composite
+  steps:
+    - name: Select sccache backend
+      shell: bash
+      # Composite actions cannot read secrets or vars. Callers export
+      # SCCACHE_R2_ACCESS_KEY_ID, SCCACHE_R2_SECRET_ACCESS_KEY,
+      # SCCACHE_BUCKET_NAME, and SCCACHE_ENDPOINT_URL. Fork pull requests
+      # export the keys as empty, and this step then keeps the local disk.
+      run: |
+        set -euo pipefail
+        # Incremental compilation does not land in sccache.
+        echo "CARGO_INCREMENTAL=0" >> "$GITHUB_ENV"
+        echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
+        # The setup action exports Actions cache URLs. Keep that backend off
+        # so it cannot combine with R2 (sccache errors on two remotes).
+        echo "SCCACHE_GHA_ENABLED=false" >> "$GITHUB_ENV"
+
+        access_key="${SCCACHE_R2_ACCESS_KEY_ID:-}"
+        secret_key="${SCCACHE_R2_SECRET_ACCESS_KEY:-}"
+        bucket="${SCCACHE_BUCKET_NAME:-}"
+        endpoint="${SCCACHE_ENDPOINT_URL:-}"
+
+        # Repo variables are visible on fork PRs. Secrets are not. Require
+        # both keys and both variables, or sccache would try S3 and fail
+        # every rustc invocation.
+        if [ -z "$access_key" ] || [ -z "$secret_key" ] || [ -z "$bucket" ] || [ -z "$endpoint" ]; then
+          echo "sccache: local disk (R2 keys or SCCACHE_BUCKET / SCCACHE_ENDPOINT are unset)"
+          exit 0
+        fi
+        case "${bucket}${endpoint}" in
+          *$'\n'*|*$'\r'*)
+            echo "sccache: local disk (bucket or endpoint contains a newline)"
+            exit 0
+            ;;
+        esac
+
+        {
+          echo "SCCACHE_BUCKET=${bucket}"
+          echo "SCCACHE_ENDPOINT=${endpoint}"
+          echo "SCCACHE_REGION=auto"
+          echo "SCCACHE_S3_USE_SSL=true"
+          echo "SCCACHE_S3_KEY_PREFIX=sccache"
+          echo "AWS_ACCESS_KEY_ID<<__MEGABASE_SCCACHE_KEY__"
+          printf '%s\n' "$access_key"
+          echo "__MEGABASE_SCCACHE_KEY__"
+          echo "AWS_SECRET_ACCESS_KEY<<__MEGABASE_SCCACHE_SECRET__"
+          printf '%s\n' "$secret_key"
+          echo "__MEGABASE_SCCACHE_SECRET__"
+        } >> "$GITHUB_ENV"
+        echo "sccache: R2 read-write (bucket ${bucket}, region auto)"
+
+    - name: Install sccache
+      uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+      with:
+        version: v0.18.0

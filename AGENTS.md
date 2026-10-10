@@ -64,6 +64,16 @@ and `workflow_dispatch` run every shard. Add a line to
 gets `judge/cases/<shard>.toml`; until then those crates run every
 shard. See [Pull request checks](docs/contributing.md#pull-request-checks).
 
+Compiling jobs wrap rustc with sccache. Pushes and same-repository pull
+requests store compiler artifacts in the R2 bucket from `SCCACHE_BUCKET`
+(endpoint `SCCACHE_ENDPOINT`, region `auto`). Fork pull requests do not
+receive repository secrets, so sccache stays on the local disk and the
+job still passes. `Swatinem/rust-cache` caches the Cargo registry and git
+database only. CI tests are `cargo nextest` (`.config/nextest.toml`
+profile `ci`); doctests stay `cargo test --doc`. Codecov runs nextest
+and doctest coverage with `cargo +nightly llvm-cov`. See
+[0035](docs/decisions/0035-ci-sccache-r2.md).
+
 `fuzz/` is a standalone cargo-fuzz workspace (excluded from the root
 workspace). Targets: `jwt` (`megabase-core` HS256 + `bearer_token`),
 `gateway_http` (URI / Kong prefix matching), `rest_query` (stub query-string

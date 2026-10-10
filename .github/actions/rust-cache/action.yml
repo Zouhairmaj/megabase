@@ -1,6 +1,12 @@
 # Pin and policy live here so every compiling job uses the same cache.
 # Swatinem/rust-cache v2.9.2 ignores its `key` input when `shared-key` is
 # set, so profile suffixes are folded into shared-key.
+#
+# cache-targets is false. sccache is the compiler cache (R2, or local disk
+# on fork PRs). Restoring target/ would skip rustc and leave that cache
+# cold. The registry and git database are still cached. Profile suffixes
+# stay in shared-key so turning target caching back on cannot mix an
+# llvm-cov or bencher target directory with a normal build.
 name: Rust cache
 description: Cache Cargo workspaces. Save only on pushes to main.
 inputs:
@@ -20,4 +26,5 @@ runs:
       with:
         workspaces: ${{ inputs.workspace == 'site' && 'site -> target' || inputs.workspace == 'fuzz' && 'fuzz -> target' || '. -> target' }}
         shared-key: ${{ inputs.key != '' && format('{0}-{1}', inputs.workspace, inputs.key) || inputs.workspace }}
+        cache-targets: "false"
         save-if: ${{ github.ref == 'refs/heads/main' && github.event_name == 'push' }}

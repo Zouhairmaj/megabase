@@ -120,7 +120,7 @@ SUGGESTED 10 Met, 3 Unmet, 1 N/A.
 
 | Criterion | Level | Status | Justification | Evidence |
 |---|---|---|---|---|
-| `test` | MUST | Met | `cargo test --workspace --locked` is the public FLOSS suite, and CI runs it. | [.github/workflows/ci.yml](https://github.com/Zouhairmaj/megabase/blob/main/.github/workflows/ci.yml) |
+| `test` | MUST | Met | `cargo test --workspace --locked` is the public suite (`just test`). CI runs those tests with `cargo nextest` and doctests with `cargo test --doc`. | [.github/workflows/ci.yml](https://github.com/Zouhairmaj/megabase/blob/main/.github/workflows/ci.yml) |
 | `test_invocation` | SHOULD | Met | `cargo test` is the standard Rust invocation. | [README](https://github.com/Zouhairmaj/megabase/blob/main/README.md) |
 | `test_most` | SUGGESTED | Unmet | Codecov on main (2026-10-09) reports 51.32% line coverage and no branch coverage, which is not most branches. | [Codecov](https://codecov.io/gh/Zouhairmaj/megabase) |
 | `test_continuous_integration` | SUGGESTED | Met | GitHub Actions runs the workspace test suite on pull requests that are not site-only and on every push to main. Site crate tests run in `pages.yml` when a pull request changes a site-generator input. A docs-only path the generator does not read, such as `docs/decisions/`, sets both flags false and runs neither suite. | [.github/workflows/ci.yml](https://github.com/Zouhairmaj/megabase/blob/main/.github/workflows/ci.yml), [.github/workflows/pages.yml](https://github.com/Zouhairmaj/megabase/blob/main/.github/workflows/pages.yml) |

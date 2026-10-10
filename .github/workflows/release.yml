@@ -14,6 +14,13 @@ on:
 permissions:
   contents: read
 
+env:
+  # Composite actions cannot read secrets or vars. Empty on fork PRs.
+  SCCACHE_R2_ACCESS_KEY_ID: ${{ secrets.SCCACHE_R2_ACCESS_KEY_ID }}
+  SCCACHE_R2_SECRET_ACCESS_KEY: ${{ secrets.SCCACHE_R2_SECRET_ACCESS_KEY }}
+  SCCACHE_BUCKET_NAME: ${{ vars.SCCACHE_BUCKET }}
+  SCCACHE_ENDPOINT_URL: ${{ vars.SCCACHE_ENDPOINT }}
+
 # One Release run at a time. Overlapping runs still race inside a single
 # job: release-please caches the `main` tree by branch name, then commits
 # onto a newer SHA. The lockfile job repairs that. Queuing only stops two
@@ -427,6 +434,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
         with:
           toolchain: stable
+      - uses: ./.github/actions/sccache
       - uses: ./.github/actions/rust-cache
         with:
           key: coverage-conformance
@@ -617,6 +625,9 @@ jobs:
           gh release view "$TAG" --json body --jq .body > /tmp/release-body.md
           cat /tmp/delta.md >> /tmp/release-body.md
           gh release edit "$TAG" --notes-file /tmp/release-body.md
+      - name: sccache stats
+        if: always()
+        run: sccache --show-stats
 
   # OpenSSF Scorecard Packaging + Signed-Releases: attach musl-static linux
   # binaries, SHA256SUMS, cosign keyless .sig/.pem, SLSA .intoto.jsonl, and
@@ -668,6 +679,7 @@ jobs:
         with:
           toolchain: stable
           targets: ${{ matrix.target }}
+      - uses: ./.github/actions/sccache
       - uses: ./.github/actions/rust-cache
         with:
           key: release-${{ matrix.target }}
@@ -704,6 +716,9 @@ jobs:
           path: dist/${{ env.ASSET }}
           if-no-files-found: error
           retention-days: 5
+      - name: sccache stats
+        if: always()
+        run: sccache --show-stats
 
   sign-and-publish:
     name: Sign and publish
@@ -797,6 +812,8 @@ jobs:
           tags: |
             type=raw,value=${{ env.TAG }}
             type=raw,value=${{ steps.version.outputs.version }}
+      # Compiles inside Docker. sccache stays on the runner jobs
+      # (docs/decisions/0035-ci-sccache-r2.md).
       - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         id: image
         with:

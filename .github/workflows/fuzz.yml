@@ -24,6 +24,11 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: 0
+  # Composite actions cannot read secrets or vars. Empty on fork PRs.
+  SCCACHE_R2_ACCESS_KEY_ID: ${{ secrets.SCCACHE_R2_ACCESS_KEY_ID }}
+  SCCACHE_R2_SECRET_ACCESS_KEY: ${{ secrets.SCCACHE_R2_SECRET_ACCESS_KEY }}
+  SCCACHE_BUCKET_NAME: ${{ vars.SCCACHE_BUCKET }}
+  SCCACHE_ENDPOINT_URL: ${{ vars.SCCACHE_ENDPOINT }}
 
 jobs:
   changes:
@@ -69,11 +74,15 @@ jobs:
         with:
           toolchain: nightly
 
+      - uses: ./.github/actions/sccache
+        if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
+      # Registry and git db only. sccache holds compiler outputs.
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
         with:
           workspaces: fuzz
           key: fuzz-${{ matrix.target }}
+          cache-targets: "false"
 
       - uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
         if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
@@ -119,3 +128,7 @@ jobs:
           path: fuzz/artifacts/
           if-no-files-found: ignore
           retention-days: 14
+
+      - name: sccache stats
+        if: always() && !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.server != 'false')
+        run: sccache --show-stats

@@ -1,0 +1,13 @@
+# Nextest does not pick this profile from the CI environment variable.
+# CI jobs select it with `--profile ci`.
+#
+# retries = 2 runs a failed test up to three times. Nextest prints each
+# attempt (TRY n). A test that never passes fails the job. A test that
+# passes on a later attempt is listed as flaky; the failed attempt stays
+# in the log (`failure-output`). Timeouts fail the test.
+
+[profile.ci]
+fail-fast = false
+retries = 2
+failure-output = "immediate-final"
+slow-timeout = { period = "60s", terminate-after = 3, on-timeout = "fail" }

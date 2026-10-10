@@ -20,6 +20,11 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: 0
+  # Composite actions cannot read secrets or vars. Empty on fork PRs.
+  SCCACHE_R2_ACCESS_KEY_ID: ${{ secrets.SCCACHE_R2_ACCESS_KEY_ID }}
+  SCCACHE_R2_SECRET_ACCESS_KEY: ${{ secrets.SCCACHE_R2_SECRET_ACCESS_KEY }}
+  SCCACHE_BUCKET_NAME: ${{ vars.SCCACHE_BUCKET }}
+  SCCACHE_ENDPOINT_URL: ${{ vars.SCCACHE_ENDPOINT }}
 
 # Latency is a percentage boundary on the `latency` measure, which
 # `rust_criterion` reports in nanoseconds. Upper boundary `0.75` means the
@@ -82,6 +87,8 @@ jobs:
         with:
           toolchain: stable
 
+      - uses: ./.github/actions/sccache
+        if: (needs.changes.result != 'success' || needs.changes.outputs.server != 'false') && env.BENCHER_API_KEY != ''
       - uses: ./.github/actions/rust-cache
         if: (needs.changes.result != 'success' || needs.changes.outputs.server != 'false') && env.BENCHER_API_KEY != ''
         with:
@@ -165,3 +172,7 @@ jobs:
             --error-on-alert \
             --github-actions "$GH_TOKEN" \
             "cargo bench --locked --bench health"
+
+      - name: sccache stats
+        if: always() && !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.server != 'false') && env.BENCHER_API_KEY != ''
+        run: sccache --show-stats
