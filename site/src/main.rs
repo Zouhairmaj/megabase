@@ -345,6 +345,7 @@ fn build(
         fs::copy(&cname, cname_out)?;
     }
     write_shields(repo_root, out)?;
+    write_treemap_pngs(repo_root, out)?;
     Ok(())
 }
 
@@ -371,6 +372,54 @@ fn write_shields(repo_root: &Path, out: &Path) -> io::Result<()> {
         }
     }
     Ok(())
+}
+
+/// PNG rasters of the coverage treemaps, for the GitHub README.
+///
+/// The Status page inlines its own SVG. GitHub's README renderer does not
+/// display an SVG loaded from `gh-pages`, so `pages-badges.yml` publishes
+/// these PNGs next to the shields JSON. Paths are omitted when the source
+/// SVG is absent (placeholder builds).
+fn write_treemap_pngs(repo_root: &Path, out: &Path) -> io::Result<()> {
+    const FILES: &[(&str, &str)] = &[
+        ("treemap.svg", "treemap.png"),
+        ("treemap-light.svg", "treemap-light.png"),
+    ];
+    let src_dir = repo_root.join("coverage");
+    let dest_dir = out.join("coverage");
+    for (svg_name, png_name) in FILES {
+        let src = src_dir.join(svg_name);
+        if !src.is_file() {
+            continue;
+        }
+        let png = rasterize_svg(&fs::read_to_string(&src)?)?;
+        fs::create_dir_all(&dest_dir)?;
+        fs::write(dest_dir.join(png_name), png)?;
+    }
+    Ok(())
+}
+
+fn rasterize_svg(svg: &str) -> io::Result<Vec<u8>> {
+    let opt = resvg::usvg::Options::default();
+    let tree = resvg::usvg::Tree::from_str(svg, &opt)
+        .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err.to_string()))?;
+    let size = tree.size();
+    let scale = 2.0_f32;
+    let width = (size.width() * scale).ceil() as u32;
+    let height = (size.height() * scale).ceil() as u32;
+    if width == 0 || height == 0 {
+        return Err(io::Error::other("treemap svg has no area"));
+    }
+    let mut pixmap = resvg::tiny_skia::Pixmap::new(width, height)
+        .ok_or_else(|| io::Error::other("pixmap allocation failed"))?;
+    resvg::render(
+        &tree,
+        resvg::tiny_skia::Transform::from_scale(scale, scale),
+        &mut pixmap.as_mut(),
+    );
+    pixmap
+        .encode_png()
+        .map_err(|err| io::Error::other(err.to_string()))
 }
 
 fn render_page(
@@ -790,6 +839,16 @@ fn copy_dir(src: &Path, dst: &Path) -> io::Result<()> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn rasterize_svg_writes_a_png() {
+        let png = rasterize_svg(
+            r##"<svg xmlns="http://www.w3.org/2000/svg" width="4" height="2"><rect width="4" height="2" fill="#00D892"/></svg>"##,
+        )
+        .expect("svg");
+        assert!(png.starts_with(b"\x89PNG"));
+        assert!(png.len() > 8);
+    }
+
     fn generate_tmp() -> PathBuf {
         generate_tmp_with(|_| {})
     }
@@ -1051,6 +1110,13 @@ mod tests {
         );
         assert!(out.join("coverage/summary.json").is_file());
         assert!(!out.join("coverage/treemap.svg").exists());
+        assert!(
+            out.join("coverage/treemap.png").is_file(),
+            "README treemap PNG is published with the shields JSON"
+        );
+        assert!(out.join("coverage/treemap-light.png").is_file());
+        let png = fs::read(out.join("coverage/treemap.png")).unwrap();
+        assert!(png.starts_with(b"\x89PNG"));
         let _ = fs::remove_dir_all(&out);
     }
 

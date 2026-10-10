@@ -206,6 +206,31 @@ pub struct JudgeSummary {
     pub passing: usize,
 }
 
+/// Whether the Judge artifact may be applied onto the default-branch checkout.
+///
+/// The Judge commit is never checked out. `compare_status` is the GitHub
+/// compare status of `judge_sha...checkout_sha`: `ahead` means the checkout
+/// contains the Judge commit (main moved while Judge ran), `identical` means
+/// the same commit. Any other status leaves the published summary unchanged.
+/// `pages-badges.yml` inlines this predicate; the workflow test below keeps
+/// the two copies aligned.
+#[cfg(test)]
+fn judge_results_apply(checkout_sha: &str, judge_sha: &str, compare_status: &str) -> bool {
+    fn commit_id(sha: &str) -> bool {
+        sha.len() == 40
+            && sha
+                .bytes()
+                .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
+    }
+    if !commit_id(checkout_sha) || !commit_id(judge_sha) {
+        return false;
+    }
+    if checkout_sha == judge_sha {
+        return true;
+    }
+    matches!(compare_status, "ahead" | "identical")
+}
+
 pub fn pct(part: usize, whole: usize) -> f64 {
     if whole == 0 {
         0.0
@@ -404,6 +429,110 @@ units = ["rest:nope"]
         );
         let err = compute(&tree.root, &units).unwrap_err().to_string();
         assert!(err.contains("unknown unit"), "{err}");
+    }
+
+    #[test]
+    fn unit_is_conformant_only_when_every_judge_case_passes() {
+        let units = units_file();
+        let get_id = "rest:route:GET /rest/v1/todos";
+        let tree = TempTree::new();
+        tree.write(
+            "crates/demo/src/lib.rs",
+            &format!("// megabase:unit {get_id}\n"),
+        );
+        tree.write(
+            "judge/cases/rest.toml",
+            &format!(
+                r#"
+[[case]]
+id = "rest.select"
+units = ["{get_id}"]
+[[case]]
+id = "rest.select.headers"
+units = ["{get_id}"]
+"#
+            ),
+        );
+
+        tree.write(
+            "coverage/judge-results.json",
+            r#"{"schema":1,"cases":[{"id":"rest.select","pass":true},{"id":"rest.select.headers","pass":true}]}"#,
+        );
+        let status = compute(&tree.root, &units).unwrap();
+        assert_eq!(status.state(get_id), State::Conformant);
+        assert_eq!(status.cases_passing, 2);
+
+        tree.write(
+            "coverage/judge-results.json",
+            r#"{"schema":1,"cases":[{"id":"rest.select","pass":true},{"id":"rest.select.headers","pass":false}]}"#,
+        );
+        let status = compute(&tree.root, &units).unwrap();
+        assert_eq!(status.state(get_id), State::Tested);
+        assert_eq!(status.cases_passing, 1);
+
+        tree.write(
+            "coverage/judge-results.json",
+            r#"{"schema":1,"cases":[{"id":"rest.select","pass":true}]}"#,
+        );
+        let status = compute(&tree.root, &units).unwrap();
+        assert_eq!(
+            status.state(get_id),
+            State::Tested,
+            "a missing case result is not a pass"
+        );
+    }
+
+    #[test]
+    fn judge_results_apply_accepts_the_checkout_and_its_ancestors_only() {
+        let head = "ff547511ed61f6b17661bdb1b98c131968d965df";
+        let parent = "9f957e503eb6f9ad4f6e253162a6b2131e9ea120";
+        assert!(judge_results_apply(head, head, "behind"));
+        assert!(judge_results_apply(head, parent, "ahead"));
+        assert!(judge_results_apply(head, parent, "identical"));
+        assert!(!judge_results_apply(head, parent, "behind"));
+        assert!(!judge_results_apply(head, parent, "diverged"));
+        assert!(!judge_results_apply(head, parent, ""));
+        assert!(!judge_results_apply(head, "9f957e5", "ahead"));
+        assert!(!judge_results_apply(
+            "FF547511ED61F6B17661BDB1B98C131968D965DF",
+            "FF547511ED61F6B17661BDB1B98C131968D965DF",
+            "identical"
+        ));
+    }
+
+    #[test]
+    fn pages_badges_keeps_judge_json_off_the_untrusted_checkout() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let badges = std::fs::read_to_string(root.join(".github/workflows/pages-badges.yml"))
+            .expect("pages-badges.yml");
+        let pages =
+            std::fs::read_to_string(root.join(".github/workflows/pages.yml")).expect("pages.yml");
+        assert!(
+            !badges.contains("ref: ${{ github.event.workflow_run.head_sha }}"),
+            "do not check out the triggering run"
+        );
+        assert!(
+            !badges.contains("uses: ./.github/actions/rust-cache"),
+            "the job that reads the Judge artifact must not write the default-branch cache"
+        );
+        assert!(badges.contains("judge_results_apply"));
+        assert!(
+            badges.contains("[[ ! \"$JUDGE_SHA\" =~ ^[0-9a-f]{40}$ ]]"),
+            "workflow must reject a Judge SHA that is not a commit id"
+        );
+        assert!(
+            badges.contains("[ \"$checked_out\" = \"$JUDGE_SHA\" ]"),
+            "equal SHAs apply without the compare API"
+        );
+        assert!(badges.contains("[ \"$status\" = \"ahead\" ] || [ \"$status\" = \"identical\" ]"));
+        assert!(badges.contains("actions/deploy-pages"));
+        assert!(badges.contains("group: pages"));
+        assert!(badges.contains("treemap.png"));
+        assert!(
+            !pages.contains("judge-results"),
+            "the cached Pages build must not download the Judge artifact"
+        );
+        assert!(!pages.contains("github.event.workflow_run"));
     }
 
     #[test]

@@ -50,9 +50,9 @@ over *how far it is from conformant*. Everything else starts in **Backlog**.
 The public website follows the design-first rule: design in
 [Kite](https://kite.new/p/megabase-identity), LLM committee review,
 revisions, then implementation. It is a `type:feature` epic with no
-level milestone. The Status page embeds the generated
-`coverage/treemap.svg` / `coverage/treemap-light.svg` (same files, same
-style as the README).
+level milestone. The Status page treemap is generated at build from
+the same unit states as the README graphic. Published builds use the
+latest Judge results from `main`.
 
 ## Regenerating the board
 

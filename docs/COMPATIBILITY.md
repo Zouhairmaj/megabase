@@ -56,10 +56,13 @@ gateway prefixes in [ADR 0002](adr/0002-gateway-layout.md).
 | not done | `#2A2C2F` (light: `#DCDDDE`) | 501, or not claimed in `crates/` |
 | implemented | `#005441` | `// megabase:unit <id>` in `crates/` |
 | tested | `#009366` | implemented and listed in `judge/cases/` |
-| conformant | `#00D892` | every such case passed in `coverage/judge-results.json` |
+| conformant | `#00D892` | every such case passed in the Judge results that produced the summary |
 
 Coverage = implemented ÷ units. Conformance = passing judge cases ÷ cases.
-A unit is **done** only when it is conformant.
+A unit is **done** only when it is conformant. The committed
+`coverage/judge-results.json` is the regression baseline. Live counts on
+the README, the shields badges, and megabase.sh come from the Judge
+artifact on `main`.
 
 ## Behavioral contract
 

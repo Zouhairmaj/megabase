@@ -889,7 +889,11 @@ mod tests {
             serde_json::to_string(&summary).unwrap(),
         )
         .expect("summary");
-        std::fs::write(cov.join("units.json"), serde_json::to_string(&units).unwrap()).expect("units");
+        std::fs::write(
+            cov.join("units.json"),
+            serde_json::to_string(&units).unwrap(),
+        )
+        .expect("units");
     }
 
     fn temp_dir(tag: &str) -> PathBuf {
