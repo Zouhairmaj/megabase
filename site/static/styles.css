@@ -143,32 +143,39 @@ a:hover {
   border-bottom: 1px solid var(--border);
 }
 
-.brand-lockup {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  min-width: 0;
-}
-
+/* Kite brand row: logo, wordmark, and the release pill on one line. */
 .brand {
   display: flex;
   align-items: center;
+  flex-wrap: nowrap;
   gap: 14px;
+  min-width: 0;
   color: var(--text);
   text-decoration: none;
 }
 
-/* Kite `Version`: #00D892 on #00D89214, 1px #005441. Nav / Desktop. */
-.version-badge {
-  display: inline-flex;
-  align-items: center;
+/* No box of its own, so the logo and wordmark join the pill as one flex row. */
+.brand-home {
+  display: contents;
+  color: inherit;
+  text-decoration: none;
+}
+
+.brand-home:focus-visible .logo,
+.brand-home:focus-visible .wordmark {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+/* Kite `Version`: square pill, #00D892 on 8% green, 1px #005441. */
+.version-pill {
   flex-shrink: 0;
-  max-width: 100%;
-  min-width: 0;
   padding: 4px 8px;
-  border: 1px solid var(--implemented);
-  background: #00d89214;
-  color: var(--accent);
+  border: 1px solid #005441;
+  border-radius: 0;
+  background: rgba(0, 216, 146, 0.08);
+  color: #00d892;
+  font-family: "JetBrains Mono", monospace;
   font-size: 12px;
   font-weight: 400;
   line-height: 1;
@@ -177,20 +184,13 @@ a:hover {
   text-decoration: none;
 }
 
-.version-badge-label {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.version-badge:hover {
-  border-color: var(--accent);
-  color: var(--accent);
+.version-pill:hover {
+  color: #00d892;
   text-decoration: none;
 }
 
-.brand:hover {
+.brand:hover,
+.brand-home:hover {
   text-decoration: none;
 }
 
@@ -206,6 +206,7 @@ a:hover {
   font-size: 18px;
   font-weight: 700;
   letter-spacing: 3px;
+  white-space: nowrap;
 }
 
 .nav-desktop {
@@ -2096,12 +2097,11 @@ body:has(#licensing-and-credits:target) .toc-list a[href="#licensing-and-credits
     letter-spacing: 2px;
   }
 
-  .brand,
-  .brand-lockup {
+  .brand {
     gap: 10px;
   }
 
-  .version-badge {
+  .version-pill {
     padding: 2px 6px;
     font-size: 10px;
     letter-spacing: 0.5px;
@@ -2351,17 +2351,5 @@ body:has(#licensing-and-credits:target) .toc-list a[href="#licensing-and-credits
 @media (max-width: 380px) {
   .site-header .wordmark {
     letter-spacing: 1px;
-  }
-
-  .site-header .brand,
-  .brand-lockup {
-    gap: 8px;
-  }
-
-  .version-badge {
-    padding: 2px 4px;
-    letter-spacing: 0;
-    max-width: 72px;
-    overflow: hidden;
   }
 }
