@@ -3,7 +3,7 @@
   "totals": {
     "units": 1024,
     "implemented": 85,
-    "tested": 52,
+    "tested": 58,
     "conformant": 0
   },
   "percent": {
@@ -12,14 +12,14 @@
     "done": 0.0
   },
   "judge": {
-    "cases": 94,
+    "cases": 112,
     "passing": 0
   },
   "components": {
     "auth": {
       "units": 152,
       "implemented": 65,
-      "tested": 48,
+      "tested": 54,
       "conformant": 0,
       "groups": {
         "admin": {
@@ -91,7 +91,7 @@
         "verify": {
           "units": 10,
           "implemented": 6,
-          "tested": 0,
+          "tested": 6,
           "conformant": 0
         },
         "well-known": {
@@ -577,14 +577,14 @@
     "auth:route:GET /auth/v1/admin/users/{user_id}/passkeys": "implemented",
     "auth:route:GET /auth/v1/health": "tested",
     "auth:route:GET /auth/v1/settings": "tested",
-    "auth:route:GET /auth/v1/verify": "implemented",
+    "auth:route:GET /auth/v1/verify": "tested",
     "auth:route:POST /auth/v1/admin/custom-providers": "implemented",
     "auth:route:POST /auth/v1/admin/generate_link": "implemented",
     "auth:route:POST /auth/v1/admin/oauth/clients": "implemented",
     "auth:route:POST /auth/v1/logout": "tested",
     "auth:route:POST /auth/v1/signup": "tested",
     "auth:route:POST /auth/v1/token": "tested",
-    "auth:route:POST /auth/v1/verify": "implemented",
+    "auth:route:POST /auth/v1/verify": "tested",
     "auth:sql-function:auth.email()": "tested",
     "auth:sql-function:auth.jwt()": "tested",
     "auth:sql-function:auth.role()": "tested",
@@ -617,10 +617,10 @@
     "auth:sql-table:auth.users": "tested",
     "auth:sql-table:auth.webauthn_challenges": "implemented",
     "auth:sql-table:auth.webauthn_credentials": "implemented",
-    "auth:verify-type:email_change": "implemented",
-    "auth:verify-type:invite": "implemented",
-    "auth:verify-type:recovery": "implemented",
-    "auth:verify-type:signup": "implemented",
+    "auth:verify-type:email_change": "tested",
+    "auth:verify-type:invite": "tested",
+    "auth:verify-type:recovery": "tested",
+    "auth:verify-type:signup": "tested",
     "rest:filter-operator:adj": "implemented",
     "rest:filter-operator:all": "implemented",
     "rest:filter-operator:any": "implemented",

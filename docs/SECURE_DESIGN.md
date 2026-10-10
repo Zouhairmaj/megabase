@@ -61,6 +61,14 @@ The length check is not an entropy check: a 32-byte secret of low entropy
 still passes, and the operator supplies the value (`crypto_random` is N/A
 until the product generates keys).
 
+The held-out judge uses the same HMAC-SHA256 (`hmac`, `sha2`) plus
+HKDF-SHA256 and ChaCha20. `MEGABASE_JUDGE_HIDDEN_SEED` is an Actions
+environment secret of at least 32 bytes. It is not in the tree. Optional
+human-authored cases are sealed with ChaCha20 and encrypt-then-MAC
+(HMAC-SHA256), because ChaCha20 alone does not authenticate ciphertext.
+The weekly job publishes pass/fail counts and discards server logs.
+MD5, SHA-1, DES, and RC4 are not used there either.
+
 ## Vulnerability classes
 
 OWASP Top 10 (2021) and the CWE entries that apply to this kind of server.
@@ -76,13 +84,13 @@ The mitigation column is what the code and CI do now.
 | A06 Vulnerable and outdated components. CWE-1104 outdated component | Cargo dependencies | `cargo audit` on `Cargo.lock` and `site/Cargo.lock` in CI. `.cargo/audit.toml` ignores RUSTSEC-2023-0071 (`rsa` via `sqlx-mysql` only; the postgres build does not link it, and no fixed release exists). `cargo deny` for bans and advisories. `cargo vet --locked` requires an imported audit (Mozilla, Google, Bytecode Alliance) or an exemption in `supply-chain/`. Renovate opens dependency updates (`renovate.json`). GitHub code scanning default setup runs CodeQL on Rust. |
 | A07 Identification and authentication failures. CWE-287 improper authentication, CWE-306 missing authentication | Bearer tokens, passwords, one-time tokens | Compact JWTs are verified (signature, then `exp` with PostgREST's 30-second skew) before claims are read. Empty tokens fail. Served admin routes and logout require that check. Email signup stores a bcrypt hash (cost 10) and does not log the password. `POST /auth/v1/token` verifies that hash, or the stored refresh token, before it issues an HS256 access token. `GET`/`POST /auth/v1/verify` accepts only a stored one-time token (the SHA-224 of the address and OTP, or the token hash itself) that is unexpired and belongs to a user who is not banned, then issues a session whose AMR method is `otp`. Routes that are not served return 501. |
 | A08 Software and data integrity failures. CWE-502 deserialization of untrusted data | JWT JSON, release artifacts | Header and payload are decoded as JSON and checked (object, `alg` allowlist, numeric `exp`) after the HMAC check for the payload. Releases after v0.1.0 keyless-sign with cosign; v0.1.0 shipped without those assets (`docs/install.md`). |
-| A09 Security logging and monitoring failures. CWE-532 sensitive info in logs | Process logs | `tracing` logs at info. The HTTP span records method, path, and `x-request-id`. `Authorization`, `apikey`, and `Cookie` are sensitive headers, so their values are not in that span. Debug formatting of `Config`, `Hs256`, `JwtSecret`, and compact JWTs redacts secrets. A caught panic returns a fixed JSON body and does not log the panic message. There is no security monitor or alert pipeline; a log line is not a detection system. |
+| A09 Security logging and monitoring failures. CWE-532 sensitive info in logs | Process logs | `tracing` logs at info. The HTTP span records method, path, and `x-request-id`. `Authorization`, `apikey`, and `Cookie` are sensitive headers, so their values are not in that span. Debug formatting of `Config`, `Hs256`, `JwtSecret`, and compact JWTs redacts secrets. A caught panic returns a fixed JSON body and does not log the panic message. The held-out judge summary is pass/fail counts; that workflow does not upload server logs or case bodies. There is no security monitor or alert pipeline; a log line is not a detection system. |
 | A10 Server-side request forgery. CWE-918 SSRF | Outbound HTTP, DNS | Product code does not make an outbound HTTP request from caller input, and it does not take a caller-controlled file path. `POST /auth/v1/admin/custom-providers` resolves admin-supplied hostnames (5 second timeout) and rejects loopback, private, link-local, multicast, and unspecified results, including IPv4-mapped IPv6 checked as IPv4. That check runs at create time only. It is not pinned to a later connection, so a future port that fetches stored provider URLs must check the connected address again (DNS rebinding). Storage and functions routes return 501. |
 | CWE-79 cross-site scripting | HTML responses | `GET /auth/v1/verify` returns GoTrue's 303 body: one anchor whose `href` is HTML-escaped (`&`, quotes, angle brackets). Every other response is JSON. The static site generator escapes markdown links that are not `http`, `https`, or relative. |
 | CWE-119 / CWE-787 buffer overflow | Parsers | The product is Rust. `[workspace.lints.rust]` forbids `unsafe_code` in every workspace crate, and `site/` repeats that lint. Bounds checks stay with the standard library and `serde_json`. |
 | CWE-22 path traversal | Static files, storage | The server does not map a request path onto the filesystem. Storage returns 501. |
 | CWE-352 cross-site request forgery | Browser session | There is no cookie session. Callers that authenticate will present `Authorization: Bearer`. Browser form routes are not implemented. |
-| CWE-798 hardcoded credentials | Source tree | Tests use the public Supabase demo secret from `.env.example`. The process has no other embedded key. |
+| CWE-798 hardcoded credentials | Source tree | Tests use the public Supabase demo secret from `.env.example`. The process has no other embedded key. The held-out judge seed is an environment secret, not a value in the tree. |
 | CWE-434 unrestricted upload | Storage | The storage prefix returns 501. |
 
 Dynamic analysis (fuzzing) is not in CI. That is OpenSSF `dynamic_analysis`,

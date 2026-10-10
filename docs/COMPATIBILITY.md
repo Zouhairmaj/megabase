@@ -104,7 +104,7 @@ In scope: **1024 units**. Excluded: **76** upstream items.
 | Auth | sso | 2 | 3 | 0 | 0 | 0 |
 | Auth | token | 1–2 | 6 | 3 | 3 | 0 |
 | Auth | user | 1–2 | 6 | 0 | 0 | 0 |
-| Auth | verify | 1–2 | 10 | 6 | 0 | 0 |
+| Auth | verify | 1–2 | 10 | 6 | 6 | 0 |
 | Auth | well-known | 2 | 3 | 0 | 0 | 0 |
 | Realtime | client-events | 3 | 3 | 0 | 0 | 0 |
 | Realtime | http-api | 3 | 3 | 0 | 0 | 0 |
