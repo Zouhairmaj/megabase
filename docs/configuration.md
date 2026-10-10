@@ -77,10 +77,9 @@ route returns 501 `MEGABASE_NOT_IMPLEMENTED`.
 
 Signup, logout, verify, token, and the user routes need `DATABASE_URL` (the
 Auth SQL from [`specs/auth/database.md`](../specs/auth/database.md)) and
-`JWT_SECRET`. `GET /auth/v1/verify` checks that secret before the token
-lookup. A missing secret is rejected before the one-time token is read.
-The secret signs a session; the first half of a secure email change does
-not issue one.
+`JWT_SECRET`. `GET` and `POST /auth/v1/verify` check that secret before the
+one-time token is read. A session is signed only for a `Session` outcome;
+`SingleConfirmation` does not sign one.
 When `GOTRUE_*` is unset, signup and settings flags match the judge
 reference stack, not GoTrue's zero values: email and phone providers on,
 anonymous off, `disable_signup` false, mailer autoconfirm on (the judge
