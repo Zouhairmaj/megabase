@@ -30,8 +30,16 @@ pub(crate) enum ServedOp {
     Match,
     Imatch,
     Fts,
+    Plfts,
+    Phfts,
+    Wfts,
     Cs,
     Cd,
+    Ov,
+    Sl,
+    Sr,
+    Nxr,
+    Nxl,
     Adj,
 }
 
@@ -62,16 +70,37 @@ impl ServedOp {
             Self::Cs => "@>",
             // megabase:unit rest:filter-operator:cd
             Self::Cd => "<@",
+            // megabase:unit rest:filter-operator:ov
+            Self::Ov => "&&",
+            // megabase:unit rest:filter-operator:sl
+            Self::Sl => "<<",
+            // megabase:unit rest:filter-operator:sr
+            Self::Sr => ">>",
+            // megabase:unit rest:filter-operator:nxr
+            Self::Nxr => "&<",
+            // megabase:unit rest:filter-operator:nxl
+            Self::Nxl => "&>",
             // megabase:unit rest:filter-operator:adj
             Self::Adj => "-|-",
             // megabase:unit rest:filter-operator:fts
             Self::Fts => "@@ to_tsquery",
+            // megabase:unit rest:filter-operator:plfts
+            Self::Plfts => "@@ plainto_tsquery",
+            // megabase:unit rest:filter-operator:phfts
+            Self::Phfts => "@@ phraseto_tsquery",
+            // megabase:unit rest:filter-operator:wfts
+            Self::Wfts => "@@ websearch_to_tsquery",
         }
     }
 
     /// `like` and `ilike` map every `*` to `%`. Other operators keep `*`.
     fn stars_are_wildcards(self) -> bool {
         matches!(self, Self::Like | Self::Ilike)
+    }
+
+    /// Full-text operators bind a `tsquery` function, not a column cast.
+    fn is_fts(self) -> bool {
+        matches!(self, Self::Fts | Self::Plfts | Self::Phfts | Self::Wfts)
     }
 }
 
@@ -124,8 +153,6 @@ pub(crate) enum ParsedFilter {
     Is { negated: bool, value: IsVal },
     /// `isdistinct.value`.
     IsDistinct { negated: bool, value: String },
-    /// Recognized PostgREST operator that a later filtering issue owns.
-    Unsupported { unit: &'static str },
 }
 
 /// Why a filter value is not a PostgREST operator expression.
@@ -183,7 +210,6 @@ fn apply_negation(filter: ParsedFilter, negated: bool) -> ParsedFilter {
             negated: true,
             value,
         },
-        ParsedFilter::Unsupported { unit } => ParsedFilter::Unsupported { unit },
     }
 }
 
@@ -209,40 +235,33 @@ fn parse_operation(input: &str) -> Option<ParsedFilter> {
     if let Some(parsed) = attempt_isdistinct(input) {
         return Some(parsed);
     }
-    if let Some(parsed) = attempt_fts(input, "plfts", "rest:filter-operator:plfts") {
-        return Some(parsed);
-    }
-    if let Some(parsed) = attempt_fts(input, "phfts", "rest:filter-operator:phfts") {
-        return Some(parsed);
-    }
-    if let Some(parsed) = attempt_fts(input, "wfts", "rest:filter-operator:wfts") {
-        return Some(parsed);
-    }
-    if let Some(parsed) = attempt_fts_served(input) {
-        return Some(parsed);
-    }
-    if let Some(parsed) = attempt_simple_served(input, "neq", ServedOp::Neq) {
-        return Some(parsed);
-    }
-    for (name, unit) in [
-        ("ov", "rest:filter-operator:ov"),
-        ("sl", "rest:filter-operator:sl"),
-        ("sr", "rest:filter-operator:sr"),
-        ("nxr", "rest:filter-operator:nxr"),
-        ("nxl", "rest:filter-operator:nxl"),
+    // `pFts` then `pSimpleOp` in `QueryParams.hs`. `fts` is not a prefix of
+    // `plfts` / `phfts` / `wfts`, and none of the simple names is a prefix
+    // of another, so the first match is the only match.
+    for (name, op) in [
+        ("fts", ServedOp::Fts),
+        ("plfts", ServedOp::Plfts),
+        ("phfts", ServedOp::Phfts),
+        ("wfts", ServedOp::Wfts),
     ] {
-        if let Some(parsed) = attempt_simple_unsupported(input, name, unit) {
+        if let Some(parsed) = attempt_fts(input, name, op) {
             return Some(parsed);
         }
     }
-    if let Some(parsed) = attempt_simple_served(input, "cs", ServedOp::Cs) {
-        return Some(parsed);
-    }
-    if let Some(parsed) = attempt_simple_served(input, "cd", ServedOp::Cd) {
-        return Some(parsed);
-    }
-    if let Some(parsed) = attempt_simple_served(input, "adj", ServedOp::Adj) {
-        return Some(parsed);
+    for (name, op) in [
+        ("neq", ServedOp::Neq),
+        ("cs", ServedOp::Cs),
+        ("cd", ServedOp::Cd),
+        ("ov", ServedOp::Ov),
+        ("sl", ServedOp::Sl),
+        ("sr", ServedOp::Sr),
+        ("nxr", ServedOp::Nxr),
+        ("nxl", ServedOp::Nxl),
+        ("adj", ServedOp::Adj),
+    ] {
+        if let Some(parsed) = attempt_simple_served(input, name, op) {
+            return Some(parsed);
+        }
     }
     for (name, op) in [
         ("ilike", ServedOp::Ilike),
@@ -303,12 +322,6 @@ fn attempt_isdistinct(input: &str) -> Option<ParsedFilter> {
     })
 }
 
-fn attempt_simple_unsupported(input: &str, name: &str, unit: &'static str) -> Option<ParsedFilter> {
-    let rest = input.strip_prefix(name)?;
-    rest.strip_prefix('.')
-        .map(|_| ParsedFilter::Unsupported { unit })
-}
-
 fn attempt_simple_served(input: &str, name: &str, op: ServedOp) -> Option<ParsedFilter> {
     let rest = input.strip_prefix(name)?;
     let value = rest.strip_prefix('.')?;
@@ -321,28 +334,17 @@ fn attempt_simple_served(input: &str, name: &str, op: ServedOp) -> Option<Parsed
     })
 }
 
-fn attempt_fts(input: &str, name: &str, unit: &'static str) -> Option<ParsedFilter> {
+fn attempt_fts(input: &str, name: &str, op: ServedOp) -> Option<ParsedFilter> {
     let rest = input.strip_prefix(name)?;
-    let rest = strip_optional_language(rest)?;
-    rest.strip_prefix('.')
-        .map(|_| ParsedFilter::Unsupported { unit })
-}
-
-fn attempt_fts_served(input: &str) -> Option<ParsedFilter> {
-    let rest = input.strip_prefix("fts")?;
     let (language, rest) = split_optional_language(rest)?;
     let value = rest.strip_prefix('.')?;
     Some(ParsedFilter::Served {
         negated: false,
-        op: ServedOp::Fts,
+        op,
         quant: None,
         language,
         value: value.to_string(),
     })
-}
-
-fn strip_optional_language(input: &str) -> Option<&str> {
-    split_optional_language(input).map(|(_, rest)| rest)
 }
 
 /// `None` when `(` is present but the config name or the closing `)` is not.
@@ -980,8 +982,8 @@ fn push_op(
     value: &str,
 ) -> Result<(), UnsafeType> {
     sql.push(' ');
-    if op == ServedOp::Fts {
-        sql.push_str(ServedOp::Fts.sql());
+    if op.is_fts() {
+        sql.push_str(op.sql());
         sql.push('(');
         if let Some(language) = language {
             push_text_cast(sql, params, language, "regconfig");
@@ -1552,35 +1554,105 @@ mod tests {
     }
 
     #[test]
-    fn leaves_later_operators_unsupported() {
+    fn parses_issue_29_operators() {
         assert_eq!(
-            served("ov.{1,2}"),
-            ParsedFilter::Unsupported {
-                unit: "rest:filter-operator:ov"
+            served("ov.[1,4)"),
+            ParsedFilter::Served {
+                negated: false,
+                op: ServedOp::Ov,
+                quant: None,
+                language: None,
+                value: "[1,4)".into(),
             }
         );
         assert_eq!(
-            served("not.ov.{1,2}"),
-            ParsedFilter::Unsupported {
-                unit: "rest:filter-operator:ov"
+            served("not.ov.[1,4)"),
+            ParsedFilter::Served {
+                negated: true,
+                op: ServedOp::Ov,
+                quant: None,
+                language: None,
+                value: "[1,4)".into(),
             }
         );
         assert_eq!(
-            served("plfts.cats"),
-            ParsedFilter::Unsupported {
-                unit: "rest:filter-operator:plfts"
+            served("sl.[9,10)"),
+            ParsedFilter::Served {
+                negated: false,
+                op: ServedOp::Sl,
+                quant: None,
+                language: None,
+                value: "[9,10)".into(),
             }
         );
         assert_eq!(
-            served("wfts.cats"),
-            ParsedFilter::Unsupported {
-                unit: "rest:filter-operator:wfts"
+            served("sr.[3,4)"),
+            ParsedFilter::Served {
+                negated: false,
+                op: ServedOp::Sr,
+                quant: None,
+                language: None,
+                value: "[3,4)".into(),
             }
         );
         assert_eq!(
-            served("nxl.1"),
-            ParsedFilter::Unsupported {
-                unit: "rest:filter-operator:nxl"
+            served("nxr.[4,7)"),
+            ParsedFilter::Served {
+                negated: false,
+                op: ServedOp::Nxr,
+                quant: None,
+                language: None,
+                value: "[4,7)".into(),
+            }
+        );
+        assert_eq!(
+            served("nxl.[4,7)"),
+            ParsedFilter::Served {
+                negated: false,
+                op: ServedOp::Nxl,
+                quant: None,
+                language: None,
+                value: "[4,7)".into(),
+            }
+        );
+        assert_eq!(
+            served("plfts.The Fat Rats"),
+            ParsedFilter::Served {
+                negated: false,
+                op: ServedOp::Plfts,
+                quant: None,
+                language: None,
+                value: "The Fat Rats".into(),
+            }
+        );
+        assert_eq!(
+            served("phfts(english).The Fat Cats"),
+            ParsedFilter::Served {
+                negated: false,
+                op: ServedOp::Phfts,
+                quant: None,
+                language: Some("english".into()),
+                value: "The Fat Cats".into(),
+            }
+        );
+        assert_eq!(
+            served("wfts(french).amusant impossible"),
+            ParsedFilter::Served {
+                negated: false,
+                op: ServedOp::Wfts,
+                quant: None,
+                language: Some("french".into()),
+                value: "amusant impossible".into(),
+            }
+        );
+        assert_eq!(
+            served("plfts."),
+            ParsedFilter::Served {
+                negated: false,
+                op: ServedOp::Plfts,
+                quant: None,
+                language: None,
+                value: String::new(),
             }
         );
         assert!(parse_filter_value("nope.1").is_err());
@@ -1945,6 +2017,87 @@ mod tests {
         .unwrap();
         assert!(!injected.sql.contains("drop"));
         assert_eq!(injected.params, vec!["{\"a\\\");drop\"}"]);
+    }
+
+    #[test]
+    fn issue_29_predicates_bind_range_and_fts() {
+        let rendered = predicate_sql(
+            "spans",
+            &[
+                bound("during", ServedOp::Ov, None, None, "[1,4)", "int4range"),
+                bound("during", ServedOp::Sl, None, None, "[9,10)", "int4range"),
+                bound("during", ServedOp::Sr, None, None, "[3,4)", "int4range"),
+                bound("during", ServedOp::Nxr, None, None, "[4,7)", "int4range"),
+                BoundFilter {
+                    column: "during".into(),
+                    negated: true,
+                    body: FilterBody::Op {
+                        op: ServedOp::Nxl,
+                        quant: None,
+                        language: None,
+                        value: "[4,7)".into(),
+                    },
+                    pg_type: Some("int4range".into()),
+                },
+                bound("body", ServedOp::Plfts, None, None, "The Fat Rats", "text"),
+                bound(
+                    "body",
+                    ServedOp::Phfts,
+                    None,
+                    Some("english"),
+                    "The Fat Cats",
+                    "text",
+                ),
+                bound(
+                    "body",
+                    ServedOp::Wfts,
+                    None,
+                    Some("french"),
+                    "amusant impossible",
+                    "text",
+                ),
+            ],
+        )
+        .unwrap();
+        assert_eq!(
+            rendered.sql,
+            "\"spans\".\"during\" && ($1::text)::int4range \
+             AND \"spans\".\"during\" << ($2::text)::int4range \
+             AND \"spans\".\"during\" >> ($3::text)::int4range \
+             AND \"spans\".\"during\" &< ($4::text)::int4range \
+             AND NOT \"spans\".\"during\" &> ($5::text)::int4range \
+             AND \"spans\".\"body\" @@ plainto_tsquery(($6::text)::text) \
+             AND \"spans\".\"body\" @@ phraseto_tsquery(($7::text)::regconfig, ($8::text)::text) \
+             AND \"spans\".\"body\" @@ websearch_to_tsquery(($9::text)::regconfig, ($10::text)::text)"
+        );
+        assert_eq!(
+            rendered.params,
+            vec![
+                "[1,4)",
+                "[9,10)",
+                "[3,4)",
+                "[4,7)",
+                "[4,7)",
+                "The Fat Rats",
+                "english",
+                "The Fat Cats",
+                "french",
+                "amusant impossible",
+            ]
+        );
+        let starred = predicate_sql(
+            "spans",
+            &[bound(
+                "during",
+                ServedOp::Ov,
+                None,
+                None,
+                "[1,4)*",
+                "int4range",
+            )],
+        )
+        .unwrap();
+        assert_eq!(starred.params, vec!["[1,4)*"]);
     }
 
     #[test]

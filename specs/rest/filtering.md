@@ -1,4 +1,4 @@
-# REST: filtering (issues 27 and 28)
+# REST: filtering (issues 27, 28, and 29)
 
 Status: draft
 Unit ids (`coverage/units.json`): `rest:filter-operator:eq`,
@@ -7,7 +7,11 @@ Unit ids (`coverage/units.json`): `rest:filter-operator:eq`,
 `rest:filter-operator:lte`, `rest:filter-operator:like`,
 `rest:filter-operator:ilike`, `rest:filter-operator:match`,
 `rest:filter-operator:imatch`, `rest:filter-operator:fts`,
-`rest:filter-operator:cs`, `rest:filter-operator:cd`,
+`rest:filter-operator:plfts`, `rest:filter-operator:phfts`,
+`rest:filter-operator:wfts`, `rest:filter-operator:cs`,
+`rest:filter-operator:cd`, `rest:filter-operator:ov`,
+`rest:filter-operator:sl`, `rest:filter-operator:sr`,
+`rest:filter-operator:nxr`, `rest:filter-operator:nxl`,
 `rest:filter-operator:adj`, `rest:filter-operator:any`,
 `rest:filter-operator:all`, `rest:filter-operator:in`,
 `rest:filter-operator:is`, `rest:filter-operator:isdistinct`,
@@ -23,14 +27,16 @@ rows (`done=eq.true`, `priority=lt.3`, `id=in.(1,3)`, `title=like.*spec*`).
 
 | Behavior | File:line (pin) |
 |---|---|
-| `neq`, `eq`, `gt`, `gte`, `lt`, `lte`, `like`, `ilike`, `match`, `imatch`, `cs`, `cd`, `adj` | [`QueryParams.hs:234`](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/ApiRequest/QueryParams.hs#L234) |
+| `neq`, `cs`, `cd`, `ov`, `sl`, `sr`, `nxr`, `nxl`, `adj`, then `eq`, `gte`, `gt`, `lte`, `lt`, `like`, `ilike`, `match`, `imatch` | [`QueryParams.hs:234`](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/ApiRequest/QueryParams.hs#L234) |
 | `not.` prefix | [`QueryParams.hs:700`](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/ApiRequest/QueryParams.hs#L700) |
 | `in.(...)` list | [`QueryParams.hs:706`](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/ApiRequest/QueryParams.hs#L706) |
 | `is` tri-state keywords | [`QueryParams.hs:707`](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/ApiRequest/QueryParams.hs#L707) |
 | `isdistinct` | [`QueryParams.hs:709`](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/ApiRequest/QueryParams.hs#L709) |
 | `any` / `all` quantifiers | [`QueryParams.hs:717`](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/ApiRequest/QueryParams.hs#L717) |
-| `fts` and optional `(language)` | [`QueryParams.hs:730`](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/ApiRequest/QueryParams.hs#L730) |
+| `fts`, `plfts`, `phfts`, `wfts` and optional `(language)` | [`QueryParams.hs:728`](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/ApiRequest/QueryParams.hs#L728) |
 | SQL for those operators, `IS`, and `= ANY` | [`SqlFragment.hs:130`](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/Query/SqlFragment.hs#L130) |
+| Range operator text (`&&`, `<<`, `>>`, `&<`, `&>`) | [`SqlFragment.hs:135`](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/Query/SqlFragment.hs#L135) |
+| Full-text function names | [`SqlFragment.hs:154`](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/Query/SqlFragment.hs#L154) |
 | `like` / `ilike` `*` to `%`, empty `in` | [`SqlFragment.hs:424`](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/Query/SqlFragment.hs#L424) |
 | `PGRST100` message | [`QueryParams.hs:929`](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/ApiRequest/QueryParams.hs#L929) |
 | Read `Content-Range` | [`RangeQuery.hs:113`](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/RangeQuery.hs#L113) |
@@ -53,8 +59,8 @@ Each `column=operator.value` pair is a filter. Served shapes:
 | `eq.value`, `neq.value`, `gt.value`, `gte.value`, `lt.value`, `lte.value` | `"relation"."col" op ($n::text)::column_type` |
 | `like.pattern`, `ilike.pattern` | `like` / `ilike`, every `*` in the pattern becomes `%` |
 | `match.pattern`, `imatch.pattern` | `~` / `~*`. `*` stays `*` |
-| `cs.value`, `cd.value`, `adj.value` | `@>`, `<@`, `-\|-` |
-| `fts.terms`, `fts(language).terms` | `@@ to_tsquery` with an optional regconfig |
+| `cs.value`, `cd.value`, `ov.value`, `sl.value`, `sr.value`, `nxr.value`, `nxl.value`, `adj.value` | `@>`, `<@`, `&&`, `<<`, `>>`, `&<`, `&>`, `-\|-` |
+| `fts.terms`, `plfts.terms`, `phfts.terms`, `wfts.terms`, and the same with `(language)` | `@@ to_tsquery`, `@@ plainto_tsquery`, `@@ phraseto_tsquery`, `@@ websearch_to_tsquery`. A language is a bound `regconfig`. The terms are bound `text`. The column type is not cast |
 | `op(any).value`, `op(all).value` | the same operator with `ANY` or `ALL` and `column_type[]` |
 | `in.(a,b)`, `in.("a,b",c)` | `= ANY` of one bound array literal. A quoted element keeps commas. A backslash escapes the next character inside quotes |
 | `in.()` and `in.(   )` | `= ANY('{}')` with no parameter. Space and tab inside the parentheses count as empty |
@@ -104,8 +110,8 @@ parse of the JSON body. There is no `ORDER BY` unless a later unit adds `order`.
 
 - `eq.` is an empty string value, not a parse error.
 - `gte` is tried before `gt`, `lte` before `lt`, and `ilike` before `like`.
-- `not.eq.1` negates `eq`. `not.` in front of an operator this crate does not
-  serve (`not.ov.{1}`) returns 501 for that inner unit.
+- `not.eq.1` negates `eq`. `not.ov.[1,4)` negates overlap the same way.
+  Every horizontal operator in this spec is served, including under `not.`.
 - `in.("")` is the empty set, the same as `in.()`. `in.( ,3)` keeps the
   empty element and is not the empty set.
 - `is.nullity` matches `null` and ignores the leftover. `is.not_null` does
@@ -118,6 +124,16 @@ parse of the JSON body. There is no `ORDER BY` unless a later unit adds `order`.
 - A path that is not a single relation, and every method other than `GET`,
   stays 501 with unit `{METHOD} {path}`.
 - `like` and `ilike` replace every `*`, including inside `(any)` / `(all)`.
+  `ov`, `sl`, `sr`, `nxr`, `nxl`, and the full-text operators keep `*`.
+- `ov.[1,4)`, `sl.[9,10)`, `sr.[3,4)`, `nxr.[4,7)`, and `nxl.[4,7)` are
+  range literals in the value. PostgreSQL applies `&&`, `<<`, `>>`, `&<`,
+  and `&>` after the value is cast to the column type (`int4range`,
+  `numrange`, an array, and the other types that define those operators).
+- `plfts.The Fat Rats`, `phfts(english).The Fat Cats`, and
+  `wfts(french).amusant impossible` follow `fts`: optional `(language)`
+  then `.` then the rest of the value, including spaces. `plfts.` is an
+  empty query string. `plfts().x` is `PGRST100`, the same shape as
+  `fts().x`.
 - A catalog type that is not a safe cast target is not spliced into SQL.
 - The value is cast to the column type. An operator that does not exist for
   that type is PostgreSQL `42883` (404). PostgREST's unknown literal can
@@ -125,8 +141,7 @@ parse of the JSON body. There is no `ORDER BY` unless a later unit adds `order`.
 
 ## Out of scope
 
-`ov`, `sl`, `sr`, `nxl`, `nxr`, `plfts`, `phfts`, and `wfts` (filtering
-3/3), embeds, vertical filtering, `order` / `limit` / `offset`, preferences,
+Embeds, vertical filtering, `order` / `limit` / `offset`, preferences,
 object and CSV media types, and writes. Those return HTTP 501 via
 `megabase_core::MegabaseNotImplemented`.
 
@@ -137,3 +152,8 @@ object and CSV media types, and writes. Those return HTTP 501 via
 `rest.filter.in` also sends `order=id`, so it stays 501 for
 `rest:query-param:order` until that unit is served.
 `rest.filter.unknown-operator` is the `PGRST100` shape for `id=nope.1`.
+Issue 29 cases live on the judge review branch: `rest.filter.ov`,
+`rest.filter.sl`, `rest.filter.sr`, `rest.filter.nxr`, `rest.filter.nxl`
+against `public.spans.during`, and `rest.filter.plfts`,
+`rest.filter.phfts`, `rest.filter.wfts` against `public.todos.title`.
+Each request returns one row so unordered `json_agg` stays stable.
