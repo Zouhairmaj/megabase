@@ -498,7 +498,9 @@ fn decorative_js_branch(ctx: &Context) -> bool {
 ///
 /// `after` must start with every byte of `before`, so Pending and earlier
 /// Completed entries cannot change. The new suffix is a single `- **Date**`
-/// item. A base log that already names the path is not the initial landing.
+/// item, and the path must appear in that item. A heading, a rule, or a
+/// second item in the suffix is rejected. A base log that already names the
+/// path is not the initial landing.
 fn decorative_log_ok(change: &Change) -> bool {
     change.path == "HUMAN_LOG.md"
         && change.status == Status::Modified
@@ -516,12 +518,24 @@ fn decorative_completed_append(before: &str, after: &str) -> bool {
     let Some(suffix) = after.strip_prefix(before) else {
         return false;
     };
-    let body = suffix.trim_start_matches('\n');
-    if body.is_empty() || !body.starts_with("- **Date**") {
+    let Some(entry) = single_completed_entry(suffix) else {
         return false;
+    };
+    log_names_path(entry, DECORATIVE_JS)
+}
+
+/// The suffix is exactly one Completed item: a `- **Date**` block with no
+/// further dated item, heading, or horizontal rule.
+fn single_completed_entry(suffix: &str) -> Option<&str> {
+    let entry = suffix.trim_matches('\n');
+    if !entry.starts_with("- **Date**") {
+        return None;
     }
-    let rest = body.strip_prefix("- **Date**").unwrap_or(body);
-    !rest.contains("\n- **Date**") && log_names_path(body, DECORATIVE_JS)
+    let extra = entry.lines().skip(1).any(|line| {
+        let trimmed = line.trim_start();
+        trimmed.starts_with("- **Date**") || trimmed.starts_with('#') || trimmed == "---"
+    });
+    (!extra).then_some(entry)
 }
 
 fn diff_logs_decorative_js(changes: &[Change]) -> bool {
@@ -1200,6 +1214,19 @@ checksum = \"abc\"
         assert!(evaluate(&[modified("HUMAN_LOG.md", &before, &two)], &c)
             .iter()
             .any(|v| v.contains("human-owned")));
+        let pending_heading = format!(
+            "{before}\n- **Date**: 2026-10-10\n- **Action**: unrelated note\n\n## Pending\n\n`site/static/db-dither.js`\n"
+        );
+        let bypass = evaluate(
+            &[
+                modified("HUMAN_LOG.md", &before, &pending_heading),
+                guard.clone(),
+            ],
+            &c,
+        );
+        assert_eq!(bypass.len(), 2, "{bypass:?}");
+        assert!(bypass.iter().any(|v| v.contains("human-owned")));
+        assert!(bypass.iter().any(|v| v.contains("reviewed path")));
         let edited = before.replacen("earlier", "changed", 1);
         assert!(evaluate(
             &[modified(

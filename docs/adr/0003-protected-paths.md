@@ -123,10 +123,11 @@ edit the guard.
 
 The log change on that landing is one appended Completed entry. The new
 file must start with every byte of the old file. The suffix is a single
-`- **Date**` item that names `` `site/static/db-dither.js` ``. Pending
-and every earlier Completed entry stay byte-for-byte unchanged. Dropping
-a Pending item, editing an earlier entry, or appending a second item is
-rejected. `judge/`, `.github/`, `CODEOWNERS`, `GOAL.md` and
+`- **Date**` item, and `` `site/static/db-dither.js` `` must appear in
+that item. Pending and every earlier Completed entry stay byte-for-byte
+unchanged. Dropping a Pending item, editing an earlier entry, appending
+a second item, or adding a heading or `---` in the suffix is rejected.
+A path that shows up only under a new Pending heading does not count. `judge/`, `.github/`, `CODEOWNERS`, `GOAL.md` and
 `MANIFESTO.md` stay closed on that branch. Further guard edits need
 `review/*`.
 
