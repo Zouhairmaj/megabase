@@ -179,10 +179,8 @@ async fn relation_route(
     if let Some(unit) = reject_prefer(headers.get("prefer")) {
         return unimplemented_unit(method, path, unit);
     }
-    if matches!(method, &Method::GET | &Method::HEAD) {
-        if let Some(unit) = reject_accept(headers.get(header::ACCEPT)) {
-            return unimplemented_unit(method, path, unit);
-        }
+    if let Some(unit) = reject_accept(headers.get(header::ACCEPT)) {
+        return unimplemented_unit(method, path, unit);
     }
     if method == Method::GET && headers.get(header::RANGE).is_some() {
         return not_implemented(method, path);
@@ -1319,6 +1317,24 @@ mod tests {
         let (status, body, _) = send(app, request).await;
         assert_eq!(status, StatusCode::METHOD_NOT_ALLOWED);
         assert_eq!(body["code"], "PGRST105");
+    }
+
+    #[tokio::test]
+    async fn write_object_accept_is_501() {
+        let app = router(RestState::from_config(&Config::default()));
+        let request = Request::builder()
+            .method("POST")
+            .uri("/rest/v1/todos")
+            .header(header::ACCEPT, "application/vnd.pgrst.object+json")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(r#"{"id":1}"#))
+            .unwrap();
+        let (status, body, _) = send(app, request).await;
+        assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
+        assert_eq!(
+            body["unit"],
+            "rest:media-type:application/vnd.pgrst.object+json"
+        );
     }
 
     #[tokio::test]

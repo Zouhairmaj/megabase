@@ -147,8 +147,10 @@ name is still `PGRST204`. `on_conflict` is ignored unless `Prefer`
 resolution is set, and that preference stays 501.
 
 `HEAD` keeps the success headers and drops the body. Error bodies stay JSON.
-`HEAD` uses the same `Accept` check as `GET`. `Range` on `GET` stays 501.
-`HEAD` ignores `Range`. `max-rows` is not applied.
+`HEAD`, `POST`, `PUT`, `PATCH`, and `DELETE` use the same `Accept` check as
+`GET`. A known unimplemented type, such as `text/csv` or
+`application/vnd.pgrst.object+json`, is 501 before a write runs. `Range` on
+`GET` stays 501. `HEAD` ignores `Range`. `max-rows` is not applied.
 
 Existence uses `relkind` `r`, `p`, `v`, `m`, `f` and `NOT relispartition`.
 The OpenAPI list uses the same kinds and `has_table_privilege` after
