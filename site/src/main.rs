@@ -357,6 +357,7 @@ fn write_shields(repo_root: &Path, out: &Path) -> io::Result<()> {
         "badge-conformance.json",
         "summary.json",
         "judge-results.json",
+        "judge-history.json",
     ];
     let src_dir = repo_root.join("coverage");
     let dest_dir = out.join("coverage");

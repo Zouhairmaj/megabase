@@ -66,25 +66,31 @@ bump set:
 
 - `CHANGELOG.md`
 - `.release-please-manifest.json`
-- `Cargo.toml` (workspace package version)
-- `Cargo.lock` (workspace member versions, kept in sync by
-  `cargo update -w` on the release branch)
+- `Cargo.toml`, and only the `[workspace.package]` `version` string.
+  Dependency lines, comments, and every other key must match the base.
+- `Cargo.lock`, and only quoted `version = "..."` lines (the workspace
+  member versions `cargo update -w` writes). The unquoted lockfile
+  format `version`, checksums, and package entries must match the base.
 - `release-please-config.json` only when the sole change is deleting
   `release-as` (required before the v0.1.0 PR merges). Any other edit
   to that file is rejected.
 
 Any other path on those branches is rejected, including reviewed paths
-and product code. This is narrower than a `review/*` exception: the bot
+and product code. A release diff that deletes a workspace dependency
+fails this check. This is narrower than a `review/*` exception: the bot
 cannot land CI or judge changes through a release PR.
 
-`review/*` may append or remove items under `## Pending` in `HUMAN_LOG.md`
-(a grow whose added suffix starts a new `- ` item, or a shrink that ends
-at a complete Pending item whose removed suffix starts with `- **Date**`)
-and may grow the Completed section (replace the empty-log placeholder,
-or append after existing completed entries). A shrink does not have to
-add a Completed entry. Format text and earlier completed entries stay
-unchanged. Mid-item Pending truncations and continuation-line growth
-are rejected.
+`review/*` may append items under `## Pending` in `HUMAN_LOG.md`
+(a grow whose added suffix starts a new `- ` item) and may drop whole
+Pending items that start with `- **Date**`, including an earlier item
+when the items that stay are unchanged, in the same order, and still
+separated by the same blank lines. It may
+also shrink a suffix that ends at a complete Pending item whose removed
+suffix starts with `- **Date**`. It may grow the Completed section
+(replace the empty-log placeholder, or append after existing completed
+entries). A shrink does not have to add a Completed entry. Format text
+and earlier completed entries stay unchanged. Mid-item Pending
+truncations, edited items, and continuation-line growth are rejected.
 
 ### Logged owner edits
 

@@ -17,13 +17,9 @@ pub const REVIEW_BRANCH_PREFIX: &str = "review/";
 /// release-please opens `release-please--branches--<target>--components--<name>`.
 pub const RELEASE_PLEASE_BRANCH_PREFIX: &str = "release-please--branches--";
 
-/// Version-bump files release-please (and the lockfile sync job) may change.
-pub const RELEASE_PLEASE_ALLOWED: &[&str] = &[
-    "CHANGELOG.md",
-    ".release-please-manifest.json",
-    "Cargo.toml",
-    "Cargo.lock",
-];
+/// Files release-please may rewrite in full. `Cargo.toml` and `Cargo.lock`
+/// are checked separately: only version fields may change.
+pub const RELEASE_PLEASE_ALLOWED: &[&str] = &["CHANGELOG.md", ".release-please-manifest.json"];
 
 /// Release config may change on a release-please branch only by deleting
 /// `release-as` (see `is_release_as_deletion_only`).
@@ -136,7 +132,8 @@ pub fn is_human_log_review_ok(before: &str, after: &str) -> bool {
         || (new_pending.starts_with(old_pending)
             && pending_grow_starts_at_item_boundary(old_pending, new_pending))
         || (old_pending.starts_with(new_pending)
-            && pending_shrink_ends_at_item_boundary(old_pending, new_pending));
+            && pending_shrink_ends_at_item_boundary(old_pending, new_pending))
+        || pending_only_drops_dated_items(old_pending, new_pending);
     pending_ok && is_completed_section_ok(old_rest, new_rest) && after != before
 }
 
@@ -144,6 +141,76 @@ fn pending_grow_starts_at_item_boundary(old_pending: &str, new_pending: &str) ->
     new_pending
         .get(old_pending.len()..)
         .is_some_and(|added| added.trim_start_matches('\n').starts_with("- "))
+}
+
+/// Drop whole `- **Date**` items anywhere in Pending. Items that remain
+/// must be unchanged, in the same order, with the same separators between
+/// them. An edited item is not a drop. Extra blank lines between kept
+/// items are not a drop.
+fn pending_only_drops_dated_items(old_pending: &str, new_pending: &str) -> bool {
+    let old_items = pending_items(old_pending);
+    let new_items = pending_items(new_pending);
+    if new_items.len() >= old_items.len() {
+        return false;
+    }
+    let mut kept: Vec<&PendingItem<'_>> = Vec::new();
+    let mut dropped = false;
+    for item in &old_items {
+        if kept.len() < new_items.len() && new_items[kept.len()].text == item.text {
+            kept.push(item);
+        } else if item.text.starts_with("- **Date**") {
+            dropped = true;
+        } else {
+            return false;
+        }
+    }
+    if kept.len() != new_items.len() || !dropped {
+        return false;
+    }
+    let mut expected = String::new();
+    for (i, item) in kept.iter().enumerate() {
+        if i > 0 {
+            expected.push_str("\n\n");
+        }
+        expected.push_str(item.raw);
+    }
+    new_pending.trim_matches('\n') == expected
+}
+
+struct PendingItem<'a> {
+    /// Item text without surrounding newlines, used for equality.
+    text: &'a str,
+    /// Item bytes between separators, including a blank line that belonged
+    /// to the gap before the next `- **Date**` marker.
+    raw: &'a str,
+}
+
+fn pending_items(body: &str) -> Vec<PendingItem<'_>> {
+    let trimmed = body.trim_matches('\n');
+    if trimmed.is_empty() {
+        return Vec::new();
+    }
+    // A blank line inside an item is not a new item. The next item starts
+    // at `- **Date**` after a blank line.
+    let mut items = Vec::new();
+    let mut start = 0;
+    let mut search_from = 0;
+    while let Some(rel) = trimmed[search_from..].find("\n\n- **Date**") {
+        let split_at = search_from + rel;
+        let raw = &trimmed[start..split_at];
+        let text = raw.trim_matches('\n');
+        if !text.is_empty() {
+            items.push(PendingItem { text, raw });
+        }
+        start = split_at + 2;
+        search_from = start;
+    }
+    let raw = &trimmed[start..];
+    let text = raw.trim_matches('\n');
+    if !text.is_empty() {
+        items.push(PendingItem { text, raw });
+    }
+    items
 }
 
 fn pending_shrink_ends_at_item_boundary(old_pending: &str, new_pending: &str) -> bool {
@@ -243,6 +310,154 @@ fn split_pending_body(from_heading: &str) -> Option<(&str, &str)> {
     Some((&after_heading[..end], &after_heading[end..]))
 }
 
+/// True when `after` matches `before` except the `[workspace.package]` version.
+///
+/// The comparison is textual. A TOML reparse would hide a dropped dependency
+/// that a later stringify omitted, which is the failure this check exists for.
+pub fn is_cargo_toml_version_bump_only(before: &str, after: &str) -> bool {
+    if before == after {
+        return false;
+    }
+    match (
+        mask_workspace_package_version(before),
+        mask_workspace_package_version(after),
+    ) {
+        (Some(masked_before), Some(masked_after)) => masked_before == masked_after,
+        _ => false,
+    }
+}
+
+/// True when `after` matches `before` except workspace package versions.
+///
+/// A `[[package]]` block with no `source` line is a path member. Only its
+/// quoted `version = "..."` line is masked. Registry packages keep their
+/// version and checksum. The unquoted lockfile format `version` is not a
+/// package version. Checksums, dependency lists, and added or removed
+/// packages still differ after masking, so they fail.
+pub fn is_cargo_lock_versions_only(before: &str, after: &str) -> bool {
+    before != after && mask_lockfile_versions(before) == mask_lockfile_versions(after)
+}
+
+fn mask_workspace_package_version(text: &str) -> Option<String> {
+    let mut out = String::with_capacity(text.len());
+    let mut in_section = false;
+    let mut found = false;
+    for_each_line(text, |body, ending| {
+        let header = body.trim();
+        if header.starts_with('[') && header.ends_with(']') {
+            in_section = header == "[workspace.package]";
+        }
+        if in_section && !found {
+            if let Some(masked) = mask_quoted_version_line(body) {
+                found = true;
+                out.push_str(&masked);
+                out.push_str(ending);
+                return;
+            }
+        }
+        out.push_str(body);
+        out.push_str(ending);
+    });
+    found.then_some(out)
+}
+
+fn mask_lockfile_versions(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut block = String::new();
+    let mut in_package = false;
+    for_each_line(text, |body, ending| {
+        if body.trim() == "[[package]]" {
+            flush_lock_block(&block, in_package, &mut out);
+            block.clear();
+            in_package = true;
+        }
+        block.push_str(body);
+        block.push_str(ending);
+    });
+    flush_lock_block(&block, in_package, &mut out);
+    out
+}
+
+fn flush_lock_block(block: &str, in_package: bool, out: &mut String) {
+    if block.is_empty() {
+        return;
+    }
+    if !in_package || lock_block_has_source(block) {
+        out.push_str(block);
+        return;
+    }
+    for_each_line(block, |body, ending| {
+        if let Some(masked) = mask_quoted_version_line(body) {
+            out.push_str(&masked);
+            out.push_str(ending);
+        } else {
+            out.push_str(body);
+            out.push_str(ending);
+        }
+    });
+}
+
+/// Registry and git packages set `source`. Path workspace members do not.
+fn lock_block_has_source(block: &str) -> bool {
+    let mut found = false;
+    for_each_line(block, |body, _| {
+        let trimmed = body.trim_start();
+        if trimmed
+            .strip_prefix("source")
+            .is_some_and(|rest| rest.trim_start().starts_with('='))
+        {
+            found = true;
+        }
+    });
+    found
+}
+
+fn for_each_line(text: &str, mut visit: impl FnMut(&str, &str)) {
+    if text.is_empty() {
+        return;
+    }
+    for chunk in text.split_inclusive('\n') {
+        let (body, ending) = if let Some(body) = chunk.strip_suffix("\r\n") {
+            (body, "\r\n")
+        } else if let Some(body) = chunk.strip_suffix('\n') {
+            (body, "\n")
+        } else {
+            (chunk, "")
+        };
+        visit(body, ending);
+    }
+}
+
+/// Replace a `version = "..."` line with a placeholder, keeping indent and
+/// any trailing comment. Returns `None` when the line is not that field.
+fn mask_quoted_version_line(body: &str) -> Option<String> {
+    let indent_len = body.len() - body.trim_start().len();
+    let trimmed = &body[indent_len..];
+    let rest = trimmed.strip_prefix("version")?;
+    let rest = rest.trim_start().strip_prefix('=')?.trim_start();
+    let rest = rest.strip_prefix('"')?;
+    let end = rest.find('"')?;
+    let after = &rest[end + 1..];
+    Some(format!(
+        "{indent}version = \"0.0.0\"{after}",
+        indent = &body[..indent_len]
+    ))
+}
+
+fn cargo_version_file_ok(change: &Change) -> bool {
+    if change.status != Status::Modified {
+        return false;
+    }
+    let Some((before, after)) = change.before.as_deref().zip(change.after.as_deref()) else {
+        return false;
+    };
+    match change.path.as_str() {
+        "Cargo.toml" => is_cargo_toml_version_bump_only(before, after),
+        "Cargo.lock" => is_cargo_lock_versions_only(before, after),
+        _ => false,
+    }
+}
+
 fn release_please_config_ok(change: &Change) -> bool {
     change.status == Status::Modified
         && change
@@ -262,11 +477,12 @@ pub fn evaluate(changes: &[Change], ctx: &Context) -> Vec<String> {
         if release_please {
             if matches(path, RELEASE_PLEASE_ALLOWED)
                 || (path == RELEASE_PLEASE_CONFIG && release_please_config_ok(change))
+                || cargo_version_file_ok(change)
             {
                 continue;
             }
             violations.push(format!(
-                "{path}: release-please branches may only change CHANGELOG.md, .release-please-manifest.json, Cargo.toml, Cargo.lock, and delete release-as from {RELEASE_PLEASE_CONFIG}"
+                "{path}: release-please branches may only change CHANGELOG.md, .release-please-manifest.json, the [workspace.package] version in Cargo.toml, workspace package versions in Cargo.lock, and delete release-as from {RELEASE_PLEASE_CONFIG}"
             ));
             continue;
         }
@@ -443,6 +659,61 @@ mod tests {
         }
     }
 
+    const TOML_OLD: &str = "\
+[workspace.package]
+version = \"0.1.4\"
+edition = \"2021\"
+
+[workspace.dependencies]
+chacha20 = \"0.10\"
+hkdf = \"0.12\"
+hmac = \"0.12\"
+";
+    const TOML_NEW: &str = "\
+[workspace.package]
+version = \"0.1.5\"
+edition = \"2021\"
+
+[workspace.dependencies]
+chacha20 = \"0.10\"
+hkdf = \"0.12\"
+hmac = \"0.12\"
+";
+    const TOML_DROPPED: &str = "\
+[workspace.package]
+version = \"0.1.5\"
+edition = \"2021\"
+
+[workspace.dependencies]
+hmac = \"0.12\"
+";
+    const LOCK_OLD: &str = "\
+version = 4
+
+[[package]]
+name = \"megabase\"
+version = \"0.1.4\"
+
+[[package]]
+name = \"chacha20\"
+version = \"0.10.0\"
+source = \"registry+https://github.com/rust-lang/crates.io-index\"
+checksum = \"abc\"
+";
+    const LOCK_NEW: &str = "\
+version = 4
+
+[[package]]
+name = \"megabase\"
+version = \"0.1.5\"
+
+[[package]]
+name = \"chacha20\"
+version = \"0.10.0\"
+source = \"registry+https://github.com/rust-lang/crates.io-index\"
+checksum = \"abc\"
+";
+
     #[test]
     fn release_please_branches_may_only_bump_version_files() {
         let c = release_ctx();
@@ -450,8 +721,8 @@ mod tests {
             &[
                 add("CHANGELOG.md"),
                 add(".release-please-manifest.json"),
-                add("Cargo.toml"),
-                add("Cargo.lock"),
+                modified("Cargo.toml", TOML_OLD, TOML_NEW),
+                modified("Cargo.lock", LOCK_OLD, LOCK_NEW),
             ],
             &c
         )
@@ -460,6 +731,58 @@ mod tests {
         assert_eq!(evaluate(&[add("vendor/auth")], &c).len(), 1);
         assert_eq!(evaluate(&[add(".github/workflows/ci.yml")], &c).len(), 1);
         assert!(evaluate(&[add("GOAL.md")], &c)[0].contains("release-please"));
+        assert_eq!(
+            evaluate(&[add("Cargo.toml"), add("Cargo.lock")], &c).len(),
+            2
+        );
+    }
+
+    #[test]
+    fn release_please_rejects_cargo_edits_beyond_version_fields() {
+        let c = release_ctx();
+        assert_eq!(
+            evaluate(&[modified("Cargo.toml", TOML_OLD, TOML_DROPPED)], &c).len(),
+            1
+        );
+        let dep_bump = TOML_OLD.replace("chacha20 = \"0.10\"", "chacha20 = \"0.11\"");
+        assert_eq!(
+            evaluate(&[modified("Cargo.toml", TOML_OLD, &dep_bump)], &c).len(),
+            1
+        );
+        assert!(!is_cargo_toml_version_bump_only(TOML_OLD, TOML_OLD));
+        assert!(is_cargo_toml_version_bump_only(TOML_OLD, TOML_NEW));
+        assert!(!is_cargo_toml_version_bump_only(TOML_OLD, TOML_DROPPED));
+        assert!(!is_cargo_toml_version_bump_only(
+            "no version\n",
+            "no version\n"
+        ));
+
+        let checksum = LOCK_NEW.replace("checksum = \"abc\"", "checksum = \"def\"");
+        assert_eq!(
+            evaluate(&[modified("Cargo.lock", LOCK_OLD, &checksum)], &c).len(),
+            1
+        );
+        let registry_version = LOCK_NEW.replace(
+            "name = \"chacha20\"\nversion = \"0.10.0\"",
+            "name = \"chacha20\"\nversion = \"0.11.0\"",
+        );
+        assert!(!is_cargo_lock_versions_only(LOCK_OLD, &registry_version));
+        assert_eq!(
+            evaluate(&[modified("Cargo.lock", LOCK_OLD, &registry_version)], &c).len(),
+            1
+        );
+        let dropped_pkg = LOCK_NEW.replace(
+            "[[package]]\nname = \"chacha20\"\nversion = \"0.10.0\"\nsource = \"registry+https://github.com/rust-lang/crates.io-index\"\nchecksum = \"abc\"\n",
+            "",
+        );
+        assert_eq!(
+            evaluate(&[modified("Cargo.lock", LOCK_OLD, &dropped_pkg)], &c).len(),
+            1
+        );
+        let format_bump = LOCK_OLD.replace("version = 4", "version = 5");
+        assert!(!is_cargo_lock_versions_only(LOCK_OLD, &format_bump));
+        assert!(is_cargo_lock_versions_only(LOCK_OLD, LOCK_NEW));
+        assert!(!is_cargo_lock_versions_only(LOCK_OLD, LOCK_OLD));
     }
 
     #[test]
@@ -626,6 +949,44 @@ mod tests {
             keep,
             "- **Date**: 2026-10-09\n- **Action**: keep\n- **Re"
         ));
+    }
+
+    #[test]
+    fn review_branch_may_drop_an_earlier_pending_item() {
+        let header = "# Human Intervention Log\n\n## Pending\n\n";
+        let rest = "\n---\n\n## Completed\n\n- already\n";
+        let first = "- **Date**: 2026-10-09\n- **Action**: pages\n";
+        let second = "- **Date**: 2026-10-09\n- **Action**: keep\n";
+        let third = "- **Date**: 2026-10-10\n- **Action**: still open\n";
+        let before = format!("{header}{first}\n{second}\n{third}{rest}");
+        let after = format!(
+            "{header}{second}\n{third}{rest}- **Date**: 2026-10-10\n- **Action**: pages is live\n"
+        );
+        let c = ctx("review/human-log", false);
+        assert!(
+            evaluate(&[modified("HUMAN_LOG.md", &before, &after)], &c).is_empty(),
+            "{:?}",
+            evaluate(&[modified("HUMAN_LOG.md", &before, &after)], &c)
+        );
+        let rewritten =
+            format!("{header}{second}\n- **Date**: 2026-10-09\n- **Action**: edited\n{rest}");
+        assert_eq!(
+            evaluate(&[modified("HUMAN_LOG.md", &before, &rewritten)], &c).len(),
+            1
+        );
+        let spaced =
+            "- **Date**: 2026-10-09\n- **Action**: pages\n\nSame item, second paragraph.\n";
+        let before_spaced = format!("{header}{spaced}\n{second}{rest}");
+        let after_spaced = format!("{header}{second}{rest}");
+        assert!(
+            is_human_log_review_ok(&before_spaced, &after_spaced),
+            "a blank line inside a dated item stays part of that item"
+        );
+        let extra_gap = format!("{header}{second}\n\n{third}{rest}");
+        assert!(
+            !is_human_log_review_ok(&before, &extra_gap),
+            "an added blank line between kept items is not a drop"
+        );
     }
 
     #[test]

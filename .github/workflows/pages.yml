@@ -1,11 +1,11 @@
-name: Deploy placeholder site
+name: Build placeholder site
 
 # Push and workflow_dispatch only. Both can write the default-branch
 # Actions cache, so this file must not check out a workflow_run ref or
-# download a workflow_run artifact. Live Judge results are applied by
-# pages-badges.yml (workflow_run only, no cache action), which then
-# republishes shields JSON, the README treemap, and this site. Both
-# workflows share the `pages` concurrency group.
+# download a workflow_run artifact. It builds the site and does not
+# deploy it. A deploy from this checkout would publish the regression
+# baseline (0% conformance) over the live Judge score. Publication is
+# pages-badges.yml after Judge on main (decision 0030).
 
 on:
   push:
@@ -15,17 +15,13 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: pages
-  cancel-in-progress: false
-
 jobs:
   build:
     name: Generate site
     runs-on: ubuntu-latest
     # Read-only checkout of the event SHA (the push, or the ref selected
-    # for workflow_dispatch). Publication is a later job that does not
-    # check the repository out.
+    # for workflow_dispatch). This job uploads a build artifact and does
+    # not deploy. pages-badges.yml publishes the live Judge site.
     permissions:
       contents: read
     steps:
@@ -62,38 +58,3 @@ jobs:
           path: _site
           if-no-files-found: error
           retention-days: 1
-
-  deploy:
-    name: Publish to GitHub Pages
-    needs: build
-    if: needs.build.result == 'success'
-    runs-on: ubuntu-latest
-    permissions:
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - name: Download site
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          name: pages-site
-          path: _site
-
-      - name: Configure Pages
-        uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5
-        with:
-          # Tries to turn Pages on. This input cannot enable Pages with
-          # GITHUB_TOKEN alone; if the site is still off after the first run,
-          # set Settings → Pages → Source to GitHub Actions (see HUMAN_LOG.md).
-          enablement: true
-
-      - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3
-        with:
-          path: _site
-
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5

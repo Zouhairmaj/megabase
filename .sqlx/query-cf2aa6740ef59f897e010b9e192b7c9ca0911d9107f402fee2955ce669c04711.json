@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM auth.one_time_tokens\n                   WHERE user_id = $1 AND token_type::text = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "cf2aa6740ef59f897e010b9e192b7c9ca0911d9107f402fee2955ce669c04711"
+}

@@ -15,11 +15,6 @@ Each entry should include:
 ## Pending
 
 - **Date**: 2026-10-09
-- **Action**: (pending) Repository Settings → Pages → Build and deployment → Source: **GitHub Actions**.
-- **Reason**: The placeholder site deploys with `actions/configure-pages` (`enablement: true`), `actions/upload-pages-artifact`, and `actions/deploy-pages` on push to `main`. Pages is not enabled yet (`GET /pages` is 404). `enablement: true` cannot turn Pages on with `GITHUB_TOKEN` alone (it needs a PAT or GitHub App token with Pages write). After the source is set to GitHub Actions, re-run **Deploy placeholder site**.
-- **Files affected**: GitHub Pages settings (not in git)
-
-- **Date**: 2026-10-09
 - **Action**: (pending) Create repository secret `RELEASE_PLEASE_TOKEN`. Settings → Secrets and variables → Actions → New repository secret. Name: `RELEASE_PLEASE_TOKEN`. Value: a fine-grained PAT **or** GitHub App installation token for `Zouhairmaj/megabase` with `contents: write` and `pull-requests: write`. The token must be a user/app credential whose **pushes start GitHub Actions** (the default `GITHUB_TOKEN` does not). Classic PAT equivalent: `repo` scope. After saving, re-run the **Release** workflow on `main` (Actions → Release → Run workflow) so lockfile commits on `release-please--branches--*` pick up the token.
 - **Reason**: Preferred path so release-please and `cargo update -w` lockfile commits trigger required checks natively. Release.yml now `workflow_dispatch`es CI when the secret is unset (GITHUB_TOKEN can start `workflow_dispatch`), but pull_request-only checks (for example Conventional Commits title) and a release branch that does not yet contain those `workflow_dispatch` triggers still need this token. Run 37980727582 failed on Sync Cargo.lock waiting for Build, Codecov, Bencher, Protected paths, and Judge on SHA `b8c1e454…`.
 - **Files affected**: GitHub Actions repository secrets (not in git)
@@ -72,3 +67,28 @@ Each entry should include:
 - **Action**: On 2026-10-10 the owner chose: `enforce_admins` disabled, code-owner review kept, owner-approved protected pull requests merged by admin bypass on an explicit chat instruction.
 - **Reason**: Code-owner review stays required on protected paths. Turning off “Include administrators” lets the owner merge a pull request they have already approved when they say so in chat.
 - **Files affected**: GitHub branch protection on `main` (not in git)
+
+- **Date**: 2026-10-10
+- **Action**: Set GitHub Pages → Build and deployment → Source to GitHub Actions. The site is live at megabase.sh. `GET /repos/Zouhairmaj/megabase/pages` returns `build_type: workflow` and `html_url: https://megabase.sh/`.
+- **Reason**: The pending item said Pages was not enabled (`GET /pages` was 404). That is no longer true. `pages.yml` no longer deploys the baseline site over that publication.
+- **Files affected**: GitHub Pages settings (not in git)
+
+- **Date**: 2026-10-10
+- **Action**: Confirmed `github-actions[bot]` publishes GitHub Releases. `v0.1.3` is authored by that account.
+- **Reason**: The human-only checklist item “Allow github-actions to publish GitHub Releases / tags on main” is done. `v0.1.0` still has no release assets, and `ghcr.io/zouhairmaj/megabase` still answers 401 to an anonymous tag list, so those pending items stay open.
+- **Files affected**: GitHub Releases (not in git)
+
+- **Date**: 2026-10-10
+- **Action**: OpenSSF Best Practices badge is registered as project 15348. Scorecard’s CII-Best-Practices check reports the badge as in progress.
+- **Reason**: The optional registration item is done. A passing badge is a later review, not this registration.
+- **Files affected**: OpenSSF Best Practices (not in git)
+
+- **Date**: 2026-10-10
+- **Action**: Confirmed repository secret `CODECOV_TOKEN` is used. CI run 38027086255 uploaded `lcov.info` with a redacted token (`./codecov upload-coverage -t <redacted>`).
+- **Reason**: Codecov was already listed as set up. The audit checked a successful `main` upload rather than the secret list (this token cannot call the secrets API).
+- **Files affected**: GitHub Actions secrets (not in git)
+
+- **Date**: 2026-10-10
+- **Action**: Confirmed repository secret `BENCHER_API_TOKEN` is used. Bencher run 38027086326 executed `bencher run` on `main` and printed `View results`.
+- **Reason**: Bencher was already listed as set up. The audit checked that the job did not skip for a missing token.
+- **Files affected**: GitHub Actions secrets (not in git)

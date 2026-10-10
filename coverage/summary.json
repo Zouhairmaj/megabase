@@ -2,24 +2,24 @@
   "schema": 1,
   "totals": {
     "units": 1024,
-    "implemented": 85,
-    "tested": 58,
+    "implemented": 91,
+    "tested": 65,
     "conformant": 0
   },
   "percent": {
-    "coverage": 8.3,
+    "coverage": 8.9,
     "conformance": 0.0,
     "done": 0.0
   },
   "judge": {
-    "cases": 112,
+    "cases": 160,
     "passing": 0
   },
   "components": {
     "auth": {
       "units": 152,
-      "implemented": 65,
-      "tested": 54,
+      "implemented": 71,
+      "tested": 60,
       "conformant": 0,
       "groups": {
         "admin": {
@@ -90,8 +90,8 @@
         },
         "verify": {
           "units": 10,
-          "implemented": 0,
-          "tested": 0,
+          "implemented": 6,
+          "tested": 6,
           "conformant": 0
         },
         "well-known": {
@@ -317,7 +317,7 @@
     "rest": {
       "units": 93,
       "implemented": 20,
-      "tested": 4,
+      "tested": 5,
       "conformant": 0,
       "groups": {
         "aggregates": {
@@ -335,7 +335,7 @@
         "filtering": {
           "units": 28,
           "implemented": 20,
-          "tested": 4,
+          "tested": 5,
           "conformant": 0
         },
         "logic": {
@@ -582,12 +582,14 @@
     "auth:route:GET /auth/v1/user": "tested",
     "auth:route:GET /auth/v1/user/identities/authorize": "tested",
     "auth:route:GET /auth/v1/user/oauth/grants": "tested",
+    "auth:route:GET /auth/v1/verify": "tested",
     "auth:route:POST /auth/v1/admin/custom-providers": "implemented",
     "auth:route:POST /auth/v1/admin/generate_link": "implemented",
     "auth:route:POST /auth/v1/admin/oauth/clients": "implemented",
     "auth:route:POST /auth/v1/logout": "tested",
     "auth:route:POST /auth/v1/signup": "tested",
     "auth:route:POST /auth/v1/token": "tested",
+    "auth:route:POST /auth/v1/verify": "tested",
     "auth:route:PUT /auth/v1/user": "tested",
     "auth:sql-function:auth.email()": "tested",
     "auth:sql-function:auth.jwt()": "tested",
@@ -621,6 +623,10 @@
     "auth:sql-table:auth.users": "tested",
     "auth:sql-table:auth.webauthn_challenges": "implemented",
     "auth:sql-table:auth.webauthn_credentials": "implemented",
+    "auth:verify-type:email_change": "tested",
+    "auth:verify-type:invite": "tested",
+    "auth:verify-type:recovery": "tested",
+    "auth:verify-type:signup": "tested",
     "rest:filter-operator:adj": "implemented",
     "rest:filter-operator:all": "implemented",
     "rest:filter-operator:any": "implemented",
@@ -640,6 +646,6 @@
     "rest:filter-operator:lte": "implemented",
     "rest:filter-operator:match": "implemented",
     "rest:filter-operator:neq": "implemented",
-    "rest:filter-operator:not": "implemented"
+    "rest:filter-operator:not": "tested"
   }
 }

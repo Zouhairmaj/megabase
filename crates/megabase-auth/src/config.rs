@@ -39,6 +39,14 @@ pub struct AuthConfig {
     pub jwt_exp_seconds: i64,
     pub jwt_issuer: String,
     pub password_min_length: usize,
+    /// `GOTRUE_SITE_URL`, or `SITE_URL` when that is unset. Implicit verify
+    /// redirects land here when `redirect_to` is missing or not allowed.
+    pub site_url: String,
+    /// `GOTRUE_MAILER_OTP_EXP` in seconds. `0` is raised to one day, matching
+    /// GoTrue's startup default.
+    pub mailer_otp_exp_seconds: u64,
+    /// `GOTRUE_MAILER_SECURE_EMAIL_CHANGE_ENABLED`.
+    pub secure_email_change: bool,
 }
 
 /// `external` object on `GET /settings`. Email and phone are separate fields
@@ -92,6 +100,10 @@ impl AuthConfig {
             jwt_exp_seconds: 3600,
             jwt_issuer: "http://localhost:8000/auth/v1".into(),
             password_min_length: MIN_PASSWORD_LENGTH,
+            // `vendor/supabase/docker/.env.example` `SITE_URL`.
+            site_url: "http://localhost:3000".into(),
+            mailer_otp_exp_seconds: 86_400,
+            secure_email_change: true,
         }
     }
 
@@ -104,6 +116,10 @@ impl AuthConfig {
         let password_min = match optional_u64(&lookup, "GOTRUE_PASSWORD_MIN_LENGTH")? {
             Some(value) => value.max(MIN_PASSWORD_LENGTH as u64) as usize,
             None => defaults.password_min_length,
+        };
+        let otp_exp = match optional_u64(&lookup, "GOTRUE_MAILER_OTP_EXP")? {
+            Some(0) | None => defaults.mailer_otp_exp_seconds,
+            Some(value) => value,
         };
         let jwt_exp = match optional_i64(&lookup, "GOTRUE_JWT_EXP")? {
             Some(value) if value > 0 => value,
@@ -166,6 +182,16 @@ impl AuthConfig {
             jwt_exp_seconds: jwt_exp,
             jwt_issuer: lookup("GOTRUE_JWT_ISSUER").unwrap_or(defaults.jwt_issuer),
             password_min_length: password_min,
+            site_url: lookup("GOTRUE_SITE_URL")
+                .filter(|value| !value.is_empty())
+                .or_else(|| lookup("SITE_URL").filter(|value| !value.is_empty()))
+                .unwrap_or(defaults.site_url),
+            mailer_otp_exp_seconds: otp_exp,
+            secure_email_change: optional_bool(
+                &lookup,
+                "GOTRUE_MAILER_SECURE_EMAIL_CHANGE_ENABLED",
+            )?
+            .unwrap_or(defaults.secure_email_change),
         })
     }
 }
@@ -254,6 +280,9 @@ mod tests {
         assert_eq!(config.jwt_exp_seconds, 3600);
         assert_eq!(config.jwt_issuer, "http://localhost:8000/auth/v1");
         assert_eq!(config.password_min_length, 6);
+        assert_eq!(config.site_url, "http://localhost:3000");
+        assert_eq!(config.mailer_otp_exp_seconds, 86_400);
+        assert!(config.secure_email_change);
     }
 
     #[test]
@@ -278,6 +307,24 @@ mod tests {
         assert_eq!(config.jwt_exp_seconds, 120);
         assert_eq!(config.sms_provider, "twilio");
         assert!(config.saml_private_key_next_configured);
+    }
+
+    #[test]
+    fn site_url_prefers_gotrue_name_and_secure_change_accepts_f() {
+        let from_site = AuthConfig::from_lookup(|key| {
+            (key == "SITE_URL").then(|| "https://app.example".into())
+        })
+        .unwrap();
+        assert_eq!(from_site.site_url, "https://app.example");
+        let both = AuthConfig::from_lookup(|key| match key {
+            "GOTRUE_SITE_URL" => Some("https://gotrue.example".into()),
+            "SITE_URL" => Some("https://site.example".into()),
+            "GOTRUE_MAILER_SECURE_EMAIL_CHANGE_ENABLED" => Some("f".into()),
+            _ => None,
+        })
+        .unwrap();
+        assert_eq!(both.site_url, "https://gotrue.example");
+        assert!(!both.secure_email_change);
     }
 
     #[test]

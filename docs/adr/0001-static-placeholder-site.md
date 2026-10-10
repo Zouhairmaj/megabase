@@ -32,4 +32,4 @@ Constraints:
 - Agents working on crates, `judge/`, or `coverage/` do not need to touch `site/`.
 - Merging this work with Phase 0 is order-independent: the generator reads `coverage/` when present and otherwise keeps placeholders.
 - Adding Status, Roadmap and the rest is a template plus a registry row, not a layout rewrite.
-- Deploy is GitHub Pages (`actions/configure-pages` with `enablement: true`, `actions/upload-pages-artifact`, `actions/deploy-pages`) on push to `main`. If Pages is still off after the first run, a human sets Settings → Pages → Source to GitHub Actions (pending in `HUMAN_LOG.md`).
+- GitHub Pages is on (source: GitHub Actions) and the site is [megabase.sh](https://megabase.sh). `pages-badges.yml` deploys it after Judge on `main`, with the live score applied. A push to `main` builds the site in `pages.yml` and does not deploy that build: the checkout still has the regression baseline, and deploying it would replace the live score ([decision 0030](../decisions/0030-conformance-is-the-live-judge-score.md)).
