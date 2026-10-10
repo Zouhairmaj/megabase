@@ -45,7 +45,12 @@ ignore = true
 
 [bans]
 multiple-versions = "warn"
-wildcards = "allow"
+# Wildcard version requirements are denied. Internal crates carry explicit
+# versions in [workspace.dependencies]; product crates stay publishable.
+wildcards = "deny"
+# No path-only exception: it would also admit `version = "*"` on private path
+# dependencies. No tools/ or judge/ crate depends on a workspace member.
+allow-wildcard-paths = false
 allow-workspace = true
 allow = [
     "aho-corasick",
