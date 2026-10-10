@@ -1,4 +1,9 @@
 /target/
+# Standalone checks of the patched driver write a lockfile that records the
+# optional `rsa` crate, plus a local target dir. Scorecard reads tracked
+# lockfiles; do not commit either.
+third_party/sqlx-mysql/Cargo.lock
+third_party/sqlx-mysql/target/
 **/*.rs.bk
 .idea/
 .vscode/

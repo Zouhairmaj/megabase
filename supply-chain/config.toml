@@ -57,10 +57,6 @@ criteria = "safe-to-deploy"
 version = "0.23.1"
 criteria = "safe-to-deploy"
 
-[[exemptions.base64ct]]
-version = "1.8.3"
-criteria = "safe-to-deploy"
-
 [[exemptions.bcrypt]]
 version = "0.19.3"
 criteria = "safe-to-deploy"
@@ -134,10 +130,6 @@ version = "0.16.6"
 criteria = "safe-to-run"
 
 [[exemptions.const-oid]]
-version = "0.9.6"
-criteria = "safe-to-deploy"
-
-[[exemptions.const-oid]]
 version = "0.10.2"
 criteria = "safe-to-deploy"
 
@@ -187,10 +179,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.ctutils]]
 version = "0.4.3"
-criteria = "safe-to-deploy"
-
-[[exemptions.der]]
-version = "0.7.10"
 criteria = "safe-to-deploy"
 
 [[exemptions.digest]]
@@ -437,10 +425,6 @@ criteria = "safe-to-deploy"
 version = "0.2.190"
 criteria = "safe-to-deploy"
 
-[[exemptions.libm]]
-version = "0.2.16"
-criteria = "safe-to-deploy"
-
 [[exemptions.libredox]]
 version = "0.1.25"
 criteria = "safe-to-deploy"
@@ -489,18 +473,6 @@ criteria = "safe-to-deploy"
 version = "1.2.4"
 criteria = "safe-to-deploy"
 
-[[exemptions.num-bigint-dig]]
-version = "0.8.6"
-criteria = "safe-to-deploy"
-
-[[exemptions.num-integer]]
-version = "0.1.47"
-criteria = "safe-to-deploy"
-
-[[exemptions.num-iter]]
-version = "0.1.46"
-criteria = "safe-to-deploy"
-
 [[exemptions.objc2-system-configuration]]
 version = "0.3.2"
 criteria = "safe-to-deploy"
@@ -519,10 +491,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.parking_lot_core]]
 version = "0.9.12"
-criteria = "safe-to-deploy"
-
-[[exemptions.pem-rfc7468]]
-version = "0.7.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.phf]]
@@ -649,10 +617,6 @@ criteria = "safe-to-deploy"
 version = "0.8.11"
 criteria = "safe-to-deploy"
 
-[[exemptions.rsa]]
-version = "0.9.10"
-criteria = "safe-to-deploy"
-
 [[exemptions.rustix]]
 version = "1.1.5"
 criteria = "safe-to-run"
@@ -717,10 +681,6 @@ criteria = "safe-to-deploy"
 version = "1.4.8"
 criteria = "safe-to-deploy"
 
-[[exemptions.signature]]
-version = "2.2.0"
-criteria = "safe-to-deploy"
-
 [[exemptions.similar]]
 version = "2.7.0"
 criteria = "safe-to-run"
@@ -745,10 +705,6 @@ criteria = "safe-to-deploy"
 version = "0.9.9"
 criteria = "safe-to-deploy"
 
-[[exemptions.spki]]
-version = "0.7.3"
-criteria = "safe-to-deploy"
-
 [[exemptions.sqlx]]
 version = "0.8.6"
 criteria = "safe-to-deploy"
@@ -762,10 +718,6 @@ version = "0.8.6"
 criteria = "safe-to-deploy"
 
 [[exemptions.sqlx-macros-core]]
-version = "0.8.6"
-criteria = "safe-to-deploy"
-
-[[exemptions.sqlx-mysql]]
 version = "0.8.6"
 criteria = "safe-to-deploy"
 
