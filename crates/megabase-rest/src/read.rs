@@ -197,11 +197,7 @@ async fn relation_route(
                 );
             }
             ReadAccept::Json => {}
-            ReadAccept::Other => {
-                if let Some(unit) = reject_accept(headers.get(header::ACCEPT)) {
-                    return unimplemented_unit(method, path, unit);
-                }
-            }
+            ReadAccept::Other(unit) => return unimplemented_unit(method, path, unit),
         }
     } else if let Some(unit) = reject_accept(headers.get(header::ACCEPT)) {
         return unimplemented_unit(method, path, unit);
@@ -571,23 +567,28 @@ enum ReadAccept {
     Csv,
     /// Every accepted type lacks a handler on a table or view (PGRST107).
     NotAcceptable(String),
-    /// Another media type; `reject_accept` decides.
-    Other,
+    /// A media type served upstream but not here; carries its unit id.
+    Other(&'static str),
 }
 
 /// Pick the first accepted media type with a handler, as `negotiateContent`
-/// does. `text/plain` and `text/xml` have none for a table or view, because
-/// no custom aggregate is registered.
+/// does: entries are ordered by `q` (stable, `q=0` dropped) and types without
+/// a handler are skipped. `text/plain` and `text/xml` have none for a table or
+/// view, because no custom aggregate is registered.
 fn negotiate_read(value: Option<&axum::http::HeaderValue>) -> ReadAccept {
     let Some(text) = header_str(value) else {
         return ReadAccept::Json;
     };
+    let mut entries: Vec<(f32, &str)> = text
+        .split(',')
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .map(|part| (quality(part), part))
+        .filter(|(q, _)| *q > 0.0)
+        .collect();
+    entries.sort_by(|a, b| b.0.total_cmp(&a.0));
     let mut skipped: Vec<String> = Vec::new();
-    for part in text.split(',') {
-        let part = part.trim();
-        if part.is_empty() {
-            continue;
-        }
+    for (_, part) in entries {
         let essence = part
             .split(';')
             .next()
@@ -600,8 +601,13 @@ fn negotiate_read(value: Option<&axum::http::HeaderValue>) -> ReadAccept {
             // megabase:unit rest:media-type:text/plain
             // megabase:unit rest:media-type:text/xml
             "text/plain" | "text/xml" => skipped.push(essence),
-            "*/*" | "application/json" | "application/*" => return ReadAccept::Json,
-            _ => return ReadAccept::Other,
+            _ => match accept_unit(part) {
+                None => return ReadAccept::Json,
+                // A type the pinned PostgREST serves: not ours yet.
+                Some(unit) if !unit.is_empty() => return ReadAccept::Other(unit),
+                // Unknown to PostgREST as well: no handler, keep looking.
+                Some(_) => skipped.push(essence),
+            },
         }
     }
     if skipped.is_empty() {
@@ -609,6 +615,20 @@ fn negotiate_read(value: Option<&axum::http::HeaderValue>) -> ReadAccept {
     } else {
         ReadAccept::NotAcceptable(skipped.join(", "))
     }
+}
+
+/// The `q` weight of one `Accept` entry; absent or malformed is 1.
+fn quality(part: &str) -> f32 {
+    part.split(';')
+        .skip(1)
+        .find_map(|param| {
+            let (name, value) = param.split_once('=')?;
+            name.trim()
+                .eq_ignore_ascii_case("q")
+                .then(|| value.trim().parse::<f32>().ok())
+                .flatten()
+        })
+        .map_or(1.0, |q| q.clamp(0.0, 1.0))
 }
 
 /// Method and body format of a relation read.
@@ -631,6 +651,11 @@ pub(crate) fn reject_accept(value: Option<&axum::http::HeaderValue>) -> Option<&
     if first.is_empty() {
         return None;
     }
+    accept_unit(first)
+}
+
+/// Unit id for one `Accept` entry: `None` is served, `Some("")` is unknown.
+fn accept_unit(first: &str) -> Option<&'static str> {
     let mut pieces = first.split(';');
     let essence = pieces.next()?.trim().to_ascii_lowercase();
     let nulls_stripped = pieces.any(|param| param.trim().eq_ignore_ascii_case("nulls=stripped"));
@@ -1393,7 +1418,19 @@ mod tests {
             ReadAccept::Json
         ));
         assert!(matches!(pick("text/xml, text/csv"), ReadAccept::Csv));
-        assert!(matches!(pick("application/geo+json"), ReadAccept::Other));
+        assert!(matches!(pick("application/geo+json"), ReadAccept::Other(_)));
+        assert!(matches!(
+            pick("application/x-unknown, text/csv"),
+            ReadAccept::Csv
+        ));
+        assert!(matches!(
+            pick("application/json;q=0.1, text/csv;q=0.9"),
+            ReadAccept::Csv
+        ));
+        assert!(matches!(
+            pick("text/csv;q=0, application/json"),
+            ReadAccept::Json
+        ));
         assert!(matches!(negotiate_read(None), ReadAccept::Json));
     }
 
