@@ -4,6 +4,19 @@ All notable changes to Megabase are documented in this file.
 The format is produced by [release-please](https://github.com/googleapis/release-please).
 Sections: Features, Bug Fixes, Performance, Conformance/judge, Documentation.
 
+## [0.1.7](https://github.com/Zouhairmaj/megabase/compare/v0.1.6...v0.1.7) (2026-10-10)
+
+
+### Features
+
+* **rest:** serve range and full-text filters ([#217](https://github.com/Zouhairmaj/megabase/issues/217)) ([bcfe3a8](https://github.com/Zouhairmaj/megabase/commit/bcfe3a8f8029ad9f963fcc4227d5a648c07d9527))
+* **site:** make live status the primary hero CTA ([#218](https://github.com/Zouhairmaj/megabase/issues/218)) ([05ab7be](https://github.com/Zouhairmaj/megabase/commit/05ab7be433918e1414460766df03679a1c85b5fa))
+
+
+### Documentation
+
+* **site:** add the 9 and 10 october devlog ([#219](https://github.com/Zouhairmaj/megabase/issues/219)) ([83e8a32](https://github.com/Zouhairmaj/megabase/commit/83e8a32c6a3034e308999f94b6160c80057c7efb))
+
 ## [0.1.6](https://github.com/Zouhairmaj/megabase/compare/v0.1.5...v0.1.6) (2026-10-10)
 
 
