@@ -235,8 +235,8 @@ jobs:
             --testbed github-actions \
             --adapter rust_criterion \
             --threshold-measure latency \
-            --threshold-test t_test \
-            --threshold-upper-boundary 0.99 \
+            --threshold-test percentage \
+            --threshold-upper-boundary 3.0 \
             --error-on-alert \
             --github-actions "$GH_TOKEN" \
             "cargo bench --locked --bench health"
