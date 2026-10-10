@@ -23,8 +23,13 @@ the request carries it (`vendor/auth/internal/api/middleware.go`). The
 judge overlay sets that name to `X-Megabase-Judge-Rate-Key`. Other cases
 omit the header, so they are not counted. The rate-limit case sends
 `judge-{{run}}`, one bucket per judge process. The pinned token limiter
-burst is 30, so the 31st password grant is the 429. Lowering the burst
-would mean editing `vendor/`, which agents cannot do.
+burst is hardcoded at 30 (`internal/api/apilimiter/apilimiter.go`). The
+default rate is `RateLimitTokenRefresh / (60 * 5)` per second, and the
+default `RateLimitTokenRefresh` is 150, so one token refills about every
+two seconds. A slow run can admit the 31st grant. The overlay sets
+`GOTRUE_RATE_LIMIT_TOKEN_REFRESH=1`, which refills about once every five
+minutes, so the 31st password grant is the 429. Lowering the burst would
+mean editing `vendor/`, which agents cannot do.
 
 `prepare` loads the fixtures into the empty `megabase` database before
 Megabase installs Auth SQL. The file creates `auth.uid()` only when it

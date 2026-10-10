@@ -90,11 +90,13 @@ optional `json` / `headers` / `key` / `capture` / `ignore`) and/or one
 `[[case.db]]` check (`table` or `function`, optional `rows = true`).
 See `judge/cases/`. Adversarial ids are `auth.adversarial.*` and
 `rest.adversarial.*`. The Auth service sets
-`GOTRUE_RATE_LIMIT_HEADER=X-Megabase-Judge-Rate-Key`. GoTrue skips the
-limiter when that header is absent, so the other cases are not counted.
+`GOTRUE_RATE_LIMIT_HEADER=X-Megabase-Judge-Rate-Key` and
+`GOTRUE_RATE_LIMIT_TOKEN_REFRESH=1`. GoTrue skips the limiter when that
+header is absent, so the other cases are not counted.
 `auth.adversarial.rate-limit.token` sends the header as `judge-{{run}}`
 (one bucket per judge process) and expects HTTP 429 on the 31st password
-grant. The token limiter's burst is 30 in the pinned GoTrue.
+grant. The token limiter's burst is 30 in the pinned GoTrue. The rate of
+1 keeps that burst from refilling during the case.
 
 ## Database side-effects
 

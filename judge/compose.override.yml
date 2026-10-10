@@ -58,6 +58,10 @@ services:
       # present (internal/api/middleware.go). Other judge cases omit it, so
       # they are not counted. Adversarial cases send a per-run value.
       GOTRUE_RATE_LIMIT_HEADER: X-Megabase-Judge-Rate-Key
+      # Default token rate is 150/(60*5) per second (one refill about every
+      # 2s) with a hardcoded burst of 30. A slow run can refill before the
+      # 31st grant. 1 refills about once every 5 minutes.
+      GOTRUE_RATE_LIMIT_TOKEN_REFRESH: "1"
   rest:
     image: ghcr.io/postgrest/postgrest:v16.4@sha256:d155c6718ed9a9f990d159a2ab7c0a3f16944dbb6d0a0344557421042acfe0df
   realtime:

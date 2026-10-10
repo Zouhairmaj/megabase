@@ -120,7 +120,6 @@ grant select on table public.profiles to anon, authenticated;
 grant select, insert, update, delete on table public.notes to authenticated;
 grant select, insert on table public.note_comments to authenticated;
 grant all on table public.profiles, public.notes, public.note_comments to service_role;
-grant usage, select on all sequences in schema public to authenticated, service_role;
 
 insert into public.profiles (id, display_name) values
   ('00000000-0000-4000-8000-0000000000a1', 'owner-a'),
