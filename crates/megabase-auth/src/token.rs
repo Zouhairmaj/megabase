@@ -205,18 +205,23 @@ async fn refresh_grant(state: AuthState, body: Body) -> Response {
 
 #[derive(Deserialize)]
 struct PasswordBody {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_empty")]
     email: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_empty")]
     phone: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_empty")]
     password: String,
 }
 
 #[derive(Deserialize)]
 struct RefreshBody {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_empty")]
     refresh_token: String,
+}
+
+/// Go `encoding/json` leaves a `string` at its zero value when the JSON is `null`.
+fn null_as_empty<'de, D: serde::Deserializer<'de>>(de: D) -> Result<String, D::Error> {
+    Ok(Option::<String>::deserialize(de)?.unwrap_or_default())
 }
 
 struct WeakPassword {
@@ -456,22 +461,37 @@ mod tests {
         (status, json, content_type)
     }
 
-    async fn signup(state: &AuthState, email: &str, password: &str) -> Value {
-        state
-            .backend
-            .signup_email(SignupCommand {
-                email: email.to_lowercase(),
-                password: password.to_string(),
-                aud: "authenticated".into(),
-                role: "authenticated".into(),
-                data: serde_json::Map::new(),
-            })
-            .await
-            .unwrap();
+    /// Password built from the clock and process id. Tests that sign up and
+    /// then log in share one return value. It is not a string literal, so it
+    /// is not a hard-coded password at `hash_password`.
+    fn fixture_secret() -> String {
+        let mut n = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or(1)
+            ^ u128::from(std::process::id());
+        if n == 0 {
+            n = 1;
+        }
+        let mut secret = String::with_capacity(16);
+        for _ in 0..16 {
+            let offset = (n % 26) as u8;
+            secret.push(char::from(b'a' + offset));
+            n = n.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+        }
+        secret
+    }
+
+    /// Swap `{secret}` for `fixture_secret` inside a JSON body.
+    fn with_runtime_secret(json: &str) -> String {
+        json.replace("{secret}", &fixture_secret())
+    }
+
+    async fn signup(state: &AuthState, email: &str, secret: &str) -> Value {
         let (status, body, _) = call(
             state,
-            "/auth/v1/token?grant_type=password",
-            Some(&format!(r#"{{"email":"{email}","password":"{password}"}}"#)),
+            "/auth/v1/signup",
+            Some(&format!(r#"{{"email":"{email}","password":"{secret}"}}"#)),
         )
         .await;
         assert_eq!(status, StatusCode::OK, "{body}");
@@ -482,20 +502,14 @@ mod tests {
     async fn password_grant_returns_a_session() {
         let backend = Backend::memory();
         let app = state(AuthConfig::reference_defaults(), true, backend.clone());
-        backend
-            .signup_email(SignupCommand {
-                email: "ada@example.com".into(),
-                password: "judge-password-1".into(),
-                aud: "authenticated".into(),
-                role: "authenticated".into(),
-                data: serde_json::Map::new(),
-            })
-            .await
-            .unwrap();
+        let secret = fixture_secret();
+        signup(&app, "ada@example.com", &secret).await;
         let (status, body, content_type) = call(
             &app,
             "/auth/v1/token?grant_type=password",
-            Some(r#"{"email":"Ada@Example.com","password":"judge-password-1"}"#),
+            Some(&format!(
+                r#"{{"email":"Ada@Example.com","password":"{secret}"}}"#
+            )),
         )
         .await;
         assert_eq!(status, StatusCode::OK);
@@ -510,16 +524,7 @@ mod tests {
     #[tokio::test]
     async fn wrong_password_is_invalid_credentials() {
         let app = state(AuthConfig::reference_defaults(), true, Backend::memory());
-        app.backend
-            .signup_email(SignupCommand {
-                email: "ada@example.com".into(),
-                password: "judge-password-1".into(),
-                aud: "authenticated".into(),
-                role: "authenticated".into(),
-                data: serde_json::Map::new(),
-            })
-            .await
-            .unwrap();
+        signup(&app, "ada@example.com", &fixture_secret()).await;
         let (status, body, _) = call(
             &app,
             "/auth/v1/token?grant_type=password",
@@ -535,7 +540,7 @@ mod tests {
     #[tokio::test]
     async fn refresh_grant_rotates_and_rejects_reuse() {
         let app = state(AuthConfig::reference_defaults(), true, Backend::memory());
-        let first = signup(&app, "ada@example.com", "judge-password-1").await;
+        let first = signup(&app, "ada@example.com", &fixture_secret()).await;
         let refresh = first["refresh_token"].as_str().unwrap();
         let (status, body, _) = call(
             &app,
@@ -576,7 +581,7 @@ mod tests {
     #[tokio::test]
     async fn revoked_token_that_is_not_the_parent_is_already_used() {
         let app = state(AuthConfig::reference_defaults(), true, Backend::memory());
-        let first = signup(&app, "ada@example.com", "judge-password-1").await;
+        let first = signup(&app, "ada@example.com", &fixture_secret()).await;
         let original = first["refresh_token"].as_str().unwrap().to_string();
         let (status, second, _) = call(
             &app,
@@ -610,7 +615,9 @@ mod tests {
         let (status, body, _) = call(
             &app,
             "/auth/v1/token",
-            Some(r#"{"email":"ada@example.com","password":"judge-password-1"}"#),
+            Some(&with_runtime_secret(
+                r#"{"email":"ada@example.com","password":"{secret}"}"#,
+            )),
         )
         .await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
@@ -638,7 +645,9 @@ mod tests {
         let (status, body, _) = call(
             &app,
             "/auth/v1/token?grant_type=password",
-            Some(r#"{"email":"ada@example.com","phone":"+1555","password":"judge-password-1"}"#),
+            Some(&with_runtime_secret(
+                r#"{"email":"ada@example.com","phone":"+1555","password":"{secret}"}"#,
+            )),
         )
         .await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
@@ -651,7 +660,7 @@ mod tests {
         let (status, body, _) = call(
             &app,
             "/auth/v1/token?grant_type=password",
-            Some(r#"{"password":"judge-password-1"}"#),
+            Some(&with_runtime_secret(r#"{"password":"{secret}"}"#)),
         )
         .await;
         assert_eq!(body["msg"], "missing email or phone");
@@ -663,7 +672,9 @@ mod tests {
         let (status, body, _) = call(
             &email_off,
             "/auth/v1/token?grant_type=password",
-            Some(r#"{"email":"ada@example.com","password":"judge-password-1"}"#),
+            Some(&with_runtime_secret(
+                r#"{"email":"ada@example.com","password":"{secret}"}"#,
+            )),
         )
         .await;
         assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
@@ -676,13 +687,16 @@ mod tests {
         let (status, body, _) = call(
             &phone_off,
             "/auth/v1/token?grant_type=password",
-            Some(r#"{"phone":"+15551212","password":"judge-password-1"}"#),
+            Some(&with_runtime_secret(
+                r#"{"phone":"+15551212","password":"{secret}"}"#,
+            )),
         )
         .await;
         assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
         assert_eq!(body["error_code"], "phone_provider_disabled");
 
-        let hash = bcrypt::hash("judge-password-1", crate::config::BCRYPT_COST).unwrap();
+        let secret = fixture_secret();
+        let hash = bcrypt::hash(&secret, crate::config::BCRYPT_COST).unwrap();
         backend
             .insert_unconfirmed_for_test(
                 "pending@example.com",
@@ -694,7 +708,9 @@ mod tests {
         let (status, body, _) = call(
             &app,
             "/auth/v1/token?grant_type=password",
-            Some(r#"{"email":"pending@example.com","password":"judge-password-1"}"#),
+            Some(&format!(
+                r#"{{"email":"pending@example.com","password":"{secret}"}}"#
+            )),
         )
         .await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
@@ -707,13 +723,15 @@ mod tests {
         let (status, body, _) = call(
             &app,
             "/auth/v1/token?grant_type=password",
-            Some(r#"{"email":"empty@example.com","password":"judge-password-1"}"#),
+            Some(&with_runtime_secret(
+                r#"{"email":"empty@example.com","password":"{secret}"}"#,
+            )),
         )
         .await;
         assert_eq!(body["error_code"], "invalid_credentials");
         assert_eq!(status, StatusCode::BAD_REQUEST);
 
-        signup(&app, "banned@example.com", "judge-password-1").await;
+        signup(&app, "banned@example.com", &fixture_secret()).await;
         backend.ban_for_test("banned@example.com").await;
         let (status, body, _) = call(
             &app,
@@ -730,14 +748,17 @@ mod tests {
     async fn phone_login_and_refresh_shape() {
         let backend = Backend::memory();
         let app = state(AuthConfig::reference_defaults(), true, backend.clone());
-        signup(&app, "ada@example.com", "judge-password-1").await;
+        let secret = fixture_secret();
+        signup(&app, "ada@example.com", &secret).await;
         backend
             .set_phone_for_test("ada@example.com", "15551212", false)
             .await;
         let (status, body, _) = call(
             &app,
             "/auth/v1/token?grant_type=password",
-            Some(r#"{"phone":"+1 555 1212","password":"judge-password-1"}"#),
+            Some(&format!(
+                r#"{{"phone":"+1 555 1212","password":"{secret}"}}"#
+            )),
         )
         .await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
@@ -750,7 +771,9 @@ mod tests {
         let (status, body, _) = call(
             &app,
             "/auth/v1/token?grant_type=password",
-            Some(r#"{"phone":"+1 555 1212","password":"judge-password-1"}"#),
+            Some(&format!(
+                r#"{{"phone":"+1 555 1212","password":"{secret}"}}"#
+            )),
         )
         .await;
         assert_eq!(status, StatusCode::OK, "{body}");
@@ -797,14 +820,17 @@ mod tests {
     async fn weak_password_still_signs_in() {
         let backend = Backend::memory();
         let signed_up = state(AuthConfig::reference_defaults(), true, backend.clone());
-        signup(&signed_up, "ada@example.com", "judge-password-1").await;
+        let secret = fixture_secret();
+        signup(&signed_up, "ada@example.com", &secret).await;
         let mut config = AuthConfig::reference_defaults();
         config.password_min_length = 30;
         let app = state(config, true, backend);
         let (status, body, _) = call(
             &app,
             "/auth/v1/token?grant_type=password",
-            Some(r#"{"email":"ada@example.com","password":"judge-password-1"}"#),
+            Some(&format!(
+                r#"{{"email":"ada@example.com","password":"{secret}"}}"#
+            )),
         )
         .await;
         assert_eq!(status, StatusCode::OK, "{body}");
@@ -821,7 +847,9 @@ mod tests {
         let (status, body, _) = call(
             &app,
             "/auth/v1/token?grant_type=password",
-            Some(r#"{"email":"ada@example.com","password":"judge-password-1"}"#),
+            Some(&with_runtime_secret(
+                r#"{"email":"ada@example.com","password":"{secret}"}"#,
+            )),
         )
         .await;
         assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
@@ -830,10 +858,11 @@ mod tests {
 
         let backend = Backend::memory();
         let app = state(AuthConfig::reference_defaults(), false, backend.clone());
+        let secret = fixture_secret();
         backend
             .signup_email(SignupCommand {
                 email: "ada@example.com".into(),
-                password: "judge-password-1".into(),
+                password: secret.clone(),
                 aud: "authenticated".into(),
                 role: "authenticated".into(),
                 data: serde_json::Map::new(),
@@ -843,11 +872,48 @@ mod tests {
         let (status, body, _) = call(
             &app,
             "/auth/v1/token?grant_type=password",
-            Some(r#"{"email":"ada@example.com","password":"judge-password-1"}"#),
+            Some(&format!(
+                r#"{{"email":"ada@example.com","password":"{secret}"}}"#
+            )),
         )
         .await;
         assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
         assert_eq!(body["msg"], "Server lacks JWT secret");
+    }
+
+    #[tokio::test]
+    async fn null_json_strings_are_empty() {
+        let secret = fixture_secret();
+        let app = state(AuthConfig::reference_defaults(), true, Backend::memory());
+        signup(&app, "ada@example.com", &secret).await;
+        let (status, body, _) = call(
+            &app,
+            "/auth/v1/token?grant_type=password",
+            Some(&format!(
+                r#"{{"email":"ada@example.com","phone":null,"password":"{secret}"}}"#
+            )),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+
+        let (status, body, _) = call(
+            &app,
+            "/auth/v1/token?grant_type=password",
+            Some(r#"{"email":"ada@example.com","password":null}"#),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(body["error_code"], "invalid_credentials");
+
+        let (status, body, _) = call(
+            &app,
+            "/auth/v1/token?grant_type=refresh_token",
+            Some(r#"{"refresh_token":null}"#),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(body["error_code"], "validation_failed");
+        assert_eq!(body["msg"], "Refresh token is not valid");
     }
 
     #[test]

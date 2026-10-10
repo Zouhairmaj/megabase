@@ -68,7 +68,7 @@ The mitigation column is what the code and CI do now.
 
 | Class | Where it would land | Mitigation in this tree |
 |---|---|---|
-| A01 Broken access control. CWE-862 missing authorization, CWE-285 improper authorization | REST and Auth routes that should honor `role` | Those routes return 501. `role` is available only after `Hs256::verify` succeeds. Enforcement arrives with the route, not as an open handler. |
+| A01 Broken access control. CWE-862 missing authorization, CWE-285 improper authorization | REST and Auth routes that should honor `role` | REST routes return 501. Auth admin routes require an admin role. Logout requires a verified user token. Unported Auth routes return 501. `role` is available only after `Hs256::verify` succeeds. |
 | A02 Cryptographic failures. CWE-327 broken crypto, CWE-326 inadequate encryption strength | JWT, database password, HTTP | Default algorithm is HMAC-SHA-256. `alg=none` and every other `alg` fail closed. Keys under 32 bytes are disabled. `Hs256` and `Config` debug output redacts `JWT_SECRET`; `Config` also redacts `DATABASE_URL`. MD5, SHA-1, DES, and RC4 are not used. HTTP and PostgreSQL are still plaintext; see the gaps above. |
 | A03 Injection. CWE-89 SQL injection, CWE-78 OS command injection | Schema install, auth queries, future query routes | Auth DDL is the static `install_sql` string. Signup, login, refresh, and logout pass request values as query parameters. `crates/` does not call a shell. A request string is not SQL text. |
 | A04 Insecure design | New routes and parsers | 501 instead of a plausible answer. Short keys and `sslmode=require` fail closed. This file is the design record new auth, crypto, SQL, and request code follows (`AGENTS.md`). |

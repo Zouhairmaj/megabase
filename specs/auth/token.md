@@ -35,7 +35,9 @@ Go zero value `0` (legacy 12-character tokens). JWT expiry is 3600 seconds
 
 `POST /auth/v1/token`. `grant_type` is the query parameter (Go
 `Request.FormValue` for a JSON body). The body is JSON, at most `1 << 20`
-bytes. Unknown JSON fields are ignored.
+bytes. Unknown JSON fields are ignored. A JSON `null` for `email`, `phone`,
+`password`, or `refresh_token` decodes as `""`, matching Go `encoding/json`
+on a `string` field.
 
 Password body: `email`, `phone`, `password`. Audience is `X-JWT-AUD` when
 that header is non-empty, otherwise `GOTRUE_JWT_AUD`.
