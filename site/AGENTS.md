@@ -12,8 +12,10 @@ Extends the root `AGENTS.md`; it does not relax it.
   `[lints.rust]` forbids `unsafe_code` here because this crate cannot inherit
   `[workspace.lints]`. Scorecard/OSV,
   `just audit`, and the CI `cargo-audit` matrix all scan
-  `site/Cargo.lock` (the matrix is skipped on a site-only pull request;
-  push to `main` still audits it). Keep `resvg` on the harfrust/skrifa stack (0.48+);
+  `site/Cargo.lock`. The CI matrix still audits that lockfile when a
+  pull request changes a site-generator input; the workspace lockfile
+  leg is skipped on a site-only diff. Push to `main` audits both.
+  Keep `resvg` on the harfrust/skrifa stack (0.48+);
   do not regress to rustybuzz or ttf-parser (RUSTSEC-2026-0206,
   RUSTSEC-2026-0192).
 - `pages.yml` lints, tests, and builds the site on pull requests that

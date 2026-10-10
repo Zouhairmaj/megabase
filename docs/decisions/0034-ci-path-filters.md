@@ -14,7 +14,12 @@ that does not start leaves a required status check at "Expected —
 waiting". Each job keeps its current name. When the diff does not apply,
 the job succeeds without the expensive steps, so branch protection sees
 success. Push to `main`, schedules, and `workflow_dispatch` (including
-release lockfile sync) are not filtered.
+release lockfile sync) are not filtered. If the path-filter job
+fails, dependent jobs run the full suite. A pull request that changes
+a site-generator input still audits `site/Cargo.lock`. A pull request
+that only changes one component crate runs that Judge shard; shared
+and unclassifiable paths run every shard. The crate-to-shard map is
+`COMPONENT_SHARDS` in `.github/actions/pr-paths`.
 
 CodeQL stays on GitHub's default code-scanning setup. There is no
 `codeql.yml` to filter, and adding one would turn off that setup.

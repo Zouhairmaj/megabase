@@ -4,9 +4,15 @@
 #
 # server=false only when every changed path is site content (see
 # site_only_path). site=false only when no changed path is a site-generator
-# input (see site_build_path). An empty diff or a failed base fetch sets
-# both to true so a filter bug runs the suite instead of skipping it.
+# input (see site_build_path). judge is "all", "none", or a comma-separated
+# shard list (see component_shard). An empty diff or a failed base fetch
+# sets site and server to true and judge to all, so a filter bug runs the
+# suite instead of skipping it.
 # Downstream jobs must treat any value other than the string false as "run".
+# If this job fails before it publishes outputs, workflows still run the
+# full suite: their job if is always() && !cancelled(), and a step runs
+# unless classification succeeded and the flag is exactly false. An empty
+# judge output means all shards.
 name: Pull request paths
 description: Classify a pull request as site content, server code, or both.
 
@@ -15,8 +21,14 @@ outputs:
     description: Build and lint the static site unless this is the string false.
     value: ${{ steps.filter.outputs.site }}
   server:
-    description: Run server, judge, and supply-chain jobs unless this is the string false.
+    description: Run server and supply-chain jobs unless this is the string false.
     value: ${{ steps.filter.outputs.server }}
+  judge:
+    description: >
+      Judge shards to run. "all" runs every shard, "none" skips the Judge
+      build, and a comma-separated list runs those shards. Other shard
+      checks still succeed without starting the stack. Empty means all.
+    value: ${{ steps.filter.outputs.judge }}
 
 runs:
   using: composite
@@ -34,14 +46,18 @@ runs:
         # is exactly "false", and this step still writes that on early exit.
         site=true
         server=true
+        judge=all
         reason="full suite"
         wrote=false
         cleanup() {
           if [ "$wrote" = true ]; then
             return 0
           fi
-          echo "site=true" >> "$GITHUB_OUTPUT"
-          echo "server=true" >> "$GITHUB_OUTPUT"
+          {
+            echo "site=true"
+            echo "server=true"
+            echo "judge=all"
+          } >> "$GITHUB_OUTPUT"
         }
         trap cleanup EXIT
 
@@ -57,11 +73,18 @@ runs:
           esac
         }
 
-        # True when the static generator reads this path.
+        # True when the static generator reads this path. Root Cargo.toml is
+        # the workspace version badge (site/src/chrome.rs). site/Cargo.toml
+        # is already site/*. Badge JSON and judge JSON are copied onto the
+        # site; the treemap SVGs are rasterized to README PNGs. They are
+        # not site-only, so a change still runs the server suite.
         site_build_path() {
           case "$1" in
-            site/*|devlog/*|MANIFESTO.md|HUMAN_LOG.md) return 0 ;;
+            site/*|devlog/*|MANIFESTO.md|HUMAN_LOG.md|Cargo.toml) return 0 ;;
             coverage/summary.json|coverage/units.json) return 0 ;;
+            coverage/badge-coverage.json|coverage/badge-conformance.json) return 0 ;;
+            coverage/judge-results.json|coverage/judge-history.json) return 0 ;;
+            coverage/treemap.svg|coverage/treemap-light.svg) return 0 ;;
             docs/*.md)
               case "$1" in
                 docs/*/*) return 1 ;;
@@ -72,14 +95,76 @@ runs:
           esac
         }
 
+        # One line per component that has judge/cases/<shard>.toml.
+        # Add "megabase-functions functions", "megabase-studio studio", or
+        # "megabase-pooler pooler" when that shard exists. Until then those
+        # crates are unclassifiable and run every shard.
+        COMPONENT_SHARDS='
+        megabase-auth auth
+        megabase-rest rest
+        megabase-storage storage
+        megabase-realtime realtime
+        megabase-meta meta
+        '
+
+        # Prints the shard name for a component crate path. Returns 1 when
+        # the path is not one of those crates.
+        component_shard() {
+          case "$1" in
+            crates/*) ;;
+            *) return 1 ;;
+          esac
+          local rest="${1#crates/}"
+          local dir="${rest%%/*}"
+          local crate shard
+          while read -r crate shard; do
+            [ -n "${crate}" ] || continue
+            if [ "$dir" = "$crate" ]; then
+              printf '%s\n' "$shard"
+              return 0
+            fi
+          done <<< "$COMPONENT_SHARDS"
+          return 1
+        }
+
+        # True when this path can affect every Judge shard. The gateway
+        # lives in crates/megabase-server. crates/megabase is the binary.
+        shared_judge_path() {
+          case "$1" in
+            crates/megabase-core|crates/megabase-core/*) return 0 ;;
+            crates/megabase-server|crates/megabase-server/*) return 0 ;;
+            crates/megabase|crates/megabase/*) return 0 ;;
+            Cargo.toml|Cargo.lock) return 0 ;;
+            judge|judge/*) return 0 ;;
+            .github|.github/*) return 0 ;;
+            coverage/judge-results.json) return 0 ;;
+            Dockerfile|*/Dockerfile|*compose*.yml|*compose*.yaml) return 0 ;;
+            *) return 1 ;;
+          esac
+        }
+
+        # True when this path cannot change Judge behavior. Anything else
+        # that is not a component shard or a shared input is unclassifiable
+        # and runs every shard.
+        judge_irrelevant_path() {
+          case "$1" in
+            site/*|devlog/*|MANIFESTO.md|HUMAN_LOG.md|README.md|PROGRESS.md) return 0 ;;
+            docs/*|coverage/*) return 0 ;;
+            *) return 1 ;;
+          esac
+        }
+
         publish() {
-          echo "site=${site}" >> "$GITHUB_OUTPUT"
-          echo "server=${server}" >> "$GITHUB_OUTPUT"
+          {
+            echo "site=${site}"
+            echo "server=${server}"
+            echo "judge=${judge}"
+          } >> "$GITHUB_OUTPUT"
           wrote=true
           {
             echo "### Path filter"
             echo
-            echo "site=\`${site}\` server=\`${server}\` (${reason})"
+            echo "site=\`${site}\` server=\`${server}\` judge=\`${judge}\` (${reason})"
           } >> "$GITHUB_STEP_SUMMARY"
         }
 
@@ -136,7 +221,10 @@ runs:
 
         site=false
         server=false
+        judge=none
         seen=false
+        declare -A shards=()
+        judge_all=false
         for path in "${files[@]}"; do
           [ -n "$path" ] || continue
           seen=true
@@ -146,14 +234,34 @@ runs:
           if ! site_only_path "$path"; then
             server=true
           fi
+          if shard="$(component_shard "$path")"; then
+            shards["$shard"]=1
+          elif shared_judge_path "$path"; then
+            judge_all=true
+          elif judge_irrelevant_path "$path"; then
+            :
+          else
+            judge_all=true
+          fi
         done
         # Blank names only. A real site-only doc that the generator does
-        # not read (docs/decisions, docs/adr) keeps both flags false.
+        # not read (docs/decisions, docs/adr) keeps both flags false and
+        # skips Judge. A component crate selects its shard. A shared or
+        # unclassifiable path runs every shard.
         if [ "$seen" != true ]; then
           site=true
           server=true
+          judge=all
           reason="empty diff"
         else
+          if [ "$judge_all" = true ]; then
+            judge=all
+          elif [ "${#shards[@]}" -eq 0 ]; then
+            judge=none
+          else
+            mapfile -t shard_names < <(printf '%s\n' "${!shards[@]}" | sort)
+            judge="$(IFS=,; echo "${shard_names[*]}")"
+          fi
           reason="${#files[@]} paths"
         fi
         publish

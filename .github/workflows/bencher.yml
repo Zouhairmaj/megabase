@@ -58,41 +58,42 @@ jobs:
     # Fork PRs do not receive repo secrets; skip instead of failing.
     # A site-only pull request still runs this job and reports Bencher as
     # success without benchmarking, so the check does not stay pending.
-    if: needs.changes.result == 'success' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+    # A failed path-filter job benchmarks (same-repo only).
+    if: always() && !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
     env:
       # The current CLI rejects --token / BENCHER_API_TOKEN for API keys.
       BENCHER_API_KEY: ${{ secrets.BENCHER_API_TOKEN }}
     steps:
       - name: Not applicable
-        if: needs.changes.outputs.server == 'false'
+        if: needs.changes.result == 'success' && needs.changes.outputs.server == 'false'
         run: echo "Site-only pull request. Bencher reports success without benchmarking."
 
       - name: Skip without BENCHER_API_TOKEN
-        if: needs.changes.outputs.server != 'false' && env.BENCHER_API_KEY == ''
+        if: (needs.changes.result != 'success' || needs.changes.outputs.server != 'false') && env.BENCHER_API_KEY == ''
         run: echo "BENCHER_API_TOKEN is not set; skipping continuous benchmarking."
 
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        if: needs.changes.outputs.server != 'false' && env.BENCHER_API_KEY != ''
+        if: (needs.changes.result != 'success' || needs.changes.outputs.server != 'false') && env.BENCHER_API_KEY != ''
         with:
           persist-credentials: false
 
       - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
-        if: needs.changes.outputs.server != 'false' && env.BENCHER_API_KEY != ''
+        if: (needs.changes.result != 'success' || needs.changes.outputs.server != 'false') && env.BENCHER_API_KEY != ''
         with:
           toolchain: stable
 
       - uses: ./.github/actions/rust-cache
-        if: needs.changes.outputs.server != 'false' && env.BENCHER_API_KEY != ''
+        if: (needs.changes.result != 'success' || needs.changes.outputs.server != 'false') && env.BENCHER_API_KEY != ''
         with:
           key: bencher-mold
       - uses: ./.github/actions/linux-mold
-        if: needs.changes.outputs.server != 'false' && env.BENCHER_API_KEY != ''
+        if: (needs.changes.result != 'success' || needs.changes.outputs.server != 'false') && env.BENCHER_API_KEY != ''
 
       - uses: bencherdev/bencher@b4cfdddf418fc547e694b8fa6cc7c846a9c77435 # main
-        if: needs.changes.outputs.server != 'false' && env.BENCHER_API_KEY != ''
+        if: (needs.changes.result != 'success' || needs.changes.outputs.server != 'false') && env.BENCHER_API_KEY != ''
 
       - name: Track benchmarks (main)
-        if: needs.changes.outputs.server != 'false' && env.BENCHER_API_KEY != '' && github.event_name == 'push'
+        if: (needs.changes.result != 'success' || needs.changes.outputs.server != 'false') && env.BENCHER_API_KEY != '' && github.event_name == 'push'
         run: |
           bencher run \
             --project megabase \
@@ -110,7 +111,7 @@ jobs:
             "cargo bench --locked --bench health"
 
       - name: Track benchmarks (pull request)
-        if: needs.changes.outputs.server != 'false' && env.BENCHER_API_KEY != '' && github.event_name == 'pull_request'
+        if: (needs.changes.result != 'success' || needs.changes.outputs.server != 'false') && env.BENCHER_API_KEY != '' && github.event_name == 'pull_request'
         env:
           HEAD_REF: ${{ github.head_ref }}
           BASE_REF: ${{ github.base_ref }}
@@ -138,7 +139,7 @@ jobs:
             "cargo bench --locked --bench health"
 
       - name: Track benchmarks (workflow_dispatch)
-        if: needs.changes.outputs.server != 'false' && env.BENCHER_API_KEY != '' && github.event_name == 'workflow_dispatch'
+        if: (needs.changes.result != 'success' || needs.changes.outputs.server != 'false') && env.BENCHER_API_KEY != '' && github.event_name == 'workflow_dispatch'
         env:
           HEAD_REF: ${{ github.ref_name }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

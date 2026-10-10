@@ -24,7 +24,8 @@ env:
 
 # Pull requests consult .github/actions/pr-paths before the expensive jobs.
 # Those jobs keep their check names. server=false succeeds without compiling.
-# Any other value, including empty, runs the job. Push and workflow_dispatch
+# Any other value, including empty, runs the job. A failed path-filter job
+# also runs the job (always() && !cancelled()). Push and workflow_dispatch
 # set server=true (main and release lockfile dispatch stay on the full suite).
 
 jobs:
@@ -51,43 +52,43 @@ jobs:
     name: Build
     runs-on: ubuntu-latest
     needs: changes
-    if: needs.changes.result == 'success'
+    if: always() && !cancelled()
     permissions:
       contents: read
     steps:
       - name: Not applicable
-        if: needs.changes.outputs.server == 'false'
+        if: needs.changes.result == 'success' && needs.changes.outputs.server == 'false'
         run: echo "Site-only pull request. This check reports success without running."
-      - if: needs.changes.outputs.server != 'false'
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
-      - if: needs.changes.outputs.server != 'false'
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
         uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
         with:
           toolchain: stable
           components: rustfmt, clippy
-      - if: needs.changes.outputs.server != 'false'
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
         uses: ./.github/actions/rust-cache
         with:
           key: mold
-      - if: needs.changes.outputs.server != 'false'
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
         uses: ./.github/actions/linux-mold
-      - if: needs.changes.outputs.server != 'false'
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
         run: cargo fmt --all -- --check
-      - if: needs.changes.outputs.server != 'false'
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
-      - if: needs.changes.outputs.server != 'false'
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
         uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
         with:
           tool: nextest
-      - if: needs.changes.outputs.server != 'false'
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
         run: cargo nextest run --workspace --locked
-      - if: needs.changes.outputs.server != 'false'
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
         run: cargo test --doc --workspace --locked
-      - if: needs.changes.outputs.server != 'false'
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
         run: cargo build --release --locked -p megabase -p megabase-judge --bin megabase --bin megabase-healthcheck
-      - if: needs.changes.outputs.server != 'false'
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: megabase
@@ -99,60 +100,60 @@ jobs:
     name: MSRV 1.89
     runs-on: ubuntu-latest
     needs: changes
-    if: needs.changes.result == 'success'
+    if: always() && !cancelled()
     permissions:
       contents: read
     steps:
       - name: Not applicable
-        if: needs.changes.outputs.server == 'false'
+        if: needs.changes.result == 'success' && needs.changes.outputs.server == 'false'
         run: echo "Site-only pull request. This check reports success without running."
-      - if: needs.changes.outputs.server != 'false'
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
-      - if: needs.changes.outputs.server != 'false'
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
         uses: dtolnay/rust-toolchain@d77020bf130f2e8c39c025bf9c4c3a445fe2b9fa # 1.89.0
         with:
           toolchain: 1.89.0
-      - if: needs.changes.outputs.server != 'false'
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
         uses: ./.github/actions/rust-cache
         with:
           key: mold
-      - if: needs.changes.outputs.server != 'false'
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
         uses: ./.github/actions/linux-mold
-      - if: needs.changes.outputs.server != 'false'
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
         run: cargo check --locked -p megabase -p megabase-core -p megabase-server
 
   coverage:
     name: Coverage check
     runs-on: ubuntu-latest
     needs: changes
-    if: needs.changes.result == 'success'
+    if: always() && !cancelled()
     permissions:
       contents: read
     steps:
       - name: Not applicable
-        if: needs.changes.outputs.server == 'false'
+        if: needs.changes.result == 'success' && needs.changes.outputs.server == 'false'
         run: echo "Site-only pull request. This check reports success without running."
-      - if: needs.changes.outputs.server != 'false'
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           submodules: recursive
           fetch-depth: 1
           persist-credentials: false
-      - if: needs.changes.outputs.server != 'false'
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
         uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
         with:
           toolchain: stable
-      - if: needs.changes.outputs.server != 'false'
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
         uses: ./.github/actions/rust-cache
         with:
           key: mold
-      - if: needs.changes.outputs.server != 'false'
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
         uses: ./.github/actions/linux-mold
-      - if: needs.changes.outputs.server != 'false'
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
         run: cargo run --locked -p megabase-coverage -- verify-pins
-      - if: needs.changes.outputs.server != 'false'
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
         run: cargo run --locked -p megabase-coverage -- check
 
   guard:
@@ -189,18 +190,18 @@ jobs:
     name: cargo-deny
     runs-on: ubuntu-latest
     needs: changes
-    if: needs.changes.result == 'success'
+    if: always() && !cancelled()
     permissions:
       contents: read
     steps:
       - name: Not applicable
-        if: needs.changes.outputs.server == 'false'
+        if: needs.changes.result == 'success' && needs.changes.outputs.server == 'false'
         run: echo "Site-only pull request. This check reports success without running."
-      - if: needs.changes.outputs.server != 'false'
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
-      - if: needs.changes.outputs.server != 'false'
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
         uses: ./.github/actions/dockerhub-login
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -209,22 +210,22 @@ jobs:
       # rust:1.85.0-alpine from Docker Hub and 429s on unauthenticated pulls.
       # --all-features matches that action's default arguments. This job
       # does not build an image; login still runs when the token is set.
-      - if: needs.changes.outputs.server != 'false'
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
         uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
         with:
           toolchain: stable
-      - if: needs.changes.outputs.server != 'false'
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
         uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
         with:
           tool: cargo-deny
-      - if: needs.changes.outputs.server != 'false'
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
         run: cargo deny --all-features check advisories licenses bans sources
 
   cargo-audit:
     name: cargo-audit
     runs-on: ubuntu-latest
     needs: changes
-    if: needs.changes.result == 'success'
+    if: always() && !cancelled()
     permissions:
       contents: read
     strategy:
@@ -235,23 +236,26 @@ jobs:
         lockfile:
           - Cargo.lock
           - site/Cargo.lock
+    # Workspace Cargo.lock is unchanged on a site-only diff, so that leg
+    # passes through. site/Cargo.lock can change whenever site=true, so
+    # that leg still audits. A failed path-filter job audits both.
     steps:
       - name: Not applicable
-        if: needs.changes.outputs.server == 'false'
-        run: echo "Site-only pull request. This check reports success without running."
-      - if: needs.changes.outputs.server != 'false'
+        if: needs.changes.result == 'success' && needs.changes.outputs.server == 'false' && (matrix.lockfile != 'site/Cargo.lock' || needs.changes.outputs.site != 'true')
+        run: echo "This lockfile is unchanged by the pull request. cargo-audit reports success without scanning it."
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false' || (matrix.lockfile == 'site/Cargo.lock' && needs.changes.outputs.site == 'true')
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
-      - if: needs.changes.outputs.server != 'false'
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false' || (matrix.lockfile == 'site/Cargo.lock' && needs.changes.outputs.site == 'true')
         uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
         with:
           toolchain: stable
-      - if: needs.changes.outputs.server != 'false'
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false' || (matrix.lockfile == 'site/Cargo.lock' && needs.changes.outputs.site == 'true')
         uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
         with:
           tool: cargo-audit
-      - if: needs.changes.outputs.server != 'false'
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false' || (matrix.lockfile == 'site/Cargo.lock' && needs.changes.outputs.site == 'true')
         run: cargo audit --file ${{ matrix.lockfile }}
 
   # Imported audits (Mozilla, Google, Bytecode Alliance) plus exemptions
@@ -260,26 +264,26 @@ jobs:
     name: cargo-vet
     runs-on: ubuntu-latest
     needs: changes
-    if: needs.changes.result == 'success'
+    if: always() && !cancelled()
     permissions:
       contents: read
     steps:
       - name: Not applicable
-        if: needs.changes.outputs.server == 'false'
+        if: needs.changes.result == 'success' && needs.changes.outputs.server == 'false'
         run: echo "Site-only pull request. This check reports success without running."
-      - if: needs.changes.outputs.server != 'false'
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
-      - if: needs.changes.outputs.server != 'false'
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
         uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
         with:
           toolchain: stable
-      - if: needs.changes.outputs.server != 'false'
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
         uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
         with:
           tool: cargo-vet@0.10.2
-      - if: needs.changes.outputs.server != 'false'
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
         run: cargo vet --locked
 
   # cargo-udeps needs nightly. cargo-machete is the stable check.
@@ -288,26 +292,26 @@ jobs:
     name: cargo-machete
     runs-on: ubuntu-latest
     needs: changes
-    if: needs.changes.result == 'success'
+    if: always() && !cancelled()
     permissions:
       contents: read
     steps:
       - name: Not applicable
-        if: needs.changes.outputs.server == 'false'
+        if: needs.changes.result == 'success' && needs.changes.outputs.server == 'false'
         run: echo "Site-only pull request. This check reports success without running."
-      - if: needs.changes.outputs.server != 'false'
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
-      - if: needs.changes.outputs.server != 'false'
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
         uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
         with:
           toolchain: stable
-      - if: needs.changes.outputs.server != 'false'
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
         uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
         with:
           tool: cargo-machete@0.9.2
-      - if: needs.changes.outputs.server != 'false'
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
         run: cargo machete crates tools judge site fuzz
 
   # --each-feature rebuilds a crate once per feature. Skip crates that
@@ -316,26 +320,26 @@ jobs:
     name: cargo-hack
     runs-on: ubuntu-latest
     needs: changes
-    if: needs.changes.result == 'success'
+    if: always() && !cancelled()
     permissions:
       contents: read
     steps:
       - name: Not applicable
-        if: needs.changes.outputs.server == 'false'
+        if: needs.changes.result == 'success' && needs.changes.outputs.server == 'false'
         run: echo "Site-only pull request. This check reports success without running."
-      - if: needs.changes.outputs.server != 'false'
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
-      - if: needs.changes.outputs.server != 'false'
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
         uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
         with:
           toolchain: stable
-      - if: needs.changes.outputs.server != 'false'
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
         uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
         with:
           tool: cargo-hack@0.6.45
-      - if: needs.changes.outputs.server != 'false'
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
         name: Check each feature of crates that declare one
         run: |
           set -euo pipefail
@@ -365,36 +369,36 @@ jobs:
     name: Codecov
     runs-on: ubuntu-latest
     needs: changes
-    if: needs.changes.result == 'success'
+    if: always() && !cancelled()
     permissions:
       contents: read
     steps:
       - name: Not applicable
-        if: needs.changes.outputs.server == 'false'
+        if: needs.changes.result == 'success' && needs.changes.outputs.server == 'false'
         run: echo "Site-only pull request. This check reports success without running."
-      - if: needs.changes.outputs.server != 'false'
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
-      - if: needs.changes.outputs.server != 'false'
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
         uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
         with:
           toolchain: stable
           components: llvm-tools-preview
-      - if: needs.changes.outputs.server != 'false'
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
         uses: ./.github/actions/rust-cache
         with:
           key: llvm-cov-mold
-      - if: needs.changes.outputs.server != 'false'
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
         uses: ./.github/actions/linux-mold
-      - if: needs.changes.outputs.server != 'false'
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
         uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
         with:
           tool: cargo-llvm-cov
-      - if: needs.changes.outputs.server != 'false'
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
         name: Generate lcov.info
         run: cargo llvm-cov --workspace --locked --lcov --output-path lcov.info
-      - if: needs.changes.outputs.server != 'false'
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
         name: Upload to Codecov
         uses: codecov/codecov-action@0fb7174895f61a3b6b78fc075e0cd60383518dac # v5.5.3
         with:
@@ -406,25 +410,25 @@ jobs:
     name: Container image
     runs-on: ubuntu-latest
     needs: changes
-    if: needs.changes.result == 'success'
+    if: always() && !cancelled()
     permissions:
       contents: read
     steps:
       - name: Not applicable
-        if: needs.changes.outputs.server == 'false'
+        if: needs.changes.result == 'success' && needs.changes.outputs.server == 'false'
         run: echo "Site-only pull request. This check reports success without running."
-      - if: needs.changes.outputs.server != 'false'
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
-      - if: needs.changes.outputs.server != 'false'
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
         uses: ./.github/actions/dockerhub-login
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-      - if: needs.changes.outputs.server != 'false'
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
         run: docker build -t megabase:ci .
-      - if: needs.changes.outputs.server != 'false'
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
         run: |
           docker run -d --name megabase-ci -p 8000:8000 megabase:ci
           for _ in $(seq 1 30); do
