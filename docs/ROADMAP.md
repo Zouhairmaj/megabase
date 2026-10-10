@@ -121,16 +121,19 @@ registry package version in `Cargo.lock`. `--locked` CI
 (Build, Codecov, Bencher, Protected paths, Judge) stays green. That
 commit is pushed with the token the tree probe selected.
 `RELEASE_PLEASE_CLASSIC_TOKEN` (classic PAT, scopes `repo` and
-`workflow`) is used when it is set, so the push to the release branch
-starts pull_request workflows. If that secret is absent, or its probe
-returns HTTP 403 or 404 that is not a rate limit, the job tries
-`RELEASE_PLEASE_TOKEN`, then `GITHUB_TOKEN`. A fine-grained PAT
+`workflow`) is used when it is set and its tree probe succeeds, so the
+push to the release branch starts pull_request workflows. If that
+secret is absent, or its probe returns HTTP 403 or 404 that is not a
+rate limit, the job tries `RELEASE_PLEASE_TOKEN`. `GITHUB_TOKEN` is
+selected only when both of those candidates are absent or denied the
+same way. A fine-grained PAT
 owned by `megabase-agent` cannot write this public repository.
 [GitHub's token docs](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens)
 say only a classic PAT has write access to a public repository owned by
-another personal account, including for a collaborator. When the probe
-falls back, or that push is denied, the push uses `GITHUB_TOKEN`, which
-does not trigger `push`/`pull_request` workflows. The lockfile
+another personal account, including for a collaborator. A denied push
+is separate from that probe: if the selected token's `git push` returns
+HTTP 403, the job pushes again with `GITHUB_TOKEN`. That retry does
+not trigger `push`/`pull_request` workflows. The lockfile
 job `workflow_dispatch`es CI, Bencher, and Judge on the release branch
 unless that push used the classic or release token and the branch is the
 default branch. Those three workflows run on `push` only for `main`.
