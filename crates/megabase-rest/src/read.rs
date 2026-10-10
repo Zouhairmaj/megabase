@@ -198,14 +198,32 @@ async fn relation_route(
             let Some(pool) = pool else {
                 return database_unavailable();
             };
-            read_relation(pool, &schema, relation, &session, &query, false).await
+            read_relation(
+                pool,
+                &schema,
+                relation,
+                &session,
+                &query,
+                state.aggregates,
+                false,
+            )
+            .await
         }
         Method::HEAD => {
             // megabase:unit rest:route:HEAD /rest/v1/{relation}
             let Some(pool) = pool else {
                 return database_unavailable();
             };
-            read_relation(pool, &schema, relation, &session, &query, true).await
+            read_relation(
+                pool,
+                &schema,
+                relation,
+                &session,
+                &query,
+                state.aggregates,
+                true,
+            )
+            .await
         }
         Method::POST => {
             // megabase:unit rest:route:POST /rest/v1/{relation}
@@ -438,9 +456,6 @@ pub(crate) fn query_fail(method: &Method, path: &str, fail: QueryFail) -> Respon
                 "Verify that '{resource}' is included in the 'select' query parameter."
             )),
         ),
-        QueryFail::Unimplemented(unit) => {
-            MegabaseNotImplemented::new(crate::COMPONENT, unit).into_response()
-        }
         QueryFail::Route => not_implemented(method, path),
     }
 }
@@ -631,10 +646,21 @@ async fn read_relation(
     relation: &str,
     session: &Session,
     read: &crate::params::ReadQuery,
+    aggregates: bool,
     headers_only: bool,
 ) -> Response {
     let http_method = if headers_only { "HEAD" } else { "GET" };
-    match read_rows(pool, schema, relation, session, read, http_method).await {
+    match read_rows(
+        pool,
+        schema,
+        relation,
+        session,
+        read,
+        aggregates,
+        http_method,
+    )
+    .await
+    {
         Ok((count, body, offset)) => {
             let mut response = json_rows(offset, count, if headers_only { "" } else { &body });
             profile_header(&mut response, schema);
@@ -652,6 +678,7 @@ async fn read_rows(
     relation: &str,
     session: &Session,
     read: &crate::params::ReadQuery,
+    aggregates: bool,
     http_method: &str,
 ) -> Result<(i64, String, i64), Box<Response>> {
     let mut tx = pool
@@ -668,6 +695,23 @@ async fn read_rows(
     let exists = relation_exists(&mut tx, schema, relation, session.anon).await?;
     if !exists {
         return Err(Box::new(table_not_found(schema, relation)));
+    }
+    // `validateAggFunctions` in `Plan.hs` runs after the table lookup.
+    if read.has_aggregate() && !aggregates {
+        return Err(Box::new(pgrst(
+            StatusCode::BAD_REQUEST,
+            "PGRST123",
+            "Use of aggregate functions is not allowed",
+            None,
+            None,
+        )));
+    }
+    // Aggregates next to an embed need `GROUP BY` over the embed; not served.
+    if read.has_aggregate() && !read.embed_names().is_empty() {
+        return Err(Box::new(
+            MegabaseNotImplemented::new(crate::COMPONENT, format!("{http_method} /{relation}"))
+                .into_response(),
+        ));
     }
     let columns = load_columns(&mut tx, schema, relation, session.anon).await?;
     let column_types: Vec<(&str, &str)> = columns
@@ -1214,11 +1258,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn aggregate_select_is_501() {
+    async fn aggregate_select_without_a_database_is_503() {
         let app = router(RestState::from_config(&Config::default()));
-        let (status, body, _) = send(app, get("/rest/v1/todos?select=id.count()")).await;
-        assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
-        assert_eq!(body["unit"], "rest:aggregate:count");
+        let (status, _, _) = send(app, get("/rest/v1/todos?select=id.count()")).await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
     }
 
     #[tokio::test]

@@ -33,6 +33,9 @@ pub struct Config {
     /// `MEGABASE_REQUEST_BODY_LIMIT_BYTES`. Default is the self-hosted
     /// `FILE_SIZE_LIMIT` ([`DEFAULT_REQUEST_BODY_LIMIT`]).
     pub request_body_limit: usize,
+    /// `PGRST_DB_AGGREGATES_ENABLED`, default `false` (PostgREST's default,
+    /// and the pinned Supabase compose file does not set it).
+    pub db_aggregates_enabled: bool,
 }
 
 impl fmt::Debug for Config {
@@ -50,6 +53,7 @@ impl fmt::Debug for Config {
             )
             .field("http_timeout", &self.http_timeout)
             .field("request_body_limit", &self.request_body_limit)
+            .field("db_aggregates_enabled", &self.db_aggregates_enabled)
             .finish()
     }
 }
@@ -63,6 +67,7 @@ impl Default for Config {
             jwt_secret: None,
             http_timeout: DEFAULT_HTTP_TIMEOUT,
             request_body_limit: DEFAULT_REQUEST_BODY_LIMIT,
+            db_aggregates_enabled: false,
         }
     }
 }
@@ -112,6 +117,8 @@ impl Config {
             jwt_secret,
             http_timeout,
             request_body_limit,
+            db_aggregates_enabled: lookup("PGRST_DB_AGGREGATES_ENABLED")
+                .is_some_and(|raw| raw.trim().eq_ignore_ascii_case("true")),
         })
     }
 
