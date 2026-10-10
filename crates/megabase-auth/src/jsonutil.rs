@@ -46,10 +46,10 @@ pub fn user_json(user: &UserRecord) -> Value {
         role: &user.role,
         email: &user.email,
         phone: &user.phone,
-        email_confirmed_at: email_confirmed_at.clone(),
-        // PostgreSQL `LEAST` ignores nulls, so a confirmed email and a null
-        // phone confirmation yield `confirmed_at = email_confirmed_at`.
-        confirmed_at: email_confirmed_at,
+        email_confirmed_at,
+        // `confirmed_at` is generated. Signup does not reload the row after
+        // `Confirm`, so that response omits it. A later load includes it.
+        confirmed_at: user.confirmed_at.map(format_ts),
         last_sign_in_at: user.last_sign_in_at.map(format_ts),
         app_metadata: &user.app_metadata,
         user_metadata: &user.user_metadata,

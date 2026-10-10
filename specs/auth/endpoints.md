@@ -58,13 +58,17 @@ Logout reads `Authorization: Bearer <access token>` and optional query
 | `GET /auth/v1/reauthenticate`, `POST /auth/v1/invite`, `POST /auth/v1/recover`, `POST /auth/v1/resend` | no | 501 `MEGABASE_NOT_IMPLEMENTED` with that unit id |
 
 Signup user JSON matches GoTrue's user object for an autoconfirmed email
-user: `phone` is `""`, `confirmed_at` equals `email_confirmed_at`,
-`app_metadata` is `{"provider":"email","providers":["email"]}`,
-`user_metadata` is the request `data` plus `email_verified: true`, and the
-email identity uses `sub`, `email`, `email_verified: false`,
-`phone_verified: false`. The refresh token is the legacy 12-character
-lowercase base32 form. The access token is HS256 (`typ` `JWT`) with `aal`
-`aal1`, `amr` `[{"method":"password","timestamp":...}]`, and `session_id`.
+user: `phone` is `""`, and `confirmed_at` is omitted. Signup reloads the
+row before `Confirm`, so the generated column is still null on the
+in-memory user. `app_metadata` is
+`{"provider":"email","providers":["email"]}`. `user_metadata` is the
+identity claims (`sub`, `email`, `email_verified: true`,
+`phone_verified: false`) plus request `data` keys that do not collide.
+The signup response identity shares that map. The identity row was
+inserted first, so it keeps `email_verified: false`. The refresh token is
+the legacy 12-character lowercase base32 form. The access token is HS256
+(`typ` `JWT`) with `aal` `aal1`, `amr`
+`[{"method":"password","timestamp":...}]`, and `session_id`.
 
 The row written to `auth.users` uses the nil `instance_id`, bcrypt cost 10,
 phone SQL NULL, empty confirmation and recovery tokens (`''`, not NULL),
@@ -124,10 +128,11 @@ GoTrue's default API shape (no `X-Supabase-Api-Version: 2024-01-01`):
 
 ## Out of scope
 
-`POST /token`, `GET /user`, admin routes, captcha, rate limits, hooks,
-mail, and SMS. Those stay 501 via `MegabaseNotImplemented`. Judge cases
-`auth.token.*`, `auth.user.*`, and `auth.admin.*` still fail until those
-units are ported.
+`GET /user`, admin routes, captcha, rate limits, hooks, mail, and SMS.
+`POST /token` for the password and refresh-token grants is specified in
+[`token.md`](token.md). The other grant types on that route stay 501.
+Judge cases `auth.user.*` and `auth.admin.*` still fail until those units
+are ported.
 
 ## Judge cases
 
