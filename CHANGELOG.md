@@ -4,6 +4,28 @@ All notable changes to Megabase are documented in this file.
 The format is produced by [release-please](https://github.com/googleapis/release-please).
 Sections: Features, Bug Fixes, Performance, Conformance/judge, Documentation.
 
+## [0.1.5](https://github.com/Zouhairmaj/megabase/compare/v0.1.4...v0.1.5) (2026-10-10)
+
+
+### Features
+
+* **auth:** serve user routes ([#183](https://github.com/Zouhairmaj/megabase/issues/183)) ([11e49e9](https://github.com/Zouhairmaj/megabase/commit/11e49e95594445dd54c13ede27eb654ed53623e0))
+* **auth:** verify signup, invite, recovery, and email change ([#193](https://github.com/Zouhairmaj/megabase/issues/193)) ([543d587](https://github.com/Zouhairmaj/megabase/commit/543d587c9aa9edc6bdc0c1e72bd27ec285cf01b9))
+* **judge:** add a hidden held-out judge suite ([#205](https://github.com/Zouhairmaj/megabase/issues/205)) ([846b842](https://github.com/Zouhairmaj/megabase/commit/846b842b8a8a4ec30bdfa0b44e5b47261e0315f9))
+* **judge:** add adversarial auth and rls cases ([#208](https://github.com/Zouhairmaj/megabase/issues/208)) ([06cd945](https://github.com/Zouhairmaj/megabase/commit/06cd94504431e51d2d52e89706630b5968378f79))
+* **rest:** add imatch, in, is, like, lt, and not filters ([#207](https://github.com/Zouhairmaj/megabase/issues/207)) ([d7ae903](https://github.com/Zouhairmaj/megabase/commit/d7ae903aac3d05578ac54cc86332efc7aadc8129))
+
+
+### Bug Fixes
+
+* **coverage:** quote live judge conformance instead of the baseline ([#206](https://github.com/Zouhairmaj/megabase/issues/206)) ([2c58ef8](https://github.com/Zouhairmaj/megabase/commit/2c58ef85a978857f0d6cce3327707ee0adbed1fd))
+
+
+### Documentation
+
+* record owner phase 0 review ([#204](https://github.com/Zouhairmaj/megabase/issues/204)) ([acb4990](https://github.com/Zouhairmaj/megabase/commit/acb49904340cb21b5631be39c2884e652bd1be46))
+* remove cost rule from manifesto (owner decision) ([#197](https://github.com/Zouhairmaj/megabase/issues/197)) ([2d9df9a](https://github.com/Zouhairmaj/megabase/commit/2d9df9a6e4febef10518a1424582b0657af3bee4))
+
 ## [0.1.4](https://github.com/Zouhairmaj/megabase/compare/v0.1.3...v0.1.4) (2026-10-10)
 
 
