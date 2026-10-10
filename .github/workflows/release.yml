@@ -14,6 +14,14 @@ on:
 permissions:
   contents: read
 
+# One Release run at a time. Overlapping runs still race inside a single
+# job: release-please caches the `main` tree by branch name, then commits
+# onto a newer SHA. The lockfile job repairs that. Queuing only stops two
+# runs from pushing the release branch at once.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 jobs:
   release-please:
     name: release-please
@@ -178,10 +186,69 @@ jobs:
         if: steps.branch.outputs.exists == 'true'
         with:
           toolchain: stable
+      # release-please 17.3.0 caches git trees in RepositoryFileCache under
+      # the branch name `main`, not the SHA. Run 38031312690 fetched that
+      # tree at 06:32:55Z (main was still 434cc3d / 2d9df9a), then created
+      # e80025f with parent 846b842. The cached Cargo.toml became the file
+      # on the new tree and deleted chacha20 and hkdf. replaceTomlValue
+      # only rewrites the version span; the deletion is the stale file.
+      # Rebuild Cargo.toml from the merge-base (the parent main actually
+      # committed onto) and change only [workspace.package] version.
+      - name: Restore Cargo.toml and bump the workspace version
+        if: steps.branch.outputs.exists == 'true'
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          git fetch origin "${DEFAULT_BRANCH}"
+          BASE="$(git merge-base HEAD "origin/${DEFAULT_BRANCH}")"
+          VERSION="$(jq -er '.["."]' .release-please-manifest.json)"
+          case "${VERSION}" in
+            [0-9]*.[0-9]*.[0-9]*) ;;
+            *)
+              echo "::error::.release-please-manifest.json version is not a dotted number: ${VERSION}"
+              exit 1
+              ;;
+          esac
+          git show "${BASE}:Cargo.toml" > Cargo.toml.base
+          awk -v ver="${VERSION}" '
+            BEGIN { in_pkg = 0; done = 0 }
+            /^\[/ { in_pkg = ($0 == "[workspace.package]") }
+            in_pkg && !done && /^version[[:space:]]*=[[:space:]]*"/ {
+              sub(/"[^"]*"/, "\"" ver "\"")
+              done = 1
+            }
+            { print }
+          ' Cargo.toml.base > Cargo.toml
+          if ! awk -v ver="${VERSION}" '
+            BEGIN { in_pkg = 0; found = 0 }
+            /^\[/ { in_pkg = ($0 == "[workspace.package]") }
+            in_pkg && index($0, "version = \"" ver "\"") == 1 { found = 1 }
+            END { exit found ? 0 : 1 }
+          ' Cargo.toml; then
+            echo "::error::[workspace.package] version was not set to ${VERSION} (base ${BASE})"
+            exit 1
+          fi
+          mask() {
+            awk '
+              BEGIN { in_pkg = 0; done = 0 }
+              /^\[/ { in_pkg = ($0 == "[workspace.package]") }
+              in_pkg && !done && /^version[[:space:]]*=[[:space:]]*"/ {
+                sub(/"[^"]*"/, "\"0.0.0\"")
+                done = 1
+              }
+              { print }
+            ' "$1"
+          }
+          if ! cmp -s <(mask Cargo.toml.base) <(mask Cargo.toml); then
+            echo "::error::restored Cargo.toml is not a version bump of ${BASE}"
+            exit 1
+          fi
+          rm Cargo.toml.base
       - name: Match lockfile workspace versions
         if: steps.branch.outputs.exists == 'true'
         run: cargo update -w
-      - name: Commit Cargo.lock if it changed
+      - name: Commit Cargo.toml and Cargo.lock if they changed
         id: commit
         if: steps.branch.outputs.exists == 'true'
         env:
@@ -192,13 +259,13 @@ jobs:
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add Cargo.lock
+          git add Cargo.toml Cargo.lock
           if git diff --cached --quiet; then
-            echo "Cargo.lock already matches workspace versions."
+            echo "Cargo.toml and Cargo.lock already match the workspace version."
             echo "pushed=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          git commit -m "chore: sync Cargo.lock with workspace version"
+          git commit -m "chore: sync workspace version into Cargo.toml and Cargo.lock"
           # A fine-grained PAT owned by megabase-agent is denied on this
           # ref (runs 38007606007 and 38008795223). Retry that 403 with
           # the job GITHUB_TOKEN, which has contents: write. Leave other
