@@ -17,6 +17,8 @@
 #   3. loads the judge fixtures into the reference database,
 #   4. turns on email autoconfirm, because the self-hosted stack ships no
 #      mail server and sign-up cases need a session back,
+#      and names a rate-limit header the stock stack leaves unset so
+#      adversarial cases can opt in without slowing every other request,
 #   5. optionally adds Megabase on host port 8100 (`--profile with-megabase`)
 #      pointed at a dedicated `megabase` database (created by
 #      `megabase-judge prepare`), so HTTP and row snapshots are independent
@@ -52,6 +54,10 @@ services:
     image: public.ecr.aws/supabase/gotrue:v2.197.0@sha256:1736a63078f5922b198c4cbe50f80ab9a2d3b54fe8b7b6cfb2e9dc5dbbc12c6b
     environment:
       GOTRUE_MAILER_AUTOCONFIRM: "true"
+      # GoTrue applies the token/signup limiters only when this header is
+      # present (internal/api/middleware.go). Other judge cases omit it, so
+      # they are not counted. Adversarial cases send a per-run value.
+      GOTRUE_RATE_LIMIT_HEADER: X-Megabase-Judge-Rate-Key
   rest:
     image: ghcr.io/postgrest/postgrest:v16.4@sha256:d155c6718ed9a9f990d159a2ab7c0a3f16944dbb6d0a0344557421042acfe0df
   realtime:

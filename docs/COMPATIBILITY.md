@@ -69,7 +69,9 @@ artifact on `main`.
 Same endpoints, request syntax, status, JSON shape, error codes, headers
 the API documents (`content-type`, `content-range`, `location`,
 `preference-applied`), and the database objects apps and RLS depend on.
-Performance may differ; correctness may not.
+Performance may differ; correctness may not. Adversarial Auth and RLS
+behavior is the reference stack's response to `auth.adversarial.*` and
+`rest.adversarial.*` in `judge/cases/`.
 
 Intentional divergences (none today) would be listed here and in
 `PROGRESS.md`.

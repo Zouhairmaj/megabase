@@ -88,7 +88,13 @@ A case is a TOML table with an id, the `coverage/units.json` ids it
 exercises, and at least one HTTP `[[case.step]]` (`method`, `path`,
 optional `json` / `headers` / `key` / `capture` / `ignore`) and/or one
 `[[case.db]]` check (`table` or `function`, optional `rows = true`).
-See `judge/cases/`.
+See `judge/cases/`. Adversarial ids are `auth.adversarial.*` and
+`rest.adversarial.*`. The Auth service sets
+`GOTRUE_RATE_LIMIT_HEADER=X-Megabase-Judge-Rate-Key`. GoTrue skips the
+limiter when that header is absent, so the other cases are not counted.
+`auth.adversarial.rate-limit.token` sends the header as `judge-{{run}}`
+(one bucket per judge process) and expects HTTP 429 on the 31st password
+grant. The token limiter's burst is 30 in the pinned GoTrue.
 
 ## Database side-effects
 
@@ -105,7 +111,11 @@ Host `5432` is Supavisor. The overlay publishes Postgres itself on
 through the pooler.
 
 `prepare` creates the `megabase` database on the official cluster and
-loads `judge/fixtures/schema.sql` into it. Megabase then installs its
+loads `judge/fixtures/schema.sql` into it. That file also creates
+`public.profiles`, `public.notes`, and `public.note_comments` for the
+adversarial RLS cases, and creates `auth.uid()` only when the function
+is missing so the reference body stays the one `auth.sql.function.uid`
+compares. Megabase then installs its
 Auth SQL there (`DATABASE_URL`). Sharing the official `postgres`
 database would make row and catalog comparisons vacuous.
 
@@ -151,8 +161,19 @@ upload to one path. The reference's winner/loser pattern is the spec.
 **Fault injection.** Kill the Postgres connection, delay queries, fill the
 storage volume. Compare error codes, not just happy paths.
 
-**Adversarial.** Forged JWTs, `alg=none`, RLS filter injection, pooler
-tenant isolation. Level 1 Auth and REST carry the first of these.
+**Adversarial.** Level 1 cases `auth.adversarial.*` and
+`rest.adversarial.*` in `judge/cases/`. Auth: malformed, truncated,
+expired, forged, and `alg=none` bearers; a payload whose `role` was
+rewritten to `service_role` without a new signature; an authenticated
+bearer on `/admin/users`; malformed signup and token bodies; the GoTrue
+token burst; `redirect_to` values outside `SITE_URL`. RLS, on the
+`profiles` / `notes` / `note_comments` fixtures: cross-user reads and
+writes, `or` / `not` filters, embeds (including `!inner`), a
+filter that looks like a second SQL statement, anon (no grant) versus
+the row owner versus `service_role`, and a `service_role` apikey that
+must not override an authenticated bearer. Pooler tenant isolation is
+still later. The reference stack is the oracle. Level 1 cannot be
+called done while these cases fail.
 
 Studio scenarios, when they exist, compare every network call Studio makes,
 visible UI errors, and the final database state. A `MEGABASE_NOT_IMPLEMENTED`

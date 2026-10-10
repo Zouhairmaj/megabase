@@ -107,3 +107,229 @@ units = ["rest:route:GET /rest/v1/rpc/{function}"]
 [[case.step]]
 method = "GET"
 path = "/rest/v1/rpc/add_numbers?a=4&b=5"
+
+# Adversarial RLS (issue #117). profiles / notes / note_comments are in
+# judge/fixtures/schema.sql. owner-a and owner-b bearers are HS256 tokens
+# for those subjects, signed with the public demo JWT_SECRET. anon has no
+# grant on notes. service_role bypasses RLS.
+[[case]]
+id = "rest.adversarial.jwt.alg-none"
+description = "alg=none service_role cannot read another user's note"
+units = ["rest:route:GET /rest/v1/{relation}"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/notes?id=eq.00000000-0000-4000-8000-0000000000c3&select=body"
+headers = { Authorization = "Bearer eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0.eyJyb2xlIjoic2VydmljZV9yb2xlIiwiaXNzIjoic3VwYWJhc2UtZGVtbyIsImlhdCI6MTY0MTc2OTIwMCwiZXhwIjoxNzk5NTM1NjAwfQ." }
+
+[[case]]
+id = "rest.adversarial.jwt.forged"
+description = "A forged service_role bearer cannot read another user's note"
+units = ["rest:route:GET /rest/v1/{relation}"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/notes?id=eq.00000000-0000-4000-8000-0000000000c3&select=body"
+headers = { Authorization = "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoic2VydmljZV9yb2xlIiwiaXNzIjoic3VwYWJhc2UtZGVtbyIsImlhdCI6MTY0MTc2OTIwMCwiZXhwIjoxNzk5NTM1NjAwfQ._Cmsw8cV9SL5A6EL45e_VWqsHCj4Bnx1R0O32FuxnP0" }
+
+[[case]]
+id = "rest.adversarial.jwt.expired"
+description = "An expired service_role bearer cannot read another user's note"
+units = ["rest:route:GET /rest/v1/{relation}"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/notes?id=eq.00000000-0000-4000-8000-0000000000c3&select=body"
+headers = { Authorization = "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoic2VydmljZV9yb2xlIiwiaXNzIjoic3VwYWJhc2UtZGVtbyIsImlhdCI6MTAwMDAwMDAwMCwiZXhwIjoxMDAwMDAwMDAxfQ.7WjbHaaRmKxhIfWEsU4fzYb_tOUYjjmbZOnqMl0zCVk" }
+
+[[case]]
+id = "rest.adversarial.jwt.malformed"
+description = "A non-JWT bearer cannot read notes"
+units = ["rest:route:GET /rest/v1/{relation}"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/notes?select=body"
+headers = { Authorization = "Bearer not-a-jwt" }
+
+[[case]]
+id = "rest.adversarial.jwt.tampered-role"
+description = "A tampered service_role claim cannot read another user's note"
+units = ["rest:route:GET /rest/v1/{relation}"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/notes?id=eq.00000000-0000-4000-8000-0000000000c3&select=body"
+headers = { Authorization = "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzk5NTM1NjAwLCJpYXQiOjE2NDE3NjkyMDAsImlzcyI6InN1cGFiYXNlLWRlbW8iLCJyb2xlIjoic2VydmljZV9yb2xlIiwic3ViIjoiMDAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMGExIn0.SwFOh8kdys6i2Xwu-c81KSa_6dDP6bKk0ifFP1rJTWI" }
+
+[[case]]
+id = "rest.adversarial.rls.anon"
+description = "anon has no grant on notes"
+units = ["rest:route:GET /rest/v1/{relation}"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/notes?id=eq.00000000-0000-4000-8000-0000000000c3&select=body"
+key = "anon"
+
+[[case]]
+id = "rest.adversarial.rls.owner-read"
+description = "The note owner can read their own row"
+units = ["rest:route:GET /rest/v1/{relation}", "rest:filter-operator:eq", "rest:query-param:select"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/notes?id=eq.00000000-0000-4000-8000-0000000000c3&select=body"
+headers = { Authorization = "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzk5NTM1NjAwLCJpYXQiOjE2NDE3NjkyMDAsImlzcyI6InN1cGFiYXNlLWRlbW8iLCJyb2xlIjoiYXV0aGVudGljYXRlZCIsInN1YiI6IjAwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDBhMSJ9.SwFOh8kdys6i2Xwu-c81KSa_6dDP6bKk0ifFP1rJTWI" }
+
+[[case]]
+id = "rest.adversarial.rls.cross-user-read"
+description = "Another authenticated user cannot read the owner's note"
+units = ["rest:route:GET /rest/v1/{relation}", "rest:filter-operator:eq"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/notes?id=eq.00000000-0000-4000-8000-0000000000c3&select=body"
+headers = { Authorization = "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzk5NTM1NjAwLCJpYXQiOjE2NDE3NjkyMDAsImlzcyI6InN1cGFiYXNlLWRlbW8iLCJyb2xlIjoiYXV0aGVudGljYXRlZCIsInN1YiI6IjAwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDBiMiJ9.FOGAcMSnz_IW5eXgNu_2n6tEaj1K8nD0yh5YbJaOmgk" }
+
+[[case]]
+id = "rest.adversarial.rls.cross-user-or"
+description = "An or filter does not bypass the owner policy"
+units = ["rest:route:GET /rest/v1/{relation}", "rest:query-param:or", "rest:filter-operator:eq"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/notes?or=(user_id.eq.00000000-0000-4000-8000-0000000000a1,body.eq.victim-secret)&select=body"
+headers = { Authorization = "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzk5NTM1NjAwLCJpYXQiOjE2NDE3NjkyMDAsImlzcyI6InN1cGFiYXNlLWRlbW8iLCJyb2xlIjoiYXV0aGVudGljYXRlZCIsInN1YiI6IjAwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDBiMiJ9.FOGAcMSnz_IW5eXgNu_2n6tEaj1K8nD0yh5YbJaOmgk" }
+
+[[case]]
+id = "rest.adversarial.rls.cross-user-not"
+description = "A not filter does not bypass the owner policy"
+units = ["rest:route:GET /rest/v1/{relation}", "rest:filter-operator:not", "rest:filter-operator:eq"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/notes?user_id=not.eq.00000000-0000-4000-8000-0000000000b2&select=body"
+headers = { Authorization = "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzk5NTM1NjAwLCJpYXQiOjE2NDE3NjkyMDAsImlzcyI6InN1cGFiYXNlLWRlbW8iLCJyb2xlIjoiYXV0aGVudGljYXRlZCIsInN1YiI6IjAwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDBiMiJ9.FOGAcMSnz_IW5eXgNu_2n6tEaj1K8nD0yh5YbJaOmgk" }
+
+[[case]]
+id = "rest.adversarial.rls.embed"
+description = "Embedding notes from a world-readable profile does not leak the note"
+units = ["rest:route:GET /rest/v1/{relation}", "rest:query-param:select", "rest:embed-join:left", "rest:filter-operator:eq"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/profiles?id=eq.00000000-0000-4000-8000-0000000000a1&select=display_name,notes(body)"
+headers = { Authorization = "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzk5NTM1NjAwLCJpYXQiOjE2NDE3NjkyMDAsImlzcyI6InN1cGFiYXNlLWRlbW8iLCJyb2xlIjoiYXV0aGVudGljYXRlZCIsInN1YiI6IjAwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDBiMiJ9.FOGAcMSnz_IW5eXgNu_2n6tEaj1K8nD0yh5YbJaOmgk" }
+
+[[case]]
+id = "rest.adversarial.rls.embed-inner"
+description = "An inner embed does not leak a note the caller cannot see"
+units = ["rest:route:GET /rest/v1/{relation}", "rest:query-param:select", "rest:embed-join:inner"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/profiles?id=eq.00000000-0000-4000-8000-0000000000a1&select=display_name,notes!inner(body)"
+headers = { Authorization = "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzk5NTM1NjAwLCJpYXQiOjE2NDE3NjkyMDAsImlzcyI6InN1cGFiYXNlLWRlbW8iLCJyb2xlIjoiYXV0aGVudGljYXRlZCIsInN1YiI6IjAwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDBiMiJ9.FOGAcMSnz_IW5eXgNu_2n6tEaj1K8nD0yh5YbJaOmgk" }
+
+[[case]]
+id = "rest.adversarial.rls.embed-comments"
+description = "Embedding comments does not leak another user's comment"
+units = ["rest:route:GET /rest/v1/{relation}", "rest:query-param:select", "rest:embed-join:left"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/notes?id=eq.00000000-0000-4000-8000-0000000000c3&select=body,note_comments(body)"
+headers = { Authorization = "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzk5NTM1NjAwLCJpYXQiOjE2NDE3NjkyMDAsImlzcyI6InN1cGFiYXNlLWRlbW8iLCJyb2xlIjoiYXV0aGVudGljYXRlZCIsInN1YiI6IjAwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDBiMiJ9.FOGAcMSnz_IW5eXgNu_2n6tEaj1K8nD0yh5YbJaOmgk" }
+
+[[case]]
+id = "rest.adversarial.rls.anon-embed"
+description = "anon cannot embed notes it has no grant for"
+units = ["rest:route:GET /rest/v1/{relation}", "rest:query-param:select", "rest:embed-join:left"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/profiles?id=eq.00000000-0000-4000-8000-0000000000a1&select=display_name,notes(body)"
+key = "anon"
+
+[[case]]
+id = "rest.adversarial.rls.service-role"
+description = "service_role bypasses RLS and can read the note"
+units = ["rest:route:GET /rest/v1/{relation}"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/notes?id=eq.00000000-0000-4000-8000-0000000000c3&select=body"
+key = "service_role"
+
+[[case]]
+id = "rest.adversarial.rls.filter-quote"
+description = "A quoted or-true filter is not executed as SQL and does not return the note"
+units = ["rest:route:GET /rest/v1/{relation}", "rest:filter-operator:eq"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/notes?body=eq.victim-secret%27)%20or%20true--&select=body"
+headers = { Authorization = "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzk5NTM1NjAwLCJpYXQiOjE2NDE3NjkyMDAsImlzcyI6InN1cGFiYXNlLWRlbW8iLCJyb2xlIjoiYXV0aGVudGljYXRlZCIsInN1YiI6IjAwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDBiMiJ9.FOGAcMSnz_IW5eXgNu_2n6tEaj1K8nD0yh5YbJaOmgk" }
+
+[[case]]
+id = "rest.adversarial.rls.filter-drop"
+description = "A filter value that looks like a second statement does not drop the table"
+units = ["rest:route:GET /rest/v1/{relation}", "rest:filter-operator:eq"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/notes?id=eq.00000000-0000-4000-8000-0000000000c3;drop%20table%20public.notes--&select=body"
+headers = { Authorization = "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzk5NTM1NjAwLCJpYXQiOjE2NDE3NjkyMDAsImlzcyI6InN1cGFiYXNlLWRlbW8iLCJyb2xlIjoiYXV0aGVudGljYXRlZCIsInN1YiI6IjAwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDBiMiJ9.FOGAcMSnz_IW5eXgNu_2n6tEaj1K8nD0yh5YbJaOmgk" }
+[[case.step]]
+method = "GET"
+path = "/rest/v1/notes?id=eq.00000000-0000-4000-8000-0000000000c3&select=body"
+key = "service_role"
+
+[[case]]
+id = "rest.adversarial.rls.apikey-role"
+description = "A service_role apikey does not override an authenticated bearer"
+units = ["rest:route:GET /rest/v1/{relation}"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/notes?id=eq.00000000-0000-4000-8000-0000000000c3&select=body"
+key = "service_role"
+headers = { Authorization = "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzk5NTM1NjAwLCJpYXQiOjE2NDE3NjkyMDAsImlzcyI6InN1cGFiYXNlLWRlbW8iLCJyb2xlIjoiYXV0aGVudGljYXRlZCIsInN1YiI6IjAwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDBiMiJ9.FOGAcMSnz_IW5eXgNu_2n6tEaj1K8nD0yh5YbJaOmgk" }
+
+[[case]]
+id = "rest.adversarial.rls.owner-insert"
+description = "The owner can insert a row whose user_id is their subject"
+units = ["rest:route:POST /rest/v1/{relation}"]
+snapshot = ["public.notes", "public.note_comments"]
+[[case.step]]
+method = "POST"
+path = "/rest/v1/notes"
+headers = { Authorization = "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzk5NTM1NjAwLCJpYXQiOjE2NDE3NjkyMDAsImlzcyI6InN1cGFiYXNlLWRlbW8iLCJyb2xlIjoiYXV0aGVudGljYXRlZCIsInN1YiI6IjAwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDBhMSJ9.SwFOh8kdys6i2Xwu-c81KSa_6dDP6bKk0ifFP1rJTWI", Prefer = "return=representation" }
+json = { id = "00000000-0000-4000-8000-0000000000d4", user_id = "00000000-0000-4000-8000-0000000000a1", body = "own-note" }
+
+[[case]]
+id = "rest.adversarial.rls.cross-user-insert"
+description = "Another user cannot insert a row owned by the victim"
+units = ["rest:route:POST /rest/v1/{relation}"]
+snapshot = ["public.notes", "public.note_comments"]
+[[case.step]]
+method = "POST"
+path = "/rest/v1/notes"
+headers = { Authorization = "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzk5NTM1NjAwLCJpYXQiOjE2NDE3NjkyMDAsImlzcyI6InN1cGFiYXNlLWRlbW8iLCJyb2xlIjoiYXV0aGVudGljYXRlZCIsInN1YiI6IjAwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDBiMiJ9.FOGAcMSnz_IW5eXgNu_2n6tEaj1K8nD0yh5YbJaOmgk", Prefer = "return=representation" }
+json = { id = "00000000-0000-4000-8000-0000000000e5", user_id = "00000000-0000-4000-8000-0000000000a1", body = "stolen-note" }
+
+[[case]]
+id = "rest.adversarial.rls.cross-user-update"
+description = "Another user cannot update the victim note"
+units = ["rest:route:PATCH /rest/v1/{relation}", "rest:filter-operator:eq"]
+snapshot = ["public.notes", "public.note_comments"]
+[[case.step]]
+method = "PATCH"
+path = "/rest/v1/notes?id=eq.00000000-0000-4000-8000-0000000000c3"
+headers = { Authorization = "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzk5NTM1NjAwLCJpYXQiOjE2NDE3NjkyMDAsImlzcyI6InN1cGFiYXNlLWRlbW8iLCJyb2xlIjoiYXV0aGVudGljYXRlZCIsInN1YiI6IjAwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDBiMiJ9.FOGAcMSnz_IW5eXgNu_2n6tEaj1K8nD0yh5YbJaOmgk", Prefer = "return=representation" }
+json = { body = "pwned" }
+
+[[case]]
+id = "rest.adversarial.rls.cross-user-delete"
+description = "Another user cannot delete the victim note"
+units = ["rest:route:DELETE /rest/v1/{relation}", "rest:filter-operator:eq"]
+snapshot = ["public.notes", "public.note_comments"]
+[[case.step]]
+method = "DELETE"
+path = "/rest/v1/notes?id=eq.00000000-0000-4000-8000-0000000000c3"
+headers = { Authorization = "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzk5NTM1NjAwLCJpYXQiOjE2NDE3NjkyMDAsImlzcyI6InN1cGFiYXNlLWRlbW8iLCJyb2xlIjoiYXV0aGVudGljYXRlZCIsInN1YiI6IjAwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDBiMiJ9.FOGAcMSnz_IW5eXgNu_2n6tEaj1K8nD0yh5YbJaOmgk", Prefer = "return=representation" }
+
+[[case]]
+id = "rest.adversarial.rls.cross-user-comment"
+description = "Another user cannot attach a comment to the victim note"
+units = ["rest:route:POST /rest/v1/{relation}"]
+snapshot = ["public.notes", "public.note_comments"]
+[[case.step]]
+method = "POST"
+path = "/rest/v1/note_comments"
+headers = { Authorization = "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzk5NTM1NjAwLCJpYXQiOjE2NDE3NjkyMDAsImlzcyI6InN1cGFiYXNlLWRlbW8iLCJyb2xlIjoiYXV0aGVudGljYXRlZCIsInN1YiI6IjAwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDBiMiJ9.FOGAcMSnz_IW5eXgNu_2n6tEaj1K8nD0yh5YbJaOmgk", Prefer = "return=representation" }
+json = { id = "00000000-0000-4000-8000-0000000000f6", note_id = "00000000-0000-4000-8000-0000000000c3", user_id = "00000000-0000-4000-8000-0000000000b2", body = "injected-comment" }
+
