@@ -443,7 +443,7 @@ method = "POST"
 path = "/rest/v1/todos"
 key = "service_role"
 headers = { Prefer = "return=minimal" }
-json = { title = "prefer-minimal" }
+json = { id = 9101, title = "prefer-minimal" }
 
 [[case]]
 id = "rest.prefer.return.minimal.update"
@@ -454,15 +454,21 @@ method = "PATCH"
 path = "/rest/v1/todos?title=eq.run%20the%20judge"
 key = "service_role"
 headers = { Prefer = "return=minimal" }
-json = { priority = 1 }
+json = { priority = 11 }
 
 [[case]]
 id = "rest.prefer.return.minimal.delete"
-description = "return=minimal on a delete answers 204"
+description = "return=minimal on a delete of an existing row answers 204"
 units = ["rest:prefer:return=minimal"]
 [[case.step]]
+method = "POST"
+path = "/rest/v1/todos"
+key = "service_role"
+headers = { Prefer = "return=minimal" }
+json = { id = 9111, title = "prefer-minimal-delete" }
+[[case.step]]
 method = "DELETE"
-path = "/rest/v1/todos?title=eq.prefer-minimal-delete"
+path = "/rest/v1/todos?id=eq.9111"
 key = "service_role"
 headers = { Prefer = "return=minimal" }
 
@@ -475,7 +481,7 @@ method = "POST"
 path = "/rest/v1/todos?select=title,done,priority"
 key = "service_role"
 headers = { Prefer = "return=representation" }
-json = { title = "prefer-representation" }
+json = { id = 9102, title = "prefer-representation" }
 
 [[case]]
 id = "rest.prefer.return.representation.update"
@@ -486,7 +492,7 @@ method = "PATCH"
 path = "/rest/v1/todos?title=eq.write%20the%20spec&select=title,priority"
 key = "service_role"
 headers = { Prefer = "return=representation" }
-json = { priority = 2 }
+json = { priority = 12 }
 
 [[case]]
 id = "rest.prefer.return.representation.delete"
@@ -499,6 +505,22 @@ key = "service_role"
 headers = { Prefer = "return=representation" }
 
 [[case]]
+id = "rest.prefer.return.representation.delete.existing"
+description = "return=representation on a delete of an existing row answers 200 with the row"
+units = ["rest:prefer:return=representation"]
+[[case.step]]
+method = "POST"
+path = "/rest/v1/todos"
+key = "service_role"
+headers = { Prefer = "return=minimal" }
+json = { id = 9112, title = "prefer-representation-delete" }
+[[case.step]]
+method = "DELETE"
+path = "/rest/v1/todos?id=eq.9112&select=id,title"
+key = "service_role"
+headers = { Prefer = "return=representation" }
+
+[[case]]
 id = "rest.prefer.return.headers-only.insert"
 description = "return=headers-only on a create answers 201 with Location and no body"
 units = ["rest:prefer:return=headers-only"]
@@ -507,7 +529,7 @@ method = "POST"
 path = "/rest/v1/todos"
 key = "service_role"
 headers = { Prefer = "return=headers-only" }
-json = { title = "prefer-headers-only" }
+json = { id = 9103, title = "prefer-headers-only" }
 
 [[case]]
 id = "rest.prefer.return.headers-only.update"
@@ -518,15 +540,21 @@ method = "PATCH"
 path = "/rest/v1/todos?title=eq.port%20the%20unit"
 key = "service_role"
 headers = { Prefer = "return=headers-only" }
-json = { priority = 3 }
+json = { priority = 13 }
 
 [[case]]
 id = "rest.prefer.return.headers-only.delete"
-description = "return=headers-only on a delete answers 204"
+description = "return=headers-only on a delete of an existing row answers 204"
 units = ["rest:prefer:return=headers-only"]
 [[case.step]]
+method = "POST"
+path = "/rest/v1/todos"
+key = "service_role"
+headers = { Prefer = "return=minimal" }
+json = { id = 9113, title = "prefer-headers-only-delete" }
+[[case.step]]
 method = "DELETE"
-path = "/rest/v1/todos?title=eq.prefer-headers-only-delete"
+path = "/rest/v1/todos?id=eq.9113"
 key = "service_role"
 headers = { Prefer = "return=headers-only" }
 
@@ -578,7 +606,7 @@ method = "POST"
 path = "/rest/v1/todos"
 key = "service_role"
 headers = { Prefer = "tx=commit, return=minimal" }
-json = { title = "prefer-tx-commit" }
+json = { id = 9104, title = "prefer-tx-commit" }
 
 [[case]]
 id = "rest.prefer.tx.commit.read"
@@ -598,7 +626,7 @@ method = "POST"
 path = "/rest/v1/todos"
 key = "service_role"
 headers = { Prefer = "tx=rollback, return=minimal" }
-json = { title = "prefer-tx-rollback" }
+json = { id = 9105, title = "prefer-tx-rollback" }
 
 [[case]]
 id = "rest.prefer.tx.rollback.read"
@@ -618,5 +646,5 @@ method = "PATCH"
 path = "/rest/v1/todos?title=eq.run%20the%20judge"
 key = "service_role"
 headers = { Prefer = "tx=rollback, return=representation" }
-json = { priority = 1 }
+json = { priority = 14 }
 
