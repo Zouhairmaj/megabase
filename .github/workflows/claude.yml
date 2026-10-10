@@ -41,6 +41,8 @@ jobs:
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           fetch-depth: 1
+          # Upstream Go/TS sources live in vendor/* submodules; Auth/REST/etc work needs them.
+          submodules: true
           persist-credentials: false
 
       - name: Run Claude Code
@@ -54,10 +56,13 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ secrets.MEGABASE_AGENT_GH_TOKEN || github.token }}
-          branch_prefix: "issue-"
+          # Protected-path issues (label protected-paths) must start on review/*
+          # because the action only pushes to the invocation branch (no raw git push).
+          # AGENTS.md uses review/issue-<n>-<slug>. Unprotected issues keep issue-*.
+          branch_prefix: ${{ contains(join(github.event.issue.labels.*.name, ','), 'protected-paths') && 'review/issue-' || 'issue-' }}
           branch_name_template: "{{prefix}}{{entityNumber}}-{{description}}"
           additional_permissions: |
             actions: read
           claude_args: |
             --allowedTools "mcp__github__create_pull_request,mcp__github__update_pull_request,mcp__github__get_pull_request,Bash(gh pr create:*),Bash(gh pr edit:*),Bash(gh pr view:*),Bash(gh pr list:*)"
-            --append-system-prompt "Follow AGENTS.md and GOAL.md. Write Rust only. Never modify vendor/ or judge/. Iteration commits use `[component] unit: what changed (coverage X→Y, conformance A→B)`. When you implement an issue, after pushing the branch, open the pull request yourself with `gh pr create` (or mcp__github__create_pull_request). Do not stop at a Create-a-PR compare link. Use a Conventional Commits title (types and scopes in .github/workflows/semantic-pr.yml). The body follows .github/pull_request_template.md and must include `Closes #<n>` for the issue. If a PR for this branch already exists, update it with `gh pr edit` (or mcp__github__update_pull_request) instead of opening another. Never include the trigger phrase in comments."
+            --append-system-prompt "Follow AGENTS.md and GOAL.md. Write Rust only. Never modify vendor/, vendor.toml, or .gitmodules. Modify protected paths (judge/, .github/, tools/megabase-guard/, CODEOWNERS) only when the issue explicitly requires it, and only when the current branch already starts with `review/` (the workflow starts protected-path issues on `review/issue-<n>-<slug>`); never touch protected paths on an issue-* branch. Do not run raw `git push`/`git switch`/`git checkout` to change branches — push only through the action's git-push wrapper (origin HEAD). Leave humans-only files (GOAL.md, MANIFESTO.md, HUMAN_LOG.md) alone. Iteration commits use `[component] unit: what changed (coverage X→Y, conformance A→B)`. When you implement an issue, after pushing the branch, open the pull request yourself with `gh pr create` (or mcp__github__create_pull_request). Do not stop at a Create-a-PR compare link. Use a Conventional Commits title (types and scopes in .github/workflows/semantic-pr.yml). The body follows .github/pull_request_template.md and must include `Closes #<n>` for the issue. If a PR for this branch already exists, update it with `gh pr edit` (or mcp__github__update_pull_request) instead of opening another. Never include the trigger phrase in comments."
