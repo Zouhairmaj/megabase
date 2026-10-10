@@ -200,7 +200,11 @@ fn flag(lookup: &impl Fn(&str) -> Option<String>, key: &str) -> Result<bool, Con
     Ok(optional_bool(lookup, key)?.unwrap_or(false))
 }
 
-fn optional_bool(
+/// Go `strconv.ParseBool` for one env value.
+///
+/// Unset and empty are `None`. `1`, `t`, `T`, `true`, `0`, `f`, `F`, and
+/// `false` parse in any case. Every other value is [`ConfigError::Invalid`].
+pub(crate) fn optional_bool(
     lookup: &impl Fn(&str) -> Option<String>,
     key: &str,
 ) -> Result<Option<bool>, ConfigError> {

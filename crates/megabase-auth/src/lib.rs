@@ -7,9 +7,11 @@
 //! settings, autoconfirm email signup, and logout. Issue #17 serves
 //! `POST /token` for the password and refresh-token grants. Issue #21
 //! serves `GET`/`POST /verify` for signup, invite, recovery, and email
-//! change. Every other Auth path returns `MEGABASE_NOT_IMPLEMENTED`.
-//! Database objects listed in `specs/auth/database.md` are installed when
-//! `DATABASE_URL` is set.
+//! change. Issue #19 serves `GET` and `PUT /user`, identity authorize and
+//! unlink, and the OAuth grant list and revoke.
+//! Every other Auth path returns `MEGABASE_NOT_IMPLEMENTED`. Database objects
+//! listed in `specs/auth/database.md` are installed when `DATABASE_URL` is
+//! set.
 
 mod admin;
 mod admin_batch2;
@@ -22,6 +24,7 @@ mod schema;
 mod state;
 mod store;
 mod token;
+mod user;
 mod verify;
 
 pub use config::AuthConfig;

@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE auth.users SET\n            encrypted_password = $3,\n            confirmation_token = '',\n            confirmation_sent_at = NULL,\n            recovery_token = '',\n            recovery_sent_at = NULL,\n            email_change_token_current = '',\n            email_change_token_new = '',\n            email_change_sent_at = NULL,\n            phone_change_token = '',\n            phone_change_sent_at = NULL,\n            reauthentication_token = '',\n            reauthentication_sent_at = NULL,\n            updated_at = $4::timestamptz\n         WHERE instance_id = $1::uuid AND id = $2::uuid",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Varchar",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "913341d7dba32f5add4d6c924310884697a80395481ef72752c473cf1b169610"
+}

@@ -4,10 +4,11 @@
 //! `/auth/v1` routes served by this crate.
 //!
 //! Health, settings, autoconfirm email signup, logout,
-//! `POST /token` (password and refresh-token grants), and
-//! `GET`/`POST /verify` (signup, invite, recovery, email change) are
-//! implemented. Invite, recover, resend, reauthenticate, phone signup,
-//! anonymous signup, and the other verify types stay HTTP 501.
+//! `POST /token` (password and refresh-token grants),
+//! `GET`/`POST /verify` (signup, invite, recovery, email change), and the
+//! user routes are implemented. Invite, recover, resend, reauthenticate,
+//! phone signup, anonymous signup, the other verify types, and mailer
+//! confirmation stay HTTP 501.
 
 use std::sync::OnceLock;
 use std::time::SystemTime;
@@ -16,7 +17,7 @@ use axum::body::{to_bytes, Body};
 use axum::extract::State;
 use axum::http::{header::AUTHORIZATION, HeaderMap, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post};
 use axum::Router;
 use megabase_core::{bearer_token, JwtClaims, JwtError, MegabaseNotImplemented};
 use regex::Regex;
@@ -39,7 +40,7 @@ const UNIT_INVITE: &str = "auth:route:POST /auth/v1/invite";
 const UNIT_RECOVER: &str = "auth:route:POST /auth/v1/recover";
 const UNIT_RESEND: &str = "auth:route:POST /auth/v1/resend";
 
-const INVALID_CHANNEL: &str = "Invalid channel, supported values are 'sms' or 'whatsapp'. 'whatsapp' is only supported if Twilio or Twilio Verify is used as the provider.";
+pub(crate) const INVALID_CHANNEL: &str = "Invalid channel, supported values are 'sms' or 'whatsapp'. 'whatsapp' is only supported if Twilio or Twilio Verify is used as the provider.";
 
 pub(crate) fn router(state: AuthState) -> Router {
     Router::new()
@@ -55,6 +56,22 @@ pub(crate) fn router(state: AuthState) -> Router {
         .route(
             "/auth/v1/verify",
             get(crate::verify::verify_get).post(crate::verify::verify_post),
+        )
+        .route(
+            "/auth/v1/user",
+            get(crate::user::user_get).put(crate::user::user_update),
+        )
+        .route(
+            "/auth/v1/user/identities/authorize",
+            get(crate::user::link_identity),
+        )
+        .route(
+            "/auth/v1/user/identities/:identity_id",
+            delete(crate::user::delete_identity),
+        )
+        .route(
+            "/auth/v1/user/oauth/grants",
+            get(crate::user::list_grants).delete(crate::user::revoke_grant),
         )
         .with_state(state)
 }
@@ -402,7 +419,7 @@ fn validate_signup(config: &AuthConfig, params: &SignupBody) -> Result<(), GoTru
     validate_pkce(&params.code_challenge_method, &params.code_challenge)
 }
 
-fn valid_channel(channel: &str, sms_provider: &str) -> bool {
+pub(crate) fn valid_channel(channel: &str, sms_provider: &str) -> bool {
     match channel {
         "sms" => true,
         "whatsapp" => sms_provider == "twilio" || sms_provider == "twilio_verify",
@@ -469,7 +486,7 @@ pub(crate) fn request_aud(headers: &HeaderMap, config: &AuthConfig) -> String {
         .to_string()
 }
 
-fn session_claim(claims: &JwtClaims) -> Result<Option<Uuid>, GoTrueError> {
+pub(crate) fn session_claim(claims: &JwtClaims) -> Result<Option<Uuid>, GoTrueError> {
     let Some(raw) = claims.raw.get("session_id") else {
         return Ok(None);
     };
@@ -552,11 +569,11 @@ fn percent_decode(input: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
-fn banned(until: Option<SystemTime>) -> bool {
+pub(crate) fn banned(until: Option<SystemTime>) -> bool {
     until.is_some_and(|until| SystemTime::now() < until)
 }
 
-fn jwt_failure(error: &JwtError) -> Response {
+pub(crate) fn jwt_failure(error: &JwtError) -> Response {
     GoTrueError::new(
         StatusCode::FORBIDDEN,
         "bad_jwt",
@@ -688,16 +705,6 @@ mod tests {
             assert_eq!(body["component"], "auth");
             assert_eq!(body["unit"], unit);
         }
-        let (status, body) = call(
-            crate::router_with_state(AuthState::reference()),
-            "GET",
-            "/auth/v1/user",
-            None,
-            &[],
-        )
-        .await;
-        assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
-        assert_eq!(body["unit"], "GET /auth/v1/user");
     }
 
     #[tokio::test]

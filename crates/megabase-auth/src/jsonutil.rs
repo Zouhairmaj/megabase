@@ -46,6 +46,7 @@ pub fn user_json(user: &UserRecord) -> Value {
         role: &user.role,
         email: &user.email,
         phone: &user.phone,
+        phone_confirmed_at: user.phone_confirmed_at.map(format_ts),
         email_confirmed_at,
         // `confirmed_at` is generated. Signup does not reload the row after
         // `Confirm`, so that response omits it. A later load includes it.
@@ -87,6 +88,8 @@ struct UserJson<'a> {
     role: &'a str,
     email: &'a str,
     phone: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    phone_confirmed_at: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     email_confirmed_at: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
