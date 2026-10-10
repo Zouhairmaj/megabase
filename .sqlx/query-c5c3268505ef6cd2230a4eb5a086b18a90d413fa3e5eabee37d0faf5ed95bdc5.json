@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE auth.identities\n                         SET identity_data = $2::jsonb, updated_at = $3::timestamptz\n                         WHERE id = $1::uuid",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Jsonb",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c5c3268505ef6cd2230a4eb5a086b18a90d413fa3e5eabee37d0faf5ed95bdc5"
+}

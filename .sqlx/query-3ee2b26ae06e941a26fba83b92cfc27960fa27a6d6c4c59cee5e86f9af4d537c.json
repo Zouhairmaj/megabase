@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE auth.users SET\n                email = NULLIF($3, ''),\n                phone = NULLIF($4, ''),\n                email_confirmed_at = $5::timestamptz,\n                phone_confirmed_at = $6::timestamptz,\n                raw_app_meta_data = $7::jsonb,\n                raw_user_meta_data = $8::jsonb,\n                updated_at = $9::timestamptz\n             WHERE instance_id = $1::uuid AND id = $2::uuid",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text",
+        "Timestamptz",
+        "Timestamptz",
+        "Jsonb",
+        "Jsonb",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "3ee2b26ae06e941a26fba83b92cfc27960fa27a6d6c4c59cee5e86f9af4d537c"
+}

@@ -148,6 +148,13 @@ pub enum SchemaError {
     TimedOut { timeout: Duration },
     #[error("installing auth schema: {0}")]
     Postgres(#[from] tokio_postgres::Error),
+    #[error("connecting to postgres: {0}")]
+    Sqlx(sqlx::Error),
+}
+
+/// Reject `sslmode=require` and `verify-*` before a client opens a socket.
+pub fn reject_tls(database_url: &str) -> Result<(), SchemaError> {
+    require_cleartext_postgres(database_url)
 }
 
 fn require_cleartext_postgres(database_url: &str) -> Result<(), SchemaError> {

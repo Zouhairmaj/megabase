@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE auth.users SET encrypted_password = $1\n                             WHERE instance_id = $2::uuid AND id = $3::uuid",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Varchar",
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "235f395eda7967d38b4fcae0986bd449be793f047f386515cb964cf30a8f54b6"
+}

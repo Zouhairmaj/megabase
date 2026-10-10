@@ -14,11 +14,13 @@ production software.
 
 The Release workflow attaches musl-static linux `x86_64` and `aarch64`
 binaries, `SHA256SUMS`, Sigstore signatures, and SLSA provenance, and
-publishes `ghcr.io/zouhairmaj/megabase` tagged with that version. `v0.1.0`
-shipped without those assets; use a later tag, or a `v0.1.0` backfill
-dispatched from that tag, that lists `megabase-*-unknown-linux-musl` on
-[Releases](https://github.com/Zouhairmaj/megabase/releases). Commands for
-download and verification live only on this page.
+publishes `ghcr.io/zouhairmaj/megabase` tagged with that version.
+`v0.1.0` and `v0.1.1` shipped without those assets. Use a later tag that
+lists `megabase-*-unknown-linux-musl` on
+[Releases](https://github.com/Zouhairmaj/megabase/releases). To backfill
+an asset-less tag, dispatch Release with Use workflow from set to that
+tag. That run creates the assets. Use the tag after the workflow
+completes. Commands for download and verification live only on this page.
 
 ## Release binary
 

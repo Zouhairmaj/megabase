@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM auth.mfa_amr_claims\n             WHERE session_id = $1 AND authentication_method = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "bead476c395a9249529526b695484727d04823fa4f5cde175d8eeb3f14dafa81"
+}

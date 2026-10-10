@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE auth.oauth_clients SET deleted_at = NOW()\n         WHERE id = $1 AND deleted_at IS NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "96899cc3f5e418216ba776375e8b904efbf58cb8b314e5d20eb1d8a9f13478ed"
+}

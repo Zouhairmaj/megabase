@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE auth.sessions SET aal = 'aal1', factor_id = NULL\n         WHERE user_id = $1 AND factor_id = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "13786e4fb0fabb0b87449865dc6fbfd7f8c36876ce424069579d96e83b806f0a"
+}

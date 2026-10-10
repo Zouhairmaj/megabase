@@ -31,6 +31,9 @@ use megabase_core::MegabaseNotImplemented;
 
 pub const COMPONENT: &str = "auth";
 
+/// Routes from the environment. This does not open a database pool:
+/// `AuthState::from_env` leaves `backend` empty. `megabase_server::run`
+/// installs the schema, calls `Backend::connect`, then `router_with_state`.
 pub fn router() -> Router {
     router_with_state(AuthState::from_env())
 }

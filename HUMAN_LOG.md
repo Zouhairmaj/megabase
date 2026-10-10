@@ -29,6 +29,11 @@ Each entry should include:
 - **Reason**: OpenSSF Scorecard Signed-Releases inspects assets on the last five GitHub Releases. Packaging also wants a public package. `attest-build-provenance` records the run SHA, so the backfill must run on that tag. Agents cannot change package visibility or start that dispatch from this environment.
 - **Files affected**: GitHub Packages and Actions (not in git)
 
+- **Date**: 2026-10-10
+- **Action**: (pending) Replace repository secret `RELEASE_PLEASE_TOKEN`. The current value is a fine-grained PAT owned by `megabase-agent`. Fine-grained PATs cannot write a public repository owned by another personal account, even for a collaborator. Create a classic PAT with scopes `repo` and `workflow` for an account that can write `Zouhairmaj/megabase`, save it as `RELEASE_PLEASE_TOKEN`, and re-run **Release** on `main`. This supersedes the 2026-10-09 pending item that allowed a fine-grained PAT for this secret.
+- **Reason**: Run 38007606007 Sync Cargo.lock failed with HTTP 403 `Permission to Zouhairmaj/megabase.git denied to megabase-agent`. GitHub's personal access token documentation says only a classic PAT has write access for a public repository you do not own. Granting Contents write on the fine-grained token does not fix that. `workflow` is included so the token can push workflow-file changes; the failed commit changed only `Cargo.lock`.
+- **Files affected**: GitHub Actions repository secrets (not in git)
+
 ---
 
 ## Completed

@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE auth.users SET\n                email = NULLIF($3, ''),\n                phone = NULLIF($4, ''),\n                email_confirmed_at = $5::timestamptz,\n                phone_confirmed_at = $6::timestamptz,\n                raw_app_meta_data = $7::jsonb,\n                raw_user_meta_data = $8::jsonb,\n                updated_at = $9::timestamptz,\n                confirmation_token = '',\n                confirmation_sent_at = NULL,\n                recovery_token = '',\n                recovery_sent_at = NULL,\n                email_change = '',\n                email_change_token_current = '',\n                email_change_token_new = '',\n                email_change_sent_at = NULL,\n                email_change_confirm_status = 0,\n                phone_change = '',\n                phone_change_token = '',\n                phone_change_sent_at = NULL,\n                reauthentication_token = '',\n                reauthentication_sent_at = NULL\n             WHERE instance_id = $1::uuid AND id = $2::uuid",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text",
+        "Timestamptz",
+        "Timestamptz",
+        "Jsonb",
+        "Jsonb",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "53557adfdd7056a18f5eafe9e0e2819d8624e8f617bc3e8177d93beb55fb21ad"
+}

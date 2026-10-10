@@ -17,8 +17,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use serde_json::{json, Map, Value};
-use tokio::sync::{Mutex, MutexGuard};
-use tokio_postgres::GenericClient;
+use tokio::sync::Mutex;
 use uuid::Uuid;
 
 use crate::config::BCRYPT_COST;
@@ -37,7 +36,7 @@ pub enum StoreError {
     #[error("database operation timed out")]
     TimedOut,
     #[error(transparent)]
-    Postgres(#[from] tokio_postgres::Error),
+    Postgres(#[from] sqlx::Error),
 }
 
 /// Same bound the admin routes use for a connect. A stalled query fails
@@ -219,11 +218,10 @@ enum BackendKind {
     Postgres(Pg),
 }
 
-/// One Auth connection, replaced when PostgreSQL closes it.
+/// Auth connection pool. Closed on process shutdown.
 #[derive(Clone)]
 struct Pg {
-    url: String,
-    client: Arc<Mutex<tokio_postgres::Client>>,
+    pool: sqlx::PgPool,
 }
 
 #[derive(Clone)]
@@ -284,11 +282,25 @@ impl Backend {
         })
     }
 
+    /// Release the Auth database pool after the HTTP listener has stopped.
+    pub async fn close(&self) {
+        if let BackendKind::Postgres(pg) = &self.inner {
+            pg.close().await;
+        }
+    }
+
+    pub fn pg_pool(&self) -> Option<sqlx::PgPool> {
+        match &self.inner {
+            BackendKind::Postgres(pg) => Some(pg.pool.clone()),
+            _ => None,
+        }
+    }
+
     pub async fn signup_email(&self, cmd: SignupCommand) -> Result<SignupResult, StoreError> {
         match &self.inner {
             BackendKind::None => Err(StoreError::Unavailable),
             BackendKind::Memory(db) => memory_signup(db, cmd).await,
-            BackendKind::Postgres(pg) => timed(pg, postgres_signup(pg, cmd)).await,
+            BackendKind::Postgres(pg) => timed(postgres_signup(pg, cmd)).await,
         }
     }
 
@@ -302,18 +314,18 @@ impl Backend {
                 }))
             }
             BackendKind::Postgres(pg) => {
-                timed(pg, async {
+                timed(async {
                     let instance = Uuid::nil();
-                    let client = pg.lock().await?;
-                    let row = client
-                        .query_opt(
-                            "SELECT banned_until FROM auth.users
+                    let row = sqlx::query!(
+                        "SELECT banned_until FROM auth.users
                          WHERE instance_id = $1::uuid AND id = $2::uuid",
-                            &[&instance, &user_id],
-                        )
-                        .await?;
+                        instance,
+                        user_id,
+                    )
+                    .fetch_optional(&pg.pool)
+                    .await?;
                     Ok(row.map(|row| Subject {
-                        banned_until: row.get(0),
+                        banned_until: row.banned_until.map(from_ts),
                     }))
                 })
                 .await
@@ -326,14 +338,13 @@ impl Backend {
             BackendKind::None => Err(StoreError::Unavailable),
             BackendKind::Memory(db) => Ok(db.lock().await.sessions.contains_key(&session_id)),
             BackendKind::Postgres(pg) => {
-                timed(pg, async {
-                    let client = pg.lock().await?;
-                    let row = client
-                        .query_opt(
-                            "SELECT 1 FROM auth.sessions WHERE id = $1::uuid",
-                            &[&session_id],
-                        )
-                        .await?;
+                timed(async {
+                    let row = sqlx::query!(
+                        "SELECT 1 AS present FROM auth.sessions WHERE id = $1::uuid",
+                        session_id,
+                    )
+                    .fetch_optional(&pg.pool)
+                    .await?;
                     Ok(row.is_some())
                 })
                 .await
@@ -358,13 +369,12 @@ impl Backend {
                 Ok(())
             }
             BackendKind::Postgres(pg) => {
-                timed(pg, async {
-                    let mut client = pg.lock().await?;
-                    let tx = client.transaction().await?;
-                    if let Some(user) = find_user_by_id(&tx, user_id).await? {
-                        insert_audit(&tx, &user, "logout", "account", None).await?;
+                timed(async {
+                    let mut tx = pg.pool.begin().await?;
+                    if let Some(user) = find_user_by_id(&mut tx, user_id).await? {
+                        insert_audit(&mut tx, &user, "logout", "account", None).await?;
                     }
-                    exec_logout(&tx, user_id, session_id, scope).await?;
+                    exec_logout(&mut tx, user_id, session_id, scope).await?;
                     tx.commit().await?;
                     Ok(())
                 })
@@ -394,13 +404,13 @@ impl Backend {
             BackendKind::Postgres(pg) => {
                 let identifier = identifier.to_string();
                 let aud = aud.to_string();
-                timed(pg, async move {
-                    let client = pg.lock().await?;
+                timed(async move {
+                    let mut conn = pg.pool.acquire().await?;
                     match channel {
                         LoginChannel::Email => {
-                            find_user_by_email_and_audience(&*client, &identifier, &aud).await
+                            find_user_by_email_and_audience(&mut conn, &identifier, &aud).await
                         }
-                        LoginChannel::Phone => find_phone(&*client, &identifier, &aud).await,
+                        LoginChannel::Phone => find_phone(&mut conn, &identifier, &aud).await,
                     }
                 })
                 .await
@@ -439,10 +449,9 @@ impl Backend {
             }
             BackendKind::Postgres(pg) => {
                 let provider = provider.to_string();
-                timed(pg, async move {
-                    let mut client = pg.lock().await?;
-                    let tx = client.transaction().await?;
-                    let Some(mut user) = find_user_by_id(&tx, user_id).await? else {
+                timed(async move {
+                    let mut tx = pg.pool.begin().await?;
+                    let Some(mut user) = find_user_by_id(&mut tx, user_id).await? else {
                         tx.commit().await?;
                         return Ok(None);
                     };
@@ -451,26 +460,34 @@ impl Backend {
                     if let Some(hash) = &replacement_hash {
                         user.password_hash.clone_from(hash);
                     }
-                    tx.execute(
+                    let instance = Uuid::nil();
+                    let signed_in = ts(now);
+                    sqlx::query!(
                         "UPDATE auth.users SET last_sign_in_at = $1::timestamptz
                          WHERE instance_id = $2::uuid AND id = $3::uuid",
-                        &[&now, &Uuid::nil(), &user_id],
+                        signed_in,
+                        instance,
+                        user_id,
                     )
+                    .execute(&mut *tx)
                     .await?;
                     if let Some(hash) = &replacement_hash {
-                        tx.execute(
+                        sqlx::query!(
                             "UPDATE auth.users SET encrypted_password = $1
                              WHERE instance_id = $2::uuid AND id = $3::uuid",
-                            &[hash, &Uuid::nil(), &user_id],
+                            hash,
+                            instance,
+                            user_id,
                         )
+                        .execute(&mut *tx)
                         .await?;
                     }
                     let issued = grant_session(&mut user, now);
-                    insert_session_rows(&tx, &issued)
+                    insert_session_rows(&mut tx, &issued)
                         .await
                         .map_err(write_to_store)?;
                     insert_audit(
-                        &tx,
+                        &mut tx,
                         &issued.user,
                         "login",
                         "account",
@@ -495,7 +512,7 @@ impl Backend {
             }
             BackendKind::Postgres(pg) => {
                 let token = token.to_string();
-                timed(pg, async move { refresh_postgres(pg, &token).await }).await
+                timed(refresh_postgres(pg, &token)).await
             }
         }
     }
@@ -512,9 +529,9 @@ impl Backend {
                 }))
             }
             BackendKind::Postgres(pg) => {
-                timed(pg, async {
-                    let client = pg.lock().await?;
-                    find_user_by_id(&*client, user_id).await
+                timed(async {
+                    let mut conn = pg.pool.acquire().await?;
+                    find_user_by_id(&mut conn, user_id).await
                 })
                 .await
             }
@@ -533,31 +550,31 @@ impl Backend {
             BackendKind::None => Err(StoreError::Unavailable),
             BackendKind::Memory(_) => Ok(false),
             BackendKind::Postgres(pg) => {
-                timed(pg, async {
-                    let client = pg.lock().await?;
-                    let verified = client
-                        .query_opt(
-                            "SELECT 1 FROM auth.mfa_factors
-                             WHERE user_id = $1::uuid AND status::text = 'verified'
-                             LIMIT 1",
-                            &[&user_id],
-                        )
-                        .await?
-                        .is_some();
+                timed(async {
+                    let mut conn = pg.pool.acquire().await?;
+                    let verified = sqlx::query!(
+                        "SELECT id FROM auth.mfa_factors
+                         WHERE user_id = $1 AND status::text = 'verified'
+                         LIMIT 1",
+                        user_id,
+                    )
+                    .fetch_optional(&mut *conn)
+                    .await?
+                    .is_some();
                     if !verified {
                         return Ok(false);
                     }
                     let Some(session_id) = session_id else {
                         return Ok(true);
                     };
-                    let aal = client
-                    .query_opt(
-                        "SELECT COALESCE(aal::text, 'aal1') FROM auth.sessions WHERE id = $1::uuid",
-                        &[&session_id],
+                    let row = sqlx::query!(
+                        "SELECT COALESCE(aal::text, 'aal1') AS \"aal!\"
+                         FROM auth.sessions WHERE id = $1",
+                        session_id,
                     )
-                    .await?
-                    .map(|row| row.get::<_, String>(0))
-                    .unwrap_or_else(|| "aal1".to_string());
+                    .fetch_optional(&mut *conn)
+                    .await?;
+                    let aal = row.map(|row| row.aal).unwrap_or_else(|| "aal1".to_string());
                     Ok(aal != "aal2")
                 })
                 .await
@@ -581,34 +598,38 @@ impl Backend {
             BackendKind::Postgres(pg) => {
                 let email = email.to_string();
                 let aud = aud.to_string();
-                timed(pg, async move {
-                    let client = pg.lock().await?;
-                    let row = client
-                        .query_one(
-                            "SELECT (
-                                EXISTS (
-                                    SELECT 1 FROM auth.identities i
-                                    JOIN auth.users u ON u.id = i.user_id
-                                    WHERE lower(COALESCE(i.email, '')) = $1
-                                      AND u.aud = $2
-                                      AND u.id <> $3::uuid
-                                      AND u.is_sso_user = false
-                                      AND u.instance_id = $4::uuid
-                                      AND i.provider NOT LIKE 'sso:%'
-                                )
-                                OR EXISTS (
-                                    SELECT 1 FROM auth.users
-                                    WHERE instance_id = $4::uuid
-                                      AND lower(COALESCE(email, '')) = $1
-                                      AND aud = $2
-                                      AND id <> $3::uuid
-                                      AND is_sso_user = false
-                                )
-                             )",
-                            &[&email, &aud, &user_id, &Uuid::nil()],
-                        )
-                        .await?;
-                    Ok(row.get(0))
+                timed(async move {
+                    let mut conn = pg.pool.acquire().await?;
+                    let instance = Uuid::nil();
+                    let row = sqlx::query!(
+                        "SELECT (
+                            EXISTS (
+                                SELECT 1 FROM auth.identities i
+                                JOIN auth.users u ON u.id = i.user_id
+                                WHERE lower(COALESCE(i.email, '')) = $1
+                                  AND u.aud = $2
+                                  AND u.id <> $3
+                                  AND u.is_sso_user = false
+                                  AND u.instance_id = $4
+                                  AND i.provider NOT LIKE 'sso:%'
+                            )
+                            OR EXISTS (
+                                SELECT 1 FROM auth.users
+                                WHERE instance_id = $4
+                                  AND lower(COALESCE(email, '')) = $1
+                                  AND aud = $2
+                                  AND id <> $3
+                                  AND is_sso_user = false
+                            )
+                         ) AS \"taken!\"",
+                        email,
+                        aud,
+                        user_id,
+                        instance,
+                    )
+                    .fetch_one(&mut *conn)
+                    .await?;
+                    Ok(row.taken)
                 })
                 .await
             }
@@ -626,9 +647,9 @@ impl Backend {
             BackendKind::Postgres(pg) => {
                 let phone = phone.to_string();
                 let aud = aud.to_string();
-                timed(pg, async move {
-                    let client = pg.lock().await?;
-                    Ok(find_phone(&*client, &phone, &aud).await?.is_some())
+                timed(async move {
+                    let mut conn = pg.pool.acquire().await?;
+                    Ok(find_phone(&mut conn, &phone, &aud).await?.is_some())
                 })
                 .await
             }
@@ -690,34 +711,35 @@ impl Backend {
                 Ok(memory_grants(&db, user_id))
             }
             BackendKind::Postgres(pg) => {
-                timed(pg, async {
-                    let client = pg.lock().await?;
-                    let rows = client
-                        .query(
-                            "SELECT c.id::text, COALESCE(c.client_name, ''),
-                                    COALESCE(c.client_uri, ''), COALESCE(c.logo_uri, ''),
-                                    s.scopes, s.granted_at
-                             FROM auth.oauth_consents s
-                             JOIN auth.oauth_clients c
-                               ON c.id = s.client_id AND c.deleted_at IS NULL
-                             WHERE s.user_id = $1::uuid AND s.revoked_at IS NULL
-                             ORDER BY s.granted_at DESC",
-                            &[&user_id],
-                        )
-                        .await?;
-                    let mut grants = Vec::with_capacity(rows.len());
-                    for row in rows {
-                        let granted_at: Option<SystemTime> = row.get(5);
-                        grants.push(OAuthGrantView {
-                            client_id: parse_uuid(&row.get::<_, String>(0))?,
-                            name: row.get(1),
-                            uri: row.get(2),
-                            logo_uri: row.get(3),
-                            scopes: parse_scopes(&row.get::<_, String>(4)),
-                            granted_at: granted_at.unwrap_or(SystemTime::now()),
-                        });
-                    }
-                    Ok(grants)
+                timed(async {
+                    let mut conn = pg.pool.acquire().await?;
+                    let rows = sqlx::query!(
+                        "SELECT c.id,
+                                COALESCE(c.client_name, '') AS \"name!\",
+                                COALESCE(c.client_uri, '') AS \"uri!\",
+                                COALESCE(c.logo_uri, '') AS \"logo_uri!\",
+                                s.scopes,
+                                s.granted_at
+                         FROM auth.oauth_consents s
+                         JOIN auth.oauth_clients c
+                           ON c.id = s.client_id AND c.deleted_at IS NULL
+                         WHERE s.user_id = $1 AND s.revoked_at IS NULL
+                         ORDER BY s.granted_at DESC",
+                        user_id,
+                    )
+                    .fetch_all(&mut *conn)
+                    .await?;
+                    Ok(rows
+                        .into_iter()
+                        .map(|row| OAuthGrantView {
+                            client_id: row.id,
+                            name: row.name,
+                            uri: row.uri,
+                            logo_uri: row.logo_uri,
+                            scopes: parse_scopes(&row.scopes),
+                            granted_at: from_ts(row.granted_at),
+                        })
+                        .collect())
                 })
                 .await
             }
@@ -751,31 +773,35 @@ impl Backend {
                 Ok(RevokeGrant::Revoked)
             }
             BackendKind::Postgres(pg) => {
-                timed(pg, async {
-                    let mut client = pg.lock().await?;
-                    let tx = client.transaction().await?;
-                    let now = SystemTime::now();
-                    let updated = tx
-                        .execute(
-                            "UPDATE auth.oauth_consents SET revoked_at = $3::timestamptz
-                             WHERE user_id = $1::uuid AND client_id = $2::uuid
-                               AND revoked_at IS NULL",
-                            &[&user_id, &client_id, &now],
-                        )
-                        .await?;
+                timed(async {
+                    let mut tx = pg.pool.begin().await?;
+                    let now = ts(SystemTime::now());
+                    let updated = sqlx::query!(
+                        "UPDATE auth.oauth_consents SET revoked_at = $3
+                         WHERE user_id = $1 AND client_id = $2
+                           AND revoked_at IS NULL",
+                        user_id,
+                        client_id,
+                        now,
+                    )
+                    .execute(&mut *tx)
+                    .await?
+                    .rows_affected();
                     if updated == 0 {
                         tx.commit().await?;
                         return Ok(RevokeGrant::Missing);
                     }
-                    tx.execute(
+                    sqlx::query!(
                         "DELETE FROM auth.sessions
-                         WHERE user_id = $1::uuid AND oauth_client_id = $2::uuid",
-                        &[&user_id, &client_id],
+                         WHERE user_id = $1 AND oauth_client_id = $2",
+                        user_id,
+                        client_id,
                     )
+                    .execute(&mut *tx)
                     .await?;
-                    if let Some(user) = find_user_by_id(&tx, user_id).await? {
+                    if let Some(user) = find_user_by_id(&mut tx, user_id).await? {
                         insert_audit(
-                            &tx,
+                            &mut tx,
                             &user,
                             "token_revoked",
                             "token",
@@ -1259,131 +1285,136 @@ fn refresh_memory(db: &mut MemoryDb, token: &str) -> RefreshStatus {
 /// not stored in `token`, and sessions from this crate have no HMAC key, so
 /// the lookup misses. GoTrue maps that miss to refresh-token-not-found.
 async fn refresh_postgres(pg: &Pg, token: &str) -> Result<RefreshStatus, StoreError> {
-    let mut client = pg.lock().await?;
-    let tx = client.transaction().await?;
-    let status = refresh_postgres_tx(&tx, token).await?;
+    let mut tx = pg.pool.begin().await?;
+    let status = refresh_postgres_tx(&mut tx, token).await?;
     tx.commit().await?;
     Ok(status)
 }
 
 async fn refresh_postgres_tx(
-    tx: &tokio_postgres::Transaction<'_>,
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     token: &str,
 ) -> Result<RefreshStatus, StoreError> {
-    let row = tx
-        .query_opt(
-            "SELECT user_id, COALESCE(revoked, false), session_id::text, COALESCE(parent, '')
-             FROM auth.refresh_tokens
-             WHERE token = $1
-             LIMIT 1
-             FOR UPDATE",
-            &[&token],
-        )
-        .await?;
+    let row = sqlx::query!(
+        "SELECT user_id,
+                COALESCE(revoked, false) AS revoked,
+                session_id::text AS session_id,
+                COALESCE(parent, '') AS parent
+         FROM auth.refresh_tokens
+         WHERE token = $1
+         LIMIT 1
+         FOR UPDATE",
+        token,
+    )
+    .fetch_optional(&mut **tx)
+    .await?;
     let Some(row) = row else {
         return Ok(RefreshStatus::NotFound);
     };
-    let user_id = parse_uuid(&row.get::<_, String>(0))?;
-    let revoked: bool = row.get(1);
-    let session_text: Option<String> = row.get(2);
-    let Some(user) = find_user_by_id(tx, user_id).await? else {
+    let Some(user_id_text) = row.user_id.filter(|value| !value.is_empty()) else {
+        return Ok(RefreshStatus::NotFound);
+    };
+    let user_id = parse_uuid(&user_id_text)?;
+    let revoked = row.revoked.unwrap_or(false);
+    let session_text = row.session_id;
+    let Some(user) = find_user_by_id(&mut *tx, user_id).await? else {
         return Ok(RefreshStatus::NotFound);
     };
     if login_banned(user.banned_until) {
         return Ok(RefreshStatus::Banned);
     }
     let Some(session_text) = session_text.filter(|value| !value.is_empty()) else {
-        tx.execute(
-            "DELETE FROM auth.refresh_tokens WHERE token = $1",
-            &[&token],
-        )
-        .await?;
+        sqlx::query!("DELETE FROM auth.refresh_tokens WHERE token = $1", token)
+            .execute(&mut **tx)
+            .await?;
         return Ok(RefreshStatus::NoSession);
     };
     let session_id = parse_uuid(&session_text)?;
-    let session = tx
-        .query_opt(
-            "SELECT id::text FROM auth.sessions WHERE id = $1::uuid FOR UPDATE",
-            &[&session_id],
-        )
-        .await?;
+    let session = sqlx::query!(
+        "SELECT id FROM auth.sessions WHERE id = $1::uuid FOR UPDATE",
+        session_id,
+    )
+    .fetch_optional(&mut **tx)
+    .await?;
     if session.is_none() {
-        tx.execute(
-            "DELETE FROM auth.refresh_tokens WHERE token = $1",
-            &[&token],
-        )
-        .await?;
+        sqlx::query!("DELETE FROM auth.refresh_tokens WHERE token = $1", token)
+            .execute(&mut **tx)
+            .await?;
         return Ok(RefreshStatus::NoSession);
     }
-    let amr_at = session_amr_at(tx, session_id).await?;
+    let amr_at = session_amr_at(&mut *tx, session_id).await?;
     let mut issued_token = String::new();
     let mut rotated = false;
     if revoked {
-        let active = tx
-            .query_opt(
-                "SELECT token, COALESCE(parent, '')
-                 FROM auth.refresh_tokens
-                 WHERE session_id = $1::uuid AND revoked IS FALSE
-                 ORDER BY id DESC
-                 LIMIT 1",
-                &[&session_id],
-            )
-            .await?;
+        let active = sqlx::query!(
+            "SELECT token, COALESCE(parent, '') AS parent
+             FROM auth.refresh_tokens
+             WHERE session_id = $1::uuid AND revoked IS FALSE
+             ORDER BY id DESC
+             LIMIT 1",
+            session_id,
+        )
+        .fetch_optional(&mut **tx)
+        .await?;
         if let Some(active) = active {
-            let active_token: String = active.get(0);
-            let active_parent: String = active.get(1);
-            if active_parent == token {
-                issued_token = active_token;
+            if active.parent.as_deref() == Some(token) {
+                if let Some(active_token) = active.token {
+                    issued_token = active_token;
+                }
             }
         }
         if issued_token.is_empty() {
             // Reuse interval is 0 and rotation is on: revoke the family, then fail.
-            tx.execute(
+            sqlx::query!(
                 "UPDATE auth.refresh_tokens
                  SET revoked = true, updated_at = now()
                  WHERE session_id = $1::uuid AND revoked = false",
-                &[&session_id],
+                session_id,
             )
+            .execute(&mut **tx)
             .await?;
             return Ok(RefreshStatus::AlreadyUsed);
         }
     }
-    insert_audit(tx, &user, "token_refreshed", "token", None).await?;
+    insert_audit(&mut *tx, &user, "token_refreshed", "token", None).await?;
     if issued_token.is_empty() {
-        let now = SystemTime::now();
+        let now = ts(SystemTime::now());
         let user_id_text = user.id.to_string();
+        let instance = Uuid::nil();
         issued_token = secure_alphanumeric(12);
         rotated = true;
-        insert_audit(tx, &user, "token_revoked", "token", None).await?;
-        tx.execute(
+        insert_audit(&mut *tx, &user, "token_revoked", "token", None).await?;
+        sqlx::query!(
             "UPDATE auth.refresh_tokens SET revoked = true, updated_at = $2::timestamptz
              WHERE token = $1",
-            &[&token, &now],
+            token,
+            now,
         )
+        .execute(&mut **tx)
         .await?;
-        tx.execute(
+        sqlx::query!(
             "INSERT INTO auth.refresh_tokens (
                 instance_id, token, user_id, revoked, created_at, updated_at, parent, session_id
              ) VALUES (
                 $1::uuid, $2, $3, false, $4::timestamptz, $4::timestamptz, $5, $6::uuid
              )",
-            &[
-                &Uuid::nil(),
-                &issued_token,
-                &user_id_text,
-                &now,
-                &token,
-                &session_id,
-            ],
+            instance,
+            issued_token,
+            user_id_text,
+            now,
+            token,
+            session_id,
         )
+        .execute(&mut **tx)
         .await?;
     }
-    tx.execute(
+    sqlx::query!(
         "UPDATE auth.sessions
          SET refreshed_at = (now() AT TIME ZONE 'utc')
          WHERE id = $1::uuid",
-        &[&session_id],
+        session_id,
     )
+    .execute(&mut **tx)
     .await?;
     Ok(RefreshStatus::Issued {
         session: Box::new(IssuedSession {
@@ -1397,77 +1428,74 @@ async fn refresh_postgres_tx(
 }
 
 async fn session_amr_at(
-    tx: &tokio_postgres::Transaction<'_>,
+    conn: &mut sqlx::PgConnection,
     session_id: Uuid,
 ) -> Result<SystemTime, StoreError> {
-    let row = tx
-        .query_opt(
-            "SELECT created_at FROM auth.mfa_amr_claims
-             WHERE session_id = $1::uuid
-             ORDER BY created_at ASC
-             LIMIT 1",
-            &[&session_id],
-        )
-        .await?;
-    Ok(row.map(|row| row.get(0)).unwrap_or_else(SystemTime::now))
+    let row = sqlx::query!(
+        "SELECT created_at FROM auth.mfa_amr_claims
+         WHERE session_id = $1::uuid
+         ORDER BY created_at ASC
+         LIMIT 1",
+        session_id,
+    )
+    .fetch_optional(&mut *conn)
+    .await?;
+    Ok(row
+        .map(|row| from_ts(row.created_at))
+        .unwrap_or_else(SystemTime::now))
 }
 
 impl Pg {
     async fn connect(url: &str) -> Result<Self, SchemaError> {
-        let client = connect_deadline(url).await?;
-        Ok(Self {
-            url: url.to_string(),
-            client: Arc::new(Mutex::new(client)),
-        })
+        // Reject `sslmode=require` before sqlx opens a socket. Schema install
+        // uses the same check.
+        crate::schema::reject_tls(url)?;
+        let connect = sqlx::postgres::PgPoolOptions::new()
+            .max_connections(10)
+            .acquire_timeout(QUERY_DEADLINE)
+            .connect(url);
+        let pool = match tokio::time::timeout(QUERY_DEADLINE, connect).await {
+            Ok(Ok(pool)) => pool,
+            Ok(Err(error)) => return Err(SchemaError::Sqlx(error)),
+            Err(_) => {
+                return Err(SchemaError::TimedOut {
+                    timeout: QUERY_DEADLINE,
+                })
+            }
+        };
+        Ok(Self { pool })
     }
 
-    async fn lock(&self) -> Result<MutexGuard<'_, tokio_postgres::Client>, StoreError> {
-        let mut guard = self.client.lock().await;
-        if guard.is_closed() {
-            tracing::warn!("auth postgres connection closed; reconnecting");
-            *guard = connect_deadline(&self.url)
-                .await
-                .map_err(StoreError::Connect)?;
-        }
-        Ok(guard)
-    }
-
-    async fn reconnect(&self) -> Result<(), StoreError> {
-        let client = connect_deadline(&self.url)
-            .await
-            .map_err(StoreError::Connect)?;
-        *self.client.lock().await = client;
-        Ok(())
+    async fn close(&self) {
+        self.pool.close().await;
     }
 }
 
-async fn connect_deadline(url: &str) -> Result<tokio_postgres::Client, SchemaError> {
-    match tokio::time::timeout(QUERY_DEADLINE, crate::schema::connect(url)).await {
-        Ok(result) => result,
-        Err(_) => Err(SchemaError::TimedOut {
-            timeout: QUERY_DEADLINE,
-        }),
-    }
-}
-
-async fn timed<T>(
-    pg: &Pg,
-    fut: impl Future<Output = Result<T, StoreError>>,
-) -> Result<T, StoreError> {
+async fn timed<T, E>(fut: impl Future<Output = Result<T, E>>) -> Result<T, E>
+where
+    E: From<StoreError>,
+{
     match tokio::time::timeout(QUERY_DEADLINE, fut).await {
         Ok(result) => result,
         Err(_) => {
             tracing::error!("auth database operation timed out");
-            let _ = pg.reconnect().await;
-            Err(StoreError::TimedOut)
+            Err(StoreError::TimedOut.into())
         }
     }
 }
 
+fn ts(time: SystemTime) -> chrono::DateTime<chrono::Utc> {
+    chrono::DateTime::<chrono::Utc>::from(time)
+}
+
+fn from_ts(time: chrono::DateTime<chrono::Utc>) -> SystemTime {
+    SystemTime::from(time)
+}
+
 async fn postgres_signup(pg: &Pg, cmd: SignupCommand) -> Result<SignupResult, StoreError> {
     let preexisting = {
-        let client = pg.lock().await?;
-        find_email(&*client, &cmd.email, &cmd.aud)
+        let mut conn = pg.pool.acquire().await?;
+        find_email(&mut conn, &cmd.email, &cmd.aud)
             .await?
             .map(|user| user.email_confirmed_at.is_some())
     };
@@ -1476,12 +1504,11 @@ async fn postgres_signup(pg: &Pg, cmd: SignupCommand) -> Result<SignupResult, St
     } else {
         Some(hash_password(cmd.password.clone()).await?)
     };
-    let mut guard = pg.lock().await?;
-    let tx = guard.transaction().await?;
-    if let Some(user) = find_email(&tx, &cmd.email, &cmd.aud).await? {
+    let mut tx = pg.pool.begin().await?;
+    if let Some(user) = find_email(&mut tx, &cmd.email, &cmd.aud).await? {
         if user.email_confirmed_at.is_some() {
             insert_audit(
-                &tx,
+                &mut tx,
                 &user,
                 "user_repeated_signup",
                 "user",
@@ -1491,21 +1518,20 @@ async fn postgres_signup(pg: &Pg, cmd: SignupCommand) -> Result<SignupResult, St
             tx.commit().await?;
             return Ok(SignupResult::AlreadyExists);
         }
-        let issued = confirm_existing_tx(&tx, user, &cmd).await?;
+        let issued = confirm_existing_tx(&mut tx, user, &cmd).await?;
         tx.commit().await?;
         return Ok(SignupResult::Created(Box::new(issued)));
     }
     let Some(hash) = hash else {
         return Err(StoreError::Unavailable);
     };
-    match insert_new_tx(&tx, &cmd, hash).await {
+    match insert_new_tx(&mut tx, &cmd, hash).await {
         Ok(issued) => {
             tx.commit().await?;
             Ok(SignupResult::Created(Box::new(issued)))
         }
         Err(WriteError::Conflict) => {
             drop(tx);
-            drop(guard);
             audit_conflict(pg, &cmd).await
         }
         Err(WriteError::Db(error)) => Err(error),
@@ -1513,11 +1539,10 @@ async fn postgres_signup(pg: &Pg, cmd: SignupCommand) -> Result<SignupResult, St
 }
 
 async fn audit_conflict(pg: &Pg, cmd: &SignupCommand) -> Result<SignupResult, StoreError> {
-    let mut client = pg.lock().await?;
-    let tx = client.transaction().await?;
-    if let Some(user) = find_email(&tx, &cmd.email, &cmd.aud).await? {
+    let mut tx = pg.pool.begin().await?;
+    if let Some(user) = find_email(&mut tx, &cmd.email, &cmd.aud).await? {
         insert_audit(
-            &tx,
+            &mut tx,
             &user,
             "user_repeated_signup",
             "user",
@@ -1530,7 +1555,7 @@ async fn audit_conflict(pg: &Pg, cmd: &SignupCommand) -> Result<SignupResult, St
 }
 
 async fn confirm_existing_tx(
-    tx: &tokio_postgres::Transaction<'_>,
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     mut user: UserRecord,
     cmd: &SignupCommand,
 ) -> Result<IssuedSession, StoreError> {
@@ -1551,7 +1576,8 @@ async fn confirm_existing_tx(
     } else {
         set_email_verified(&mut user.user_metadata);
     }
-    tx.execute(
+    let now_ts = ts(now);
+    sqlx::query!(
         "UPDATE auth.users SET
             email_confirmed_at = $2::timestamptz,
             confirmation_token = '',
@@ -1559,8 +1585,11 @@ async fn confirm_existing_tx(
             raw_user_meta_data = $3::jsonb,
             updated_at = $2::timestamptz
          WHERE id = $1::uuid",
-        &[&user.id, &now, &user.user_metadata],
+        user.id,
+        now_ts,
+        user.user_metadata,
     )
+    .execute(&mut **tx)
     .await?;
     let issued = grant_session(&mut user, now);
     insert_session_rows(tx, &issued)
@@ -1586,7 +1615,7 @@ async fn confirm_existing_tx(
 }
 
 async fn insert_new_tx(
-    tx: &tokio_postgres::Transaction<'_>,
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     cmd: &SignupCommand,
     password_hash: String,
 ) -> Result<IssuedSession, WriteError> {
@@ -1628,124 +1657,133 @@ async fn insert_new_tx(
 }
 
 async fn insert_user(
-    tx: &tokio_postgres::Transaction<'_>,
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     user: &UserRecord,
 ) -> Result<(), WriteError> {
-    let confirmed = user.email_confirmed_at.unwrap_or(user.created_at);
-    let signed_in = user.last_sign_in_at.unwrap_or(user.created_at);
+    let confirmed = ts(user.email_confirmed_at.unwrap_or(user.created_at));
+    let signed_in = ts(user.last_sign_in_at.unwrap_or(user.created_at));
+    let created = ts(user.created_at);
     let instance = Uuid::nil();
-    let result = tx
-        .execute(
-            "INSERT INTO auth.users (
-                instance_id, id, aud, role, email, encrypted_password,
-                email_confirmed_at, confirmation_token, recovery_token,
-                email_change_token_new, email_change, email_change_token_current,
-                email_change_confirm_status,
-                phone, phone_change, phone_change_token, reauthentication_token,
-                last_sign_in_at, raw_app_meta_data, raw_user_meta_data,
-                is_sso_user, is_anonymous, created_at, updated_at
-            ) VALUES (
-                $1::uuid, $2::uuid, $3, $4, $5, $6,
-                $7::timestamptz, '', '',
-                '', '', '',
-                0,
-                NULL, '', '', '',
-                $8::timestamptz, $9::jsonb, $10::jsonb,
-                false, false, $11::timestamptz, $11::timestamptz
-            )",
-            &[
-                &instance,
-                &user.id,
-                &user.aud,
-                &user.role,
-                &user.email,
-                &user.password_hash,
-                &confirmed,
-                &signed_in,
-                &user.app_metadata,
-                &user.user_metadata,
-                &user.created_at,
-            ],
-        )
-        .await;
+    let result = sqlx::query!(
+        "INSERT INTO auth.users (
+            instance_id, id, aud, role, email, encrypted_password,
+            email_confirmed_at, confirmation_token, recovery_token,
+            email_change_token_new, email_change, email_change_token_current,
+            email_change_confirm_status,
+            phone, phone_change, phone_change_token, reauthentication_token,
+            last_sign_in_at, raw_app_meta_data, raw_user_meta_data,
+            is_sso_user, is_anonymous, created_at, updated_at
+        ) VALUES (
+            $1::uuid, $2::uuid, $3, $4, $5, $6,
+            $7::timestamptz, '', '',
+            '', '', '',
+            0,
+            NULL, '', '', '',
+            $8::timestamptz, $9::jsonb, $10::jsonb,
+            false, false, $11::timestamptz, $11::timestamptz
+        )",
+        instance,
+        user.id,
+        user.aud,
+        user.role,
+        user.email,
+        user.password_hash,
+        confirmed,
+        signed_in,
+        user.app_metadata,
+        user.user_metadata,
+        created,
+    )
+    .execute(&mut **tx)
+    .await
+    .map(|done| done.rows_affected());
     map_write(result)
 }
 
 async fn insert_identity(
-    tx: &tokio_postgres::Transaction<'_>,
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     identity: &IdentityRecord,
 ) -> Result<(), WriteError> {
-    let result = tx
-        .execute(
-            "INSERT INTO auth.identities (
-                id, provider_id, user_id, identity_data, provider,
-                last_sign_in_at, created_at, updated_at
-            ) VALUES (
-                $1::uuid, $2, $3::uuid, $4::jsonb, $5,
-                $6::timestamptz, $6::timestamptz, $6::timestamptz
-            )",
-            &[
-                &identity.id,
-                &identity.provider_id,
-                &identity.user_id,
-                &identity.identity_data,
-                &identity.provider,
-                &identity.created_at,
-            ],
-        )
-        .await;
+    let created = ts(identity.created_at);
+    let result = sqlx::query!(
+        "INSERT INTO auth.identities (
+            id, provider_id, user_id, identity_data, provider,
+            last_sign_in_at, created_at, updated_at
+        ) VALUES (
+            $1::uuid, $2, $3::uuid, $4::jsonb, $5,
+            $6::timestamptz, $6::timestamptz, $6::timestamptz
+        )",
+        identity.id,
+        identity.provider_id,
+        identity.user_id,
+        identity.identity_data,
+        identity.provider,
+        created,
+    )
+    .execute(&mut **tx)
+    .await
+    .map(|done| done.rows_affected());
     map_write(result)
 }
 
 async fn insert_session_rows(
-    tx: &tokio_postgres::Transaction<'_>,
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     issued: &IssuedSession,
 ) -> Result<(), WriteError> {
     let instance = Uuid::nil();
     // `auth.refresh_tokens.user_id` is varchar, not uuid.
     let user_id = issued.user.id.to_string();
     let amr_id = Uuid::new_v4();
+    let amr_at = ts(issued.amr_at);
     map_write(
-        tx.execute(
+        sqlx::query!(
             "INSERT INTO auth.sessions (id, user_id, created_at, updated_at, aal)
              VALUES ($1::uuid, $2::uuid, $3::timestamptz, $3::timestamptz, 'aal1')",
-            &[&issued.session_id, &issued.user.id, &issued.amr_at],
+            issued.session_id,
+            issued.user.id,
+            amr_at,
         )
-        .await,
+        .execute(&mut **tx)
+        .await
+        .map(|done| done.rows_affected()),
     )?;
     map_write(
-        tx.execute(
+        sqlx::query!(
             "INSERT INTO auth.refresh_tokens (
                 instance_id, token, user_id, revoked, created_at, updated_at, session_id
              ) VALUES (
                 $1::uuid, $2, $3, false, $4::timestamptz, $4::timestamptz, $5::uuid
              )",
-            &[
-                &instance,
-                &issued.refresh_token,
-                &user_id,
-                &issued.amr_at,
-                &issued.session_id,
-            ],
+            instance,
+            issued.refresh_token,
+            user_id,
+            amr_at,
+            issued.session_id,
         )
-        .await,
+        .execute(&mut **tx)
+        .await
+        .map(|done| done.rows_affected()),
     )?;
     map_write(
-        tx.execute(
+        sqlx::query!(
             "INSERT INTO auth.mfa_amr_claims (
                 id, session_id, created_at, updated_at, authentication_method
              ) VALUES (
                 $1::uuid, $2::uuid, $3::timestamptz, $3::timestamptz, 'password'
              )",
-            &[&amr_id, &issued.session_id, &issued.amr_at],
+            amr_id,
+            issued.session_id,
+            amr_at,
         )
-        .await,
+        .execute(&mut **tx)
+        .await
+        .map(|done| done.rows_affected()),
     )?;
     Ok(())
 }
 
 async fn insert_audit(
-    tx: &tokio_postgres::Transaction<'_>,
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     user: &UserRecord,
     action: &str,
     log_type: &str,
@@ -1753,211 +1791,220 @@ async fn insert_audit(
 ) -> Result<(), StoreError> {
     let instance = Uuid::nil();
     let id = Uuid::new_v4();
-    let now = SystemTime::now();
+    let now = ts(SystemTime::now());
     let payload = audit_payload(user, action, log_type, traits);
-    tx.execute(
+    sqlx::query!(
         "INSERT INTO auth.audit_log_entries (instance_id, id, payload, created_at, ip_address)
          VALUES ($1::uuid, $2::uuid, $3::json, $4::timestamptz, '')",
-        &[&instance, &id, &payload, &now],
+        instance,
+        id,
+        payload,
+        now,
     )
+    .execute(&mut **tx)
     .await?;
     Ok(())
 }
 
 async fn exec_logout(
-    tx: &tokio_postgres::Transaction<'_>,
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     user_id: Uuid,
     session_id: Option<Uuid>,
     scope: LogoutScope,
 ) -> Result<(), StoreError> {
     match (session_id, scope) {
         (None, _) | (_, LogoutScope::Global) => {
-            tx.execute(
+            sqlx::query!(
                 "DELETE FROM auth.sessions WHERE user_id = $1::uuid",
-                &[&user_id],
+                user_id,
             )
+            .execute(&mut **tx)
             .await?;
         }
         (Some(session_id), LogoutScope::Local) => {
-            tx.execute(
-                "DELETE FROM auth.sessions WHERE id = $1::uuid",
-                &[&session_id],
-            )
-            .await?;
+            sqlx::query!("DELETE FROM auth.sessions WHERE id = $1::uuid", session_id,)
+                .execute(&mut **tx)
+                .await?;
         }
         (Some(session_id), LogoutScope::Others) => {
-            tx.execute(
+            sqlx::query!(
                 "DELETE FROM auth.sessions WHERE user_id = $1::uuid AND id <> $2::uuid",
-                &[&user_id, &session_id],
+                user_id,
+                session_id,
             )
+            .execute(&mut **tx)
             .await?;
         }
     }
     Ok(())
 }
 
-async fn find_user_by_email_and_audience<C: GenericClient + Sync>(
-    client: &C,
+async fn find_user_by_email_and_audience(
+    conn: &mut sqlx::PgConnection,
     email: &str,
     aud: &str,
 ) -> Result<Option<UserRecord>, StoreError> {
     let instance = Uuid::nil();
-    let row = client
-        .query_opt(
-            "SELECT id::text FROM auth.users
-             WHERE instance_id = $1::uuid
-               AND lower(email) = $2
-               AND aud = $3
-               AND is_sso_user = false
-             LIMIT 1",
-            &[&instance, &email, &aud],
-        )
-        .await?;
+    let row = sqlx::query!(
+        "SELECT id
+         FROM auth.users
+         WHERE instance_id = $1::uuid
+           AND lower(email) = $2
+           AND aud = $3
+           AND is_sso_user = false
+         LIMIT 1",
+        instance,
+        email,
+        aud,
+    )
+    .fetch_optional(&mut *conn)
+    .await?;
     match row {
-        Some(row) => find_user_by_id(client, parse_uuid(&row.get::<_, String>(0))?).await,
+        Some(row) => find_user_by_id(conn, row.id).await,
         None => Ok(None),
     }
 }
 
-async fn find_phone<C: GenericClient + Sync>(
-    client: &C,
+async fn find_phone(
+    conn: &mut sqlx::PgConnection,
     phone: &str,
     aud: &str,
 ) -> Result<Option<UserRecord>, StoreError> {
     let instance = Uuid::nil();
-    let row = client
-        .query_opt(
-            "SELECT id::text FROM auth.users
-             WHERE instance_id = $1::uuid
-               AND phone = $2
-               AND aud = $3
-               AND is_sso_user = false
-             LIMIT 1",
-            &[&instance, &phone, &aud],
-        )
-        .await?;
+    let row = sqlx::query!(
+        "SELECT id
+         FROM auth.users
+         WHERE instance_id = $1::uuid
+           AND phone = $2
+           AND aud = $3
+           AND is_sso_user = false
+         LIMIT 1",
+        instance,
+        phone,
+        aud,
+    )
+    .fetch_optional(&mut *conn)
+    .await?;
     match row {
-        Some(row) => find_user_by_id(client, parse_uuid(&row.get::<_, String>(0))?).await,
+        Some(row) => find_user_by_id(conn, row.id).await,
         None => Ok(None),
     }
 }
 
-async fn find_email<C: GenericClient + Sync>(
-    client: &C,
+async fn find_email(
+    conn: &mut sqlx::PgConnection,
     email: &str,
     aud: &str,
 ) -> Result<Option<UserRecord>, StoreError> {
     let instance = Uuid::nil();
-    let by_identity = client
-        .query_opt(
-            "SELECT u.id::text
-             FROM auth.identities i
-             JOIN auth.users u ON u.id = i.user_id
-             WHERE i.email = $1
-               AND u.aud = $2
-               AND u.instance_id = $3::uuid
-               AND u.is_sso_user = false
-             LIMIT 1",
-            &[&email, &aud, &instance],
-        )
-        .await?;
+    let by_identity = sqlx::query!(
+        "SELECT u.id::text AS id
+         FROM auth.identities i
+         JOIN auth.users u ON u.id = i.user_id
+         WHERE i.email = $1
+           AND u.aud = $2
+           AND u.instance_id = $3::uuid
+           AND u.is_sso_user = false
+         LIMIT 1",
+        email,
+        aud,
+        instance,
+    )
+    .fetch_optional(&mut *conn)
+    .await?;
     if let Some(row) = by_identity {
-        let id = parse_uuid(&row.get::<_, String>(0))?;
-        return find_user_by_id(client, id).await;
+        let id = parse_uuid(row.id.as_deref().unwrap_or(""))?;
+        return find_user_by_id(conn, id).await;
     }
-    let by_user = client
-        .query_opt(
-            "SELECT id::text FROM auth.users
-             WHERE instance_id = $1::uuid
-               AND lower(email) = $2
-               AND aud = $3
-               AND is_sso_user = false
-             LIMIT 1",
-            &[&instance, &email, &aud],
-        )
-        .await?;
+    let by_user = sqlx::query!(
+        "SELECT id::text AS id FROM auth.users
+         WHERE instance_id = $1::uuid
+           AND lower(email) = $2
+           AND aud = $3
+           AND is_sso_user = false
+         LIMIT 1",
+        instance,
+        email,
+        aud,
+    )
+    .fetch_optional(&mut *conn)
+    .await?;
     match by_user {
-        Some(row) => find_user_by_id(client, parse_uuid(&row.get::<_, String>(0))?).await,
+        Some(row) => find_user_by_id(conn, parse_uuid(row.id.as_deref().unwrap_or(""))?).await,
         None => Ok(None),
     }
 }
 
-async fn find_user_by_id<C: GenericClient + Sync>(
-    client: &C,
+async fn find_user_by_id(
+    conn: &mut sqlx::PgConnection,
     id: Uuid,
 ) -> Result<Option<UserRecord>, StoreError> {
-    let row = client
-        .query_opt(
-            "SELECT id::text, aud, COALESCE(role, ''), COALESCE(email, ''),
-                    COALESCE(phone, ''), email_confirmed_at, last_sign_in_at,
-                    created_at, updated_at,
-                    COALESCE(raw_app_meta_data::text, 'null'),
-                    COALESCE(raw_user_meta_data::text, 'null'),
-                    is_anonymous, banned_until, is_sso_user,
-                    COALESCE(encrypted_password, ''), phone_confirmed_at,
-                    confirmed_at
-             FROM auth.users
-             WHERE instance_id = $1::uuid AND id = $2::uuid",
-            &[&Uuid::nil(), &id],
-        )
-        .await?;
+    let instance = Uuid::nil();
+    let row = sqlx::query!(
+        "SELECT id, aud, role, email, phone,
+                email_confirmed_at, last_sign_in_at, created_at, updated_at,
+                raw_app_meta_data, raw_user_meta_data,
+                is_anonymous, banned_until, is_sso_user, encrypted_password,
+                phone_confirmed_at, confirmed_at
+         FROM auth.users
+         WHERE instance_id = $1 AND id = $2",
+        instance,
+        id,
+    )
+    .fetch_optional(&mut *conn)
+    .await?;
     let Some(row) = row else {
         return Ok(None);
     };
-    let id = parse_uuid(&row.get::<_, String>(0))?;
-    let identities = load_identities(client, id).await?;
-    let created_at: Option<SystemTime> = row.get(7);
-    let updated_at: Option<SystemTime> = row.get(8);
+    let identities = load_identities(conn, row.id).await?;
     let now = SystemTime::now();
     Ok(Some(UserRecord {
-        id,
-        aud: row.get(1),
-        role: row.get(2),
-        email: row.get(3),
-        phone: row.get(4),
-        email_confirmed_at: row.get(5),
-        last_sign_in_at: row.get(6),
-        app_metadata: parse_json_text(&row.get::<_, String>(9)),
-        user_metadata: parse_json_text(&row.get::<_, String>(10)),
+        id: row.id,
+        aud: row.aud.unwrap_or_default(),
+        role: row.role.unwrap_or_default(),
+        email: row.email.unwrap_or_default(),
+        phone: row.phone.unwrap_or_default(),
+        email_confirmed_at: row.email_confirmed_at.map(from_ts),
+        last_sign_in_at: row.last_sign_in_at.map(from_ts),
+        app_metadata: row.raw_app_meta_data.unwrap_or(Value::Null),
+        user_metadata: row.raw_user_meta_data.unwrap_or(Value::Null),
         identities,
-        created_at: created_at.unwrap_or(now),
-        updated_at: updated_at.unwrap_or(now),
-        is_anonymous: row.get(11),
-        banned_until: row.get(12),
-        is_sso_user: row.get(13),
-        password_hash: row.get(14),
-        phone_confirmed_at: row.get(15),
-        confirmed_at: row.get(16),
+        created_at: row.created_at.map(from_ts).unwrap_or(now),
+        updated_at: row.updated_at.map(from_ts).unwrap_or(now),
+        is_anonymous: row.is_anonymous,
+        banned_until: row.banned_until.map(from_ts),
+        is_sso_user: row.is_sso_user,
+        password_hash: row.encrypted_password.unwrap_or_default(),
+        phone_confirmed_at: row.phone_confirmed_at.map(from_ts),
+        confirmed_at: row.confirmed_at.map(from_ts),
     }))
 }
 
-async fn load_identities<C: GenericClient + Sync>(
-    client: &C,
+async fn load_identities(
+    conn: &mut sqlx::PgConnection,
     user_id: Uuid,
 ) -> Result<Vec<IdentityRecord>, StoreError> {
-    let rows = client
-        .query(
-            "SELECT id::text, provider_id, user_id::text, identity_data::text, provider,
-                    COALESCE(email, ''), last_sign_in_at, created_at, updated_at
-             FROM auth.identities WHERE user_id = $1::uuid",
-            &[&user_id],
-        )
-        .await?;
+    let rows = sqlx::query!(
+        "SELECT id, provider_id, user_id, identity_data, provider, email,
+                last_sign_in_at, created_at, updated_at
+         FROM auth.identities WHERE user_id = $1",
+        user_id,
+    )
+    .fetch_all(&mut *conn)
+    .await?;
     let mut identities = Vec::with_capacity(rows.len());
     for row in rows {
-        let created_at: Option<SystemTime> = row.get(7);
-        let updated_at: Option<SystemTime> = row.get(8);
         let now = SystemTime::now();
         identities.push(IdentityRecord {
-            id: parse_uuid(&row.get::<_, String>(0))?,
-            provider_id: row.get(1),
-            user_id: parse_uuid(&row.get::<_, String>(2))?,
-            identity_data: parse_json_text(&row.get::<_, String>(3)),
-            provider: row.get(4),
-            email: row.get(5),
-            last_sign_in_at: row.get(6),
-            created_at: created_at.unwrap_or(now),
-            updated_at: updated_at.unwrap_or(now),
+            id: row.id,
+            provider_id: row.provider_id,
+            user_id: row.user_id,
+            identity_data: row.identity_data,
+            provider: row.provider,
+            email: row.email.unwrap_or_default(),
+            last_sign_in_at: row.last_sign_in_at.map(from_ts),
+            created_at: row.created_at.map(from_ts).unwrap_or(now),
+            updated_at: row.updated_at.map(from_ts).unwrap_or(now),
         });
     }
     Ok(identities)
@@ -1970,7 +2017,7 @@ fn write_to_store(error: WriteError) -> StoreError {
     }
 }
 
-fn map_write(result: Result<u64, tokio_postgres::Error>) -> Result<(), WriteError> {
+fn map_write(result: Result<u64, sqlx::Error>) -> Result<(), WriteError> {
     match result {
         Ok(_) => Ok(()),
         Err(error) if unique_violation(&error) => Err(WriteError::Conflict),
@@ -1978,16 +2025,15 @@ fn map_write(result: Result<u64, tokio_postgres::Error>) -> Result<(), WriteErro
     }
 }
 
-fn unique_violation(error: &tokio_postgres::Error) -> bool {
-    error.code().is_some_and(|code| code.code() == "23505")
+fn unique_violation(error: &sqlx::Error) -> bool {
+    error
+        .as_database_error()
+        .and_then(|db| db.code())
+        .is_some_and(|code| code == "23505")
 }
 
 fn parse_uuid(value: &str) -> Result<Uuid, StoreError> {
     Uuid::parse_str(value).map_err(|_| StoreError::Unavailable)
-}
-
-fn parse_json_text(value: &str) -> Value {
-    serde_json::from_str(value).unwrap_or(Value::Null)
 }
 
 fn app_metadata() -> Value {
@@ -2442,10 +2488,9 @@ fn finish_user_update(db: &mut MemoryDb, user: &mut UserRecord, update: &UserUpd
 }
 
 async fn postgres_update_user(pg: &Pg, update: UserUpdate) -> Result<UserRecord, UserUpdateError> {
-    let run = async {
-        let mut client = pg.lock().await?;
-        let tx = client.transaction().await.map_err(StoreError::from)?;
-        let Some(mut user) = find_user_by_id(&tx, update.user_id).await? else {
+    timed(async move {
+        let mut tx = pg.pool.begin().await.map_err(StoreError::from)?;
+        let Some(mut user) = find_user_by_id(&mut tx, update.user_id).await? else {
             return Err(UserUpdateError::Missing);
         };
         let before_phone = update.phone.is_some().then(|| user.clone());
@@ -2456,63 +2501,62 @@ async fn postgres_update_user(pg: &Pg, update: UserUpdate) -> Result<UserRecord,
             .collect();
         apply_user_update(&mut user, &update);
         if let Some(hash) = &update.password_hash {
-            clear_password_row(&tx, &user, hash).await?;
+            clear_password_row(&mut tx, &user, hash).await?;
             let scope = if update.session_id.is_some() {
                 LogoutScope::Others
             } else {
                 LogoutScope::Global
             };
-            exec_logout(&tx, user.id, update.session_id, scope).await?;
+            exec_logout(&mut tx, user.id, update.session_id, scope).await?;
             let actor = before_phone.as_ref().unwrap_or(&user);
-            insert_audit(&tx, actor, "user_updated_password", "user", None).await?;
+            insert_audit(&mut tx, actor, "user_updated_password", "user", None).await?;
         }
         if update.data.is_some() || update.app_data.is_some() || update.phone.is_some() {
-            write_profile(&tx, &user).await?;
+            write_profile(&mut tx, &user).await?;
         }
         for identity in &user.identities {
             if let Some((_, previous)) = before.iter().find(|(id, _)| *id == identity.id) {
                 if previous != &identity.identity_data {
-                    tx.execute(
+                    let updated_at = ts(identity.updated_at);
+                    sqlx::query!(
                         "UPDATE auth.identities
                          SET identity_data = $2::jsonb, updated_at = $3::timestamptz
                          WHERE id = $1::uuid",
-                        &[&identity.id, &identity.identity_data, &identity.updated_at],
+                        identity.id,
+                        identity.identity_data,
+                        updated_at,
                     )
+                    .execute(&mut *tx)
                     .await
                     .map_err(StoreError::from)?;
                 }
             } else {
-                insert_identity(&tx, identity)
+                insert_identity(&mut tx, identity)
                     .await
                     .map_err(write_to_store)?;
             }
         }
         if let Some(actor) = &before_phone {
-            insert_audit(&tx, actor, "user_modified", "user", None).await?;
+            insert_audit(&mut tx, actor, "user_modified", "user", None).await?;
         }
-        insert_audit(&tx, &user, "user_modified", "user", None).await?;
+        insert_audit(&mut tx, &user, "user_modified", "user", None).await?;
         let user_id = user.id;
         tx.commit().await.map_err(StoreError::from)?;
-        find_user_by_id(&*client, user_id)
+        let mut conn = pg.pool.acquire().await.map_err(StoreError::from)?;
+        find_user_by_id(&mut conn, user_id)
             .await?
             .ok_or(UserUpdateError::Missing)
-    };
-    match tokio::time::timeout(QUERY_DEADLINE, run).await {
-        Ok(result) => result,
-        Err(_) => {
-            tracing::error!("auth database operation timed out");
-            let _ = pg.reconnect().await;
-            Err(StoreError::TimedOut.into())
-        }
-    }
+    })
+    .await
 }
 
 async fn clear_password_row(
-    tx: &tokio_postgres::Transaction<'_>,
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     user: &UserRecord,
     hash: &str,
 ) -> Result<(), StoreError> {
-    tx.execute(
+    let updated_at = ts(user.updated_at);
+    sqlx::query!(
         "UPDATE auth.users SET
             encrypted_password = $3,
             confirmation_token = '',
@@ -2528,22 +2572,29 @@ async fn clear_password_row(
             reauthentication_sent_at = NULL,
             updated_at = $4::timestamptz
          WHERE instance_id = $1::uuid AND id = $2::uuid",
-        &[&Uuid::nil(), &user.id, &hash, &user.updated_at],
+        Uuid::nil(),
+        user.id,
+        hash,
+        updated_at,
     )
+    .execute(&mut **tx)
     .await?;
-    tx.execute(
-        "DELETE FROM auth.one_time_tokens WHERE user_id = $1::uuid",
-        &[&user.id],
+    sqlx::query!(
+        "DELETE FROM auth.one_time_tokens WHERE user_id = $1",
+        user.id,
     )
+    .execute(&mut **tx)
     .await?;
     Ok(())
 }
 
 async fn write_profile(
-    tx: &tokio_postgres::Transaction<'_>,
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     user: &UserRecord,
 ) -> Result<(), StoreError> {
-    tx.execute(
+    let updated_at = ts(user.updated_at);
+    let phone_confirmed_at = user.phone_confirmed_at.map(ts);
+    sqlx::query!(
         "UPDATE auth.users SET
             raw_app_meta_data = $3::jsonb,
             raw_user_meta_data = $4::jsonb,
@@ -2552,17 +2603,16 @@ async fn write_profile(
             is_anonymous = $7,
             updated_at = $8::timestamptz
          WHERE instance_id = $1::uuid AND id = $2::uuid",
-        &[
-            &Uuid::nil(),
-            &user.id,
-            &user.app_metadata,
-            &user.user_metadata,
-            &user.phone,
-            &user.phone_confirmed_at,
-            &user.is_anonymous,
-            &user.updated_at,
-        ],
+        Uuid::nil(),
+        user.id,
+        user.app_metadata,
+        user.user_metadata,
+        user.phone,
+        phone_confirmed_at,
+        user.is_anonymous,
+        updated_at,
     )
+    .execute(&mut **tx)
     .await?;
     Ok(())
 }
@@ -2573,15 +2623,14 @@ async fn postgres_unlink(
     identity_id: Uuid,
     autoconfirm: bool,
 ) -> Result<IdentityRecord, UnlinkError> {
-    let run = async {
-        let mut client = pg.lock().await?;
-        let tx = client.transaction().await.map_err(StoreError::from)?;
-        let Some(user) = find_user_by_id(&tx, user_id).await? else {
+    timed(async move {
+        let mut tx = pg.pool.begin().await.map_err(StoreError::from)?;
+        let Some(user) = find_user_by_id(&mut tx, user_id).await? else {
             return Err(UnlinkError::Missing);
         };
         let mut taken = HashSet::new();
         for identity in &user.identities {
-            if email_row_exists(&tx, &identity.email, &user.aud).await? {
+            if email_row_exists(&mut tx, &identity.email, &user.aud).await? {
                 taken.insert(identity.email.to_lowercase());
             }
         }
@@ -2589,36 +2638,31 @@ async fn postgres_unlink(
             taken.contains(&email.to_lowercase())
         })?;
         insert_audit(
-            &tx,
+            &mut tx,
             &user,
             "identity_unlinked",
             "user",
             Some(unlink_traits(&plan.removed)),
         )
         .await?;
-        tx.execute(
+        sqlx::query!(
             "DELETE FROM auth.identities WHERE id = $1::uuid AND user_id = $2::uuid",
-            &[&plan.removed.id, &user_id],
+            plan.removed.id,
+            user_id,
         )
+        .execute(&mut *tx)
         .await
         .map_err(StoreError::from)?;
-        write_unlinked_user(&tx, &plan).await?;
+        write_unlinked_user(&mut tx, &plan).await?;
         let removed = plan.removed;
         tx.commit().await.map_err(StoreError::from)?;
         Ok(removed)
-    };
-    match tokio::time::timeout(QUERY_DEADLINE, run).await {
-        Ok(result) => result,
-        Err(_) => {
-            tracing::error!("auth database operation timed out");
-            let _ = pg.reconnect().await;
-            Err(StoreError::TimedOut.into())
-        }
-    }
+    })
+    .await
 }
 
 async fn email_row_exists(
-    tx: &tokio_postgres::Transaction<'_>,
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     email: &str,
     aud: &str,
 ) -> Result<bool, StoreError> {
@@ -2626,28 +2670,33 @@ async fn email_row_exists(
         return Ok(false);
     }
     let email = email.to_lowercase();
-    let row = tx
-        .query_one(
-            "SELECT EXISTS (
-                SELECT 1 FROM auth.users
-                WHERE instance_id = $1::uuid
-                  AND lower(email) = $2
-                  AND aud = $3
-                  AND is_sso_user = false
-             )",
-            &[&Uuid::nil(), &email, &aud],
-        )
-        .await?;
-    Ok(row.get(0))
+    let row = sqlx::query!(
+        r#"SELECT EXISTS (
+            SELECT 1 FROM auth.users
+            WHERE instance_id = $1::uuid
+              AND lower(email) = $2
+              AND aud = $3
+              AND is_sso_user = false
+        ) AS "taken!""#,
+        Uuid::nil(),
+        email,
+        aud,
+    )
+    .fetch_one(&mut **tx)
+    .await?;
+    Ok(row.taken)
 }
 
 async fn write_unlinked_user(
-    tx: &tokio_postgres::Transaction<'_>,
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     plan: &UnlinkPlan,
 ) -> Result<(), StoreError> {
     let user = &plan.user;
+    let updated_at = ts(user.updated_at);
+    let email_confirmed_at = user.email_confirmed_at.map(ts);
+    let phone_confirmed_at = user.phone_confirmed_at.map(ts);
     if plan.clear_tokens {
-        tx.execute(
+        sqlx::query!(
             "UPDATE auth.users SET
                 email = NULLIF($3, ''),
                 phone = NULLIF($4, ''),
@@ -2671,26 +2720,26 @@ async fn write_unlinked_user(
                 reauthentication_token = '',
                 reauthentication_sent_at = NULL
              WHERE instance_id = $1::uuid AND id = $2::uuid",
-            &[
-                &Uuid::nil(),
-                &user.id,
-                &user.email,
-                &user.phone,
-                &user.email_confirmed_at,
-                &user.phone_confirmed_at,
-                &user.app_metadata,
-                &user.user_metadata,
-                &user.updated_at,
-            ],
+            Uuid::nil(),
+            user.id,
+            user.email,
+            user.phone,
+            email_confirmed_at,
+            phone_confirmed_at,
+            user.app_metadata,
+            user.user_metadata,
+            updated_at,
         )
+        .execute(&mut **tx)
         .await?;
-        tx.execute(
-            "DELETE FROM auth.one_time_tokens WHERE user_id = $1::uuid",
-            &[&user.id],
+        sqlx::query!(
+            "DELETE FROM auth.one_time_tokens WHERE user_id = $1",
+            user.id,
         )
+        .execute(&mut **tx)
         .await?;
     } else {
-        tx.execute(
+        sqlx::query!(
             "UPDATE auth.users SET
                 email = NULLIF($3, ''),
                 phone = NULLIF($4, ''),
@@ -2700,18 +2749,17 @@ async fn write_unlinked_user(
                 raw_user_meta_data = $8::jsonb,
                 updated_at = $9::timestamptz
              WHERE instance_id = $1::uuid AND id = $2::uuid",
-            &[
-                &Uuid::nil(),
-                &user.id,
-                &user.email,
-                &user.phone,
-                &user.email_confirmed_at,
-                &user.phone_confirmed_at,
-                &user.app_metadata,
-                &user.user_metadata,
-                &user.updated_at,
-            ],
+            Uuid::nil(),
+            user.id,
+            user.email,
+            user.phone,
+            email_confirmed_at,
+            phone_confirmed_at,
+            user.app_metadata,
+            user.user_metadata,
+            updated_at,
         )
+        .execute(&mut **tx)
         .await?;
     }
     Ok(())

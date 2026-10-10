@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE auth.refresh_tokens SET revoked = true, updated_at = $2::timestamptz\n             WHERE token = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "9752189bf8862d1b1966f3179310a81fed54e3912e729a8c2cc65ad58a45ca47"
+}

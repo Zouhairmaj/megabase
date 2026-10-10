@@ -36,6 +36,22 @@ Failures return HTTP 501 with `{"code":"MEGABASE_NOT_IMPLEMENTED",...}`. Never a
 - Credit upstream in a header comment; keep NOTICE current.
 - Conventional Commits for the site and docs; component unit commits follow GOAL.md.
 
+## Checked queries
+
+Auth DML is `sqlx::query!` / `sqlx::query_as!`. `.cargo/config.toml` sets
+`SQLX_OFFLINE=true`, and `.sqlx/` is the committed query metadata. After
+changing a query string, install `sqlx-cli` 0.8.6 (the `sqlx` pin in the
+workspace `Cargo.toml`) and refresh the cache against a database that already
+has the Auth schema:
+
+```shell
+cargo install sqlx-cli --version 0.8.6 --locked --no-default-features --features native-tls,postgres
+SQLX_OFFLINE=false DATABASE_URL=postgres://… cargo sqlx prepare --workspace -- --all-targets
+```
+
+Commit the `.sqlx` files the command writes. A CI `cargo sqlx prepare --check`
+step would live in `.github/` and needs its own `review/*` pull request.
+
 ## Fuzzing
 
 OpenSSF Scorecard's Fuzzing check treats a Rust repo as fuzzed when a `*.rs`
@@ -74,7 +90,7 @@ Mockups live in the [Kite identity file](https://kite.new/p/megabase-identity). 
 
 ## Supply chain
 
-Megabase owns two Rust lockfiles: the workspace `Cargo.lock` and `site/Cargo.lock` (the static generator is a standalone crate). `just audit` and the CI `cargo-audit` matrix each run `cargo audit --file` once per owned lockfile. A workspace-only `cargo audit` misses `site/`. OpenSSF Scorecard's OSV check walks every `Cargo.lock` in the tree, including `site/`.
+Megabase owns two Rust lockfiles: the workspace `Cargo.lock` and `site/Cargo.lock` (the static generator is a standalone crate). `just audit` and the CI `cargo-audit` matrix each run `cargo audit --file` once per owned lockfile. A workspace-only `cargo audit` misses `site/`. The workspace ignore list is `.cargo/audit.toml`: RUSTSEC-2023-0071 (`rsa` 0.9.10, no fixed release) is there because `sqlx-macros-core` always depends on `sqlx-mysql` and Megabase does not enable that driver. OpenSSF Scorecard's OSV check walks every `Cargo.lock` in the tree, including `site/`.
 
 Lockfiles under `vendor/` belong to the pinned upstream spec. Agents never edit them ([ADR 0003](adr/0003-protected-paths.md)). Report issues in those trees upstream; do not add an OSV ignore unless a Scorecard finding is only in `vendor/` and cannot be fixed without bumping a pin.
 

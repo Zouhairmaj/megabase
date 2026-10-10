@@ -1,6 +1,6 @@
 ---
 title: supabase-js compatibility
-description: Point supabase-js at your local Megabase URL. REST still returns 501. Auth health, settings, signup, and logout are served.
+description: Point supabase-js at your local Megabase URL. REST still returns 501. Auth health, settings, signup, logout, and the password and refresh-token grants are served.
 section: use
 order: 1
 card: Point supabase-js at your local Megabase URL. REST still returns 501. Zero client changes is the goal, not the state.
@@ -12,7 +12,7 @@ tag: 501
 The goal is that an existing supabase-js app can point at Megabase without changing a line of code. That is the target, not the state.
 
 > [!NOTE]
-> REST, Storage, Realtime, Functions, and most Auth routes still return 501. `GET /auth/v1/health`, `GET /auth/v1/settings`, autoconfirm email signup, and logout are served when `DATABASE_URL` and `JWT_SECRET` are set (health and settings do not need them). See [Configuration](configuration.md).
+> REST, Storage, Realtime, Functions, and most Auth routes still return 501. `GET /auth/v1/health`, `GET /auth/v1/settings`, autoconfirm email signup, logout, and the password and refresh-token grants on `POST /auth/v1/token` are served when `DATABASE_URL` and `JWT_SECRET` are set (health and settings do not need them). See [Configuration](configuration.md).
 
 ## Point the client
 

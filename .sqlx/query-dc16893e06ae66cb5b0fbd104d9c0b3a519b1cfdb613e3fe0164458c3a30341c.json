@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id\n         FROM auth.users\n         WHERE instance_id = $1::uuid\n           AND lower(email) = $2\n           AND aud = $3\n           AND is_sso_user = false\n         LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "dc16893e06ae66cb5b0fbd104d9c0b3a519b1cfdb613e3fe0164458c3a30341c"
+}

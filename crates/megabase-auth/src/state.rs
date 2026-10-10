@@ -26,7 +26,10 @@ pub struct AuthState {
     pub admin_roles: Vec<String>,
     /// Signup and settings flags. Unset `GOTRUE_*` follows the reference stack.
     pub config: AuthConfig,
-    /// Long-lived client for signup and logout. Admin routes open their own.
+    /// Shared Auth pool. `try_from_env` leaves this empty. `megabase_server::run`
+    /// replaces it with `Backend::connect` before `router_with_state`, and
+    /// closes it on shutdown. Signup, logout, the password and refresh-token
+    /// grants, and admin routes use that pool. `router()` does not connect.
     pub backend: Backend,
 }
 

@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE auth.refresh_tokens\n                 SET revoked = true, updated_at = now()\n                 WHERE session_id = $1::uuid AND revoked = false",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "32aab057c0f5a82d7cc199fcf9f9f279fb3d5e16133bcc3be6632b0a6c50a29a"
+}

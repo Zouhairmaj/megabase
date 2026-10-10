@@ -10,6 +10,10 @@
 FROM public.ecr.aws/docker/library/rust:1.89-slim-bookworm@sha256:d7fc7de78bb8c1469933aeecbf801314d30d7d6e9f0578bba4cfa285bfa37fe6 AS build
 WORKDIR /src
 COPY Cargo.toml Cargo.lock ./
+# Offline sqlx query metadata. `.cargo/config.toml` sets SQLX_OFFLINE; the
+# ENV keeps the build offline even if that file is not consulted.
+COPY .cargo .cargo
+COPY .sqlx .sqlx
 COPY crates crates
 COPY tools tools
 COPY judge/harness judge/harness
@@ -18,6 +22,7 @@ COPY judge/harness judge/harness
 RUN apt-get update \
     && apt-get install -y --no-install-recommends mold \
     && rm -rf /var/lib/apt/lists/*
+ENV SQLX_OFFLINE=true
 ENV RUSTFLAGS="-C link-arg=-fuse-ld=mold"
 RUN cargo build --release --locked -p megabase -p megabase-judge --bin megabase --bin megabase-healthcheck
 
