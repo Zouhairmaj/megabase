@@ -19,7 +19,7 @@ use axum::response::{IntoResponse, Response};
 use serde_json::{Map, Value};
 
 use crate::filter::{parse_filter_value, quote_ident, sql_type_name, UnsafeType};
-use crate::prefer::{self, Preferences};
+use crate::prefer::Prefer;
 use crate::query::percent_decode;
 use crate::read::{
     begin, content_range, database_unavailable, negotiated_schema, not_implemented,
@@ -232,7 +232,7 @@ pub(crate) async fn call(
         Ok(session) => session,
         Err(response) => return *response,
     };
-    session.timezone = Preferences::from_headers(headers).timezone;
+    session.timezone = Prefer::from_headers(headers).timezone;
     let schema = match negotiated_schema(method, headers) {
         Ok(schema) => schema,
         Err(response) => return *response,
@@ -244,7 +244,7 @@ pub(crate) async fn call(
         // megabase:unit rest:route:OPTIONS /rest/v1/rpc/{function}
         return routine_options(state, method, uri, &session, &schema, function).await;
     }
-    if let Some(unit) = prefer::unserved(headers) {
+    if let Some(unit) = Prefer::from_headers(headers).rpc_unserved() {
         return unimplemented_unit(method, path, unit);
     }
     if let Some(unit) = reject_accept(headers.get(header::ACCEPT)) {

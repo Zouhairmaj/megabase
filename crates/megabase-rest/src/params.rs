@@ -100,6 +100,12 @@ impl ReadQuery {
         self.columns.as_deref()
     }
 
+    /// `on_conflict` columns, when the client sent them.
+    #[must_use]
+    pub(crate) fn conflict_columns(&self) -> Option<&[String]> {
+        self.on_conflict.as_deref()
+    }
+
     /// Horizontal `eq` filters, or `None` when any filter is not a plain `eq`.
     ///
     /// `PUT` needs every filter to be `column=eq.value` with no `and`/`or`

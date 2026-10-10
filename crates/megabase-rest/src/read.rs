@@ -2,8 +2,9 @@
 //!
 //! Reads, writes, `OPTIONS`, and the root OpenAPI document follow
 //! `specs/rest/resources.md`. RPC follows `specs/rest/rpc.md`. Embeds,
-//! `Prefer`, and other media types stay
-//! [`megabase_core::MegabaseNotImplemented`]. Values are bound parameters.
+//! `Prefer: return`/`tx`/`timezone`, and other media types stay
+//! [`megabase_core::MegabaseNotImplemented`]. `Prefer` itself follows
+//! `specs/rest/prefer.md`. Values are bound parameters.
 //! Relation and column names come from `pg_catalog` after a bound lookup,
 //! then `quote_ident`.
 
@@ -17,11 +18,11 @@ use axum::Router;
 use megabase_core::{bearer_token, JwtError, MegabaseNotImplemented};
 use serde_json::{Map, Value};
 
-use crate::filter::UnsafeType;
+use crate::filter::{quote_ident, UnsafeType};
 use crate::mutate::mutate;
 use crate::openapi::document;
-use crate::params::{build_read_sql, parse_get_query, QueryFail, Relationship};
-use crate::prefer::{self, Preferences};
+use crate::params::{build_read_sql, parse_get_query, where_clause, QueryFail, Relationship};
+use crate::prefer::{set_applied, Count, Prefer, Scope};
 use crate::query::path_decode;
 use crate::RestState;
 
@@ -50,18 +51,14 @@ async fn dispatch(
     body: Bytes,
 ) -> Response {
     let path = uri.path();
-    let prefs = Preferences::from_headers(&headers);
-    let mutation = matches!(
-        method,
-        Method::POST | Method::PUT | Method::PATCH | Method::DELETE
-    );
+    let prefer = Prefer::from_headers(&headers);
     match classify(path) {
         Target::Outside => not_implemented(&method, path),
         Target::Rpc(function) => {
             let mut response =
                 crate::rpc::call(&state, &method, &uri, &headers, &function, &body).await;
-            if method != Method::OPTIONS {
-                prefs.stamp(&mut response, false);
+            if method != Method::OPTIONS && response.status().is_success() {
+                set_applied(&mut response, prefer.applied(Scope::default()));
             }
             response
         }
@@ -73,19 +70,14 @@ async fn dispatch(
             None,
         ),
         Target::Root => {
-            let mut response = root(&state, &method, &headers, &prefs).await;
-            if method != Method::OPTIONS {
-                prefs.stamp(&mut response, false);
+            let mut response = root(&state, &method, &headers, &prefer).await;
+            if method != Method::OPTIONS && response.status().is_success() {
+                set_applied(&mut response, prefer.applied(Scope::default()));
             }
             response
         }
         Target::Relation(relation) => {
-            let mut response =
-                relation_route(&state, &method, &uri, &headers, &relation, &body).await;
-            if method != Method::OPTIONS {
-                prefs.stamp(&mut response, mutation);
-            }
-            response
+            relation_route(&state, &method, &uri, &headers, &relation, &body).await
         }
     }
 }
@@ -120,13 +112,13 @@ async fn root(
     state: &RestState,
     method: &Method,
     headers: &HeaderMap,
-    prefs: &Preferences,
+    prefer: &Prefer,
 ) -> Response {
     let mut session = match session(state, headers.get(header::AUTHORIZATION)) {
         Ok(session) => session,
         Err(response) => return *response,
     };
-    session.timezone = prefs.timezone.clone();
+    session.timezone = prefer.timezone.clone();
     let schema = match negotiated_schema(method, headers) {
         Ok(schema) => schema,
         Err(response) => return *response,
@@ -180,8 +172,8 @@ async fn relation_route(
         Ok(session) => session,
         Err(response) => return *response,
     };
-    let prefs = Preferences::from_headers(headers);
-    session.timezone = prefs.timezone.clone();
+    let prefer = Prefer::from_headers(headers);
+    session.timezone = prefer.timezone.clone();
     let schema = match negotiated_schema(method, headers) {
         Ok(schema) => schema,
         Err(response) => return *response,
@@ -212,8 +204,8 @@ async fn relation_route(
         Ok(query) => query,
         Err(response) => return *response,
     };
-    if let Some(unit) = prefer::unserved(headers) {
-        return unimplemented_unit(method, path, unit);
+    if let Err(response) = prefer.check_strict() {
+        return *response;
     }
     let shape = if matches!(*method, Method::GET | Method::HEAD) {
         ReadShape::from_accept(headers.get(header::ACCEPT))
@@ -246,6 +238,7 @@ async fn relation_route(
                     headers_only: false,
                     shape,
                 },
+                &prefer,
             )
             .await
         }
@@ -265,6 +258,7 @@ async fn relation_route(
                     headers_only: true,
                     shape,
                 },
+                &prefer,
             )
             .await
         }
@@ -277,9 +271,9 @@ async fn relation_route(
                 &session,
                 method,
                 &query,
+                &prefer,
                 body,
                 headers.get(header::CONTENT_TYPE),
-                &prefs,
             )
             .await
         }
@@ -292,9 +286,9 @@ async fn relation_route(
                 &session,
                 method,
                 &query,
+                &prefer,
                 body,
                 headers.get(header::CONTENT_TYPE),
-                &prefs,
             )
             .await
         }
@@ -307,9 +301,9 @@ async fn relation_route(
                 &session,
                 method,
                 &query,
+                &prefer,
                 body,
                 headers.get(header::CONTENT_TYPE),
-                &prefs,
             )
             .await
         }
@@ -322,9 +316,9 @@ async fn relation_route(
                 &session,
                 method,
                 &query,
+                &prefer,
                 body,
                 headers.get(header::CONTENT_TYPE),
-                &prefs,
             )
             .await
         }
@@ -760,6 +754,7 @@ pub(crate) fn not_implemented(method: &Method, path: &str) -> Response {
     MegabaseNotImplemented::new(crate::COMPONENT, format!("{method} {path}")).into_response()
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn read_relation(
     pool: &sqlx::PgPool,
     schema: &str,
@@ -767,14 +762,39 @@ async fn read_relation(
     session: &Session,
     read: &crate::params::ReadQuery,
     mode: ReadMode,
+    prefer: &Prefer,
 ) -> Response {
-    match read_rows(pool, schema, relation, session, read, mode).await {
-        Ok((count, body, offset)) => {
-            let mut response = json_rows(
-                offset,
-                count,
-                if mode.headers_only { "" } else { &body },
-                mode.shape.map_or(JSON_UTF8, ReadShape::content_type),
+    // The count of an aggregated read is not the filtered row count.
+    if let (Some(count), true) = (prefer.count, read.has_aggregate()) {
+        let unit = match count {
+            Count::Exact => "rest:prefer:count=exact",
+            Count::Planned => "rest:prefer:count=planned",
+            Count::Estimated => "rest:prefer:count=estimated",
+        };
+        return MegabaseNotImplemented::new(crate::COMPONENT, unit).into_response();
+    }
+    match read_rows(pool, schema, relation, session, read, mode, prefer.count).await {
+        Ok((count, body, offset, total)) => {
+            let mut response = match total {
+                Some(total) if offset > total => out_of_bounds(offset, total),
+                _ => json_rows(
+                    offset,
+                    count,
+                    total,
+                    if mode.headers_only { "" } else { &body },
+                    mode.shape.map_or(JSON_UTF8, ReadShape::content_type),
+                ),
+            };
+            set_applied(
+                &mut response,
+                // `prefAppliedHeader` echoes every parsed preference.
+                prefer.applied(Scope {
+                    resolution: true,
+                    missing: true,
+                    count: true,
+                    max_affected: true,
+                    representation: false,
+                }),
             );
             profile_header(&mut response, schema);
             response
@@ -783,8 +803,108 @@ async fn read_relation(
     }
 }
 
+/// `416` with `PGRST103` when the offset is past the counted total.
+fn out_of_bounds(offset: i64, total: i64) -> Response {
+    let mut response = pgrst(
+        StatusCode::RANGE_NOT_SATISFIABLE,
+        "PGRST103",
+        "Requested range not satisfiable",
+        Some(&format!(
+            "An offset of {offset} was requested, but there are only {total} rows."
+        )),
+        None,
+    );
+    if let Ok(value) = HeaderValue::from_str(&content_range_total(offset, 0, Some(total))) {
+        response.headers_mut().insert(header::CONTENT_RANGE, value);
+    }
+    response
+}
+
+/// The reference stack's `PGRST_DB_MAX_ROWS` (Supabase `.env.example`).
+const DB_MAX_ROWS: i64 = 1000;
+
+// megabase:unit rest:prefer:count=exact
+// megabase:unit rest:prefer:count=planned
+// megabase:unit rest:prefer:count=estimated
+/// Total rows behind the filters. `exact` counts. `estimated` counts up to
+/// `DB_MAX_ROWS`, then reads the planner's row estimate like `planned`
+/// (`Statements.hs` `mainRead`).
+async fn count_total(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    schema: &str,
+    relation: &str,
+    read: &crate::params::ReadQuery,
+    column_types: &[(&str, &str)],
+    mode: Count,
+    anon: bool,
+) -> Result<i64, Box<Response>> {
+    let filter = where_clause(relation, read, column_types)
+        .map_err(|error| Box::new(unsafe_type(&error)))?;
+    let from = format!("{}.{}", quote_ident(schema), quote_ident(relation));
+    let (where_sql, params) = match filter {
+        Some(filter) => (format!(" WHERE {}", filter.sql), filter.params),
+        None => (String::new(), Vec::new()),
+    };
+    let mut planned = mode == Count::Planned;
+    if mode == Count::Estimated {
+        // `Statements.hs`: count up to `db-max-rows + 1`, then trust the planner.
+        let sql = format!(
+            "SELECT pg_catalog.count(*)::bigint FROM (SELECT 1 FROM {from}{where_sql} LIMIT {}) AS _megabase_count",
+            DB_MAX_ROWS + 1
+        );
+        let mut query = sqlx::query_scalar::<sqlx::Postgres, i64>(&sql);
+        for param in &params {
+            query = query.bind(param);
+        }
+        let limited = query
+            .fetch_one(&mut **tx)
+            .await
+            .map_err(|error| Box::new(query_failure(&error, anon)))?;
+        if limited <= DB_MAX_ROWS {
+            return Ok(limited);
+        }
+        planned = true;
+    }
+    if planned {
+        let sql = format!("EXPLAIN (FORMAT JSON) SELECT 1 FROM {from}{where_sql}");
+        let mut query = sqlx::query(&sql);
+        for param in &params {
+            query = query.bind(param);
+        }
+        let row = query
+            .fetch_one(&mut **tx)
+            .await
+            .map_err(|error| Box::new(query_failure(&error, anon)))?;
+        let plan: String = sqlx::Row::try_get_unchecked(&row, 0)
+            .map_err(|error| Box::new(query_failure(&error, anon)))?;
+        let rows = serde_json::from_str::<Value>(&plan)
+            .ok()
+            .and_then(|plan| plan[0]["Plan"]["Plan Rows"].as_i64());
+        return rows.ok_or_else(|| {
+            tracing::error!("rest planned count: no Plan Rows in EXPLAIN output");
+            Box::new(pgrst(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "PGRST000",
+                "Database connection error.",
+                Some("could not read the planned row count"),
+                None,
+            ))
+        });
+    }
+    let sql = format!("SELECT pg_catalog.count(*)::bigint FROM {from}{where_sql}");
+    let mut query = sqlx::query_scalar::<sqlx::Postgres, i64>(&sql);
+    for param in &params {
+        query = query.bind(param);
+    }
+    query
+        .fetch_one(&mut **tx)
+        .await
+        .map_err(|error| Box::new(query_failure(&error, anon)))
+}
+
 // megabase:unit rest:embed-join:left
 // megabase:unit rest:embed-join:inner
+#[allow(clippy::too_many_arguments)]
 async fn read_rows(
     pool: &sqlx::PgPool,
     schema: &str,
@@ -792,7 +912,8 @@ async fn read_rows(
     session: &Session,
     read: &crate::params::ReadQuery,
     mode: ReadMode,
-) -> Result<(i64, String, i64), Box<Response>> {
+    count: Option<Count>,
+) -> Result<(i64, String, i64, Option<i64>), Box<Response>> {
     let ReadMode {
         aggregates,
         headers_only,
@@ -856,6 +977,21 @@ async fn read_rows(
         .fetch_one(&mut *tx)
         .await
         .map_err(|error| Box::new(query_failure(&error, session.anon)))?;
+    let total = match count {
+        Some(count_mode) => Some(
+            count_total(
+                &mut tx,
+                schema,
+                relation,
+                read,
+                &column_types,
+                count_mode,
+                session.anon,
+            )
+            .await?,
+        ),
+        None => None,
+    };
     if let Some(shape) = shape {
         if shape.singular() {
             singular_check(row.0)?;
@@ -875,7 +1011,7 @@ async fn read_rows(
     tx.commit()
         .await
         .map_err(|error| Box::new(query_failure(&error, session.anon)))?;
-    Ok((row.0, row.1, built.offset))
+    Ok((row.0, row.1, built.offset, total))
 }
 
 /// Foreign keys between two tables of one schema, in either direction.
@@ -1163,10 +1299,21 @@ fn sanitize(text: &str) -> String {
     }
 }
 
-fn json_rows(offset: i64, count: i64, body: &str, content_type: &'static str) -> Response {
-    let range = content_range(offset, count);
+fn json_rows(
+    offset: i64,
+    count: i64,
+    total: Option<i64>,
+    body: &str,
+    content_type: &'static str,
+) -> Response {
+    let range = content_range_total(offset, count, total);
+    // `RangeQuery.rangeStatusHeader`: a page shorter than the total is `206`.
+    let status = match total {
+        Some(total) if count < total => StatusCode::PARTIAL_CONTENT,
+        _ => StatusCode::OK,
+    };
     (
-        StatusCode::OK,
+        status,
         [
             (header::CONTENT_TYPE, content_type),
             (header::CONTENT_RANGE, range.as_str()),
@@ -1181,12 +1328,19 @@ fn json_rows(offset: i64, count: i64, body: &str, content_type: &'static str) ->
 /// `lower` is the offset. `upper` is `offset + count - 1`. An empty page,
 /// or a lower bound past the upper bound, is `*/*` (`RangeQuery.contentRangeH`).
 pub(crate) fn content_range(offset: i64, count: i64) -> String {
-    if count <= 0 {
-        return "*/*".to_string();
+    content_range_total(offset, count, None)
+}
+
+/// `Content-Range` with an optional counted total. A zero total, an empty
+/// page, or a lower bound past the upper bound prints `*` for the range.
+pub(crate) fn content_range_total(offset: i64, count: i64, total: Option<i64>) -> String {
+    let total_text = total.map_or_else(|| "*".to_string(), |total| total.to_string());
+    if count <= 0 || total == Some(0) {
+        return format!("*/{total_text}");
     }
     match offset.checked_add(count - 1) {
-        Some(upper) if offset <= upper => format!("{offset}-{upper}/*"),
-        _ => "*/*".to_string(),
+        Some(upper) if offset <= upper => format!("{offset}-{upper}/{total_text}"),
+        _ => format!("*/{total_text}"),
     }
 }
 
@@ -1266,19 +1420,19 @@ mod tests {
 
     #[test]
     fn content_range_uses_the_sql_count() {
-        let response = json_rows(0, 2, "not json", JSON_UTF8);
+        let response = json_rows(0, 2, None, "not json", JSON_UTF8);
         let range = response
             .headers()
             .get(header::CONTENT_RANGE)
             .and_then(|value| value.to_str().ok());
         assert_eq!(range, Some("0-1/*"));
-        let empty = json_rows(0, 0, "[]", JSON_UTF8);
+        let empty = json_rows(0, 0, None, "[]", JSON_UTF8);
         let range = empty
             .headers()
             .get(header::CONTENT_RANGE)
             .and_then(|value| value.to_str().ok());
         assert_eq!(range, Some("*/*"));
-        let shifted = json_rows(1, 1, "[{}]", JSON_UTF8);
+        let shifted = json_rows(1, 1, None, "[{}]", JSON_UTF8);
         let range = shifted
             .headers()
             .get(header::CONTENT_RANGE)
@@ -1566,16 +1720,72 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn prefer_count_is_501() {
+    async fn prefer_return_timezone_and_tx_reach_the_pool() {
         let app = router(RestState::from_config(&Config::default()));
         let request = Request::builder()
             .uri("/rest/v1/todos?done=eq.true")
-            .header("prefer", "count=exact")
+            .header("prefer", "return=representation, tx=rollback, timezone=UTC")
+            .body(Body::empty())
+            .unwrap();
+        let (status, _, _) = send(app, request).await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    #[tokio::test]
+    async fn prefer_count_reaches_the_pool() {
+        let app = router(RestState::from_config(&Config::default()));
+        let request = Request::builder()
+            .uri("/rest/v1/todos")
+            .header("prefer", "count=planned")
+            .body(Body::empty())
+            .unwrap();
+        let (status, _, _) = send(app, request).await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    #[tokio::test]
+    async fn strict_handling_rejects_unknown_preferences() {
+        let app = router(RestState::from_config(&Config::default()));
+        let request = Request::builder()
+            .uri("/rest/v1/todos")
+            .header("prefer", "handling=strict, wat")
             .body(Body::empty())
             .unwrap();
         let (status, body, _) = send(app, request).await;
-        assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
-        assert_eq!(body["unit"], "rest:prefer:count=exact");
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(body["code"], "PGRST122");
+        assert_eq!(body["details"], "Invalid preferences: wat");
+    }
+
+    #[tokio::test]
+    async fn lenient_handling_ignores_unknown_preferences() {
+        let app = router(RestState::from_config(&Config::default()));
+        let request = Request::builder()
+            .uri("/rest/v1/todos")
+            .header("prefer", "handling=lenient, wat")
+            .body(Body::empty())
+            .unwrap();
+        let (status, _, _) = send(app, request).await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    #[test]
+    fn content_range_carries_the_counted_total() {
+        assert_eq!(content_range_total(0, 2, Some(5)), "0-1/5");
+        assert_eq!(content_range_total(0, 0, Some(0)), "*/0");
+        assert_eq!(content_range_total(5, 0, Some(3)), "*/3");
+        assert_eq!(
+            json_rows(0, 2, Some(5), "[]", JSON_UTF8).status(),
+            StatusCode::PARTIAL_CONTENT
+        );
+        assert_eq!(
+            json_rows(0, 5, Some(5), "[]", JSON_UTF8).status(),
+            StatusCode::OK
+        );
+        assert_eq!(
+            out_of_bounds(9, 3).status(),
+            StatusCode::RANGE_NOT_SATISFIABLE
+        );
     }
 
     #[tokio::test]
