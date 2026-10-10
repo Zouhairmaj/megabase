@@ -14,10 +14,10 @@ combine horizontal filters with boolean logic, for example
 
 | Behavior | File:line (pin) |
 |---|---|
-| `and` / `or` / `not` query keys, `pLogicPath` | [`QueryParams.hs:308`](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/ApiRequest/QueryParams.hs#L308) |
+| `and` / `or` / `not` query keys, `pLogicPath` | [`QueryParams.hs:912`](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/ApiRequest/QueryParams.hs#L912) |
 | `pLogicTree` (nested expressions, leaf `field.op.value`) | [`QueryParams.hs:883`](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/ApiRequest/QueryParams.hs#L883) |
-| `not` prefix | [`QueryParams.hs:892`](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/ApiRequest/QueryParams.hs#L892) |
-| `and` / `or` operator tokens | [`QueryParams.hs:897`](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/ApiRequest/QueryParams.hs#L897) |
+| `not` prefix | [`QueryParams.hs:890`](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/ApiRequest/QueryParams.hs#L890) |
+| `and` / `or` operator tokens | [`QueryParams.hs:894`](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/ApiRequest/QueryParams.hs#L894) |
 
 Pins: `postgrest v16.4` (`vendor.toml`). Ported code carries the credit header
 required by AGENTS.md.
@@ -34,7 +34,8 @@ plain column filters.
 
 Rows matching the boolean expression. SQL joins children with `AND` / `OR`
 inside parentheses, `NOT (...)` for a negated tree, with every value a bound
-parameter in left-to-right order.
+parameter. Plain-filter parameters come first; within each logic tree values
+are bound left to right.
 
 ## Errors
 
@@ -50,7 +51,7 @@ negates the tree. Quoted values may contain `,` and `)`.
 
 ## Out of scope
 
-JSON-path leaves (`data->a.eq.1`) and embedded-resource logic stay 501
+JSON-path leaves (`data->a.eq.1`) stay 501
 (routed through the read unit).
 
 ## Judge cases

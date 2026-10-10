@@ -2127,7 +2127,7 @@ mod tests {
             QueryFail::Parse { .. }
         ));
         assert!(matches!(
-            parse_get_query("and=id.eq.1").unwrap_err(),
+            parse_get_query("and=(id.eq.1").unwrap_err(),
             QueryFail::Parse { .. }
         ));
     }
