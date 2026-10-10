@@ -581,3 +581,113 @@ units = ["auth:route:DELETE /auth/v1/admin/users/{user_id}/passkeys/{passkey_id}
 method = "DELETE"
 path = "/auth/v1/admin/users/00000000-0000-0000-0000-000000000001/passkeys/00000000-0000-0000-0000-000000000002"
 key = "service_role"
+
+[[case]]
+id = "auth.user.put-metadata"
+description = "PUT /user merges metadata, keeps untouched keys, and drops null keys"
+units = ["auth:route:PUT /auth/v1/user"]
+[[case.step]]
+method = "POST"
+path = "/auth/v1/signup"
+json = { email = "judge-put-{{run}}@example.com", password = "judge-password-1", data = { name = "Ada", drop = "me", keep = "me" } }
+capture = { token = "/access_token" }
+[[case.step]]
+method = "PUT"
+path = "/auth/v1/user"
+headers = { Authorization = "Bearer {{token}}", "Content-Type" = "application/json" }
+body = '{"data":{"name":"Grace","drop":null}}'
+
+[[case]]
+id = "auth.user.put-same-password"
+description = "PUT /user rejects a password equal to the stored hash"
+units = ["auth:route:PUT /auth/v1/user"]
+[[case.step]]
+method = "POST"
+path = "/auth/v1/signup"
+json = { email = "judge-same-{{run}}@example.com", password = "judge-password-1" }
+capture = { token = "/access_token" }
+[[case.step]]
+method = "PUT"
+path = "/auth/v1/user"
+headers = { Authorization = "Bearer {{token}}" }
+json = { password = "judge-password-1" }
+
+[[case]]
+id = "auth.user.identity.authorize-disabled"
+description = "Identity authorize is 404 while manual linking is off"
+units = ["auth:route:GET /auth/v1/user/identities/authorize"]
+[[case.step]]
+method = "POST"
+path = "/auth/v1/signup"
+json = { email = "judge-link-{{run}}@example.com", password = "judge-password-1" }
+capture = { token = "/access_token" }
+[[case.step]]
+method = "GET"
+path = "/auth/v1/user/identities/authorize?provider=github"
+headers = { Authorization = "Bearer {{token}}" }
+
+[[case]]
+id = "auth.user.identity.unlink-disabled"
+description = "Identity unlink is 404 while manual linking is off"
+units = ["auth:route:DELETE /auth/v1/user/identities/{identity_id}"]
+[[case.step]]
+method = "POST"
+path = "/auth/v1/signup"
+json = { email = "judge-unlink-{{run}}@example.com", password = "judge-password-1" }
+capture = { token = "/access_token", identity = "/user/identities/0/id" }
+[[case.step]]
+method = "DELETE"
+path = "/auth/v1/user/identities/{{identity}}"
+headers = { Authorization = "Bearer {{token}}" }
+
+[[case]]
+id = "auth.user.oauth.grants-disabled"
+description = "OAuth grant list and revoke are 404 while the server flag is off"
+units = ["auth:route:GET /auth/v1/user/oauth/grants", "auth:route:DELETE /auth/v1/user/oauth/grants"]
+[[case.step]]
+method = "POST"
+path = "/auth/v1/signup"
+json = { email = "judge-grants-{{run}}@example.com", password = "judge-password-1" }
+capture = { token = "/access_token" }
+[[case.step]]
+method = "GET"
+path = "/auth/v1/user/oauth/grants"
+headers = { Authorization = "Bearer {{token}}" }
+[[case.step]]
+method = "DELETE"
+path = "/auth/v1/user/oauth/grants?client_id=00000000-0000-0000-0000-000000000000"
+headers = { Authorization = "Bearer {{token}}" }
+
+[[case]]
+id = "auth.user.put-password"
+description = "PUT /user stores a new password and rejects the previous refresh token"
+units = ["auth:route:PUT /auth/v1/user"]
+[[case.step]]
+method = "POST"
+path = "/auth/v1/signup"
+json = { email = "judge-pw-{{run}}@example.com", password = "judge-password-1" }
+capture = { token = "/access_token", refresh = "/refresh_token" }
+[[case.step]]
+method = "PUT"
+path = "/auth/v1/user"
+headers = { Authorization = "Bearer {{token}}" }
+json = { password = "judge-password-2" }
+[[case.step]]
+method = "POST"
+path = "/auth/v1/token?grant_type=refresh_token"
+json = { refresh_token = "{{refresh}}" }
+
+[[case]]
+id = "auth.user.put-phone"
+description = "PUT /user autoconfirms an E.164 phone"
+units = ["auth:route:PUT /auth/v1/user"]
+[[case.step]]
+method = "POST"
+path = "/auth/v1/signup"
+json = { email = "judge-phone-{{run}}@example.com", password = "judge-password-1" }
+capture = { token = "/access_token" }
+[[case.step]]
+method = "PUT"
+path = "/auth/v1/user"
+headers = { Authorization = "Bearer {{token}}" }
+json = { phone = "+14155550100" }
