@@ -13,7 +13,8 @@ use megabase_core::{bearer_token, JwtError, MegabaseNotImplemented};
 use serde_json::{Map, Value};
 
 use crate::filter::{
-    parse_filter_value, predicate_sql, quote_ident, BoundFilter, ParsedFilter, UnsafeType,
+    parse_filter_value, predicate_sql, quote_ident, BoundFilter, FilterBody, ParsedFilter,
+    UnsafeType,
 };
 use crate::query::{classify_query, path_decode};
 use crate::RestState;
@@ -48,15 +49,10 @@ async fn dispatch(
     let mut served = Vec::new();
     for filter in &classified.filters {
         match parse_filter_value(&filter.value) {
-            Ok(ParsedFilter::Served {
-                op,
-                quant,
-                language,
-                value,
-            }) => served.push((filter.column.as_str(), op, quant, language, value)),
             Ok(ParsedFilter::Unsupported { unit }) => {
                 return MegabaseNotImplemented::new(crate::COMPONENT, unit).into_response();
             }
+            Ok(parsed) => served.push((filter.column.clone(), parsed)),
             Err(error) => {
                 return pgrst(
                     StatusCode::BAD_REQUEST,
@@ -295,19 +291,11 @@ fn not_implemented(method: &Method, path: &str) -> Response {
     MegabaseNotImplemented::new(crate::COMPONENT, format!("{method} {path}")).into_response()
 }
 
-type Served<'a> = (
-    &'a str,
-    crate::filter::ServedOp,
-    Option<crate::filter::Quant>,
-    Option<String>,
-    String,
-);
-
 async fn read_rows(
     pool: &sqlx::PgPool,
     relation: &str,
     session: &Session,
-    filters: &[Served<'_>],
+    filters: &[(String, ParsedFilter)],
 ) -> Result<(i64, String), Box<Response>> {
     let mut tx = pool
         .begin()
@@ -348,19 +336,12 @@ async fn read_rows(
         .await
         .map_err(|error| Box::new(query_failure(&error, session.anon)))?;
     let mut bound = Vec::with_capacity(filters.len());
-    for filter in filters {
+    for (column, parsed) in filters {
         let pg_type = columns
             .iter()
-            .find(|(name, _)| name.as_str() == filter.0)
+            .find(|(name, _)| name == column)
             .map(|(_, pg_type)| pg_type.clone());
-        bound.push(BoundFilter {
-            column: filter.0.to_string(),
-            op: filter.1,
-            quant: filter.2,
-            language: filter.3.clone(),
-            value: filter.4.clone(),
-            pg_type,
-        });
+        bound.push(bound_filter(column, parsed, pg_type));
     }
     let predicate =
         predicate_sql(relation, &bound).map_err(|error| Box::new(unsafe_type(&error)))?;
@@ -401,6 +382,40 @@ async fn read_rows(
         .await
         .map_err(|error| Box::new(query_failure(&error, session.anon)))?;
     Ok(row)
+}
+
+fn bound_filter(column: &str, parsed: &ParsedFilter, pg_type: Option<String>) -> BoundFilter {
+    let (negated, body) = match parsed {
+        ParsedFilter::Served {
+            negated,
+            op,
+            quant,
+            language,
+            value,
+        } => (
+            *negated,
+            FilterBody::Op {
+                op: *op,
+                quant: *quant,
+                language: language.clone(),
+                value: value.clone(),
+            },
+        ),
+        ParsedFilter::In { negated, values } => (*negated, FilterBody::In(values.clone())),
+        ParsedFilter::Is { negated, value } => (*negated, FilterBody::Is(*value)),
+        ParsedFilter::IsDistinct { negated, value } => {
+            (*negated, FilterBody::IsDistinct(value.clone()))
+        }
+        ParsedFilter::Unsupported { .. } => {
+            unreachable!("unsupported filters return 501 before the read");
+        }
+    };
+    BoundFilter {
+        column: column.to_string(),
+        negated,
+        body,
+        pg_type,
+    }
 }
 
 /// Column names and base types. `NULL` typmod matches an unknown literal:
@@ -665,9 +680,10 @@ mod tests {
     #[tokio::test]
     async fn later_operator_is_501_and_does_not_query() {
         let app = router(RestState::from_config(&Config::default()));
-        let (status, body, _) = send(app, get("/rest/v1/todos?priority=gt.1&priority=lt.3")).await;
+        let (status, body, _) =
+            send(app, get("/rest/v1/todos?priority=gt.1&priority=ov.{1,2}")).await;
         assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
-        assert_eq!(body["unit"], "rest:filter-operator:lt");
+        assert_eq!(body["unit"], "rest:filter-operator:ov");
     }
 
     #[tokio::test]
