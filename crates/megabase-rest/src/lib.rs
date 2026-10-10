@@ -6,7 +6,8 @@
 //! filters and query parameters are specified in
 //! [`specs/rest/filtering.md`](../../../specs/rest/filtering.md) and
 //! [`specs/rest/query-params.md`](../../../specs/rest/query-params.md).
-//! RPC, embeds, `Prefer`, and the other media types return
+//! RPC is specified in [`specs/rest/rpc.md`](../../../specs/rest/rpc.md).
+//! Embeds, `Prefer`, and the other media types return
 //! `MEGABASE_NOT_IMPLEMENTED`.
 
 mod db;
@@ -16,6 +17,7 @@ mod openapi;
 mod params;
 mod query;
 mod read;
+mod rpc;
 
 use std::sync::Arc;
 

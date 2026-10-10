@@ -1,10 +1,11 @@
 //! Resource routes under `/rest/v1/`.
 //!
 //! Reads, writes, `OPTIONS`, and the root OpenAPI document follow
-//! `specs/rest/resources.md`. RPC, embeds, `Prefer`, and other media types
-//! stay [`megabase_core::MegabaseNotImplemented`]. Values are bound
-//! parameters. Relation and column names come from `pg_catalog` after a
-//! bound lookup, then `quote_ident`.
+//! `specs/rest/resources.md`. RPC follows `specs/rest/rpc.md`. Embeds,
+//! `Prefer`, and other media types stay
+//! [`megabase_core::MegabaseNotImplemented`]. Values are bound parameters.
+//! Relation and column names come from `pg_catalog` after a bound lookup,
+//! then `quote_ident`.
 
 use axum::body::Bytes;
 use axum::extract::{OriginalUri, State};
@@ -33,7 +34,7 @@ pub(crate) fn router(state: RestState) -> Router {
 enum Target {
     Root,
     Relation(String),
-    Rpc,
+    Rpc(String),
     Invalid,
     Outside,
 }
@@ -47,7 +48,10 @@ async fn dispatch(
 ) -> Response {
     let path = uri.path();
     match classify(path) {
-        Target::Outside | Target::Rpc => not_implemented(&method, path),
+        Target::Outside => not_implemented(&method, path),
+        Target::Rpc(function) => {
+            crate::rpc::call(&state, &method, &uri, &headers, &function, &body).await
+        }
         Target::Invalid => pgrst(
             StatusCode::NOT_FOUND,
             "PGRST125",
@@ -83,7 +87,7 @@ fn classify(path: &str) -> Target {
     match parts.as_slice() {
         [] => Target::Root,
         [name] => Target::Relation(name.clone()),
-        [rpc, _] if rpc == "rpc" => Target::Rpc,
+        [rpc, name] if rpc == "rpc" => Target::Rpc(name.clone()),
         _ => Target::Invalid,
     }
 }
@@ -277,7 +281,10 @@ fn query_is_blank(raw: &str) -> bool {
     raw.split('&').all(|part| part.is_empty())
 }
 
-fn negotiated_schema(method: &Method, headers: &HeaderMap) -> Result<String, Box<Response>> {
+pub(crate) fn negotiated_schema(
+    method: &Method,
+    headers: &HeaderMap,
+) -> Result<String, Box<Response>> {
     let name = if matches!(
         method,
         &Method::POST | &Method::PUT | &Method::PATCH | &Method::DELETE
@@ -380,7 +387,7 @@ async fn relation_options(state: &RestState, schema: &str, relation: &str, anon:
     options_response(&allow.join(","))
 }
 
-fn options_response(allow: &str) -> Response {
+pub(crate) fn options_response(allow: &str) -> Response {
     let mut response = Response::builder()
         .status(StatusCode::OK)
         .body(axum::body::Body::empty())
@@ -399,6 +406,14 @@ fn options_response(allow: &str) -> Response {
 fn relation_name(path: &str) -> Option<String> {
     match classify(path) {
         Target::Relation(name) => Some(name),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+fn rpc_name(path: &str) -> Option<String> {
+    match classify(path) {
+        Target::Rpc(name) => Some(name),
         _ => None,
     }
 }
@@ -547,7 +562,7 @@ pub(crate) fn reject_accept(value: Option<&axum::http::HeaderValue>) -> Option<&
     }
 }
 
-fn reject_prefer(value: Option<&axum::http::HeaderValue>) -> Option<&'static str> {
+pub(crate) fn reject_prefer(value: Option<&axum::http::HeaderValue>) -> Option<&'static str> {
     let value = header_str(value)?;
     if value.trim().is_empty() {
         return None;
@@ -604,7 +619,7 @@ pub(crate) fn unimplemented_unit(method: &Method, path: &str, unit: &str) -> Res
     }
 }
 
-fn not_implemented(method: &Method, path: &str) -> Response {
+pub(crate) fn not_implemented(method: &Method, path: &str) -> Response {
     MegabaseNotImplemented::new(crate::COMPONENT, format!("{method} {path}")).into_response()
 }
 
@@ -1453,12 +1468,15 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn rpc_stays_501() {
-        let app = router(RestState::from_config(&Config::default()));
-        let (status, body, _) = send(app, get("/rest/v1/rpc/add_numbers")).await;
-        assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
-        assert_eq!(body["unit"], "GET /rest/v1/rpc/add_numbers");
+    #[test]
+    fn rpc_name_is_one_decoded_segment() {
+        assert_eq!(
+            rpc_name("/rest/v1/rpc/add_numbers").as_deref(),
+            Some("add_numbers")
+        );
+        assert_eq!(rpc_name("/rest/v1/rpc/a%2Bb").as_deref(), Some("a+b"));
+        assert_eq!(rpc_name("/rest/v1/rpc"), None);
+        assert_eq!(rpc_name("/rest/v1/rpc/a/b"), None);
     }
 
     #[tokio::test]
