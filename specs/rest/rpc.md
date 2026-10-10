@@ -34,14 +34,15 @@ required by AGENTS.md.
 One path segment after `/rest/v1/rpc/`. The segment is percent-decoded with
 `+` left as `+`. A deeper path is `PGRST125`.
 
-`Accept-Profile` selects the schema for `GET`, `HEAD`, and `OPTIONS`.
-`Content-Profile` selects it for `POST` and for every other method. Absent
-means `public`. Any other schema is `PGRST106`.
+`Content-Profile` selects the schema for `POST`, `PUT`, `PATCH`, and
+`DELETE`. `Accept-Profile` selects it for every other method, including
+`GET`, `HEAD`, and `OPTIONS`. Absent means `public`. Any other schema is
+`PGRST106`.
 
 `GET` and `HEAD` arguments are non-reserved query pairs. `+` is a space.
-`select=*` is the default and is ignored. `POST` arguments are the keys of
-one JSON object. A missing `Content-Type` is `application/json`. An empty
-body is `{}`.
+A key with no `=` is ignored. `select=*` is the default and is ignored.
+`POST` arguments are the keys of one JSON object. A missing `Content-Type`
+is `application/json`. An empty body is `{}`.
 
 The bearer token is the same HS256 session as a resource route. No
 `Authorization`, or a non-bearer value, is the `anon` role. `OPTIONS` does
@@ -102,9 +103,12 @@ varying`, including the array forms.
 
 ## Edge cases
 
-Optional arguments (the last `pronargdefaults` inputs) may be omitted. Extra
-keys do not match. Repeated `GET` keys keep the last value, except a
-`VARIADIC` argument, which keeps every value in order. `POST` of exactly one
+Argument types come from `proallargtypes` when that column is set, and
+otherwise from `proargtypes`. Only modes `i`, `b`, and `v` are inputs.
+`required` is `idx <= pronargs - pronargdefaults` after `idx` is counted
+over those inputs. Optional arguments (the last `pronargdefaults` inputs)
+may be omitted. Extra keys do not match. Repeated `GET` keys keep the last
+value, except a `VARIADIC` argument, which keeps every value in order. `POST` of exactly one
 unnamed `json` or `jsonb` argument receives the raw body when no named
 overload matches. `GET` has no unnamed fallback. `OPTIONS` uses the query
 keys and does not call the function, so a required argument that is absent

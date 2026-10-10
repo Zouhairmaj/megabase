@@ -33,6 +33,10 @@ const KEYS_MUST_MATCH: &str = "All object keys must match";
 /// Catalog lookup. Names stay in `$1` and `$2`. Domain bases are resolved so a
 /// domain over a composite is composite. `bit` and `character` lose their
 /// length, matching `funcsSqlQuery`.
+///
+/// `proargnames` lines up with `proallargtypes`, not with `proargtypes`.
+/// Input rows are modes `i`, `b`, and `v`, and `idx` counts only those rows
+/// so `required` stays `idx <= pronargs - pronargdefaults`.
 const LOOKUP_SQL: &str = "WITH RECURSIVE base_walk AS (
     SELECT oid, oid AS base_type
     FROM pg_type
@@ -56,14 +60,22 @@ expanded AS (
         x.idx
     FROM pg_proc AS p
     JOIN pg_namespace AS pn ON pn.oid = p.pronamespace
-    LEFT JOIN LATERAL unnest(
-        COALESCE(p.proargnames, ARRAY[]::text[]),
-        p.proargtypes::oid[],
-        COALESCE(
-            p.proargmodes,
-            array_fill('i'::\"char\", ARRAY[COALESCE(p.pronargs, 0)::int])
-        )
-    ) WITH ORDINALITY AS x(name, type, mode, idx) ON true
+    LEFT JOIN LATERAL (
+        SELECT
+            a.name,
+            a.type,
+            a.mode,
+            row_number() OVER (ORDER BY a.ord) AS idx
+        FROM unnest(
+            COALESCE(p.proargnames, ARRAY[]::text[]),
+            COALESCE(p.proallargtypes, p.proargtypes::oid[]),
+            COALESCE(
+                p.proargmodes,
+                array_fill('i'::\"char\", ARRAY[COALESCE(p.pronargs, 0)::int])
+            )
+        ) WITH ORDINALITY AS a(name, type, mode, ord)
+        WHERE a.mode IN ('i', 'b', 'v')
+    ) AS x ON true
     WHERE pn.nspname = $1
       AND p.proname = $2
       AND p.prokind = 'f'
@@ -678,7 +690,8 @@ fn array_keys(items: &[Value]) -> ArrayKeys {
 }
 
 /// `GET` / `HEAD` / `OPTIONS` arguments. `Err` means a shaping parameter or a
-/// filter, which this unit does not apply.
+/// filter, which this unit does not apply. A key with no `=` is dropped, as
+/// `nonemptyParams` drops a `Nothing` value in `QueryParams.hs`.
 fn get_arguments(raw: &str) -> Result<BTreeMap<String, Vec<String>>, ()> {
     let mut values = BTreeMap::new();
     if raw.is_empty() {
@@ -735,11 +748,13 @@ fn statement(proc: &Proc, invocation: &Invocation) -> Result<Built, UnsafeType> 
         direct_source(proc, invocation, &specified)?
     };
     if proc.is_void() {
+        // `count` references the call row. An unused stable or immutable
+        // target can be replaced with NULL (`remove_unused_subquery_outputs`).
         let sql = format!(
             "SELECT \
                 nullif(current_setting('response.status', true), '') AS response_status, \
                 nullif(current_setting('response.headers', true), '') AS response_headers, \
-                1::bigint AS page_total, \
+                pg_catalog.count(_call.*)::bigint AS page_total, \
                 NULL::text AS body \
              FROM ({source}) AS _call"
         );
@@ -1113,6 +1128,8 @@ mod tests {
         assert!(LOOKUP_SQL.contains("pn.nspname = $1"));
         assert!(LOOKUP_SQL.contains("p.proname = $2"));
         assert!(LOOKUP_SQL.contains("bit varying"));
+        assert!(LOOKUP_SQL.contains("COALESCE(p.proallargtypes, p.proargtypes::oid[])"));
+        assert!(LOOKUP_SQL.contains("a.mode IN ('i', 'b', 'v')"));
         assert!(!LOOKUP_SQL.contains("{function}"));
     }
 
@@ -1244,6 +1261,9 @@ mod tests {
         proc.volatility = Volatility::Volatile;
         let built = statement(&proc, &get_invocation(&[])).unwrap();
         assert!(built.sql.contains("NULL::text AS body"));
+        assert!(built
+            .sql
+            .contains("pg_catalog.count(_call.*)::bigint AS page_total"));
         assert!(!built.sql.contains("json_agg"));
         assert!(!read_only("POST", &proc));
         assert!(read_only("GET", &proc));
@@ -1390,6 +1410,9 @@ mod tests {
         assert!(get_arguments("items.order=id").is_err());
         let decoded = get_arguments("q=a%2Bb+c").unwrap();
         assert_eq!(decoded.get("q").unwrap(), &vec!["a+b c".to_string()]);
+        let bare = get_arguments("a&b=1").unwrap();
+        assert!(!bare.contains_key("a"));
+        assert_eq!(bare.get("b").unwrap(), &vec!["1".to_string()]);
     }
 
     #[test]
