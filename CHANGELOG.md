@@ -4,6 +4,19 @@ All notable changes to Megabase are documented in this file.
 The format is produced by [release-please](https://github.com/googleapis/release-please).
 Sections: Features, Bug Fixes, Performance, Conformance/judge, Documentation.
 
+## [0.1.12](https://github.com/Zouhairmaj/megabase/compare/v0.1.11...v0.1.12) (2026-10-10)
+
+
+### Features
+
+* **judge:** compare acls, column defaults and rls policies ([#246](https://github.com/Zouhairmaj/megabase/issues/246)) ([cbeab52](https://github.com/Zouhairmaj/megabase/commit/cbeab525cf59e6f4445773ee1437969f5b2a914c))
+
+
+### Bug Fixes
+
+* **judge:** compare decoded jwt claims in normalisation ([#245](https://github.com/Zouhairmaj/megabase/issues/245)) ([e746bcd](https://github.com/Zouhairmaj/megabase/commit/e746bcdf0f0856977577b389bcaf3e594016991f))
+* **site:** show commit and PR totals on home stats ([#252](https://github.com/Zouhairmaj/megabase/issues/252)) ([5e91e44](https://github.com/Zouhairmaj/megabase/commit/5e91e44d2f47b85a1aaf7ca953d601c1eb40b675))
+
 ## [0.1.11](https://github.com/Zouhairmaj/megabase/compare/v0.1.10...v0.1.11) (2026-10-10)
 
 
