@@ -37,6 +37,25 @@ jobs:
       id-token: write
       actions: read
     steps:
+      # Cargo runs build.rs / proc macros while GH_TOKEN is in the environment.
+      # Refuse fork PRs so only same-repo code (pushed by trusted agents) is built.
+      - name: Refuse fork pull requests
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number || (github.event.issue.pull_request && github.event.issue.number) || '' }}
+        run: |
+          set -euo pipefail
+          if [ -z "$PR_NUMBER" ]; then
+            echo "Not a pull request event; nothing to check."
+            exit 0
+          fi
+          head_repo="$(gh api "repos/$REPO/pulls/$PR_NUMBER" --jq '.head.repo.full_name // ""')"
+          if [ "$head_repo" != "$REPO" ]; then
+            echo "::error::PR #$PR_NUMBER comes from '$head_repo', not $REPO. Refusing to run Claude with cargo on fork code."
+            exit 1
+          fi
+
       - name: Checkout repository
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
