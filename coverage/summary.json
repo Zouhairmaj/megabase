@@ -2,12 +2,12 @@
   "schema": 1,
   "totals": {
     "units": 1024,
-    "implemented": 75,
-    "tested": 56,
+    "implemented": 85,
+    "tested": 58,
     "conformant": 0
   },
   "percent": {
-    "coverage": 7.3,
+    "coverage": 8.3,
     "conformance": 0.0,
     "done": 0.0
   },
@@ -316,8 +316,8 @@
     },
     "rest": {
       "units": 93,
-      "implemented": 10,
-      "tested": 2,
+      "implemented": 20,
+      "tested": 4,
       "conformant": 0,
       "groups": {
         "aggregates": {
@@ -334,8 +334,8 @@
         },
         "filtering": {
           "units": 28,
-          "implemented": 10,
-          "tested": 2,
+          "implemented": 20,
+          "tested": 4,
           "conformant": 0
         },
         "logic": {
@@ -630,6 +630,16 @@
     "rest:filter-operator:fts": "implemented",
     "rest:filter-operator:gt": "tested",
     "rest:filter-operator:gte": "implemented",
-    "rest:filter-operator:ilike": "implemented"
+    "rest:filter-operator:ilike": "implemented",
+    "rest:filter-operator:imatch": "implemented",
+    "rest:filter-operator:in": "tested",
+    "rest:filter-operator:is": "implemented",
+    "rest:filter-operator:isdistinct": "implemented",
+    "rest:filter-operator:like": "implemented",
+    "rest:filter-operator:lt": "tested",
+    "rest:filter-operator:lte": "implemented",
+    "rest:filter-operator:match": "implemented",
+    "rest:filter-operator:neq": "implemented",
+    "rest:filter-operator:not": "implemented"
   }
 }
