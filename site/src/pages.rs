@@ -1,6 +1,7 @@
 //! Page bodies matching the Kite Website frames.
 
 use crate::chrome::Paths;
+use crate::counts::PublicCounts;
 use crate::devlog;
 use crate::html::esc;
 use crate::markdown;
@@ -8,23 +9,23 @@ use crate::metrics::{self, CatalogRow, Metrics, CATALOG};
 use crate::treemap;
 use crate::GITHUB;
 
-pub fn home(paths: &Paths, metrics: &Metrics) -> String {
+pub fn home(paths: &Paths, metrics: &Metrics, counts: &PublicCounts) -> String {
     let treemap = treemap_block(metrics);
-    let components = component_cards(paths, metrics);
-    let faq = home_faq(paths, metrics);
+    let scope = home_scope_cards(metrics);
+    let faq = home_faq();
+    let lede = live_status_lede(metrics);
+    let commits_url = format!("{GITHUB}/commits/main/");
+    let pulls_url = format!("{GITHUB}/pulls?q=is%3Apr");
     format!(
         r#"<main id="main" class="home-main">
 <section class="hero">
   <div class="hero-copy">
-    <p class="kicker hide-mobile">{kicker_desktop}</p>
-    <p class="kicker hide-desktop">{kicker_mobile}</p>
-    <h1 class="display">Supabase,<br />rewritten in Rust.<br /><span class="headline-accent">By agents. In public.</span></h1>
+    <h1 class="display"><span class="hero-line">Supabase,</span><span class="hero-line">rewritten in Rust.</span><span class="headline-accent">By agents. In public.</span></h1>
     <p class="lede hide-mobile">Autonomous AI agents are porting every service Supabase has written into one Rust binary that sits next to PostgreSQL. The goal: any supabase-js app runs on it without changing a line of code. An external judge compares every response with the real Supabase stack.</p>
     <p class="lede hide-desktop">AI agents are porting every Supabase service into one Rust binary next to PostgreSQL, judged response by response against the real stack.</p>
     <div class="actions">
       <a class="btn btn-primary" href="{status}">SEE LIVE STATUS</a>
-      <a class="btn btn-ghost" href="{manifesto}">READ THE MANIFESTO</a>
-      <a class="btn btn-ghost hide-mobile" href="{GITHUB}" rel="noopener noreferrer">GITHUB ↗</a>
+      <a class="btn btn-ghost" href="{github}" rel="noopener noreferrer">GITHUB ↗</a>
     </div>
     <p class="hero-disclaimer">Independent experiment. Not affiliated with or endorsed by Supabase, Inc.</p>
   </div>
@@ -33,28 +34,45 @@ pub fn home(paths: &Paths, metrics: &Metrics) -> String {
   </figure>
 </section>
 
+<section class="home-stats" aria-label="Project totals">
+  <a class="home-stat" href="{status}">
+    <span class="home-stat-label">SUPABASE COVERAGE →</span>
+    <span class="home-stat-value">{coverage}</span>
+  </a>
+  <a class="home-stat" href="{commits_url}" rel="noopener noreferrer">
+    <span class="home-stat-label">TOTAL COMMITS ↗</span>
+    <span class="home-stat-value">{commits}</span>
+  </a>
+  <a class="home-stat" href="{pulls_url}" rel="noopener noreferrer">
+    <span class="home-stat-label">TOTAL PRS ↗</span>
+    <span class="home-stat-value">{pulls}</span>
+  </a>
+</section>
+
 <section class="band home-what">
-  <p class="kicker">01 · WHAT AND WHY</p>
-  <h2 class="section-title">One binary. The same API.<br /><span class="hide-mobile">A precise, verifiable target.</span></h2>
-  <p class="lede hide-mobile">Self-hosting Supabase today means running about a dozen containers written in six languages. Megabase aims for one Rust binary next to standard PostgreSQL, serving /rest/v1, /auth/v1, /storage/v1, /realtime/v1 and /functions/v1 exactly as Supabase does.</p>
-  <div class="triple">
-    <article class="stat-card">
-      <p class="card-kicker">SUPABASE SELF-HOSTED</p>
-      <p class="stat-xl">~12 containers</p>
-      <p>Haskell, Go, Elixir, TypeScript, Rust and Lua.</p>
+  <div class="home-copy">
+    <p class="kicker">01 · WHAT AND WHY</p>
+    <h2 class="section-title"><span class="hide-mobile">One binary. The same API.<br />A precise, verifiable target.</span><span class="hide-desktop">One binary. The same API.</span></h2>
+    <p class="lede hide-mobile">Self-hosting Supabase today means running about a dozen containers written in six languages. Megabase aims for one Rust binary next to standard PostgreSQL, serving /rest/v1, /auth/v1, /storage/v1, /realtime/v1 and /functions/v1 exactly as Supabase does.</p>
+  </div>
+  <div class="compare-row">
+    <article>
+      <p class="compare-label">Supabase self-hosted</p>
+      <p class="compare-value">~12 containers</p>
+      <p class="compare-desc hide-mobile">Haskell, Go, Elixir, TypeScript, Rust and Lua.</p>
     </article>
-    <article class="stat-card is-accent">
-      <p class="card-kicker accent">MEGABASE TARGET</p>
-      <p class="stat-xl">1 binary</p>
-      <p>Rust only, next to the PostgreSQL you already run. Memory target: under 256 MB.</p>
+    <article class="is-accent">
+      <p class="compare-label accent">Megabase target</p>
+      <p class="compare-value">1 binary</p>
+      <p class="compare-desc hide-mobile">Rust only, next to the PostgreSQL you already run. Memory target: under 256 MB.</p>
     </article>
-    <article class="stat-card">
-      <p class="card-kicker">YOUR APP</p>
-      <p class="stat-xl">0 code changes (goal)</p>
-      <p>Point supabase-js at Megabase. Same endpoints, bodies, status codes and errors.</p>
+    <article>
+      <p class="compare-label">Your app</p>
+      <p class="compare-value">0 code changes (goal)</p>
+      <p class="compare-desc hide-mobile">Point supabase-js at Megabase. Same endpoints, bodies, status codes and errors.</p>
     </article>
   </div>
-  <div class="triple hide-mobile">
+  <div class="essay-row hide-mobile">
     <article>
       <h3>Measure what agents can build</h3>
       <p>Not a toy or a demo: a large, multi-language, production-grade system with a precise target.</p>
@@ -71,48 +89,72 @@ pub fn home(paths: &Paths, metrics: &Metrics) -> String {
 </section>
 
 <section class="band home-how">
-  <p class="kicker">02 · HOW IT WORKS</p>
-  <h2 class="section-title">Agents write the code.<br />An external judge grades it.</h2>
-  <ol class="step-row">
-    <li><span class="step-num">01</span><h3>Read pinned upstream source</h3><p>Upstream lives in vendor/, frozen. That is the specification.</p></li>
-    <li><span class="step-num">02</span><h3>Spec one unit</h3><p>Spec first, then Rust. Failures return a structured 501.</p></li>
-    <li><span class="step-num">03</span><h3>Diff against real Supabase</h3><p>Official Supabase runs next to Megabase from the same pins.</p></li>
-    <li><span class="step-num">04</span><h3>Keep or revert, never regress</h3><p>A commit is kept only if total conformance does not fall.</p></li>
-    <li><span class="step-num">05</span><h3>Record in public</h3><p>Coverage, the treemap, the human log.</p></li>
+  <div class="band-head">
+    <div class="home-copy">
+      <p class="kicker">02 · HOW IT WORKS</p>
+      <h2 class="section-title"><span class="hide-mobile">Agents write the code.<br />An external judge grades it.</span><span class="hide-desktop">Agents write. An external judge grades.</span></h2>
+    </div>
+    <a class="text-link hide-mobile" href="{how}">How it works →</a>
+  </div>
+  <ol class="step-row home-steps hide-mobile">
+    <li><p class="step-kicker">01 READ</p><h3>Pinned upstream source</h3><p>Supabase repos are frozen at fixed versions in vendor/. They are the specification.</p></li>
+    <li><p class="step-kicker">02 SPEC</p><h3>One unit at a time</h3><p>A builder agent writes the spec for one route, operator or flow, citing upstream files.</p></li>
+    <li><p class="step-kicker">03 PORT</p><h3>Implement in Rust</h3><p>axum on tokio. Anything unfinished returns a loud 501, never a plausible guess.</p></li>
+    <li class="is-filled"><p class="step-kicker">04 JUDGE</p><h3>Diff against real Supabase</h3><p>Same request to both stacks. Status, headers and bodies must match.</p></li>
+    <li><p class="step-kicker">05 KEEP OR REVERT</p><h3>No regressions</h3><p>A commit stays only if conformance does not drop. A reviewer agent checks for test gaming.</p></li>
   </ol>
-  <p class="hide-mobile"><a class="text-link" href="{how}">How the loop works →</a></p>
+  <ol class="home-how-list hide-desktop">
+    <li><span>01</span> Read pinned upstream source</li>
+    <li><span>02</span> Spec one unit</li>
+    <li><span>03</span> Port it to Rust</li>
+    <li><span>04</span> Diff against real Supabase</li>
+    <li><span>05</span> Keep or revert, never regress</li>
+  </ol>
 </section>
 
-<section class="band home-live" id="status">
-  <div class="band-head hide-mobile">
-    <div>
+<section class="band home-live hide-mobile" id="status">
+  <div class="band-head">
+    <div class="home-copy">
       <p class="kicker">03 · LIVE STATUS</p>
       <h2 class="section-title">Each cell is one unit.<br />Grey until the judge says green.</h2>
+      <p class="lede">{lede}</p>
     </div>
     <a class="text-link" href="{status}">Full status →</a>
   </div>
-  <p class="lede hide-mobile">Nested squarified treemap: component, then feature group, then one whole square per unit. Regenerated at build time from coverage/summary.json and coverage/units.json. The four-state legend matches the README: not started, implemented, tested, conformant.</p>
   {treemap}
 </section>
 
 <section class="band home-levels">
   <div class="band-head">
-    <div>
-      <p class="kicker">04 · ROADMAP</p>
+    <div class="home-copy">
+      <p class="kicker hide-mobile">04 · ROADMAP</p>
+      <p class="kicker hide-desktop">03 · ROADMAP</p>
       <h2 class="section-title hide-mobile">Five public levels.<br />Each one gated by the judge.</h2>
     </div>
-    <a class="text-link" href="{roadmap}">Full roadmap →</a>
+    <a class="text-link hide-mobile" href="{roadmap}">Full roadmap →</a>
   </div>
-  {levels}
-  <p class="note hide-mobile">Each percentage is the conformance required on that level’s own scope before the next level may start, and earlier levels must hold their score. Thresholds come from PROGRESS.md when it exists. Level 5 has no gate yet: it is deferred until a feasibility study.</p>
+  <div class="hide-mobile">{levels}</div>
+  <div class="home-level-list hide-desktop">
+    <div class="is-next"><span>L1 REST + Auth</span><span>≥ 95%</span></div>
+    <div><span>L2 OAuth, Storage</span><span>≥ 90%</span></div>
+    <div><span>L3 Realtime</span><span>≥ 85%</span></div>
+    <div><span>L4 Studio test</span><span>≥ 80%</span></div>
+    <div><span>L5 Studio in Rust</span><span>deferred</span></div>
+  </div>
+  <p class="hide-desktop"><a class="text-link" href="{roadmap}">Full roadmap →</a></p>
+  <p class="note hide-mobile">Each percentage is the conformance required on that level’s own scope before the next level may start, and earlier levels must hold their score. Thresholds come from PROGRESS.md. Level 5 has no gate yet: it is deferred until a feasibility study.</p>
 </section>
 
 <section class="band home-components hide-mobile">
-  <p class="kicker">05 · COMPONENTS</p>
-  <h2 class="section-title">Every service Supabase wrote.<br />Ported to Rust.</h2>
-  <div class="component-grid">{components}</div>
-  <p class="note">Plus the API gateway that replaces Kong (Lua / Nginx). PostgreSQL stays external. Licenses: NOTICE.</p>
-  <p><a class="text-link" href="{components_href}">Component catalog →</a></p>
+  <div class="band-head">
+    <div class="home-copy">
+      <p class="kicker">05 · SCOPE</p>
+      <h2 class="section-title">Every service Supabase wrote.<br />Ported to Rust.</h2>
+    </div>
+    <a class="text-link" href="{components_href}">All components →</a>
+  </div>
+  <div class="scope-grid">{scope}</div>
+  <p class="scope-note">Plus the API gateway that replaces Kong (Lua / Nginx). PostgreSQL and its extensions stay standard and out of scope.</p>
 </section>
 
 <section class="band faq-teaser hide-mobile">
@@ -125,23 +167,158 @@ pub fn home(paths: &Paths, metrics: &Metrics) -> String {
 </section>
 
 <section class="cta-band home-cta">
-  <h2 class="section-title">Watch the map turn green.</h2>
+  <div class="cta-copy">
+    <h2 class="section-title">Watch the map turn green.</h2>
+    <p class="lede hide-mobile">Code, prompts and logs are public. Star the repo or follow the daily devlog.</p>
+  </div>
   <div class="actions">
-    <a class="btn btn-primary" href="{GITHUB}" rel="noopener noreferrer">FOLLOW ON GITHUB ↗</a>
-    <a class="btn btn-ghost hide-mobile" href="{status}">SEE STATUS</a>
+    <a class="btn btn-primary" href="{github}" rel="noopener noreferrer">FOLLOW ON GITHUB ↗</a>
+    <a class="btn btn-ghost hide-mobile" href="{devlog}">READ THE DEVLOG</a>
   </div>
 </section>
 </main>"#,
-        manifesto = paths.page("manifesto"),
         status = paths.page("status"),
+        github = GITHUB,
+        coverage = esc(&metrics.coverage_label()),
+        commits_url = commits_url,
+        commits = esc(&count_label(counts.commits)),
+        pulls_url = pulls_url,
+        pulls = esc(&count_label(counts.pull_requests)),
         how = paths.page("how-it-works"),
+        lede = esc(&lede),
         roadmap = paths.page("roadmap"),
+        levels = home_level_row(metrics),
         components_href = paths.page("components"),
+        scope = scope,
         faq_href = paths.page("faq"),
-        levels = level_cards(metrics, false),
-        kicker_desktop = esc(&hero_kicker_desktop(metrics)),
-        kicker_mobile = esc(&hero_kicker_mobile(metrics)),
+        devlog = paths.page("devlog"),
     )
+}
+
+fn count_label(value: Option<u64>) -> String {
+    let Some(value) = value else {
+        return "—".into();
+    };
+    let Ok(value) = usize::try_from(value) else {
+        return "—".into();
+    };
+    metrics::comma(value)
+}
+
+fn live_status_lede(metrics: &Metrics) -> String {
+    let Some(total) = metrics.total else {
+        return "Units are extracted from the pinned upstream source. Counts arrive with coverage/."
+            .into();
+    };
+    let listed = format!(
+        "{} units (routes, query operators, auth flows, message types, storage endpoints, Studio pages) were extracted from the pinned upstream source.",
+        metrics::comma(total)
+    );
+    match metrics.passing {
+        Some(0) => format!("{listed} Today none of them pass. That is Day 0."),
+        Some(passing) => {
+            let verb = if passing == 1 { "passes" } else { "pass" };
+            format!("{listed} {} {verb} the judge.", metrics::comma(passing))
+        }
+        None => listed,
+    }
+}
+
+struct ScopeCard {
+    id: &'static str,
+    name: &'static str,
+    level: &'static str,
+    upstream: &'static str,
+    path: &'static str,
+}
+
+const SCOPE_CARDS: &[ScopeCard] = &[
+    ScopeCard {
+        id: "rest",
+        name: "REST API",
+        level: "L1",
+        upstream: "PostgREST · Haskell",
+        path: "/rest/v1",
+    },
+    ScopeCard {
+        id: "auth",
+        name: "Auth",
+        level: "L1–L2",
+        upstream: "GoTrue · Go",
+        path: "/auth/v1",
+    },
+    ScopeCard {
+        id: "storage",
+        name: "Storage",
+        level: "L2",
+        upstream: "Storage API · TypeScript",
+        path: "/storage/v1",
+    },
+    ScopeCard {
+        id: "realtime",
+        name: "Realtime",
+        level: "L3",
+        upstream: "Realtime · Elixir",
+        path: "/realtime/v1",
+    },
+    ScopeCard {
+        id: "functions",
+        name: "Edge Functions",
+        level: "L4",
+        upstream: "Edge Runtime · Rust + Deno",
+        path: "/functions/v1",
+    },
+    ScopeCard {
+        id: "pooler",
+        name: "Pooler",
+        level: "L4",
+        upstream: "Supavisor · Elixir",
+        path: "postgres wire",
+    },
+    ScopeCard {
+        id: "meta",
+        name: "Postgres Meta",
+        level: "L4",
+        upstream: "postgres-meta · TypeScript",
+        path: "/pg",
+    },
+    ScopeCard {
+        id: "studio",
+        name: "Studio",
+        level: "L4–L5",
+        upstream: "Studio · TypeScript / Next.js",
+        path: "judge first",
+    },
+];
+
+fn scope_progress(metrics: &Metrics, id: &str) -> String {
+    if !metrics.has_data() {
+        return "—".into();
+    }
+    match metrics.component(id) {
+        Some(block) => format!(
+            "{}/{}",
+            metrics::comma(block.conformant),
+            metrics::comma(block.total())
+        ),
+        None => "0/0".into(),
+    }
+}
+
+fn home_scope_cards(metrics: &Metrics) -> String {
+    let mut out = String::new();
+    for card in SCOPE_CARDS {
+        let progress = scope_progress(metrics, card.id);
+        out.push_str(&format!(
+            r#"<article class="scope-card"><p class="scope-name"><span>{name}</span><span>{level}</span></p><p>{upstream}</p><p>{path} · {progress}</p></article>"#,
+            name = esc(card.name),
+            level = esc(card.level),
+            upstream = esc(card.upstream),
+            path = esc(card.path),
+            progress = esc(&progress),
+        ));
+    }
+    out
 }
 
 fn treemap_block(metrics: &Metrics) -> String {
@@ -305,26 +482,6 @@ fn conformance_metric(metrics: &Metrics, show_conformance: bool) -> String {
     )
 }
 
-fn units_pass_kicker(metrics: &Metrics) -> Option<String> {
-    match metrics.passing {
-        Some(n) if n > 0 => Some(format!(
-            "{} · {} {} PASS",
-            metrics.stage_short.to_ascii_uppercase(),
-            metrics::comma(n),
-            if n == 1 { "UNIT" } else { "UNITS" }
-        )),
-        _ => None,
-    }
-}
-
-fn hero_kicker_desktop(metrics: &Metrics) -> String {
-    units_pass_kicker(metrics).unwrap_or_else(|| "DAY 0 · NOTHING PASSES YET".into())
-}
-
-fn hero_kicker_mobile(metrics: &Metrics) -> String {
-    units_pass_kicker(metrics).unwrap_or_else(|| "DAY 0 · PHASE 0".into())
-}
-
 fn level_scope_counts(metrics: &Metrics, level: u8) -> Option<(usize, usize)> {
     if !metrics.has_data() {
         return None;
@@ -354,7 +511,7 @@ fn level_complete(metrics: &Metrics, spec: &LevelSpec) -> bool {
     }
 }
 
-fn level_progress_label(metrics: &Metrics, spec: &LevelSpec) -> String {
+fn level_progress_text(metrics: &Metrics, spec: &LevelSpec, one_decimal: bool) -> String {
     if spec.stretch {
         return "deferred".into();
     }
@@ -373,12 +530,25 @@ fn level_progress_label(metrics: &Metrics, spec: &LevelSpec) -> String {
             } else {
                 "in progress"
             };
-            format!("{} · {state}", metrics::compact_pct(value))
+            let shown = if one_decimal {
+                format!("{value:.1}%")
+            } else {
+                metrics::compact_pct(value)
+            };
+            format!("{shown} · {state}")
         }
     }
 }
 
 fn level_cards(metrics: &Metrics, detailed: bool) -> String {
+    level_row(metrics, detailed, false)
+}
+
+fn home_level_row(metrics: &Metrics) -> String {
+    level_row(metrics, false, true)
+}
+
+fn level_row(metrics: &Metrics, detailed: bool, one_decimal: bool) -> String {
     let next = LEVELS
         .iter()
         .find(|spec| !spec.stretch && !level_complete(metrics, spec))
@@ -398,7 +568,7 @@ fn level_cards(metrics: &Metrics, detailed: bool) -> String {
         } else {
             spec.kicker.to_string()
         };
-        let progress = level_progress_label(metrics, spec);
+        let progress = level_progress_text(metrics, spec, one_decimal);
         let extra = if detailed {
             String::new()
         } else {
@@ -418,48 +588,23 @@ fn level_cards(metrics: &Metrics, detailed: bool) -> String {
     format!(r#"<div class="level-row">{cards}</div>"#)
 }
 
-fn component_cards(paths: &Paths, metrics: &Metrics) -> String {
-    let mut out = String::new();
-    for row in CATALOG {
-        let tag = metrics::status_tag(metrics.component(row.id));
-        let progress = metrics.component_progress(row.id);
-        out.push_str(&format!(
-            r#"<a class="comp-card" href="{href}">
-  <p class="card-kicker">{name}</p>
-  <p class="comp-path">{path}</p>
-  <p class="muted">{upstream}</p>
-  <p class="comp-meta"><span class="tag">{tag}</span><span>{progress}</span></p>
-</a>"#,
-            href = paths.page("components"),
-            name = esc(row.name),
-            path = esc(row.path),
-            upstream = esc(row.upstream),
-            progress = esc(&progress),
-        ));
-    }
-    out
-}
-
-fn home_faq(paths: &Paths, metrics: &Metrics) -> String {
+fn home_faq() -> String {
     let items = [
         (
             "Can I use it in production?",
-            "No. Today every endpoint returns 501 MEGABASE_NOT_IMPLEMENTED. Watch the levels: Level 1 is the first point where real apps should run.".into(),
+            "No. Today every endpoint returns 501 MEGABASE_NOT_IMPLEMENTED. Watch the levels: Level 1 is the first point where real apps should run.",
         ),
         (
             "Is this affiliated with Supabase?",
-            "No. It is an independent experiment. “Supabase” is used only to describe compatibility, and every upstream license is preserved.".into(),
+            "No. It is an independent experiment. “Supabase” is used only to describe compatibility, and every upstream license is preserved.",
         ),
         (
             "Who decides what “correct” means?",
-            "The real Supabase stack, run side by side from pinned versions. Agents can’t change what the judge compares against.".into(),
+            "The real Supabase stack, run side by side from pinned versions. Agents can’t change what the judge compares against.",
         ),
         (
             "Do humans write any code?",
-            format!(
-                "Humans wrote the manifesto, GOAL.md and the initial setup. Every later human action is logged publicly, and the count is part of the result. Interventions so far: {}.",
-                metrics.human_interventions_label()
-            ),
+            "Humans wrote the manifesto, GOAL.md and the initial setup. Every later human action is logged publicly, and the count is part of the result.",
         ),
     ];
     let mut out = String::new();
@@ -467,10 +612,9 @@ fn home_faq(paths: &Paths, metrics: &Metrics) -> String {
         out.push_str(&format!(
             r#"<div class="faq-row"><h3>{q}</h3><p>{a}</p></div>"#,
             q = esc(q),
-            a = esc(&a),
+            a = esc(a),
         ));
     }
-    let _ = paths;
     out
 }
 
@@ -935,13 +1079,20 @@ mod tests {
         metrics
     }
 
+    fn home_page(metrics: &Metrics) -> String {
+        home(&Paths::home(false), metrics, &PublicCounts::unavailable())
+    }
+
     #[test]
     fn home_hero_live_status_is_the_primary_cta() {
-        let html = home(&Paths::home(false), &Metrics::placeholder());
+        let html = home_page(&Metrics::placeholder());
         let hero = html
             .split(r#"<section class="hero">"#)
             .nth(1)
-            .expect("hero");
+            .expect("hero")
+            .split("<section")
+            .next()
+            .expect("hero end");
         let actions = hero
             .split(r#"<div class="actions">"#)
             .nth(1)
@@ -952,28 +1103,33 @@ mod tests {
             "live status is the filled primary control: {actions}"
         );
         assert!(
-            actions
-                .contains(r#"<a class="btn btn-ghost" href="manifesto/">READ THE MANIFESTO</a>"#),
-            "the manifesto is the outline control: {actions}"
+            !actions.contains("READ THE MANIFESTO"),
+            "the manifesto button is not on the hero: {actions}"
         );
+        assert!(!hero.contains("kicker"), "the hero has no eyebrow");
         assert!(
             actions.contains(
-                r#"<a class="btn btn-ghost hide-mobile" href="https://github.com/Zouhairmaj/megabase" rel="noopener noreferrer">GITHUB ↗</a>"#
+                r#"<a class="btn btn-ghost" href="https://github.com/Zouhairmaj/megabase" rel="noopener noreferrer">GITHUB ↗</a>"#
             ),
-            "the github control stays an outline link, hidden on small screens: {actions}"
+            "github is the outline control on every width: {actions}"
         );
         let status_at = actions.find("SEE LIVE STATUS").expect("status label");
-        let manifesto_at = actions.find("READ THE MANIFESTO").expect("manifesto label");
         let github_at = actions.find("GITHUB ↗").expect("github label");
         assert!(
-            status_at < manifesto_at && manifesto_at < github_at,
-            "hero order is live status, manifesto, github"
+            status_at < github_at,
+            "hero order is live status, then github"
         );
+        assert!(html.contains("SUPABASE COVERAGE →"));
+        assert!(html.contains("TOTAL COMMITS ↗"));
+        assert!(html.contains("TOTAL PRS ↗"));
+        assert!(html.contains(r#"rel="noopener noreferrer""#));
         let css = include_str!("../static/styles.css");
         assert!(css.contains("--accent: #00d892;"));
         assert!(css.contains("--bg: #0b0e12;"));
         assert!(css.contains("--text: #f7f7f7;"));
         assert!(css.contains("--border: #303235;"));
+        assert!(css.contains(".page-home .home-stat:hover"));
+        assert!(css.contains(".page-home .home-stat:focus-visible"));
         let primary = css
             .split(".btn-primary {")
             .nth(1)
@@ -997,21 +1153,25 @@ mod tests {
     }
 
     #[test]
-    fn hero_claim_follows_live_passing_count() {
-        let live = live_progress();
-        assert_eq!(hero_kicker_desktop(&live), "PHASE 0 · 2 UNITS PASS");
-        assert_eq!(hero_kicker_mobile(&live), "PHASE 0 · 2 UNITS PASS");
-        assert!(!hero_kicker_desktop(&live).contains("BUILT BY AGENTS"));
-        assert!(!hero_kicker_mobile(&live).contains("BUILT BY AGENTS"));
-        assert!(!hero_kicker_desktop(&live).contains("NOTHING PASSES YET"));
-        assert_eq!(
-            hero_kicker_desktop(&Metrics::placeholder()),
-            "DAY 0 · NOTHING PASSES YET"
-        );
-        assert_eq!(
-            hero_kicker_mobile(&Metrics::placeholder()),
-            "DAY 0 · PHASE 0"
-        );
+    fn hero_has_no_eyebrow_and_stats_do_not_invent_counts() {
+        let mut live = live_progress();
+        live.coverage = Some(11.4);
+        let html = home_page(&live);
+        assert!(!html.contains("NOTHING PASSES YET"));
+        assert!(!html.contains("BUILT BY AGENTS"));
+        assert!(!html.contains("READ THE MANIFESTO"));
+        assert!(html.contains(">11.4%</span>"));
+        let placeholder = home_page(&Metrics::placeholder());
+        assert!(placeholder.contains(r#"<span class="home-stat-value">—</span>"#));
+        assert!(!placeholder.contains(">135<"));
+        assert!(!placeholder.contains(">106<"));
+        assert!(html.contains("How it works →"));
+        assert!(html.contains("01 READ"));
+        assert!(html.contains("04 JUDGE"));
+        assert!(!html.contains("How the loop works"));
+        assert!(html.contains("2 pass the judge."));
+        assert!(html.contains("66.7% · in progress"));
+        assert!(html.contains("0.0% · not started"));
     }
 
     #[test]
@@ -1046,7 +1206,7 @@ mod tests {
             strip_on.contains(r#"<span class="muted">Conformance</span><strong>40.0%</strong>"#)
         );
 
-        let home = home(&Paths::home(false), &live);
+        let home = home_page(&live);
         let status_html = status(&Paths::nested("status", false), &live);
         assert!(home.contains(r#"data-db-dither"#));
         assert!(!home.contains("<dt>Coverage</dt>"));
@@ -1094,14 +1254,20 @@ mod tests {
     fn roadmap_progress_is_per_level_scope() {
         let live = live_progress();
         assert_eq!(
-            level_progress_label(&live, &LEVELS[0]),
+            level_progress_text(&live, &LEVELS[0], false),
             "66.7% · in progress"
         );
-        assert_eq!(level_progress_label(&live, &LEVELS[1]), "0% · not started");
-        assert_eq!(level_progress_label(&live, &LEVELS[2]), "0% · not started");
-        assert_eq!(level_progress_label(&live, &LEVELS[4]), "deferred");
+        assert_eq!(
+            level_progress_text(&live, &LEVELS[1], false),
+            "0% · not started"
+        );
+        assert_eq!(
+            level_progress_text(&live, &LEVELS[2], false),
+            "0% · not started"
+        );
+        assert_eq!(level_progress_text(&live, &LEVELS[4], false), "deferred");
         assert_ne!(
-            level_progress_label(&live, &LEVELS[0]),
+            level_progress_text(&live, &LEVELS[0], false),
             format!("{} · not started", live.conformance_label())
         );
         let html = level_cards(&live, false);
@@ -1164,8 +1330,10 @@ mod tests {
         let faq = faq(&Paths::nested("faq", false), &metrics);
         assert!(!faq.to_ascii_lowercase().contains("cost"));
         assert!(!faq.to_ascii_lowercase().contains("tokens and money"));
-        let home = home(&Paths::home(false), &metrics);
-        assert!(home.contains("the human log."));
+        let home = home_page(&metrics);
+        assert!(home.contains("the count is part of the result."));
+        assert!(!home.contains("the human log."));
+        assert!(!home.contains("Interventions so far"));
         assert!(!home.to_ascii_lowercase().contains("spend"));
         assert!(!home.contains("<picture"));
         assert!(!home.contains("coverage/treemap.svg"));
@@ -1179,7 +1347,7 @@ mod tests {
             .parent()
             .expect("repo root");
         let metrics = crate::metrics::load(root);
-        let home = home(&Paths::home(false), &metrics);
+        let home = home_page(&metrics);
         let status = status(&Paths::nested("status", false), &metrics);
         assert!(home.contains(r#"<figure class="hero-art" aria-hidden="true">"#));
         assert!(home.contains(

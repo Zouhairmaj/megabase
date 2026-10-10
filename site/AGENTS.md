@@ -35,6 +35,13 @@ Extends the root `AGENTS.md`; it does not relax it.
   writes the JSON and those PNGs to `_site/coverage/` (never treemap
   SVGs). `pages-badges.yml` uses the `pages` concurrency group.
   Neither workflow pushes to `main`.
+- The home stats band shows build-time totals. Commits need a full-depth
+  checkout (`git rev-list --count HEAD`); pull requests need `GITHUB_TOKEN`
+  in the generator's environment (GitHub search `total_count`, sent to
+  `curl` on stdin). Without either, or when GitHub reports
+  `incomplete_results`, the cell renders an em dash. Enabling both in
+  `pages.yml` / `pages-badges.yml` (`fetch-depth: 0`, `GITHUB_TOKEN`) is a
+  `review/*` change.
 - Root design gate: the PR links the approved Kite frame and its committee
   review.
 - Treemaps are generated in Rust (`src/treemap.rs`) from
