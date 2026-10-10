@@ -21,7 +21,8 @@ One Cargo workspace, one final binary: `megabase`. One crate per Supabase-author
 3. Spec the unit from `vendor/` if the spec file is missing.
 4. Implement in Rust.
 5. Run the judge (`just judge`). Mutating cases also compare database
-   side-effects; judge harness changes stay on `review/*`.
+   side-effects; judge harness changes stay on `review/*`. The held-out
+   suite (`just judge-hidden`) is weekly and is not part of this loop.
 6. Keep the commit only if total conformance does not fall.
 7. Record: PR, coverage, and a new `docs/decisions/NNNN-slug.md` when the
    decision outlives one issue. `PROGRESS.md` stays current state only.

@@ -17,7 +17,8 @@ judge/
   compose.override.yml   overlay on vendor/supabase/docker/docker-compose.yml
   fixtures/schema.sql    extra schema loaded into the reference database
   cases/*.toml           visible cases (unit ids from coverage/units.json)
-  harness/               megabase-judge (Rust, ureq)
+  harness/               megabase-judge (Rust, ureq), including the held-out suite
+                         (no case files; see below)
   NORMALIZATION.md       rules applied to both responses
 ```
 
@@ -139,6 +140,77 @@ dropped the object (`auth.sso_sessions`): both databases must lack it,
 or the case fails. A missing fixture snapshot table (`auth.users`,
 `public.todos`) on the reference stack still aborts the run.
 
+## Held-out suite
+
+Visible cases in `judge/cases/` are the regression suite. A second suite
+runs weekly so an implementation cannot settle on those files alone.
+Decision: [0029](../docs/decisions/0029-judge-hidden-suite.md).
+
+The grammar that expands a seed is public (open design). The seed is not,
+and neither are any human-authored cases. Instances are built in memory
+on the runner and are not written to the summary, the artifact, or the
+process log.
+
+Two inputs, both GitHub Actions **environment** secrets on `judge-hidden`
+(deployment branch: `main` only). They are not repository secrets: a
+repository secret is readable by `workflow_dispatch` on any branch.
+
+| Secret | Role |
+|---|---|
+| `MEGABASE_JUDGE_HIDDEN_SEED` | At least 32 bytes. HKDF-SHA256 expands it into the grammar stream and into the seal keys. |
+| `MEGABASE_JUDGE_HIDDEN_CASES` | Optional. Standard base64 of a ChaCha20 ciphertext plus an HMAC-SHA256 tag. Plaintext is a normal case file. |
+
+Create the seed locally and paste it into the environment secret. Do not
+commit it:
+
+```bash
+openssl rand -base64 48
+```
+
+Optional cases use the same case schema as `judge/cases/`. Seal them with
+the seed in the environment, then delete the plaintext. The command
+prints ciphertext only:
+
+```bash
+export MEGABASE_JUDGE_HIDDEN_SEED='…'
+cargo run --locked -p megabase-judge -- hidden-seal --in private.toml
+```
+
+Put that stdout into `MEGABASE_JUDGE_HIDDEN_CASES`. To read a blob back
+on a trusted machine:
+
+```bash
+MEGABASE_JUDGE_HIDDEN_ALLOW_OPEN=1 \
+  cargo run --locked -p megabase-judge -- hidden-open --in blob.txt --out private.toml
+```
+
+`hidden-open` refuses to run without `MEGABASE_JUDGE_HIDDEN_ALLOW_OPEN=1`
+and refuses stdout. CI does not set the variable and does not call
+`hidden-open` or `hidden-seal`.
+
+Run the suite when both stacks are up (`just judge-up`, or the weekly
+workflow):
+
+```bash
+just judge-hidden
+```
+
+That reads the seed from the environment, sends the same requests to the
+reference stack and to Megabase, and prints a count table. It exits
+non-zero when any case fails. It does not write `coverage/judge-results.json`
+and does not change the conformance badge. Read filters in the grammar
+are limited to fixture ids `1`, `2`, and `3`, so rows left by an earlier
+run do not make the two databases disagree.
+
+The workflow is `.github/workflows/judge-hidden.yml` (Mondays 06:00 UTC,
+and `workflow_dispatch` on `main` only). The seed and the sealed blob
+are set on the seed check and the hidden run only, so the Megabase
+process and third-party actions do not inherit them. The job's only
+artifact is `judge-hidden-summary`, a JSON object with `total`, `passed`, `failed`,
+`generated`, and `stored`. Server logs are discarded. Do not add this
+workflow to required pull-request checks: it does not run on pull
+requests, and it fails closed until the seed exists.
+
 Studio browser sessions (`judge/studio/`, a Rust harness such as
 fantoccini or chromiumoxide driving Chromium against official Studio
 twice) are **planned**: they land with Level 4, on a `review/*` branch,
@@ -149,9 +221,9 @@ and are the Studio test in GOAL.md section 9. The runner is Rust-only.
 Approved by the agent coordinator with proposal 0001. Built incrementally;
 none of these weaken existing cases.
 
-**Hidden tests.** A second, private suite the agents cannot read. Run
-weekly; only pass/fail counts are published. Stops overfitting to the
-visible TOML.
+**Hidden tests.** Built. Concrete cases are not in git. The weekly
+**Hidden judge** workflow publishes pass/fail counts only. See
+[Held-out suite](#held-out-suite).
 
 **Database side-effects.** Built for Level 1: `auth.users` and
 `public.todos` after mutating cases, plus `[[case.db]]` catalog checks.

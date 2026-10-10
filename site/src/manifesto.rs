@@ -34,12 +34,7 @@ pub fn render(md: &str, metrics: &Metrics) -> String {
     for section in sections {
         let title = section.title;
         let level = section.level;
-        if level == 0
-            || matches!(
-                title.to_ascii_lowercase().as_str(),
-                "megabase" | "status" | "cost"
-            )
-        {
+        if level == 0 || matches!(title.to_ascii_lowercase().as_str(), "megabase" | "status") {
             continue;
         }
         if level == 1 {
@@ -196,8 +191,7 @@ fn render_blocks(lines: &[String], metrics: &Metrics) -> String {
             }
             let lis: String = items
                 .iter()
-                .filter_map(|item| site_copy(item))
-                .map(|item| format!("<li>{}</li>", inline(&item)))
+                .map(|item| format!("<li>{}</li>", inline(item)))
                 .collect();
             if !lis.is_empty() {
                 blocks.push(format!("<ol>{lis}</ol>"));
@@ -212,8 +206,7 @@ fn render_blocks(lines: &[String], metrics: &Metrics) -> String {
             }
             let lis: String = items
                 .iter()
-                .filter_map(|item| site_copy(item))
-                .map(|item| format!("<li>{}</li>", inline(&item)))
+                .map(|item| format!("<li>{}</li>", inline(item)))
                 .collect();
             if !lis.is_empty() {
                 blocks.push(format!("<ul>{lis}</ul>"));
@@ -236,9 +229,7 @@ fn render_blocks(lines: &[String], metrics: &Metrics) -> String {
             para.push(nxt.to_string());
             i += 1;
         }
-        let Some(text) = site_copy(&para.join(" ")) else {
-            continue;
-        };
+        let text = para.join(" ");
         if text == PULL_QUOTE {
             blocks.push(format!(
                 r#"<blockquote class="pullquote">{}</blockquote>"#,
@@ -267,29 +258,6 @@ fn strip_number(s: &str) -> String {
 
 fn strip_bullet(s: &str) -> String {
     s.trim_start_matches(['-', '*']).trim().to_string()
-}
-
-fn site_copy(text: &str) -> Option<String> {
-    if is_cost_only_item(text) {
-        return None;
-    }
-    Some(scrub_cost_clauses(text))
-}
-
-fn is_cost_only_item(text: &str) -> bool {
-    let lower = text.trim().to_ascii_lowercase();
-    let label = lower.trim_start_matches('*').trim_start();
-    label.starts_with("cost:")
-        || label.starts_with("spend:")
-        || label.starts_with("budget:")
-        || lower.starts_with("how much does it cost")
-}
-
-fn scrub_cost_clauses(text: &str) -> String {
-    text.replace(
-        "the loop, the logs, the token spend and the cost, in real time",
-        "the loop and the logs, in real time",
-    )
 }
 
 fn parse_table(rows: &[String]) -> Vec<Vec<String>> {
@@ -452,30 +420,44 @@ mod tests {
     use crate::metrics::Metrics;
 
     #[test]
-    fn public_rule_and_progress_list_omit_cost_copy() {
-        let md = "\
+    fn manifesto_prose_matches_the_source() {
+        let sentence = "the loop and the logs, in real time";
+        let md = format!(
+            "\
 ## Rules of the experiment
 
-7. **Everything is public.** The code, the agent prompts, the loop, the logs, the token spend and the cost, in real time.
+7. **Everything is public.** The code, the agent prompts, {sentence}.
 
 ## How progress is measured
 
 - **Coverage:** the share of units.
-- **Cost:** tokens and money spent, published continuously.
 - **Treemaps:** one square per unit.
-
-## Cost
-
-Tokens and money spent, published continuously.
-";
-        let html = render(md, &Metrics::placeholder());
-        let lower = html.to_ascii_lowercase();
-        assert!(html.contains("the loop and the logs, in real time"));
+"
+        );
+        let html = render(&md, &Metrics::placeholder());
+        assert!(html.contains(sentence));
+        assert!(html.contains("<strong>Everything is public.</strong>"));
         assert!(html.contains("Coverage"));
         assert!(html.contains("Treemaps"));
-        assert!(!lower.contains("cost"));
-        assert!(!lower.contains("spend"));
-        assert!(!lower.contains("money"));
-        assert!(!html.contains("id=\"cost\""));
+        assert!(!html.to_ascii_lowercase().contains("token spend"));
+    }
+
+    #[test]
+    fn renderer_does_not_rewrite_source_sentences() {
+        let clause = "the loop, the logs, the token spend and the cost, in real time";
+        let md = format!(
+            "\
+## Rules of the experiment
+
+7. **Everything is public.** The code, the agent prompts, {clause}.
+
+## How progress is measured
+
+- **Cost:** tokens and money spent, published continuously.
+"
+        );
+        let html = render(&md, &Metrics::placeholder());
+        assert!(html.contains(clause));
+        assert!(html.contains("tokens and money spent, published continuously"));
     }
 }
