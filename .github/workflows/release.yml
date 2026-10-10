@@ -46,12 +46,12 @@ jobs:
       # release-please failures; skipping them keeps the log clean. The
       # job still fails on real errors (config, permissions, API).
       #
-      # RELEASE_PLEASE_TOKEN is preferred when its tree probe succeeds:
-      # a user or GitHub App push starts workflows; GITHUB_TOKEN does not.
-      # The lockfile job uses this step's source output as token_source
-      # and dispatches required checks when the push does not use the
-      # secret (see sync-lockfile). Required secret permissions are
-      # in PROGRESS.md (Human-only actions).
+      # RELEASE_PLEASE_CLASSIC_TOKEN is preferred (classic PAT, repo and
+      # workflow). A push with that credential starts workflows.
+      # If it is absent, the probe tries RELEASE_PLEASE_TOKEN, then
+      # GITHUB_TOKEN. GITHUB_TOKEN does not start push or pull_request
+      # workflows. The lockfile job uses this step's source output
+      # (classic, release, or github) as token_source.
       #
       # The probe POSTs /git/trees with an unreferenced tree (a "probe"
       # blob on .release-please-manifest.json, not attached to a commit
@@ -63,6 +63,7 @@ jobs:
       - name: Choose a token that can create a git tree
         id: tree-token
         env:
+          CLASSIC_TOKEN: ${{ secrets.RELEASE_PLEASE_CLASSIC_TOKEN }}
           RELEASE_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           FALLBACK_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -110,31 +111,40 @@ jobs:
               *) return 1 ;;
             esac
           }
-          if [ -n "${RELEASE_TOKEN}" ] && can_create_tree "${RELEASE_TOKEN}"; then
-            echo "source=release" >> "$GITHUB_OUTPUT"
-            echo "RELEASE_PLEASE_TOKEN can create a git tree."
-            exit 0
-          fi
-          if [ -n "${RELEASE_TOKEN}" ]; then
+          # Absent means unset or empty. A present token that is denied
+          # (HTTP 403 or 404, not a rate limit) falls through. Any other
+          # probe failure is retried by failing the job.
+          try_token() {
+            local name="$1" token="$2" source_name="$3"
+            if [ -z "${token}" ]; then
+              echo "${name} is absent."
+              return 1
+            fi
+            if can_create_tree "${token}"; then
+              echo "source=${source_name}" >> "$GITHUB_OUTPUT"
+              echo "${name} can create a git tree."
+              return 0
+            fi
             if ! auth_denial; then
-              echo "::error::RELEASE_PLEASE_TOKEN tree probe failed with HTTP ${last_http:-unknown}. This job falls back only for HTTP 403 or 404 that is not a rate limit, so this response is left to retry. GitHub response: ${last_probe}. Permissions: PROGRESS.md Human-only actions."
+              echo "::error::${name} tree probe failed with HTTP ${last_http:-unknown}. This job falls back only for HTTP 403 or 404 that is not a rate limit, so this response is left to retry. GitHub response: ${last_probe}."
               exit 1
             fi
-            echo "::warning::RELEASE_PLEASE_TOKEN cannot create a git tree (HTTP ${last_http}; release-please would report Error adding to tree: ${GITHUB_SHA}). Falling back to GITHUB_TOKEN for this job. If this secret is megabase-agent's fine-grained PAT, GitHub does not allow it to write a public repository owned by another personal account, even for a collaborator. Replace it with a classic PAT (scopes repo and workflow). Pending: PROGRESS.md Human-only actions and HUMAN_LOG.md. GitHub response: ${last_probe}"
-          fi
-          if can_create_tree "${FALLBACK_TOKEN}"; then
-            echo "source=github" >> "$GITHUB_OUTPUT"
-            echo "GITHUB_TOKEN can create a git tree."
+            echo "::warning::${name} cannot create a git tree (HTTP ${last_http}; release-please would report Error adding to tree: ${GITHUB_SHA}). Trying the next credential. GitHub response: ${last_probe}"
+            return 1
+          }
+          if try_token "RELEASE_PLEASE_CLASSIC_TOKEN" "${CLASSIC_TOKEN}" "classic" \
+            || try_token "RELEASE_PLEASE_TOKEN" "${RELEASE_TOKEN}" "release" \
+            || try_token "GITHUB_TOKEN" "${FALLBACK_TOKEN}" "github"; then
             exit 0
           fi
-          echo "::error::GITHUB_TOKEN cannot create a git tree on ${GITHUB_SHA} (HTTP ${last_http:-unknown}). The release-please job needs permissions contents: write. GitHub response: ${last_probe}. Permissions: PROGRESS.md Human-only actions."
+          echo "::error::No token can create a git tree on ${GITHUB_SHA} (HTTP ${last_http:-unknown}). Tried RELEASE_PLEASE_CLASSIC_TOKEN, RELEASE_PLEASE_TOKEN, and GITHUB_TOKEN. The release-please job needs permissions contents: write. GitHub response: ${last_probe}."
           exit 1
       - uses: googleapis/release-please-action@5c625bfb5d1ff62eadeeb3772007f7f66fdcf071 # v4.4.0
         id: release
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
-          token: ${{ steps.tree-token.outputs.source == 'release' && secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
+          token: ${{ steps.tree-token.outputs.source == 'classic' && secrets.RELEASE_PLEASE_CLASSIC_TOKEN || steps.tree-token.outputs.source == 'release' && secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
 
   sync-lockfile:
     name: Sync Cargo.lock
@@ -147,29 +157,35 @@ jobs:
       checks: read
       pull-requests: read
     steps:
-      # Same credential the tree probe selected. RELEASE_PLEASE_TOKEN
-      # authenticates as megabase-agent. A fine-grained PAT from that
-      # account cannot write this repository (owned by another user),
-      # so runs 38007606007 and 38008795223 got HTTP 403
-      # "Permission to Zouhairmaj/megabase.git denied to megabase-agent".
-      # Do not keep that identity. GITHUB_TOKEN on this job has
-      # contents: write. It does not start push workflows, so the
-      # confirm step dispatches checks unless the push used a release
-      # token that GitHub actually accepted.
+      # Same credential the tree probe selected.
+      # RELEASE_PLEASE_CLASSIC_TOKEN is a classic PAT (repo and workflow);
+      # its push to the release branch starts pull_request workflows.
+      # RELEASE_PLEASE_TOKEN is the previous fine-grained PAT. The probe
+      # uses it when the classic secret is absent, or when a present
+      # classic token gets HTTP 403 or 404 that is not a rate limit.
+      # GITHUB_TOKEN has contents: write and does not start those workflows.
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
           persist-credentials: true
-          token: ${{ needs.release-please.outputs.token_source == 'release' && secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
+          token: ${{ needs.release-please.outputs.token_source == 'classic' && secrets.RELEASE_PLEASE_CLASSIC_TOKEN || needs.release-please.outputs.token_source == 'release' && secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
       - name: Checkout the release-please branch
         id: branch
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
           set -euo pipefail
           git fetch origin '+refs/heads/release-please--branches--*:refs/remotes/origin/release-please--branches--*'
           mapfile -t BRANCHES < <(git for-each-ref --format='%(refname:short)' 'refs/remotes/origin/release-please--branches--*' | sed 's#^origin/##')
           if [ "${#BRANCHES[@]}" -eq 0 ]; then
-            echo "exists=false" >> "$GITHUB_OUTPUT"
-            echo "No release-please branch on origin."
+            # The release pull request is already merged and its branch is
+            # gone. The release commit on the default branch bumped
+            # Cargo.toml and left Cargo.lock behind (0.1.5). Sync that
+            # branch and push the lockfile commit there.
+            echo "No release-please branch on origin. Syncing Cargo.lock on ${DEFAULT_BRANCH}."
+            git checkout -B "${DEFAULT_BRANCH}" "origin/${DEFAULT_BRANCH}"
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "name=${DEFAULT_BRANCH}" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           BRANCH="${BRANCHES[0]}"
@@ -282,7 +298,7 @@ jobs:
             fi
             echo "Push denied for the checkout token; retrying with GITHUB_TOKEN (contents: write)."
             if printf '%s\n' "$push_out" | grep -q 'denied to megabase-agent'; then
-              echo "::error::RELEASE_PLEASE_TOKEN authenticated as megabase-agent and git push was denied (HTTP 403). That secret is a fine-grained PAT. Fine-grained PATs cannot write a public repository owned by another personal account, even for a collaborator (https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens). Replace it with a classic PAT that can write ${GITHUB_REPOSITORY}, scopes repo and workflow. Granting Contents write on the fine-grained token does not remove this limit. Pending: PROGRESS.md Human-only actions and HUMAN_LOG.md. Retrying with GITHUB_TOKEN (contents: write); that push does not start workflows."
+              echo "::error::The checkout token authenticated as megabase-agent and git push was denied (HTTP 403). A fine-grained PAT cannot write a public repository owned by another personal account. RELEASE_PLEASE_CLASSIC_TOKEN is the classic PAT (repo and workflow) this job prefers. Retrying with GITHUB_TOKEN (contents: write); that push does not start workflows."
             fi
             # actions/checkout stores AUTHORIZATION in
             # http.https://github.com/.extraheader. Replacing origin does
@@ -292,7 +308,7 @@ jobs:
             git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
             git push origin "HEAD:refs/heads/${BRANCH}"
             pushed_with="github"
-          elif [ "$pushed_with" != "release" ]; then
+          elif [ "$pushed_with" != "release" ] && [ "$pushed_with" != "classic" ]; then
             pushed_with="github"
           fi
           echo "pushed=true" >> "$GITHUB_OUTPUT"
@@ -355,15 +371,21 @@ jobs:
           # that ref's workflow files lack workflow_dispatch, fall back to
           # Lockfile required checks on the default branch, which reports
           # the same check names onto this SHA via the Checks API.
-          # Dispatch whenever checks are missing. A release-token push
-          # starts push workflows only on the default branch: ci.yml,
-          # bencher.yml, and judge.yml listen for push on main. The
-          # lockfile commit is on release-please--branches--*, so skip
-          # dispatch only when that push used the release token and
-          # BRANCH is the default branch. pushed_with is github when
-          # the probe fell back or a 403 retry used GITHUB_TOKEN
-          # (megabase-agent). Also dispatch when this step did not push.
-          if [ "${PUSHED_WITH:-${TOKEN_SOURCE}}" != "release" ] || [ "${PUSHED:-false}" != "true" ] || [ "${BRANCH}" != "${DEFAULT_BRANCH}" ]; then
+          # Dispatch whenever checks are missing. A classic or release
+          # token push starts pull_request workflows on the release
+          # branch, and push workflows on the default branch. ci.yml,
+          # bencher.yml, and judge.yml listen for push only on main, so
+          # skip dispatch only when that push used classic or release
+          # and BRANCH is the default branch. BRANCH is the default
+          # branch when the release-please branch is already gone.
+          # pushed_with is github when the probe fell back or a 403
+          # retry used GITHUB_TOKEN. Also dispatch when this step did
+          # not push.
+          user_token=false
+          case "${PUSHED_WITH:-${TOKEN_SOURCE}}" in
+            classic|release) user_token=true ;;
+          esac
+          if [ "${user_token}" != "true" ] || [ "${PUSHED:-false}" != "true" ] || [ "${BRANCH}" != "${DEFAULT_BRANCH}" ]; then
             echo "Required checks missing on ${SHA}; dispatching (pushed_with=${PUSHED_WITH:-unset} token_source=${TOKEN_SOURCE:-unset} pushed=${PUSHED:-false} branch=${BRANCH} default=${DEFAULT_BRANCH})"
             if gh workflow run ci.yml --repo "${GITHUB_REPOSITORY}" --ref "${BRANCH}" \
                && gh workflow run bencher.yml --repo "${GITHUB_REPOSITORY}" --ref "${BRANCH}" \
@@ -386,7 +408,7 @@ jobs:
             fi
             sleep "${SLEEP_SECS}"
           done
-          echo "::error::Required checks did not start for ${SHA} (need Build, Codecov, Bencher, Protected paths, and Judge or a Judge (…) matrix job). A GITHUB_TOKEN push does not trigger push/pull_request workflows. The job dispatches CI/Bencher/Judge or Lockfile required checks; if that also failed, set RELEASE_PLEASE_TOKEN to a classic PAT (repo and workflow scopes) as described under Human-only actions in PROGRESS.md. A fine-grained PAT cannot write this public user-owned repository."
+          echo "::error::Required checks did not start for ${SHA} (need Build, Codecov, Bencher, Protected paths, and Judge or a Judge (…) matrix job). A GITHUB_TOKEN push does not trigger push/pull_request workflows. The job prefers RELEASE_PLEASE_CLASSIC_TOKEN so the release-branch push starts those workflows, and dispatches CI/Bencher/Judge or Lockfile required checks when that push did not."
           exit 1
 
   annotate-release:

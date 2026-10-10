@@ -15,19 +15,9 @@ Each entry should include:
 ## Pending
 
 - **Date**: 2026-10-09
-- **Action**: (pending) Create repository secret `RELEASE_PLEASE_TOKEN`. Settings → Secrets and variables → Actions → New repository secret. Name: `RELEASE_PLEASE_TOKEN`. Value: a fine-grained PAT **or** GitHub App installation token for `Zouhairmaj/megabase` with `contents: write` and `pull-requests: write`. The token must be a user/app credential whose **pushes start GitHub Actions** (the default `GITHUB_TOKEN` does not). Classic PAT equivalent: `repo` scope. After saving, re-run the **Release** workflow on `main` (Actions → Release → Run workflow) so lockfile commits on `release-please--branches--*` pick up the token.
-- **Reason**: Preferred path so release-please and `cargo update -w` lockfile commits trigger required checks natively. Release.yml now `workflow_dispatch`es CI when the secret is unset (GITHUB_TOKEN can start `workflow_dispatch`), but pull_request-only checks (for example Conventional Commits title) and a release branch that does not yet contain those `workflow_dispatch` triggers still need this token. Run 37980727582 failed on Sync Cargo.lock waiting for Build, Codecov, Bencher, Protected paths, and Judge on SHA `b8c1e454…`.
-- **Files affected**: GitHub Actions repository secrets (not in git)
-
-- **Date**: 2026-10-09
 - **Action**: (pending) After the Release workflow publishes `ghcr.io/zouhairmaj/megabase`, set that package to public if GitHub created it private. Then dispatch **Release** from tag `v0.1.0` (Use workflow from = `v0.1.0`, input tag `v0.1.0`) so the first GitHub Release gains signed binaries (it shipped without assets).
 - **Reason**: OpenSSF Scorecard Signed-Releases inspects assets on the last five GitHub Releases. Packaging also wants a public package. `attest-build-provenance` records the run SHA, so the backfill must run on that tag. Agents cannot change package visibility or start that dispatch from this environment.
 - **Files affected**: GitHub Packages and Actions (not in git)
-
-- **Date**: 2026-10-10
-- **Action**: (pending) Replace repository secret `RELEASE_PLEASE_TOKEN`. The current value is a fine-grained PAT owned by `megabase-agent`. Fine-grained PATs cannot write a public repository owned by another personal account, even for a collaborator. Create a classic PAT with scopes `repo` and `workflow` for an account that can write `Zouhairmaj/megabase`, save it as `RELEASE_PLEASE_TOKEN`, and re-run **Release** on `main`. This supersedes the 2026-10-09 pending item that allowed a fine-grained PAT for this secret.
-- **Reason**: Run 38007606007 Sync Cargo.lock failed with HTTP 403 `Permission to Zouhairmaj/megabase.git denied to megabase-agent`. GitHub's personal access token documentation says only a classic PAT has write access for a public repository you do not own. Granting Contents write on the fine-grained token does not fix that. `workflow` is included so the token can push workflow-file changes; the failed commit changed only `Cargo.lock`.
-- **Files affected**: GitHub Actions repository secrets (not in git)
 
 - **Date**: 2026-10-10
 - **Action**: (pending) Create the GitHub Actions environment `judge-hidden` (Settings → Environments), restrict deployment branches to `main`, and add environment secret `MEGABASE_JUDGE_HIDDEN_SEED` from `openssl rand -base64 48`. Optionally add `MEGABASE_JUDGE_HIDDEN_CASES` (ciphertext from `megabase-judge hidden-seal`). Do not store either value as a repository secret, and do not require reviewers on the environment. Do not add **Hidden judge** to required pull-request checks.
@@ -92,3 +82,8 @@ Each entry should include:
 - **Action**: Confirmed repository secret `BENCHER_API_TOKEN` is used. Bencher run 38027086326 executed `bencher run` on `main` and printed `View results`.
 - **Reason**: Bencher was already listed as set up. The audit checked that the job did not skip for a missing token.
 - **Files affected**: GitHub Actions secrets (not in git)
+
+- **Date**: 2026-10-10
+- **Action**: Created repository secret `RELEASE_PLEASE_CLASSIC_TOKEN`, a classic PAT for `megabase-agent` with scopes `repo` and `workflow`. Release uses it for release-please and the Cargo.lock sync push, and falls back to `RELEASE_PLEASE_TOKEN`, then `GITHUB_TOKEN`, when that secret is absent.
+- **Reason**: The fine-grained `RELEASE_PLEASE_TOKEN` cannot write this public user-owned repository, so those pushes did not start workflows. The classic token does. This closes the pending items that asked to create or replace `RELEASE_PLEASE_TOKEN`.
+- **Files affected**: GitHub Actions repository secrets (not in git)

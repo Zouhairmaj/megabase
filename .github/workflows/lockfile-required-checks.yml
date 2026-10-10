@@ -1,7 +1,9 @@
-# Fallback for Release → Sync Cargo.lock when RELEASE_PLEASE_TOKEN is unset.
-# GITHUB_TOKEN pushes do not start push/pull_request workflows. This workflow
-# is dispatched from main (where it is defined) and reports the required
-# check names onto the lockfile SHA via the Checks API.
+# Fallback for Release → Sync Cargo.lock when required checks are missing
+# and dispatching CI, Bencher, and Judge fails. The target is a
+# release-please branch, or the default branch when that release branch
+# is already gone. This workflow is dispatched from main (where it is
+# defined) and reports the required check names onto the lockfile SHA
+# via the Checks API.
 name: Lockfile required checks
 
 on:
@@ -12,7 +14,7 @@ on:
         required: true
         type: string
       branch:
-        description: Release-please branch name (guard --head-ref)
+        description: Release-please branch, or the default branch (guard --head-ref)
         required: true
         type: string
 
@@ -37,15 +39,17 @@ jobs:
     permissions:
       contents: read
     steps:
-      - name: Require release-please branch head
+      - name: Require release-please or default branch head
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
           set -euo pipefail
           case "${TARGET_BRANCH}" in
             release-please--branches--*) ;;
+            "${DEFAULT_BRANCH}") ;;
             *)
-              echo "::error::Target branch must be a release-please branch, got ${TARGET_BRANCH}"
+              echo "::error::Target branch must be a release-please branch or ${DEFAULT_BRANCH}, got ${TARGET_BRANCH}"
               exit 1
               ;;
           esac

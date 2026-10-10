@@ -22,7 +22,16 @@ stale file written onto the newer tree.
 
 The lockfile job now rebuilds `Cargo.toml` from the merge-base with the
 default branch and changes only `[workspace.package] version` to the
-manifest version, then runs `cargo update -w`. `megabase-guard` rejects
+manifest version, then runs `cargo update -w`. If the release
+branch is already gone, the job does that on the default branch and
+pushes the lockfile commit there. Release 0.1.5 merged without that
+commit: the sync job exited 0 because the branch was missing, and
+`Cargo.lock` still named workspace packages `0.1.4`. The push uses
+`RELEASE_PLEASE_CLASSIC_TOKEN` when that secret is set (classic PAT,
+scopes `repo` and `workflow`). If it is absent, or that probe returns
+HTTP 403 or 404 that is not a rate limit, the job probes
+`RELEASE_PLEASE_TOKEN`, then `GITHUB_TOKEN`. A classic-token push to the
+release branch starts pull_request workflows. `megabase-guard` rejects
 a release-please diff that changes anything else in `Cargo.toml` or
 `Cargo.lock` (changelog and `.release-please-manifest.json` stay
 allowed). See [ADR 0003](../adr/0003-protected-paths.md).

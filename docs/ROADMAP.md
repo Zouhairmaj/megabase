@@ -110,28 +110,36 @@ older `main` tree and then commit onto a newer SHA, so the cached
 lockfile job restores `Cargo.toml` from the merge-base with the default
 branch, sets only `[workspace.package].version` from
 `.release-please-manifest.json`, runs `cargo update -w`, and commits
-`Cargo.toml` and `Cargo.lock` when `[workspace.package] version` or a
-workspace package version in `Cargo.lock` changed. `megabase-guard`
-rejects any other edit in those files, including a registry package
-version. `--locked` CI
+`Cargo.toml` and `Cargo.lock` when those version fields changed.
+When the release-please branch is already gone, that job checks out
+the default branch and pushes the lockfile commit there. The 0.1.5
+merge did not: Sync Cargo.lock exited 0 on a missing branch, and
+`cargo --locked` failed because workspace packages in `Cargo.lock`
+were still `0.1.4`.
+`megabase-guard` rejects any other edit in those files, including a
+registry package version in `Cargo.lock`. `--locked` CI
 (Build, Codecov, Bencher, Protected paths, Judge) stays green. That
 commit is pushed with the token the tree probe selected.
-`RELEASE_PLEASE_TOKEN` is used only when that probe can create a git
-tree, so the push starts workflows. A fine-grained PAT owned by
-`megabase-agent` cannot write this public repository.
+`RELEASE_PLEASE_CLASSIC_TOKEN` (classic PAT, scopes `repo` and
+`workflow`) is used when it is set and its tree probe succeeds, so the
+push to the release branch starts pull_request workflows. If that
+secret is absent, or its probe returns HTTP 403 or 404 that is not a
+rate limit, the job tries `RELEASE_PLEASE_TOKEN`. `GITHUB_TOKEN` is
+selected only when both of those candidates are absent or denied the
+same way. A fine-grained PAT
+owned by `megabase-agent` cannot write this public repository.
 [GitHub's token docs](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens)
 say only a classic PAT has write access to a public repository owned by
-another personal account, including for a collaborator. The secret has to be a classic PAT with
-the `repo` and `workflow` scopes. Otherwise, and when that push is
-denied, the push uses `GITHUB_TOKEN`, which does not trigger
-`push`/`pull_request` workflows. The pending replacement is under
-Human-only actions in `PROGRESS.md` and in `HUMAN_LOG.md`. The lockfile
+another personal account, including for a collaborator. A denied push
+is separate from that probe: if the selected token's `git push` returns
+HTTP 403, the job pushes again with `GITHUB_TOKEN`. That retry does
+not trigger `push`/`pull_request` workflows. The lockfile
 job `workflow_dispatch`es CI, Bencher, and Judge on the release branch
-unless that push used the probed release token and the branch is the
-default branch. Those three workflows run on `push` only for `main`,
-and the lockfile commit is on `release-please--branches--*`, so a
-release-token push there still dispatches (native check runs on that
-SHA). The same dispatch runs when the probe did not select the secret,
+unless that push used the classic or release token and the branch is the
+default branch. Those three workflows run on `push` only for `main`.
+A lockfile commit on `release-please--branches--*` still needs that
+dispatch. A lockfile commit on the default branch does not: a classic
+or release token push there starts the `push` workflows. The same dispatch runs when the probe selected `GITHUB_TOKEN`,
 the push was retried with `GITHUB_TOKEN`, or the commit was not pushed. If that ref's workflow files lack
 `workflow_dispatch`, it dispatches **Lockfile required checks** on the
 default branch, which checks out the lockfile SHA and reports Build,
