@@ -19,7 +19,8 @@ Content negotiation via `Accept` and `Content-Type`. Template:
 
 ## Behavior
 
-Only the first `Accept` entry is considered.
+All comma-separated `Accept` entries are considered. Entries with `q=0` are
+dropped; the entry with the highest `q` wins and ties keep header order.
 
 | Accept | Served | Response `Content-Type` |
 |---|---|---|
