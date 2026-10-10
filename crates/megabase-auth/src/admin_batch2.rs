@@ -2436,9 +2436,11 @@ mod tests {
     #[test]
     fn signup_password_rules() {
         let state = AuthState::from_lookup(|_| None);
-        let missing = check_signup_password(&state, "").unwrap_err();
+        let empty = String::new();
+        let missing = check_signup_password(&state, &empty).unwrap_err();
         assert_eq!(missing.message, "Signup requires a valid password");
-        let short = check_signup_password(&state, "short").unwrap_err();
+        let short_value = "x".repeat(state.config.password_min_length - 1);
+        let short = check_signup_password(&state, &short_value).unwrap_err();
         assert_eq!(short.error_code, "weak_password");
         assert_eq!(
             short.weak_password.as_deref(),
