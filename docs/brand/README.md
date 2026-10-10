@@ -102,9 +102,12 @@ Open Graph); light mode swaps via `prefers-color-scheme`.
 ## Status treemap
 
 `coverage/treemap.svg` (dark) and `coverage/treemap-light.svg` are the
-README Status graphic. GitHub and the website pick the dark file as the
-default; light mode swaps via `prefers-color-scheme`. Totals always come
-from `coverage/units.json` (never a hardcoded denominator). Layout, from
+committed baseline graphic (`coverage check` diffs them). The README
+`<picture>` loads the PNG rasters published to `gh-pages` after Judge
+on `main` (`coverage/treemap.png`, light: `coverage/treemap-light.png`);
+GitHub does not render an SVG from that branch. The website Status page
+inlines a treemap from the same Judge results. Totals always come from
+`coverage/units.json` (never a hardcoded denominator). Layout, from
 the Kite page "Repo / README":
 
 1. Badges: coverage, conformance, units `n / total`.
@@ -141,7 +144,8 @@ not-started fill.
 README coverage and conformance shields.io badges (owner-specified,
 `flat-square`) read the same JSON from the `gh-pages` branch
 (`coverage/badge-coverage.json`, `coverage/badge-conformance.json`),
-published by Pages after Judge on `main` (no direct push to `main`):
+published with the treemap PNGs after Judge on `main` (no direct push
+to `main`):
 `#e05d44` below 50%, `#fe7d37` from 50% to under 90%, `#00D892` at 90%
 and above. PRs still commit the generated copies so `coverage check`
 can reject drift. The site Status page shows those percentages as text,
