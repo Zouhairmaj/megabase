@@ -22,16 +22,16 @@ core JWT + error types
                   └─► embedding, aggregates (same level, after CRUD)
 ```
 
-Level 1 is the critical path. REST `GET /{relation}` with `eq` / `select` /
-`order` and Auth email/password plus `auth.uid()` are what most apps need
-before anything else. Admin APIs, media types and exotic operators are
-Level 1 scope but not on the critical path.
+Level 1 is the critical path. REST resource routes, `GET /{relation}` with
+`eq` / `select` / `order`, and Auth email/password plus `auth.uid()` are
+what most apps need before anything else. Admin APIs, media types and
+exotic operators are Level 1 scope but not on the critical path.
 
 ## Levels
 
 | Level | What ships | Threshold | Status |
 |---|---|---|---|
-| 1 | `/rest/v1` + `/auth/v1` email/password, JWT, `auth.users`, `auth.uid()`, `auth.jwt()` | ≥95% conformance, no P0 security issues | In progress (Auth admin GET/DELETE, health, settings, autoconfirm signup, logout; REST horizontal filters) |
+| 1 | `/rest/v1` + `/auth/v1` email/password, JWT, `auth.users`, `auth.uid()`, `auth.jwt()` | ≥95% conformance, no P0 security issues | In progress (Auth admin GET/DELETE, health, settings, autoconfirm signup, logout; REST resource routes and horizontal filters) |
 | 2 | OAuth, magic links, OTP, `/storage/v1` + `storage.objects` RLS | ≥90%, Level 1 held | Backlog |
 | 3 | `/realtime/v1` (replication, broadcast, presence) | ≥85%, Levels 1–2 held | Backlog |
 | 4 | `/functions/v1`, pooler, Postgres Meta, **Studio test** | ≥80%, all held | Backlog |

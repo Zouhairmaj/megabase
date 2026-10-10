@@ -9,7 +9,7 @@
 
 use crate::filter::{
     append_predicate, parse_filter_value, quote_ident, BoundFilter, FilterBody, FilterParseError,
-    ParsedFilter, UnsafeType,
+    ParsedFilter, ServedOp, UnsafeType,
 };
 use crate::query::percent_decode;
 
@@ -57,6 +57,45 @@ impl ReadQuery {
     #[must_use]
     pub(crate) fn handled(&self) -> bool {
         self.handled
+    }
+
+    /// `true` when `limit` or `offset` is present.
+    ///
+    /// `PUT` rejects that with `PGRST114` (`ApiRequest.getRanges`).
+    #[must_use]
+    pub(crate) fn limits_rows(&self) -> bool {
+        self.page.active
+    }
+
+    /// `columns` query parameter, when the client sent one.
+    #[must_use]
+    pub(crate) fn column_list(&self) -> Option<&[String]> {
+        self.columns.as_deref()
+    }
+
+    /// Horizontal `eq` filters, or `None` when any filter is not a plain `eq`.
+    ///
+    /// `PUT` needs every filter to be `column=eq.value` with no `and`/`or`
+    /// (`Plan.hs` single upsert). An empty list is still `Some`.
+    #[must_use]
+    pub(crate) fn eq_column_filters(&self) -> Option<Vec<(String, String)>> {
+        if !self.logic.is_empty() {
+            return None;
+        }
+        let mut out = Vec::new();
+        for (column, parsed) in &self.filters {
+            match parsed {
+                ParsedFilter::Served {
+                    negated: false,
+                    op: ServedOp::Eq,
+                    quant: None,
+                    language: None,
+                    value,
+                } => out.push((column.clone(), value.clone())),
+                _ => return None,
+            }
+        }
+        Some(out)
     }
 }
 
@@ -1673,6 +1712,38 @@ fn push_json(sql: &mut String, params: &mut Vec<String>, steps: &[JsonStep]) {
             }
         }
     }
+}
+
+/// `WHERE` fragment for a mutation, without the `WHERE` keyword.
+///
+/// Placeholders start at `$1`. `None` means the client sent no filter.
+///
+/// # Errors
+///
+/// Returns [`UnsafeType`] when a filter's catalog type cannot be spliced.
+pub(crate) fn where_clause(
+    relation: &str,
+    query: &ReadQuery,
+    column_types: &[(&str, &str)],
+) -> Result<Option<ReadSql>, UnsafeType> {
+    if query.filters.is_empty() && query.logic.is_empty() {
+        return Ok(None);
+    }
+    let mut sql = String::new();
+    let mut params = Vec::new();
+    push_where(
+        &mut sql,
+        &mut params,
+        relation,
+        &query.filters,
+        &query.logic,
+        column_types,
+    )?;
+    Ok(Some(ReadSql {
+        sql,
+        params,
+        offset: 0,
+    }))
 }
 
 fn push_where(
