@@ -1,4 +1,5 @@
-# Fallback for Release → Sync Cargo.lock when RELEASE_PLEASE_TOKEN is unset.
+# Fallback for Release → Sync Cargo.lock when the push used GITHUB_TOKEN.
+# RELEASE_PLEASE_CLASSIC_TOKEN is preferred; RELEASE_PLEASE_TOKEN is next.
 # GITHUB_TOKEN pushes do not start push/pull_request workflows. This workflow
 # is dispatched from main (where it is defined) and reports the required
 # check names onto the lockfile SHA via the Checks API.

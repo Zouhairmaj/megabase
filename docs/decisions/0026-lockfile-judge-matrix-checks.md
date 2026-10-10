@@ -25,8 +25,10 @@ slow `Judge build` can still create the matrix jobs. The knobs remain
 protection can keep requiring the aggregate name `Judge`. This wait
 only proves the workflow was dispatched onto the lockfile SHA.
 
-`RELEASE_PLEASE_TOKEN` stays a human-only classic PAT (`repo` and
-`workflow`). A fine-grained PAT cannot write this public user-owned
-repository, so the job keeps dispatching with `GITHUB_TOKEN` when the
-tree probe falls back. That dispatch is what creates the matrix checks
-this wait accepts. Humans replace the secret; this workflow does not.
+Release prefers `RELEASE_PLEASE_CLASSIC_TOKEN` (classic PAT, `repo` and
+`workflow`). If that secret is absent, the probe tries
+`RELEASE_PLEASE_TOKEN`, then `GITHUB_TOKEN`. A fine-grained PAT cannot
+write this public user-owned repository, so a denial of that secret
+falls through. The job still dispatches with `GITHUB_TOKEN` when the
+selected push will not start workflows. That dispatch is what creates
+the matrix checks this wait accepts.
