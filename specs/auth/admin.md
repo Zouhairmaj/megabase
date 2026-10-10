@@ -470,15 +470,80 @@ loopback redirects do not consult that list.
 
 ---
 
+## Issue #8 writes (`admin_batch3.rs`)
+
+Upstream: `internal/api/admin.go` (`adminUserCreate`, `adminUserUpdate`,
+`adminUserUpdateFactor`), `ssoadmin.go`, `custom_oauth_admin.go`,
+`oauthserver/handlers.go`, `oauthserver/service.go`. All sit behind the admin
+credential check above. Audit rows use a nil actor id and the admin role as
+the username.
+
+**`POST /admin/users`.** Needs an email or phone (400 `Cannot create a user
+without either an email or phone`). Email uses the `generate_link` format
+check, lower-cased; a duplicate (identity or user, same audience) is 422
+`email_exists`. Phone drops one `+` and spaces, then must match
+`^[1-9][0-9]{1,14}$` (400 `Invalid phone number format (E.164 required)`);
+a duplicate is 422 `phone_exists`. `password` and `password_hash` together
+are 400. A plaintext password is length-checked (max 72, minimum from config,
+422 `weak_password`); with neither, a random 64 character password is stored.
+Only bcrypt hashes are accepted; argon2 and Firebase scrypt hashes answer 501.
+`id` must be a non-nil UUID. `ban_duration` is `none` or a Go duration. The
+role defaults to `GOTRUE_JWT_DEFAULT_GROUP_NAME`. `app_metadata` merges over
+`{provider, providers}`. `email_confirm` / `phone_confirm` confirm the contact
+after the identity rows (email, phone) are written. Audit `user_signedup`.
+**Output** `200` user JSON. A database failure is 500
+`Database error creating new user`.
+
+**`PUT /admin/users/{user_id}`.** The user is loaded first (404
+`validation_failed` for a bad id, `user_not_found`). Then email, phone, ban
+duration, and password are validated as above (a supplied password, even empty,
+is strength-checked; empty clears it). In one transaction: role, confirms,
+password (clears pending tokens, one-time tokens, and sessions), email and
+phone identities (update `identity_data`, or create when missing), pending
+token reset when email or phone changed, metadata merges (`null` deletes a
+key), ban. Audit `user_modified`. Failure is 500 `Error updating user`.
+
+**`PUT /admin/users/{user_id}/factors/{factor_id}`.** Loads user then factor
+(404 `mfa_factor_not_found`). `friendly_name` and, for phone factors only,
+`phone` (validated) are updated; audit `factor_updated`. Returns the factor.
+
+**`POST` / `PUT /admin/sso/providers`.** Validation order follows
+`CreateSSOProviderParams.validate`: type `saml` (create), one of
+`metadata_xml` / `metadata_url`, HTTPS URL, `name_id_format`. Create rejects a
+known EntityID (422 `saml_idp_already_exists`) and a taken domain (400
+`sso_domain_already_exists`); 201 with the provider. Update diffs domains,
+attribute mapping, name id format, resource id, and disabled; a changed
+EntityID is 400 `saml_entity_id_mismatch`. A failed write is 422 `conflict`.
+There is no XML parser or TLS client on the dependency allow list, so
+`metadata_url` answers 501 and `metadata_xml` is scanned for the root
+`EntityDescriptor`, its `entityID`, and one `IDPSSODescriptor`; XML that
+scan cannot place also answers 501.
+
+**`PUT /admin/oauth/clients/{client_id}`.** Same id and lookup errors as GET.
+Bad JSON is 400 `Invalid JSON body`; no fields is 400 `No fields provided for
+update`. Validation messages are the unwrapped `oauthserver/service.go`
+strings (`redirect_uris cannot be empty`, and so on). A
+`token_endpoint_auth_method` must suit the stored client type (public: `none`;
+confidential: `client_secret_basic`, `client_secret_post`). Returns the client.
+
+**`POST /admin/oauth/clients/{client_id}/regenerate_secret`.** Public clients
+are 400 `Cannot regenerate secret for public client`. Otherwise a new 32 byte
+base64 raw URL secret replaces the SHA-256 hash and is returned once.
+
+**`PUT /admin/custom-providers/{identifier}`.** Same identifier checks as GET.
+Only supplied fields change (`updateProviderFromParams`); OIDC scopes keep
+`openid` first; URLs pass the HTTPS and address checks of create. For an OIDC
+provider an `issuer` or `discovery_url` change needs discovery, which this
+build cannot fetch, so a non-empty change answers 501
+`MEGABASE_NOT_IMPLEMENTED`. Returns the provider.
+
+---
+
 ## Still unimplemented
 
-`POST /auth/v1/admin/users`, user update, factor update, SSO create/update,
-OAuth client update and secret regeneration, custom-provider update, and
-every non-admin Auth route other than signup, logout, and the password and
-refresh-token grants remain `MEGABASE_NOT_IMPLEMENTED`. Unimplemented
-methods on a registered admin path (for example
-`PUT /auth/v1/admin/custom-providers/{identifier}` and
-`PUT /auth/v1/admin/sso/providers/{idp_id}`) also return that 501, not Axum 405.
+Every non-admin Auth route other than signup, logout, and the password and
+refresh-token grants remains `MEGABASE_NOT_IMPLEMENTED`. Unimplemented
+methods on a registered admin path also return that 501, not Axum 405.
 
 ## Judge cases
 
