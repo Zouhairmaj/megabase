@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, aud, role, email, phone,\n                email_confirmed_at, last_sign_in_at, created_at, updated_at,\n                raw_app_meta_data, raw_user_meta_data,\n                is_anonymous, banned_until, is_sso_user, encrypted_password\n         FROM auth.users\n         WHERE instance_id = $1 AND id = $2",
+  "query": "SELECT id, aud, role, email, phone,\n                email_confirmed_at, last_sign_in_at, created_at, updated_at,\n                raw_app_meta_data, raw_user_meta_data,\n                is_anonymous, banned_until, is_sso_user, encrypted_password,\n                phone_confirmed_at, confirmed_at\n         FROM auth.users\n         WHERE instance_id = $1 AND id = $2",
   "describe": {
     "columns": [
       {
@@ -77,6 +77,16 @@
         "ordinal": 14,
         "name": "encrypted_password",
         "type_info": "Varchar"
+      },
+      {
+        "ordinal": 15,
+        "name": "phone_confirmed_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 16,
+        "name": "confirmed_at",
+        "type_info": "Timestamptz"
       }
     ],
     "parameters": {
@@ -100,8 +110,10 @@
       false,
       true,
       false,
+      true,
+      true,
       true
     ]
   },
-  "hash": "4d839b98458282cbf06c23ced85ce4333a72675681eb56148a3fcb5c004055bf"
+  "hash": "4e1745c27a8106fc75d7a7799e66c10785e23d37f85fe065debd3eb9ec8c3994"
 }

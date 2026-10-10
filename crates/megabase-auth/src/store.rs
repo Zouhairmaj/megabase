@@ -1,6 +1,7 @@
-// Ported from supabase/auth internal/api/signup.go, internal/models/user.go,
-// sessions.go, refresh_token.go, amr.go, and internal/crypto/crypto.go
-// (MIT), pin v2.197.0.
+// Ported from supabase/auth internal/api/signup.go, internal/api/token.go,
+// internal/api/token_refresh.go, internal/models/user.go, sessions.go,
+// refresh_token.go, amr.go, internal/tokens/service.go, and
+// internal/crypto/crypto.go (MIT), pin v2.197.0.
 
 //! Auth users, identities, sessions, and legacy refresh tokens.
 //!
@@ -90,6 +91,11 @@ pub struct UserRecord {
     pub banned_until: Option<SystemTime>,
     pub is_sso_user: bool,
     pub password_hash: String,
+    pub phone_confirmed_at: Option<SystemTime>,
+    /// Generated `LEAST(email_confirmed_at, phone_confirmed_at)`. Populated
+    /// when the row is loaded. Signup leaves it unset. Login and refresh
+    /// fill it, including the in-memory store.
+    pub confirmed_at: Option<SystemTime>,
 }
 
 #[derive(Clone, Debug)]
@@ -118,6 +124,30 @@ pub enum SignupResult {
     AlreadyExists,
 }
 
+/// Password-grant lookup. Phone numbers are stored without a leading `+`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LoginChannel {
+    Email,
+    Phone,
+}
+
+/// Outcome of rotating one refresh token. HTTP status mapping lives in `token`.
+///
+/// `rotated` is false when the presented token is the parent of the active
+/// child (the client missed the previous response). That retry returns the
+/// child and does not mint another token.
+#[derive(Debug)]
+pub enum RefreshStatus {
+    Issued {
+        session: Box<IssuedSession>,
+        rotated: bool,
+    },
+    NotFound,
+    NoSession,
+    Banned,
+    AlreadyUsed,
+}
+
 #[derive(Clone, Debug)]
 pub struct Subject {
     pub banned_until: Option<SystemTime>,
@@ -143,9 +173,20 @@ struct Pg {
     pool: sqlx::PgPool,
 }
 
+#[derive(Clone)]
+struct LegacyRefresh {
+    user_id: Uuid,
+    session_id: Uuid,
+    revoked: bool,
+    parent: String,
+    /// AMR timestamp for the session. Refresh keeps this; it does not add a claim.
+    amr_at: SystemTime,
+}
+
 struct MemoryDb {
     users: HashMap<Uuid, UserRecord>,
     sessions: HashMap<Uuid, Uuid>,
+    refresh_tokens: HashMap<String, LegacyRefresh>,
 }
 
 impl Backend {
@@ -160,6 +201,7 @@ impl Backend {
             inner: BackendKind::Memory(Arc::new(Mutex::new(MemoryDb {
                 users: HashMap::new(),
                 sessions: HashMap::new(),
+                refresh_tokens: HashMap::new(),
             }))),
         }
     }
@@ -253,7 +295,7 @@ impl Backend {
                 if let Some(user) = db.users.get(&user_id).cloned() {
                     remember_audit(&user, "logout", "account", None);
                 }
-                apply_logout(&mut db.sessions, user_id, session_id, scope);
+                apply_logout(&mut db, user_id, session_id, scope);
                 Ok(())
             }
             BackendKind::Postgres(pg) => {
@@ -267,6 +309,140 @@ impl Backend {
                     Ok(())
                 })
                 .await
+            }
+        }
+    }
+
+    /// Email or phone lookup for the password grant. `identifier` is already
+    /// normalized (lowercased email, or a phone with `+` and spaces removed).
+    pub async fn find_login_user(
+        &self,
+        channel: LoginChannel,
+        identifier: &str,
+        aud: &str,
+    ) -> Result<Option<UserRecord>, StoreError> {
+        match &self.inner {
+            BackendKind::None => Err(StoreError::Unavailable),
+            BackendKind::Memory(db) => {
+                let db = db.lock().await;
+                let user = match channel {
+                    LoginChannel::Email => db.find_email(identifier, aud).cloned(),
+                    LoginChannel::Phone => db.find_phone(identifier, aud).cloned(),
+                };
+                Ok(user)
+            }
+            BackendKind::Postgres(pg) => {
+                let identifier = identifier.to_string();
+                let aud = aud.to_string();
+                timed(async move {
+                    let mut conn = pg.pool.acquire().await?;
+                    match channel {
+                        LoginChannel::Email => {
+                            find_user_by_email_and_audience(&mut conn, &identifier, &aud).await
+                        }
+                        LoginChannel::Phone => find_phone(&mut conn, &identifier, &aud).await,
+                    }
+                })
+                .await
+            }
+        }
+    }
+
+    /// New legacy session after a successful password check.
+    ///
+    /// Updates `last_sign_in_at` only. `replacement_hash` is set when GoTrue
+    /// would re-encrypt a bcrypt cost other than the default.
+    pub async fn issue_login_session(
+        &self,
+        user_id: Uuid,
+        provider: &str,
+        replacement_hash: Option<String>,
+    ) -> Result<Option<IssuedSession>, StoreError> {
+        match &self.inner {
+            BackendKind::None => Err(StoreError::Unavailable),
+            BackendKind::Memory(db) => {
+                let mut db = db.lock().await;
+                let Some(user) = db.users.get_mut(&user_id) else {
+                    return Ok(None);
+                };
+                let now = SystemTime::now();
+                user.last_sign_in_at = Some(now);
+                if let Some(hash) = replacement_hash {
+                    user.password_hash = hash;
+                }
+                let mut issued = grant_session(user, now);
+                reload_confirmed_at(&mut issued.user);
+                let traits = json!({ "provider": provider });
+                remember_audit(&issued.user, "login", "account", Some(traits));
+                db.track(&issued);
+                Ok(Some(issued))
+            }
+            BackendKind::Postgres(pg) => {
+                let provider = provider.to_string();
+                timed(async move {
+                    let mut tx = pg.pool.begin().await?;
+                    let Some(mut user) = find_user_by_id(&mut tx, user_id).await? else {
+                        tx.commit().await?;
+                        return Ok(None);
+                    };
+                    let now = SystemTime::now();
+                    user.last_sign_in_at = Some(now);
+                    if let Some(hash) = &replacement_hash {
+                        user.password_hash.clone_from(hash);
+                    }
+                    let instance = Uuid::nil();
+                    let signed_in = ts(now);
+                    sqlx::query!(
+                        "UPDATE auth.users SET last_sign_in_at = $1::timestamptz
+                         WHERE instance_id = $2::uuid AND id = $3::uuid",
+                        signed_in,
+                        instance,
+                        user_id,
+                    )
+                    .execute(&mut *tx)
+                    .await?;
+                    if let Some(hash) = &replacement_hash {
+                        sqlx::query!(
+                            "UPDATE auth.users SET encrypted_password = $1
+                             WHERE instance_id = $2::uuid AND id = $3::uuid",
+                            hash,
+                            instance,
+                            user_id,
+                        )
+                        .execute(&mut *tx)
+                        .await?;
+                    }
+                    let issued = grant_session(&mut user, now);
+                    insert_session_rows(&mut tx, &issued)
+                        .await
+                        .map_err(write_to_store)?;
+                    insert_audit(
+                        &mut tx,
+                        &issued.user,
+                        "login",
+                        "account",
+                        Some(json!({ "provider": provider })),
+                    )
+                    .await?;
+                    tx.commit().await?;
+                    Ok(Some(issued))
+                })
+                .await
+            }
+        }
+    }
+
+    /// Rotate a legacy refresh token (algorithm version 0).
+    pub async fn refresh_login(&self, token: &str) -> Result<RefreshStatus, StoreError> {
+        match &self.inner {
+            BackendKind::None => Err(StoreError::Unavailable),
+            BackendKind::Memory(db) => {
+                let mut db = db.lock().await;
+                Ok(refresh_memory(&mut db, token))
+            }
+            BackendKind::Postgres(pg) => {
+                let token = token.to_string();
+                timed(refresh_postgres(pg, &token)).await
             }
         }
     }
@@ -303,6 +479,8 @@ impl Backend {
             banned_until: None,
             is_sso_user: false,
             password_hash: password_hash.into(),
+            phone_confirmed_at: None,
+            confirmed_at: None,
         };
         db.lock().await.users.insert(id, user);
     }
@@ -328,6 +506,20 @@ impl Backend {
             .find(|user| user.email.eq_ignore_ascii_case(email) && user.aud == "authenticated")
             .expect("ban fixture user");
         user.banned_until = Some(until);
+    }
+
+    pub async fn set_phone_for_test(&self, email: &str, phone: &str, confirmed: bool) {
+        let BackendKind::Memory(db) = &self.inner else {
+            panic!("phone fixture is memory-only");
+        };
+        let mut db = db.lock().await;
+        let user = db
+            .users
+            .values_mut()
+            .find(|user| user.email.eq_ignore_ascii_case(email) && user.aud == "authenticated")
+            .expect("phone fixture user");
+        user.phone = phone.to_string();
+        user.phone_confirmed_at = confirmed.then(SystemTime::now);
     }
 }
 
@@ -401,6 +593,26 @@ impl MemoryDb {
         })
     }
 
+    fn find_phone(&self, phone: &str, aud: &str) -> Option<&UserRecord> {
+        self.users
+            .values()
+            .find(|user| !user.is_sso_user && user.aud == aud && user.phone == phone)
+    }
+
+    fn track(&mut self, issued: &IssuedSession) {
+        self.sessions.insert(issued.session_id, issued.user.id);
+        self.refresh_tokens.insert(
+            issued.refresh_token.clone(),
+            LegacyRefresh {
+                user_id: issued.user.id,
+                session_id: issued.session_id,
+                revoked: false,
+                parent: String::new(),
+                amr_at: issued.amr_at,
+            },
+        );
+    }
+
     fn confirm_existing(&mut self, cmd: &SignupCommand) -> Result<IssuedSession, StoreError> {
         let now = SystemTime::now();
         let user_id = self
@@ -414,17 +626,20 @@ impl MemoryDb {
         user.email_confirmed_at = Some(now);
         user.last_sign_in_at = Some(now);
         user.updated_at = now;
-        set_email_verified(&mut user.user_metadata);
         if !user
             .identities
             .iter()
             .any(|identity| identity.provider == EMAIL_PROVIDER)
         {
-            user.identities
-                .push(new_identity(user.id, &user.email, &cmd.data, now));
+            let (shown, meta) =
+                shown_signup_identity(&new_identity(user.id, &user.email, &cmd.data, now));
+            user.user_metadata = meta;
+            user.identities.push(shown);
+        } else {
+            set_email_verified(&mut user.user_metadata);
         }
         let issued = grant_session(user, now);
-        self.sessions.insert(issued.session_id, user_id);
+        self.track(&issued);
         remember_audit(
             &issued.user,
             "user_signedup",
@@ -438,6 +653,7 @@ impl MemoryDb {
     fn insert_new(&mut self, cmd: &SignupCommand, password_hash: String) -> IssuedSession {
         let now = SystemTime::now();
         let id = Uuid::new_v4();
+        let (shown, meta) = shown_signup_identity(&new_identity(id, &cmd.email, &cmd.data, now));
         let mut user = UserRecord {
             id,
             aud: cmd.aud.clone(),
@@ -447,22 +663,32 @@ impl MemoryDb {
             email_confirmed_at: Some(now),
             last_sign_in_at: Some(now),
             app_metadata: app_metadata(),
-            user_metadata: user_metadata(&cmd.data),
-            identities: vec![new_identity(id, &cmd.email, &cmd.data, now)],
+            user_metadata: meta,
+            identities: vec![shown],
             created_at: now,
             updated_at: now,
             is_anonymous: false,
             banned_until: None,
             is_sso_user: false,
             password_hash,
+            phone_confirmed_at: None,
+            confirmed_at: None,
         };
         let issued = grant_session(&mut user, now);
-        self.sessions.insert(issued.session_id, id);
+        self.track(&issued);
         remember_audit(&user, "user_signedup", "team", Some(provider_traits()));
         remember_audit(&user, "login", "account", Some(provider_traits()));
         self.users.insert(id, user);
         issued
     }
+}
+
+/// PostgreSQL `LEAST` skips nulls, so one confirmed timestamp is enough.
+fn reload_confirmed_at(user: &mut UserRecord) {
+    user.confirmed_at = match (user.email_confirmed_at, user.phone_confirmed_at) {
+        (Some(email), Some(phone)) => Some(email.min(phone)),
+        (email, phone) => email.or(phone),
+    };
 }
 
 fn grant_session(user: &mut UserRecord, now: SystemTime) -> IssuedSession {
@@ -476,23 +702,256 @@ fn grant_session(user: &mut UserRecord, now: SystemTime) -> IssuedSession {
     }
 }
 
-fn apply_logout(
-    sessions: &mut HashMap<Uuid, Uuid>,
-    user_id: Uuid,
-    session_id: Option<Uuid>,
-    scope: LogoutScope,
-) {
+fn apply_logout(db: &mut MemoryDb, user_id: Uuid, session_id: Option<Uuid>, scope: LogoutScope) {
     match (session_id, scope) {
         (None, _) | (_, LogoutScope::Global) => {
-            sessions.retain(|_, owner| *owner != user_id);
+            db.sessions.retain(|_, owner| *owner != user_id);
         }
         (Some(session_id), LogoutScope::Local) => {
-            sessions.remove(&session_id);
+            db.sessions.remove(&session_id);
         }
         (Some(session_id), LogoutScope::Others) => {
-            sessions.retain(|id, owner| *id == session_id || *owner != user_id);
+            db.sessions
+                .retain(|id, owner| *id == session_id || *owner != user_id);
         }
     }
+    db.refresh_tokens
+        .retain(|_, row| db.sessions.contains_key(&row.session_id));
+}
+
+fn login_banned(until: Option<SystemTime>) -> bool {
+    until.is_some_and(|until| SystemTime::now() < until)
+}
+
+fn refresh_memory(db: &mut MemoryDb, token: &str) -> RefreshStatus {
+    let Some(row) = db.refresh_tokens.get(token).cloned() else {
+        return RefreshStatus::NotFound;
+    };
+    let Some(mut user) = db.users.get(&row.user_id).cloned() else {
+        return RefreshStatus::NotFound;
+    };
+    reload_confirmed_at(&mut user);
+    if login_banned(user.banned_until) {
+        return RefreshStatus::Banned;
+    }
+    if !db.sessions.contains_key(&row.session_id) {
+        db.refresh_tokens.remove(token);
+        return RefreshStatus::NoSession;
+    }
+    if row.revoked {
+        let child = db.refresh_tokens.iter().find(|(_, other)| {
+            !other.revoked && other.session_id == row.session_id && other.parent == token
+        });
+        if let Some((child_token, child)) = child {
+            let child_token = child_token.clone();
+            let session_id = child.session_id;
+            return RefreshStatus::Issued {
+                session: Box::new(IssuedSession {
+                    user,
+                    refresh_token: child_token,
+                    session_id,
+                    amr_at: row.amr_at,
+                }),
+                rotated: false,
+            };
+        }
+        for other in db.refresh_tokens.values_mut() {
+            if other.session_id == row.session_id {
+                other.revoked = true;
+            }
+        }
+        return RefreshStatus::AlreadyUsed;
+    }
+    if let Some(stored) = db.refresh_tokens.get_mut(token) {
+        stored.revoked = true;
+    }
+    let refresh_token = secure_alphanumeric(12);
+    db.refresh_tokens.insert(
+        refresh_token.clone(),
+        LegacyRefresh {
+            user_id: row.user_id,
+            session_id: row.session_id,
+            revoked: false,
+            parent: token.to_string(),
+            amr_at: row.amr_at,
+        },
+    );
+    RefreshStatus::Issued {
+        session: Box::new(IssuedSession {
+            user,
+            refresh_token,
+            session_id: row.session_id,
+            amr_at: row.amr_at,
+        }),
+        rotated: true,
+    }
+}
+
+/// Legacy refresh rotation against `auth.refresh_tokens`.
+///
+/// Algorithm version 0 (the reference stack leaves
+/// `GOTRUE_SECURITY_REFRESH_TOKEN_ALGORITHM_VERSION` unset). A longer token is
+/// not stored in `token`, and sessions from this crate have no HMAC key, so
+/// the lookup misses. GoTrue maps that miss to refresh-token-not-found.
+async fn refresh_postgres(pg: &Pg, token: &str) -> Result<RefreshStatus, StoreError> {
+    let mut tx = pg.pool.begin().await?;
+    let status = refresh_postgres_tx(&mut tx, token).await?;
+    tx.commit().await?;
+    Ok(status)
+}
+
+async fn refresh_postgres_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    token: &str,
+) -> Result<RefreshStatus, StoreError> {
+    let row = sqlx::query!(
+        "SELECT user_id,
+                COALESCE(revoked, false) AS revoked,
+                session_id::text AS session_id,
+                COALESCE(parent, '') AS parent
+         FROM auth.refresh_tokens
+         WHERE token = $1
+         LIMIT 1
+         FOR UPDATE",
+        token,
+    )
+    .fetch_optional(&mut **tx)
+    .await?;
+    let Some(row) = row else {
+        return Ok(RefreshStatus::NotFound);
+    };
+    let Some(user_id_text) = row.user_id.filter(|value| !value.is_empty()) else {
+        return Ok(RefreshStatus::NotFound);
+    };
+    let user_id = parse_uuid(&user_id_text)?;
+    let revoked = row.revoked.unwrap_or(false);
+    let session_text = row.session_id;
+    let Some(user) = find_user_by_id(&mut *tx, user_id).await? else {
+        return Ok(RefreshStatus::NotFound);
+    };
+    if login_banned(user.banned_until) {
+        return Ok(RefreshStatus::Banned);
+    }
+    let Some(session_text) = session_text.filter(|value| !value.is_empty()) else {
+        sqlx::query!("DELETE FROM auth.refresh_tokens WHERE token = $1", token)
+            .execute(&mut **tx)
+            .await?;
+        return Ok(RefreshStatus::NoSession);
+    };
+    let session_id = parse_uuid(&session_text)?;
+    let session = sqlx::query!(
+        "SELECT id FROM auth.sessions WHERE id = $1::uuid FOR UPDATE",
+        session_id,
+    )
+    .fetch_optional(&mut **tx)
+    .await?;
+    if session.is_none() {
+        sqlx::query!("DELETE FROM auth.refresh_tokens WHERE token = $1", token)
+            .execute(&mut **tx)
+            .await?;
+        return Ok(RefreshStatus::NoSession);
+    }
+    let amr_at = session_amr_at(&mut *tx, session_id).await?;
+    let mut issued_token = String::new();
+    let mut rotated = false;
+    if revoked {
+        let active = sqlx::query!(
+            "SELECT token, COALESCE(parent, '') AS parent
+             FROM auth.refresh_tokens
+             WHERE session_id = $1::uuid AND revoked IS FALSE
+             ORDER BY id DESC
+             LIMIT 1",
+            session_id,
+        )
+        .fetch_optional(&mut **tx)
+        .await?;
+        if let Some(active) = active {
+            if active.parent.as_deref() == Some(token) {
+                if let Some(active_token) = active.token {
+                    issued_token = active_token;
+                }
+            }
+        }
+        if issued_token.is_empty() {
+            // Reuse interval is 0 and rotation is on: revoke the family, then fail.
+            sqlx::query!(
+                "UPDATE auth.refresh_tokens
+                 SET revoked = true, updated_at = now()
+                 WHERE session_id = $1::uuid AND revoked = false",
+                session_id,
+            )
+            .execute(&mut **tx)
+            .await?;
+            return Ok(RefreshStatus::AlreadyUsed);
+        }
+    }
+    insert_audit(&mut *tx, &user, "token_refreshed", "token", None).await?;
+    if issued_token.is_empty() {
+        let now = ts(SystemTime::now());
+        let user_id_text = user.id.to_string();
+        let instance = Uuid::nil();
+        issued_token = secure_alphanumeric(12);
+        rotated = true;
+        insert_audit(&mut *tx, &user, "token_revoked", "token", None).await?;
+        sqlx::query!(
+            "UPDATE auth.refresh_tokens SET revoked = true, updated_at = $2::timestamptz
+             WHERE token = $1",
+            token,
+            now,
+        )
+        .execute(&mut **tx)
+        .await?;
+        sqlx::query!(
+            "INSERT INTO auth.refresh_tokens (
+                instance_id, token, user_id, revoked, created_at, updated_at, parent, session_id
+             ) VALUES (
+                $1::uuid, $2, $3, false, $4::timestamptz, $4::timestamptz, $5, $6::uuid
+             )",
+            instance,
+            issued_token,
+            user_id_text,
+            now,
+            token,
+            session_id,
+        )
+        .execute(&mut **tx)
+        .await?;
+    }
+    sqlx::query!(
+        "UPDATE auth.sessions
+         SET refreshed_at = (now() AT TIME ZONE 'utc')
+         WHERE id = $1::uuid",
+        session_id,
+    )
+    .execute(&mut **tx)
+    .await?;
+    Ok(RefreshStatus::Issued {
+        session: Box::new(IssuedSession {
+            user,
+            refresh_token: issued_token,
+            session_id,
+            amr_at,
+        }),
+        rotated,
+    })
+}
+
+async fn session_amr_at(
+    conn: &mut sqlx::PgConnection,
+    session_id: Uuid,
+) -> Result<SystemTime, StoreError> {
+    let row = sqlx::query!(
+        "SELECT created_at FROM auth.mfa_amr_claims
+         WHERE session_id = $1::uuid
+         ORDER BY created_at ASC
+         LIMIT 1",
+        session_id,
+    )
+    .fetch_optional(&mut *conn)
+    .await?;
+    Ok(row
+        .map(|row| from_ts(row.created_at))
+        .unwrap_or_else(SystemTime::now))
 }
 
 impl Pg {
@@ -610,17 +1069,18 @@ async fn confirm_existing_tx(
     user.email_confirmed_at = Some(now);
     user.last_sign_in_at = Some(now);
     user.updated_at = now;
-    set_email_verified(&mut user.user_metadata);
     if !user
         .identities
         .iter()
         .any(|identity| identity.provider == EMAIL_PROVIDER)
     {
-        let identity = new_identity(user.id, &user.email, &cmd.data, now);
-        insert_identity(tx, &identity)
-            .await
-            .map_err(write_to_store)?;
-        user.identities.push(identity);
+        let stored = new_identity(user.id, &user.email, &cmd.data, now);
+        let (shown, meta) = shown_signup_identity(&stored);
+        insert_identity(tx, &stored).await.map_err(write_to_store)?;
+        user.user_metadata = meta;
+        user.identities.push(shown);
+    } else {
+        set_email_verified(&mut user.user_metadata);
     }
     let now_ts = ts(now);
     sqlx::query!(
@@ -667,6 +1127,8 @@ async fn insert_new_tx(
 ) -> Result<IssuedSession, WriteError> {
     let now = SystemTime::now();
     let id = Uuid::new_v4();
+    let stored = new_identity(id, &cmd.email, &cmd.data, now);
+    let (shown, meta) = shown_signup_identity(&stored);
     let mut user = UserRecord {
         id,
         aud: cmd.aud.clone(),
@@ -676,17 +1138,19 @@ async fn insert_new_tx(
         email_confirmed_at: Some(now),
         last_sign_in_at: Some(now),
         app_metadata: app_metadata(),
-        user_metadata: user_metadata(&cmd.data),
-        identities: vec![new_identity(id, &cmd.email, &cmd.data, now)],
+        user_metadata: meta,
+        identities: vec![shown],
         created_at: now,
         updated_at: now,
         is_anonymous: false,
         banned_until: None,
         is_sso_user: false,
         password_hash,
+        phone_confirmed_at: None,
+        confirmed_at: None,
     };
     insert_user(tx, &user).await?;
-    insert_identity(tx, &user.identities[0]).await?;
+    insert_identity(tx, &stored).await?;
     let issued = grant_session(&mut user, now);
     insert_session_rows(tx, &issued).await?;
     insert_audit(tx, &user, "user_signedup", "team", Some(provider_traits()))
@@ -881,6 +1345,58 @@ async fn exec_logout(
     Ok(())
 }
 
+async fn find_user_by_email_and_audience(
+    conn: &mut sqlx::PgConnection,
+    email: &str,
+    aud: &str,
+) -> Result<Option<UserRecord>, StoreError> {
+    let instance = Uuid::nil();
+    let row = sqlx::query!(
+        "SELECT id
+         FROM auth.users
+         WHERE instance_id = $1::uuid
+           AND lower(email) = $2
+           AND aud = $3
+           AND is_sso_user = false
+         LIMIT 1",
+        instance,
+        email,
+        aud,
+    )
+    .fetch_optional(&mut *conn)
+    .await?;
+    match row {
+        Some(row) => find_user_by_id(conn, row.id).await,
+        None => Ok(None),
+    }
+}
+
+async fn find_phone(
+    conn: &mut sqlx::PgConnection,
+    phone: &str,
+    aud: &str,
+) -> Result<Option<UserRecord>, StoreError> {
+    let instance = Uuid::nil();
+    let row = sqlx::query!(
+        "SELECT id
+         FROM auth.users
+         WHERE instance_id = $1::uuid
+           AND phone = $2
+           AND aud = $3
+           AND is_sso_user = false
+         LIMIT 1",
+        instance,
+        phone,
+        aud,
+    )
+    .fetch_optional(&mut *conn)
+    .await?;
+    match row {
+        Some(row) => find_user_by_id(conn, row.id).await,
+        None => Ok(None),
+    }
+}
+
 async fn find_email(
     conn: &mut sqlx::PgConnection,
     email: &str,
@@ -934,7 +1450,8 @@ async fn find_user_by_id(
         "SELECT id, aud, role, email, phone,
                 email_confirmed_at, last_sign_in_at, created_at, updated_at,
                 raw_app_meta_data, raw_user_meta_data,
-                is_anonymous, banned_until, is_sso_user, encrypted_password
+                is_anonymous, banned_until, is_sso_user, encrypted_password,
+                phone_confirmed_at, confirmed_at
          FROM auth.users
          WHERE instance_id = $1 AND id = $2",
         instance,
@@ -964,6 +1481,8 @@ async fn find_user_by_id(
         banned_until: row.banned_until.map(from_ts),
         is_sso_user: row.is_sso_user,
         password_hash: row.encrypted_password.unwrap_or_default(),
+        phone_confirmed_at: row.phone_confirmed_at.map(from_ts),
+        confirmed_at: row.confirmed_at.map(from_ts),
     }))
 }
 
@@ -1027,12 +1546,6 @@ fn app_metadata() -> Value {
     json!({ "provider": EMAIL_PROVIDER, "providers": [EMAIL_PROVIDER] })
 }
 
-fn user_metadata(data: &Map<String, Value>) -> Value {
-    let mut meta = data.clone();
-    meta.insert("email_verified".into(), json!(true));
-    Value::Object(meta)
-}
-
 fn set_email_verified(metadata: &mut Value) {
     if let Value::Object(map) = metadata {
         map.insert("email_verified".into(), json!(true));
@@ -1041,22 +1554,48 @@ fn set_email_verified(metadata: &mut Value) {
     }
 }
 
+/// `structs.Map` of `provider.Claims` for an email signup.
+///
+/// `email_verified` and `phone_verified` have no `omitempty` tag, so both
+/// bools are stored. Request `data` fills only keys that are not already set
+/// (`signup.go`).
+fn identity_claims(user_id: Uuid, email: &str, data: &Map<String, Value>) -> Map<String, Value> {
+    let mut claims = Map::new();
+    claims.insert("sub".into(), json!(user_id.to_string()));
+    claims.insert("email".into(), json!(email));
+    claims.insert("email_verified".into(), json!(false));
+    claims.insert("phone_verified".into(), json!(false));
+    for (key, value) in data {
+        claims.entry(key.clone()).or_insert_with(|| value.clone());
+    }
+    claims
+}
+
+/// Signup `Confirm` sets `email_verified` on the map
+/// `RemoveUnconfirmedIdentities` assigned to both `UserMetaData` and
+/// `IdentityData`. The identity row was inserted before that write, so it
+/// keeps `email_verified: false`.
+fn shown_signup_identity(stored: &IdentityRecord) -> (IdentityRecord, Value) {
+    let mut shown = stored.clone();
+    let meta = match &stored.identity_data {
+        Value::Object(claims) => {
+            let mut meta = claims.clone();
+            meta.insert("email_verified".into(), json!(true));
+            Value::Object(meta)
+        }
+        other => other.clone(),
+    };
+    shown.identity_data = meta.clone();
+    (shown, meta)
+}
+
 fn new_identity(
     user_id: Uuid,
     email: &str,
     data: &Map<String, Value>,
     now: SystemTime,
 ) -> IdentityRecord {
-    let mut identity_data = Map::new();
-    identity_data.insert("sub".into(), json!(user_id.to_string()));
-    identity_data.insert("email".into(), json!(email));
-    identity_data.insert("email_verified".into(), json!(false));
-    identity_data.insert("phone_verified".into(), json!(false));
-    for (key, value) in data {
-        identity_data
-            .entry(key.clone())
-            .or_insert_with(|| value.clone());
-    }
+    let identity_data = identity_claims(user_id, email, data);
     IdentityRecord {
         id: Uuid::new_v4(),
         provider_id: user_id.to_string(),

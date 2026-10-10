@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE auth.sessions\n         SET refreshed_at = (now() AT TIME ZONE 'utc')\n         WHERE id = $1::uuid",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "9fdde77920135ed60d55b8282d6b7c16ff40714a12b9a9bb189214209584da76"
+}

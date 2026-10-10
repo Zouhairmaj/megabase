@@ -10,6 +10,6 @@ Specs go in `specs/auth/<unit>.md` (GOAL.md section 5). Mark served code with `/
 
 | State | Unit id | Upstream source |
 |---|---|---|
-| ⬜ | `auth:grant-type:password` | [internal/api/token.go:48](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/token.go#L48) |
-| ⬜ | `auth:grant-type:refresh_token` | [internal/api/token.go:50](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/token.go#L50) |
-| ⬜ | `auth:route:POST /auth/v1/token` | [internal/api/api.go:268](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/api.go#L268) |
+| 🟩 | `auth:grant-type:password` | [internal/api/token.go:48](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/token.go#L48) |
+| 🟩 | `auth:grant-type:refresh_token` | [internal/api/token.go:50](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/token.go#L50) |
+| 🟩 | `auth:route:POST /auth/v1/token` | [internal/api/api.go:268](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/api.go#L268) |

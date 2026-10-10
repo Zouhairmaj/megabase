@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT user_id,\n                COALESCE(revoked, false) AS revoked,\n                session_id::text AS session_id,\n                COALESCE(parent, '') AS parent\n         FROM auth.refresh_tokens\n         WHERE token = $1\n         LIMIT 1\n         FOR UPDATE",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "user_id",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "revoked",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 2,
+        "name": "session_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "parent",
+        "type_info": "Varchar"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      true,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "60407a697a1703d51009ada2c5f14999446324afc82767164a28447296e8a3d5"
+}

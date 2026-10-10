@@ -2,7 +2,8 @@
 //!
 //! Target behavior: Supabase Auth, vendor/auth (MIT), pinned in `vendor/`.
 //! Issue #6 serves the first `/auth/v1/admin` GET/DELETE batch. Issue #15
-//! serves health, settings, autoconfirm email signup, and logout. Every
+//! serves health, settings, autoconfirm email signup, and logout. Issue #17
+//! serves `POST /token` for the password and refresh-token grants. Every
 //! other Auth path returns `MEGABASE_NOT_IMPLEMENTED`. Database objects
 //! listed in `specs/auth/database.md` are installed when `DATABASE_URL` is
 //! set.
@@ -16,6 +17,7 @@ mod routes;
 mod schema;
 mod state;
 mod store;
+mod token;
 
 pub use config::AuthConfig;
 pub use schema::{install_schema, SchemaError};

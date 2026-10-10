@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE auth.users SET last_sign_in_at = $1::timestamptz\n                         WHERE instance_id = $2::uuid AND id = $3::uuid",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Timestamptz",
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "21a7a67eb705d697d19c210244eb50a014143d05da71cd839262dab665f613d7"
+}
