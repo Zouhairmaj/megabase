@@ -139,8 +139,8 @@ Physically impossible for the agent (repository settings or credentials):
       Run 38008795223 (`acf5bee`) repeated that push 403 after the tree
       probe had already fallen back to `GITHUB_TOKEN`: the lockfile
       checkout on `main` still used the secret, which authenticates as
-      `megabase-agent`.       The lockfile checkout uses the probe's token, and a push that is
-      still denied retries with the job `GITHUB_TOKEN`
+      `megabase-agent`. The lockfile checkout uses the probe's token, and
+      a push that is still denied retries with the job `GITHUB_TOKEN`
       (`contents: write`). It does not keep the `megabase-agent`
       identity. The push changed only `Cargo.lock`, so this is not
       Workflows permission. Run 38003872424 failed the same way on
