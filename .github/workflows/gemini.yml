@@ -68,17 +68,16 @@ jobs:
           persist-credentials: false
 
       - name: Prepare working branch
+        env:
+          TARGET_BRANCH: ${{ steps.target.outputs.branch }}
         run: |
           set -euo pipefail
           git config user.name "megabase-agent"
           git config user.email "megabase-agent@users.noreply.github.com"
-          branch="${{ steps.target.outputs.branch }}"
-          # Detached HEAD at the resolved SHA → recreate the work branch tip.
-          if git show-ref --verify --quiet "refs/heads/${branch}"; then
-            git switch "$branch"
-          else
-            git switch -c "$branch"
-          fi
+          # HEAD is detached at the resolved SHA (the existing remote branch tip
+          # on reruns, otherwise main), so -C reuses earlier pushed work and the
+          # later push stays a fast-forward.
+          git switch -C "$TARGET_BRANCH"
           echo "WORK_BRANCH=$(git branch --show-current)" >> "$GITHUB_ENV"
 
       - name: Configure push credentials
@@ -115,8 +114,11 @@ jobs:
             You are working on Megabase (repository ${{ github.repository }}), on
             ${{ env.IS_PR == 'true' && 'pull request' || 'issue' }} #${{ env.ISSUE_NUMBER }}.
             Your working branch is already checked out: ${{ env.WORK_BRANCH }}.
-            Read the issue or PR with `gh issue view` / `gh pr view` and the request in
-            the triggering comment, then do the work.
+            Read the issue or PR with `gh issue view` / `gh pr view`, then do the work
+            requested in the triggering comment (by megabase-agent), quoted here:
+            ---
+            ${{ github.event.comment.body }}
+            ---
 
             Rules:
             - Follow AGENTS.md and GOAL.md. Write Rust only.
