@@ -846,3 +846,388 @@ method = "PUT"
 path = "/auth/v1/user"
 headers = { Authorization = "Bearer {{token}}" }
 json = { phone = "+14155550100" }
+
+# Adversarial Auth (issue #117). Tokens below are fixtures for the public
+# demo JWT_SECRET in vendor/supabase/docker/.env.example. `forged` is HMAC'd
+# with a different secret. `expired` is HMAC'd with the demo secret and
+# exp in 2001, so a verifier that skips exp still accepts it. `tampered`
+# keeps the owner-a signature after the payload role was rewritten to
+# service_role. `alg-none` is an unsecured service_role token.
+[[case]]
+id = "auth.adversarial.jwt.malformed"
+description = "A non-JWT bearer is rejected on GET /user"
+units = ["auth:route:GET /auth/v1/user"]
+[[case.step]]
+method = "GET"
+path = "/auth/v1/user"
+headers = { Authorization = "Bearer not-a-jwt" }
+
+[[case]]
+id = "auth.adversarial.jwt.truncated"
+description = "A two-segment bearer is rejected on GET /user"
+units = ["auth:route:GET /auth/v1/user"]
+[[case.step]]
+method = "GET"
+path = "/auth/v1/user"
+headers = { Authorization = "Bearer eyJhbGciOiJIUzI1NiJ9.e30" }
+
+[[case]]
+id = "auth.adversarial.jwt.alg-none"
+description = "An alg=none service_role bearer is rejected on GET /user"
+units = ["auth:route:GET /auth/v1/user"]
+[[case.step]]
+method = "GET"
+path = "/auth/v1/user"
+headers = { Authorization = "Bearer eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0.eyJyb2xlIjoic2VydmljZV9yb2xlIiwiaXNzIjoic3VwYWJhc2UtZGVtbyIsImlhdCI6MTY0MTc2OTIwMCwiZXhwIjoxNzk5NTM1NjAwfQ." }
+
+[[case]]
+id = "auth.adversarial.jwt.forged"
+description = "A service_role bearer signed with the wrong secret is rejected on GET /user"
+units = ["auth:route:GET /auth/v1/user"]
+[[case.step]]
+method = "GET"
+path = "/auth/v1/user"
+headers = { Authorization = "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoic2VydmljZV9yb2xlIiwiaXNzIjoic3VwYWJhc2UtZGVtbyIsImlhdCI6MTY0MTc2OTIwMCwiZXhwIjoxNzk5NTM1NjAwfQ._Cmsw8cV9SL5A6EL45e_VWqsHCj4Bnx1R0O32FuxnP0" }
+
+[[case]]
+id = "auth.adversarial.jwt.expired"
+description = "An expired service_role bearer signed with the demo secret is rejected on GET /user"
+units = ["auth:route:GET /auth/v1/user"]
+[[case.step]]
+method = "GET"
+path = "/auth/v1/user"
+headers = { Authorization = "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoic2VydmljZV9yb2xlIiwiaXNzIjoic3VwYWJhc2UtZGVtbyIsImlhdCI6MTAwMDAwMDAwMCwiZXhwIjoxMDAwMDAwMDAxfQ.7WjbHaaRmKxhIfWEsU4fzYb_tOUYjjmbZOnqMl0zCVk" }
+
+[[case]]
+id = "auth.adversarial.jwt.tampered-role"
+description = "Rewriting role to service_role without re-signing is rejected on GET /admin/users"
+units = ["auth:route:GET /auth/v1/admin/users"]
+[[case.step]]
+method = "GET"
+path = "/auth/v1/admin/users"
+headers = { Authorization = "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzk5NTM1NjAwLCJpYXQiOjE2NDE3NjkyMDAsImlzcyI6InN1cGFiYXNlLWRlbW8iLCJyb2xlIjoic2VydmljZV9yb2xlIiwic3ViIjoiMDAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMGExIn0.SwFOh8kdys6i2Xwu-c81KSa_6dDP6bKk0ifFP1rJTWI" }
+
+[[case]]
+id = "auth.adversarial.jwt.role-escalation"
+description = "A valid authenticated bearer cannot list admin users"
+units = ["auth:route:GET /auth/v1/admin/users"]
+[[case.step]]
+method = "GET"
+path = "/auth/v1/admin/users"
+headers = { Authorization = "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzk5NTM1NjAwLCJpYXQiOjE2NDE3NjkyMDAsImlzcyI6InN1cGFiYXNlLWRlbW8iLCJyb2xlIjoiYXV0aGVudGljYXRlZCIsInN1YiI6IjAwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDBhMSJ9.SwFOh8kdys6i2Xwu-c81KSa_6dDP6bKk0ifFP1rJTWI" }
+
+[[case]]
+id = "auth.adversarial.body.signup-not-json"
+description = "Signup rejects a body that is not JSON"
+units = ["auth:route:POST /auth/v1/signup"]
+[[case.step]]
+method = "POST"
+path = "/auth/v1/signup"
+headers = { "Content-Type" = "application/json" }
+body = "not-json"
+
+[[case]]
+id = "auth.adversarial.body.signup-empty"
+description = "Signup with neither email nor phone is rejected because anonymous sign-ins are disabled"
+units = ["auth:route:POST /auth/v1/signup"]
+[[case.step]]
+method = "POST"
+path = "/auth/v1/signup"
+json = {}
+
+[[case]]
+id = "auth.adversarial.body.signup-password-type"
+description = "Signup rejects a numeric password"
+units = ["auth:route:POST /auth/v1/signup"]
+[[case.step]]
+method = "POST"
+path = "/auth/v1/signup"
+json = { email = "judge-num-{{run}}@example.com", password = 1 }
+
+[[case]]
+id = "auth.adversarial.body.signup-email-type"
+description = "Signup rejects an email sent as an array"
+units = ["auth:route:POST /auth/v1/signup"]
+[[case.step]]
+method = "POST"
+path = "/auth/v1/signup"
+json = { email = ["judge-arr-{{run}}@example.com"], password = "judge-password-1" }
+
+[[case]]
+id = "auth.adversarial.body.signup-email-and-phone"
+description = "Signup rejects a body that sets both email and phone"
+units = ["auth:route:POST /auth/v1/signup"]
+[[case.step]]
+method = "POST"
+path = "/auth/v1/signup"
+json = { email = "judge-both-{{run}}@example.com", phone = "+14155550100", password = "judge-password-1" }
+
+[[case]]
+id = "auth.adversarial.body.token-not-json"
+description = "Password grant rejects a body that is not JSON"
+units = ["auth:route:POST /auth/v1/token", "auth:grant-type:password"]
+[[case.step]]
+method = "POST"
+path = "/auth/v1/token?grant_type=password"
+headers = { "Content-Type" = "application/json" }
+body = "not-json"
+
+[[case]]
+id = "auth.adversarial.body.token-empty"
+description = "Password grant rejects an empty JSON object"
+units = ["auth:route:POST /auth/v1/token", "auth:grant-type:password"]
+[[case.step]]
+method = "POST"
+path = "/auth/v1/token?grant_type=password"
+json = {}
+
+[[case]]
+id = "auth.adversarial.body.token-grant"
+description = "An unknown grant_type is rejected"
+units = ["auth:route:POST /auth/v1/token"]
+[[case.step]]
+method = "POST"
+path = "/auth/v1/token?grant_type=client_credentials"
+json = {}
+
+[[case]]
+id = "auth.adversarial.rate-limit.token"
+description = "Password grant returns 429 once the per-header token burst (30) is spent"
+units = ["auth:route:POST /auth/v1/token", "auth:grant-type:password"]
+[[case.step]]
+method = "POST"
+path = "/auth/v1/token?grant_type=password"
+headers = { X-Megabase-Judge-Rate-Key = "judge-{{run}}" }
+json = { email = "nobody-{{run}}@example.com", password = "not-a-real-password" }
+[[case.step]]
+method = "POST"
+path = "/auth/v1/token?grant_type=password"
+headers = { X-Megabase-Judge-Rate-Key = "judge-{{run}}" }
+json = { email = "nobody-{{run}}@example.com", password = "not-a-real-password" }
+[[case.step]]
+method = "POST"
+path = "/auth/v1/token?grant_type=password"
+headers = { X-Megabase-Judge-Rate-Key = "judge-{{run}}" }
+json = { email = "nobody-{{run}}@example.com", password = "not-a-real-password" }
+[[case.step]]
+method = "POST"
+path = "/auth/v1/token?grant_type=password"
+headers = { X-Megabase-Judge-Rate-Key = "judge-{{run}}" }
+json = { email = "nobody-{{run}}@example.com", password = "not-a-real-password" }
+[[case.step]]
+method = "POST"
+path = "/auth/v1/token?grant_type=password"
+headers = { X-Megabase-Judge-Rate-Key = "judge-{{run}}" }
+json = { email = "nobody-{{run}}@example.com", password = "not-a-real-password" }
+[[case.step]]
+method = "POST"
+path = "/auth/v1/token?grant_type=password"
+headers = { X-Megabase-Judge-Rate-Key = "judge-{{run}}" }
+json = { email = "nobody-{{run}}@example.com", password = "not-a-real-password" }
+[[case.step]]
+method = "POST"
+path = "/auth/v1/token?grant_type=password"
+headers = { X-Megabase-Judge-Rate-Key = "judge-{{run}}" }
+json = { email = "nobody-{{run}}@example.com", password = "not-a-real-password" }
+[[case.step]]
+method = "POST"
+path = "/auth/v1/token?grant_type=password"
+headers = { X-Megabase-Judge-Rate-Key = "judge-{{run}}" }
+json = { email = "nobody-{{run}}@example.com", password = "not-a-real-password" }
+[[case.step]]
+method = "POST"
+path = "/auth/v1/token?grant_type=password"
+headers = { X-Megabase-Judge-Rate-Key = "judge-{{run}}" }
+json = { email = "nobody-{{run}}@example.com", password = "not-a-real-password" }
+[[case.step]]
+method = "POST"
+path = "/auth/v1/token?grant_type=password"
+headers = { X-Megabase-Judge-Rate-Key = "judge-{{run}}" }
+json = { email = "nobody-{{run}}@example.com", password = "not-a-real-password" }
+[[case.step]]
+method = "POST"
+path = "/auth/v1/token?grant_type=password"
+headers = { X-Megabase-Judge-Rate-Key = "judge-{{run}}" }
+json = { email = "nobody-{{run}}@example.com", password = "not-a-real-password" }
+[[case.step]]
+method = "POST"
+path = "/auth/v1/token?grant_type=password"
+headers = { X-Megabase-Judge-Rate-Key = "judge-{{run}}" }
+json = { email = "nobody-{{run}}@example.com", password = "not-a-real-password" }
+[[case.step]]
+method = "POST"
+path = "/auth/v1/token?grant_type=password"
+headers = { X-Megabase-Judge-Rate-Key = "judge-{{run}}" }
+json = { email = "nobody-{{run}}@example.com", password = "not-a-real-password" }
+[[case.step]]
+method = "POST"
+path = "/auth/v1/token?grant_type=password"
+headers = { X-Megabase-Judge-Rate-Key = "judge-{{run}}" }
+json = { email = "nobody-{{run}}@example.com", password = "not-a-real-password" }
+[[case.step]]
+method = "POST"
+path = "/auth/v1/token?grant_type=password"
+headers = { X-Megabase-Judge-Rate-Key = "judge-{{run}}" }
+json = { email = "nobody-{{run}}@example.com", password = "not-a-real-password" }
+[[case.step]]
+method = "POST"
+path = "/auth/v1/token?grant_type=password"
+headers = { X-Megabase-Judge-Rate-Key = "judge-{{run}}" }
+json = { email = "nobody-{{run}}@example.com", password = "not-a-real-password" }
+[[case.step]]
+method = "POST"
+path = "/auth/v1/token?grant_type=password"
+headers = { X-Megabase-Judge-Rate-Key = "judge-{{run}}" }
+json = { email = "nobody-{{run}}@example.com", password = "not-a-real-password" }
+[[case.step]]
+method = "POST"
+path = "/auth/v1/token?grant_type=password"
+headers = { X-Megabase-Judge-Rate-Key = "judge-{{run}}" }
+json = { email = "nobody-{{run}}@example.com", password = "not-a-real-password" }
+[[case.step]]
+method = "POST"
+path = "/auth/v1/token?grant_type=password"
+headers = { X-Megabase-Judge-Rate-Key = "judge-{{run}}" }
+json = { email = "nobody-{{run}}@example.com", password = "not-a-real-password" }
+[[case.step]]
+method = "POST"
+path = "/auth/v1/token?grant_type=password"
+headers = { X-Megabase-Judge-Rate-Key = "judge-{{run}}" }
+json = { email = "nobody-{{run}}@example.com", password = "not-a-real-password" }
+[[case.step]]
+method = "POST"
+path = "/auth/v1/token?grant_type=password"
+headers = { X-Megabase-Judge-Rate-Key = "judge-{{run}}" }
+json = { email = "nobody-{{run}}@example.com", password = "not-a-real-password" }
+[[case.step]]
+method = "POST"
+path = "/auth/v1/token?grant_type=password"
+headers = { X-Megabase-Judge-Rate-Key = "judge-{{run}}" }
+json = { email = "nobody-{{run}}@example.com", password = "not-a-real-password" }
+[[case.step]]
+method = "POST"
+path = "/auth/v1/token?grant_type=password"
+headers = { X-Megabase-Judge-Rate-Key = "judge-{{run}}" }
+json = { email = "nobody-{{run}}@example.com", password = "not-a-real-password" }
+[[case.step]]
+method = "POST"
+path = "/auth/v1/token?grant_type=password"
+headers = { X-Megabase-Judge-Rate-Key = "judge-{{run}}" }
+json = { email = "nobody-{{run}}@example.com", password = "not-a-real-password" }
+[[case.step]]
+method = "POST"
+path = "/auth/v1/token?grant_type=password"
+headers = { X-Megabase-Judge-Rate-Key = "judge-{{run}}" }
+json = { email = "nobody-{{run}}@example.com", password = "not-a-real-password" }
+[[case.step]]
+method = "POST"
+path = "/auth/v1/token?grant_type=password"
+headers = { X-Megabase-Judge-Rate-Key = "judge-{{run}}" }
+json = { email = "nobody-{{run}}@example.com", password = "not-a-real-password" }
+[[case.step]]
+method = "POST"
+path = "/auth/v1/token?grant_type=password"
+headers = { X-Megabase-Judge-Rate-Key = "judge-{{run}}" }
+json = { email = "nobody-{{run}}@example.com", password = "not-a-real-password" }
+[[case.step]]
+method = "POST"
+path = "/auth/v1/token?grant_type=password"
+headers = { X-Megabase-Judge-Rate-Key = "judge-{{run}}" }
+json = { email = "nobody-{{run}}@example.com", password = "not-a-real-password" }
+[[case.step]]
+method = "POST"
+path = "/auth/v1/token?grant_type=password"
+headers = { X-Megabase-Judge-Rate-Key = "judge-{{run}}" }
+json = { email = "nobody-{{run}}@example.com", password = "not-a-real-password" }
+[[case.step]]
+method = "POST"
+path = "/auth/v1/token?grant_type=password"
+headers = { X-Megabase-Judge-Rate-Key = "judge-{{run}}" }
+json = { email = "nobody-{{run}}@example.com", password = "not-a-real-password" }
+[[case.step]]
+method = "POST"
+path = "/auth/v1/token?grant_type=password"
+headers = { X-Megabase-Judge-Rate-Key = "judge-{{run}}" }
+json = { email = "nobody-{{run}}@example.com", password = "not-a-real-password" }
+
+[[case]]
+id = "auth.adversarial.redirect.external"
+description = "GET /verify does not redirect to an external host"
+units = ["auth:route:GET /auth/v1/verify"]
+[[case.step]]
+method = "GET"
+path = "/auth/v1/verify?type=signup&token=deadbeef&redirect_to=https%3A%2F%2Fevil.example%2Fphish"
+key = "none"
+
+[[case]]
+id = "auth.adversarial.redirect.suffix-host"
+description = "GET /verify does not treat a suffix of the site host as the site"
+units = ["auth:route:GET /auth/v1/verify"]
+[[case.step]]
+method = "GET"
+path = "/auth/v1/verify?type=signup&token=deadbeef&redirect_to=http%3A%2F%2Flocalhost%3A3000.evil.example%2Fphish"
+key = "none"
+
+[[case]]
+id = "auth.adversarial.redirect.userinfo"
+description = "GET /verify does not follow a userinfo trick onto an external host"
+units = ["auth:route:GET /auth/v1/verify"]
+[[case.step]]
+method = "GET"
+path = "/auth/v1/verify?type=signup&token=deadbeef&redirect_to=http%3A%2F%2Flocalhost%3A3000%40evil.example%2Fphish"
+key = "none"
+
+[[case]]
+id = "auth.adversarial.redirect.scheme"
+description = "GET /verify does not upgrade the site URL to https"
+units = ["auth:route:GET /auth/v1/verify"]
+[[case.step]]
+method = "GET"
+path = "/auth/v1/verify?type=signup&token=deadbeef&redirect_to=https%3A%2F%2Flocalhost%3A3000%2Fphish"
+key = "none"
+
+[[case]]
+id = "auth.adversarial.redirect.javascript"
+description = "GET /verify does not honor a javascript redirect"
+units = ["auth:route:GET /auth/v1/verify"]
+[[case.step]]
+method = "GET"
+path = "/auth/v1/verify?type=signup&token=deadbeef&redirect_to=javascript%3Aalert(1)"
+key = "none"
+
+[[case]]
+id = "auth.adversarial.redirect.decimal-ip"
+description = "GET /verify does not honor a decimal loopback address"
+units = ["auth:route:GET /auth/v1/verify"]
+[[case.step]]
+method = "GET"
+path = "/auth/v1/verify?type=signup&token=deadbeef&redirect_to=http%3A%2F%2F2130706433%2Fphish"
+key = "none"
+
+[[case]]
+id = "auth.adversarial.redirect.protocol-relative"
+description = "GET /verify does not honor a protocol-relative external URL"
+units = ["auth:route:GET /auth/v1/verify"]
+[[case.step]]
+method = "GET"
+path = "/auth/v1/verify?type=signup&token=deadbeef&redirect_to=%2F%2Fevil.example%2Fphish"
+key = "none"
+
+[[case]]
+id = "auth.adversarial.redirect.same-origin"
+description = "GET /verify keeps a same-origin redirect_to path"
+units = ["auth:route:GET /auth/v1/verify"]
+[[case.step]]
+method = "GET"
+path = "/auth/v1/verify?type=signup&token=deadbeef&redirect_to=http%3A%2F%2Flocalhost%3A3000%2Fwelcome"
+key = "none"
+
+[[case]]
+id = "auth.adversarial.redirect.authorize"
+description = "Authorize with a disabled provider and an external redirect_to does not send the browser off-site"
+units = ["auth:route:GET /auth/v1/authorize"]
+[[case.step]]
+method = "GET"
+path = "/auth/v1/authorize?provider=github&redirect_to=https%3A%2F%2Fevil.example%2Fphish"
+key = "none"
+

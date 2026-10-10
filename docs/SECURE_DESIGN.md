@@ -96,6 +96,16 @@ The mitigation column is what the code and CI do now.
 Dynamic analysis (fuzzing) is not in CI. That is OpenSSF `dynamic_analysis`,
 which stays Unmet, tracked in [issue 153](https://github.com/Zouhairmaj/megabase/issues/153).
 
+## Adversarial cases
+
+Auth and RLS attacks are specified by the judge, against the pinned
+reference stack, not by a guessed status code in this file. Visible cases
+`auth.adversarial.*` and `rest.adversarial.*` cover bad, expired, forged,
+and `alg=none` JWTs, role escalation, malformed Auth bodies, the GoTrue
+token burst, redirect allow-list abuse, and RLS bypass attempts
+(cross-user reads and writes, filters, embeds, anon versus authenticated
+versus `service_role`). Level 1 is not done while those cases fail.
+
 ## Reporting
 
 Vulnerabilities in this repository's code, CI, and release artifacts are

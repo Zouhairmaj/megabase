@@ -70,7 +70,9 @@ from the Judge artifact on `main`.
 Same endpoints, request syntax, status, JSON shape, error codes, headers
 the API documents (`content-type`, `content-range`, `location`,
 `preference-applied`), and the database objects apps and RLS depend on.
-Performance may differ; correctness may not.
+Performance may differ; correctness may not. Adversarial Auth and RLS
+behavior is the reference stack's response to `auth.adversarial.*` and
+`rest.adversarial.*` in `judge/cases/`.
 
 Intentional divergences (none today) would be listed here and in
 `PROGRESS.md`.
@@ -88,7 +90,7 @@ Implemented and tested counts come from markers and `judge/cases/`. Live conform
 |---|---|---|---:|---:|---:|
 | REST | aggregates | 1 | 5 | 0 | 0 |
 | REST | embedding | 1 | 2 | 0 | 0 |
-| REST | filtering | 1 | 28 | 20 | 4 |
+| REST | filtering | 1 | 28 | 20 | 5 |
 | REST | logic | 1 | 3 | 0 | 0 |
 | REST | media-types | 1 | 13 | 0 | 0 |
 | REST | ordering | 1 | 4 | 0 | 0 |
