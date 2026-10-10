@@ -1892,22 +1892,57 @@ body:has(#licensing-and-credits:target) .toc-list a[href="#licensing-and-credits
     min-height: 0;
   }
 
+  .docs-article {
+    align-items: stretch;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    grid-template-columns: none;
+  }
+
   .docs-mobile-bars {
-    display: flex;
-    flex-direction: column;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    width: 100%;
+    min-width: 0;
     border-bottom: 1px solid var(--border);
   }
 
   .docs-mobile-crumb {
+    grid-column: 1;
+    grid-row: 1;
+    min-width: 0;
     margin: 0;
     padding: 14px 20px;
     color: var(--body);
     font-size: 13px;
     border-bottom: 1px solid var(--border);
+    overflow-wrap: anywhere;
   }
 
   .docs-mobile-panel {
     border-bottom: 1px solid var(--border);
+    min-width: 0;
+    grid-column: 1 / -1;
+    grid-row: 3;
+  }
+
+  .docs-mobile-panel + .docs-mobile-panel {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .docs-mobile-panel + .docs-mobile-panel[open] {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+
+  .docs-mobile-panel summary {
+    text-transform: uppercase;
+  }
+
+  .docs-mobile-panel + .docs-mobile-panel summary::after {
+    content: "\00a0\25be";
   }
 
   .docs-mobile-panel summary {
@@ -1945,6 +1980,29 @@ body:has(#licensing-and-credits:target) .toc-list a[href="#licensing-and-credits
 
   .docs-body {
     padding: 32px 20px 0;
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .docs-body pre {
+    overflow-x: auto;
+    max-width: 100%;
+  }
+
+  .docs-status-table .data-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px 16px;
+  }
+
+  .docs-status-table .data-row span:nth-child(2),
+  .docs-status-table .data-row span:nth-child(3),
+  .docs-status-table .data-row span:nth-child(4),
+  .docs-status-table .data-row span:nth-child(5) {
+    display: none;
+  }
+
+  .docs-status-table .data-row.head {
+    display: none;
   }
 
   .docs-pager {
