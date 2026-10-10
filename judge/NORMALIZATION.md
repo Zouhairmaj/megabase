@@ -45,12 +45,16 @@ compared. Implemented in `judge/harness/src/db.rs`.
 
 | Kind | Compared | Normalized |
 |---|---|---|
-| Table catalog | column name and attnum order, `pg_type.typname`, `NOT NULL`, generated expression, `relrowsecurity`, `pg_get_indexdef`, `pg_get_constraintdef` (PK, UNIQUE, CHECK, FK) | SQL text: strip `--` comments, collapse whitespace, lowercase outside `'quoted'` literals. A required object missing on both sides fails; `absent = true` passes only when both databases lack the relation |
+| Table catalog | column name and attnum order, `pg_type.typname`, `NOT NULL`, generated expression, `pg_get_expr` column default, table and column ACLs (`aclexplode`: grantee, privilege, grant option; grantor excluded), RLS policies (`pg_policy`: name, command, permissive flag, sorted roles, `USING`, `WITH CHECK`), `relrowsecurity`, `pg_get_indexdef`, `pg_get_constraintdef` (PK, UNIQUE, CHECK, FK) | SQL text (defaults and policy expressions included): strip `--` comments, collapse whitespace, lowercase, all outside `'quoted'` literals and `"quoted"` identifiers (their contents, including spaces and `--`, are kept exactly). A required object missing on both sides fails; `absent = true` passes only when both databases lack the relation |
 | Function catalog | identity arguments, result type, language, `provolatile`, `prosrc` | same SQL normalization on result type and body |
 | Row snapshot | `jsonb_agg(row_to_json(t))` of `SELECT *` | HTTP JSON rules (including bcrypt), plus non-empty `auth.users` secret columns (`encrypted_password`, `*_token`), then sort the row array by serialized text. Mutating HTTP cases compare the before/after row delta as a multiset (duplicate normalized rows are counted), not the full table. Empty token strings stay empty so an autoconfirmed clear still differs from a leftover token. |
 
-Owners, ACLs, `column_default` and comments are not compared: they
-depend on which cluster roles exist and on cosmetic `COMMENT ON`.
+Owners, grantors and comments are not compared: they depend on which
+cluster role created the object and on cosmetic `COMMENT ON`. ACL entries
+whose grantee is the object's owner (`relowner`) are dropped for the same
+reason. ACL and
+policy roles are compared by name, so both databases must live in the
+same cluster (they do).
 `storage.objects` is out of scope until Level 2.
 
 ## Captures
