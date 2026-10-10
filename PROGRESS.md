@@ -140,9 +140,9 @@ Physically impossible for the agent (repository settings or credentials):
       [Create a tree](https://docs.github.com/rest/git/trees#create-a-tree),
       then Sync Cargo.lock's `git push` failed with `Permission to
       Zouhairmaj/megabase.git denied to megabase-agent`. Run 38008795223
-      (`acf5bee`) repeated that push 403 after the probe had fallen
-      back, because the lockfile checkout on `main` still used the
-      secret. This workflow checks out with the probe token, logs that
+      (`acf5bee`) and run 38009403819 (`951df46`) repeated that push
+      403 after the probe had fallen back, because the lockfile
+      checkout on `main` still used the secret. This workflow checks out with the probe token, logs that
       limit when the denial names `megabase-agent`, drops the checkout
       authorization header (`http.https://github.com/.extraheader`),
       and retries with the job `GITHUB_TOKEN` (`contents: write`). The

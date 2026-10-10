@@ -269,15 +269,16 @@ jobs:
           # that ref's workflow files lack workflow_dispatch, fall back to
           # Lockfile required checks on the default branch, which reports
           # the same check names onto this SHA via the Checks API.
-          # Dispatch whenever checks are missing, unless this run's push
-          # used the probed release token (that push starts workflows).
-          # pushed_with is github when the probe fell back or a 403
-          # retry used GITHUB_TOKEN, including a secret that is set but
-          # lacks Contents write (megabase-agent). Also dispatch when
-          # this step did not push (the existing head may have been
-          # pushed with GITHUB_TOKEN).
-          if [ "${PUSHED_WITH:-${TOKEN_SOURCE}}" != "release" ] || [ "${PUSHED:-false}" != "true" ]; then
-            echo "Required checks missing on ${SHA}; dispatching (pushed_with=${PUSHED_WITH:-unset} token_source=${TOKEN_SOURCE:-unset} pushed=${PUSHED:-false})"
+          # Dispatch whenever checks are missing. A release-token push
+          # starts push workflows only on the default branch: ci.yml,
+          # bencher.yml, and judge.yml listen for push on main. The
+          # lockfile commit is on release-please--branches--*, so skip
+          # dispatch only when that push used the release token and
+          # BRANCH is the default branch. pushed_with is github when
+          # the probe fell back or a 403 retry used GITHUB_TOKEN
+          # (megabase-agent). Also dispatch when this step did not push.
+          if [ "${PUSHED_WITH:-${TOKEN_SOURCE}}" != "release" ] || [ "${PUSHED:-false}" != "true" ] || [ "${BRANCH}" != "${DEFAULT_BRANCH}" ]; then
+            echo "Required checks missing on ${SHA}; dispatching (pushed_with=${PUSHED_WITH:-unset} token_source=${TOKEN_SOURCE:-unset} pushed=${PUSHED:-false} branch=${BRANCH} default=${DEFAULT_BRANCH})"
             if gh workflow run ci.yml --repo "${GITHUB_REPOSITORY}" --ref "${BRANCH}" \
                && gh workflow run bencher.yml --repo "${GITHUB_REPOSITORY}" --ref "${BRANCH}" \
                && gh workflow run judge.yml --repo "${GITHUB_REPOSITORY}" --ref "${BRANCH}"; then

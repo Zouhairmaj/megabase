@@ -116,11 +116,14 @@ another personal account, including for a collaborator. The secret has to be a c
 the `repo` and `workflow` scopes. Otherwise, and when that push is
 denied, the push uses `GITHUB_TOKEN`, which does not trigger
 `push`/`pull_request` workflows. The pending replacement is under
-Human-only actions in `PROGRESS.md` and in `HUMAN_LOG.md`. When the probe did not select
-the secret, the push was retried with `GITHUB_TOKEN`, or the lockfile
-commit was not pushed, the lockfile job `workflow_dispatch`es
-CI, Bencher, and Judge on the release branch
-(native check runs on that SHA). If that ref's workflow files lack
+Human-only actions in `PROGRESS.md` and in `HUMAN_LOG.md`. The lockfile
+job `workflow_dispatch`es CI, Bencher, and Judge on the release branch
+unless that push used the probed release token and the branch is the
+default branch. Those three workflows run on `push` only for `main`,
+and the lockfile commit is on `release-please--branches--*`, so a
+release-token push there still dispatches (native check runs on that
+SHA). The same dispatch runs when the probe did not select the secret,
+the push was retried with `GITHUB_TOKEN`, or the commit was not pushed. If that ref's workflow files lack
 `workflow_dispatch`, it dispatches **Lockfile required checks** on the
 default branch, which checks out the lockfile SHA and reports Build,
 Codecov, Bencher, Protected paths, and Judge via the Checks API.
