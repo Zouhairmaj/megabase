@@ -4,6 +4,19 @@ All notable changes to Megabase are documented in this file.
 The format is produced by [release-please](https://github.com/googleapis/release-please).
 Sections: Features, Bug Fixes, Performance, Conformance/judge, Documentation.
 
+## [0.1.9](https://github.com/Zouhairmaj/megabase/compare/v0.1.8...v0.1.9) (2026-10-10)
+
+
+### Features
+
+* **rest:** serve resource routes ([7c162a7](https://github.com/Zouhairmaj/megabase/commit/7c162a7dddb1425939a4b4db7facb694bb255cfb))
+* **site:** animated dither database in the home hero ([#229](https://github.com/Zouhairmaj/megabase/issues/229)) ([c0015d3](https://github.com/Zouhairmaj/megabase/commit/c0015d3cc01e5baad9275d1a2c5fdee820310afe))
+
+
+### Bug Fixes
+
+* drop rsa from the lockfile ([#230](https://github.com/Zouhairmaj/megabase/issues/230)) ([11bca54](https://github.com/Zouhairmaj/megabase/commit/11bca547aa79dc8283e1b43b397261c3406ecbbe))
+
 ## [0.1.8](https://github.com/Zouhairmaj/megabase/compare/v0.1.7...v0.1.8) (2026-10-10)
 
 
