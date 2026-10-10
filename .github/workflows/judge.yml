@@ -127,7 +127,10 @@ jobs:
   service:
     name: Judge (${{ matrix.service }})
     needs: [changes, build, services]
-    if: (needs.changes.result != 'success' || (needs.changes.outputs.server != 'false' && needs.changes.outputs.judge != 'none')) && needs.build.result == 'success' && needs.services.result == 'success'
+    # always() overrides the implicit success() check. Without it, a
+    # failed changes job skips every shard even when build and services
+    # succeeded, and the aggregate fails without running cases.
+    if: always() && !cancelled() && (needs.changes.result != 'success' || (needs.changes.outputs.server != 'false' && needs.changes.outputs.judge != 'none')) && needs.build.result == 'success' && needs.services.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
