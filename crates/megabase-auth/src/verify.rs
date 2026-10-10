@@ -112,6 +112,17 @@ pub(crate) async fn verify_get(
         secure_email_change: state.config.secure_email_change,
         otp_exp_seconds: state.config.mailer_otp_exp_seconds,
     };
+    // Signing happens after the one-time token is cleared. GoTrue rolls that
+    // write back when the signer is missing; reject here so the token stays.
+    if state.jwt.is_none() {
+        let error = unexpected("Server lacks JWT secret");
+        return see_other(&error_redirect(
+            &redirect,
+            error.status.as_u16(),
+            error.error_code,
+            &error.message,
+        ));
+    }
     match state.backend.verify(&request).await {
         Ok(VerifyOutcome::Rejected {
             status,
@@ -196,6 +207,9 @@ pub(crate) async fn verify_post(
         secure_email_change: state.config.secure_email_change,
         otp_exp_seconds: state.config.mailer_otp_exp_seconds,
     };
+    if state.jwt.is_none() {
+        return unexpected("Server lacks JWT secret").into_response();
+    }
     match state.backend.verify(&request).await {
         Ok(VerifyOutcome::Rejected {
             status,
@@ -422,7 +436,7 @@ fn success_redirect(base: &str, kind: &str, signed: &SignedSession) -> String {
         ("token_type", "bearer"),
         ("type", kind),
     ]);
-    format!("{base}#{fragment}")
+    set_fragment(base, &fragment)
 }
 
 fn set_fragment(url: &str, fragment: &str) -> String {
@@ -527,6 +541,14 @@ mod tests {
         crate::routes::router(AuthState::new(config, Some(jwt), backend))
     }
 
+    fn app_without_jwt(backend: Backend) -> Router {
+        crate::routes::router(AuthState::new(
+            AuthConfig::reference_defaults(),
+            None,
+            backend,
+        ))
+    }
+
     async fn call(
         app: Router,
         method: &str,
@@ -560,6 +582,22 @@ mod tests {
         let html = format!("<a href=\"{}\">See Other</a>.\n\n", html_escape(&url));
         assert!(html.contains("&amp;"));
         assert!(html.ends_with(".\n\n"));
+    }
+
+    #[test]
+    fn success_redirect_replaces_an_existing_fragment() {
+        let signed = SignedSession {
+            response: Response::new(Body::empty()),
+            access_token: "tok".into(),
+            expires_in: 3600,
+            expires_at: 1,
+            refresh_token: "ref".into(),
+        };
+        let url = success_redirect("http://localhost:3000/welcome#section", "signup", &signed);
+        assert_eq!(url.matches('#').count(), 1);
+        assert!(url.starts_with("http://localhost:3000/welcome#"));
+        assert!(url.contains("access_token=tok"));
+        assert!(!url.contains("section"));
     }
 
     #[test]
@@ -933,5 +971,46 @@ mod tests {
         .await;
         assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
         assert_eq!(body["msg"], "Database error finding user from email link");
+    }
+
+    #[tokio::test]
+    async fn missing_jwt_does_not_consume_the_token() {
+        let backend = Backend::memory();
+        backend
+            .plant_verification_for_test("keep@example.com", "keephash", PlantFlags::default())
+            .await;
+        let (status, _, headers, _) = call(
+            app_without_jwt(backend.clone()),
+            "GET",
+            "/auth/v1/verify?type=signup&token=keephash",
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::SEE_OTHER);
+        let location = headers.get(header::LOCATION).unwrap().to_str().unwrap();
+        assert!(location.contains("error=server_error"));
+        assert!(location.contains("error_code=unexpected_failure"));
+        assert!(location.contains("Server+lacks+JWT+secret"));
+
+        let (status, body, _, _) = call(
+            app_without_jwt(backend.clone()),
+            "POST",
+            "/auth/v1/verify",
+            Some(r#"{"type":"signup","token_hash":"keephash"}"#),
+        )
+        .await;
+        assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(body["error_code"], "unexpected_failure");
+        assert_eq!(body["msg"], "Server lacks JWT secret");
+
+        let (status, body, _, _) = call(
+            app(true, backend),
+            "POST",
+            "/auth/v1/verify",
+            Some(r#"{"type":"signup","token_hash":"keephash"}"#),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(body["user"]["email"], "keep@example.com");
     }
 }

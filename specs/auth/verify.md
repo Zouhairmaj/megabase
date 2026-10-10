@@ -77,8 +77,9 @@ Go's redirect HTML: `<a href="ESCAPED">See Other</a>.` plus a blank line.
 `error`, `error_code`, `error_description`, and empty `sb`, query-escaped and
 sorted. 403 is `access_denied`. 400 is `invalid_request`. 500 is
 `server_error`. A success fragment carries the session fields plus `type` and
-empty `sb`. `SITE_URL` `http://localhost:3000` has an empty path, so the
-redirect has no slash before `#`.
+empty `sb`. Any `#` already on the redirect base is removed first. `SITE_URL`
+`http://localhost:3000` has an empty path, so the redirect has no slash before
+`#`.
 
 Signup and invite write a `user_signedup` / `team` audit. Recovery of an
 already confirmed user writes `login` / `account`. Email change writes
@@ -99,6 +100,7 @@ already confirmed user writes `login` / `account`. Email change writes
 | Email OTP not found or not valid | 403 | `otp_expired` / `Token has expired or is invalid` |
 | Banned (`banned_until` in the future), checked before expiry | 403 | `user_banned` / `User is banned` |
 | No database | 500 | `unexpected_failure` / `Database error finding user from email link` on the hash path, `Database error finding user` on the email path (GET redirects this) |
+| `JWT_SECRET` missing | 500 | `unexpected_failure` / `Server lacks JWT secret`, before the one-time token is read (GET redirects this) |
 
 Expiry is strict: the token is expired only when now is after `sent_at + GOTRUE_MAILER_OTP_EXP` seconds. `0` means 86400.
 
