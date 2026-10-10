@@ -191,8 +191,10 @@ are limited to fixture ids `1`, `2`, and `3`, so rows left by an earlier
 run do not make the two databases disagree.
 
 The workflow is `.github/workflows/judge-hidden.yml` (Mondays 06:00 UTC,
-and `workflow_dispatch` on `main` only). The job's only artifact is
-`judge-hidden-summary`, a JSON object with `total`, `passed`, `failed`,
+and `workflow_dispatch` on `main` only). The seed and the sealed blob
+are set on the seed check and the hidden run only, so the Megabase
+process and third-party actions do not inherit them. The job's only
+artifact is `judge-hidden-summary`, a JSON object with `total`, `passed`, `failed`,
 `generated`, and `stored`. Server logs are discarded. Do not add this
 workflow to required pull-request checks: it does not run on pull
 requests, and it fails closed until the seed exists.

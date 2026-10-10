@@ -30,9 +30,6 @@ jobs:
     environment: judge-hidden
     permissions:
       contents: read
-    env:
-      MEGABASE_JUDGE_HIDDEN_SEED: ${{ secrets.MEGABASE_JUDGE_HIDDEN_SEED }}
-      MEGABASE_JUDGE_HIDDEN_CASES: ${{ secrets.MEGABASE_JUDGE_HIDDEN_CASES }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -40,6 +37,8 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
       - name: Hidden seed is configured
+        env:
+          MEGABASE_JUDGE_HIDDEN_SEED: ${{ secrets.MEGABASE_JUDGE_HIDDEN_SEED }}
         run: |
           set -euo pipefail
           if [ -z "${MEGABASE_JUDGE_HIDDEN_SEED}" ]; then
@@ -103,6 +102,9 @@ jobs:
       - name: Wait
         run: ./target/release/megabase-judge wait --timeout 240
       - name: Run hidden suite
+        env:
+          MEGABASE_JUDGE_HIDDEN_SEED: ${{ secrets.MEGABASE_JUDGE_HIDDEN_SEED }}
+          MEGABASE_JUDGE_HIDDEN_CASES: ${{ secrets.MEGABASE_JUDGE_HIDDEN_CASES }}
         run: |
           set -euo pipefail
           set +e

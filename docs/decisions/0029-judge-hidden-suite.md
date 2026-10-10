@@ -51,9 +51,12 @@ restricted to `main` are not.
    fixed message that does not include ids, paths, or bodies.
 5. `.github/workflows/judge-hidden.yml` runs that command on Mondays
    06:00 UTC and on `workflow_dispatch`, only for `refs/heads/main`,
-   in the `judge-hidden` environment. The only artifact is that JSON.
-   Server logs are discarded. Results are not merged into
-   `coverage/judge-results.json` and do not move the conformance badge.
+   in the `judge-hidden` environment. The seed and the sealed blob
+   are environment variables of the steps that read them. The product
+   binary and third-party actions do not inherit them. The only
+   artifact is that JSON. Server logs are discarded. Results are not
+   merged into `coverage/judge-results.json` and do not move the
+   conformance badge.
 6. Read cases in the grammar constrain `public.todos` to fixture ids
    `1`, `2`, and `3`, so inserts left by an earlier run cannot make
    the two databases disagree on a later read.

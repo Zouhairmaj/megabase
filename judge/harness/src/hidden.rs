@@ -544,11 +544,9 @@ fn rest_cases(rng: &mut Rng) -> Vec<Case> {
         &[],
         &[],
     ));
-    let count = if rng.gen_bool() {
-        "count=exact"
-    } else {
-        "count=planned"
-    };
+    // count=planned is a planner estimate and can differ between two
+    // databases that return the same rows. The visible suite covers exact.
+    let count = "count=exact";
     let ids = fixture_ids(rng);
     cases.push(http(
         rng,
@@ -1154,6 +1152,11 @@ path = "/auth/v1/settings"
         assert!(text.contains("refs/heads/main"));
         assert!(text.contains("schedule:"));
         assert!(text.contains("MEGABASE_JUDGE_HIDDEN_SEED"));
+        // A job-level env would reach the product binary and third-party actions.
+        assert!(!text.contains("    env:\n      MEGABASE_JUDGE_HIDDEN_SEED"));
+        let start = text.find("name: Megabase on :8100").expect("server step");
+        let end = text.find("name: Wait").expect("wait step");
+        assert!(!text[start..end].contains("MEGABASE_JUDGE_HIDDEN"));
         assert!(!text.contains("hidden-open"));
         assert!(!text.contains("hidden-seal"));
         assert!(!text.contains("megabase.log"));
