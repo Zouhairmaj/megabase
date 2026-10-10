@@ -3,7 +3,8 @@
 
 use std::sync::OnceLock;
 
-use regex::Regex;
+use base64::Engine;
+use regex::{Captures, Regex};
 use serde_json::Value;
 
 /// Response headers compared on every step. All others (date, server, via,
@@ -33,14 +34,41 @@ const AUTH_USER_SECRET_KEYS: &[&str] = &[
     "phone_change_token",
 ];
 
+/// Compact JWT: header, payload (captured), signature.
+const JWT_PATTERN: &str = r"eyJ[A-Za-z0-9_-]*\.([A-Za-z0-9_-]+)\.[A-Za-z0-9_-]+";
+
+/// Claims generated per token that carry no contract.
+const VOLATILE_CLAIMS: &[&str] = &["iat", "exp", "jti"];
+
+fn jwt_regex() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(JWT_PATTERN).expect("valid jwt regex"))
+}
+
+/// Renders a JWT as its decoded claims minus `iat`, `exp` and `jti`, so two
+/// tokens compare equal exactly when every other claim matches. The
+/// signature is not checked. A payload that is not a JSON object becomes
+/// `<jwt>`.
+fn jwt_claims(token: &Captures<'_>) -> String {
+    let claims = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(&token[1])
+        .ok()
+        .and_then(|raw| serde_json::from_slice::<Value>(&raw).ok());
+    match claims {
+        Some(Value::Object(mut map)) => {
+            for key in VOLATILE_CLAIMS {
+                map.remove(*key);
+            }
+            format!("<jwt:{}>", Value::Object(map))
+        }
+        _ => "<jwt>".to_string(),
+    }
+}
+
 fn rules() -> &'static [(Regex, &'static str)] {
     static RULES: OnceLock<Vec<(Regex, &'static str)>> = OnceLock::new();
     RULES.get_or_init(|| {
         [
-            (
-                r"eyJ[A-Za-z0-9_-]*\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+",
-                "<jwt>",
-            ),
             (r"(?i)\$2[abxy]?\$\d{2}\$[A-Za-z0-9./]{53}", "<bcrypt>"),
             (
                 r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}(:?\d{2})?)?",
@@ -58,7 +86,7 @@ fn rules() -> &'static [(Regex, &'static str)] {
 }
 
 pub fn text(s: &str) -> String {
-    let mut out = s.to_string();
+    let mut out = jwt_regex().replace_all(s, jwt_claims).into_owned();
     for (re, to) in rules() {
         out = re.replace_all(&out, *to).into_owned();
     }
@@ -144,12 +172,50 @@ mod tests {
         );
         assert_eq!(
             text("Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.abc-_x"),
-            "Bearer <jwt>"
+            r#"Bearer <jwt:{"sub":"1"}>"#
         );
         assert_eq!(
             text("$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy"),
             "<bcrypt>"
         );
+    }
+
+    fn token(claims: &Value) -> String {
+        let enc = |v: &[u8]| base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(v);
+        format!(
+            "{}.{}.sig",
+            enc(br#"{"alg":"HS256","typ":"JWT"}"#),
+            enc(claims.to_string().as_bytes())
+        )
+    }
+
+    #[test]
+    fn jwt_claim_differences_fail() {
+        let base = json!({
+            "role": "anon", "aud": "authenticated", "sub": "u1",
+            "aal": "aal1", "amr": ["password"]
+        });
+        let reference = text(&token(&base));
+        for (claim, other) in [
+            ("role", json!("service_role")),
+            ("aud", json!("other")),
+            ("sub", json!("u2")),
+            ("aal", json!("aal2")),
+            ("amr", json!(["otp"])),
+            ("email", json!("a@example.com")),
+        ] {
+            let mut changed = base.clone();
+            changed[claim] = other;
+            assert_ne!(text(&token(&changed)), reference, "{claim}");
+        }
+    }
+
+    #[test]
+    fn jwt_volatile_claims_do_not_matter() {
+        let a = json!({"role": "anon", "sub": "u1", "iat": 1, "exp": 2, "jti": "a"});
+        let b = json!({"role": "anon", "sub": "u1", "iat": 10, "exp": 20, "jti": "b"});
+        assert_eq!(text(&token(&a)), text(&token(&b)));
+        assert_eq!(text(&token(&a)), text(&token(&json!({"role": "anon", "sub": "u1"}))));
     }
 
     #[test]
