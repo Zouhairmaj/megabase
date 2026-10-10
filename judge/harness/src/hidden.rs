@@ -111,7 +111,7 @@ struct Rng {
 
 impl Rng {
     fn from_seed(seed: &HiddenSeed) -> Result<Self> {
-        let mut okm = [0u8; 44];
+        let mut okm = seed_buffer(&seed.bytes, 44);
         expand(&seed.bytes, b"megabase-judge-hidden-rng-v1", &mut okm)?;
         let key: [u8; 32] = okm[..32].try_into().expect("32-byte key");
         let nonce: [u8; 12] = okm[32..].try_into().expect("12-byte nonce");
@@ -153,10 +153,24 @@ fn expand(seed: &[u8], info: &[u8], okm: &mut [u8]) -> Result<()> {
         .map_err(|_| anyhow::anyhow!("HKDF expand failed for the hidden-suite key"))
 }
 
+/// Repeats `seed` until `len` bytes are filled.
+///
+/// HKDF expand replaces every byte of the buffer it is given. The initial
+/// contents are seed material, not a fixed key.
+fn seed_buffer(seed: &[u8], len: usize) -> Vec<u8> {
+    assert!(!seed.is_empty(), "hidden seed is non-empty");
+    let mut okm = Vec::with_capacity(len);
+    while okm.len() < len {
+        let n = (len - okm.len()).min(seed.len());
+        okm.extend_from_slice(&seed[..n]);
+    }
+    okm
+}
+
 fn hmac_key(seed: &HiddenSeed, info: &[u8]) -> Result<[u8; 32]> {
-    let mut okm = [0u8; 32];
+    let mut okm = seed_buffer(&seed.bytes, 32);
     expand(&seed.bytes, info, &mut okm)?;
-    Ok(okm)
+    Ok(okm.as_slice().try_into().expect("32-byte key"))
 }
 
 fn shuffle<T>(rng: &mut Rng, items: &mut [T]) {
