@@ -1,0 +1,19 @@
+# Storage smoke cases.
+
+[[case]]
+id = "storage.bucket.list"
+description = "List buckets with the service role"
+units = ["storage:route:GET /storage/v1/bucket"]
+[[case.step]]
+method = "GET"
+path = "/storage/v1/bucket"
+key = "service_role"
+
+[[case]]
+id = "storage.bucket.missing"
+description = "Unknown bucket is a structured not-found error"
+units = ["storage:route:GET /storage/v1/bucket/{bucketId}"]
+[[case.step]]
+method = "GET"
+path = "/storage/v1/bucket/judge-does-not-exist"
+key = "service_role"

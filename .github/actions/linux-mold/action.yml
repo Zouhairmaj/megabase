@@ -1,0 +1,29 @@
+name: Linux mold
+description: >
+  Install the mold linker on Linux and export per-target rustflags only when
+  the mold binary is on PATH. Other platforms and a failed install keep the
+  default linker.
+
+runs:
+  using: composite
+  steps:
+    - name: Install mold when apt can provide it
+      shell: bash
+      run: |
+        set -euo pipefail
+        if ! command -v mold >/dev/null 2>&1; then
+          if command -v apt-get >/dev/null 2>&1 && command -v sudo >/dev/null 2>&1; then
+            sudo apt-get update || true
+            sudo apt-get install -y --no-install-recommends mold || true
+          fi
+        fi
+        if command -v mold >/dev/null 2>&1; then
+          echo "mold $(mold --version | head -n 1)"
+          # CARGO_TARGET_<triple>_RUSTFLAGS is target.<triple>.rustflags.
+          # It is set only after mold is installed, so a runner without the
+          # package still links with the default linker.
+          echo 'CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS=-C link-arg=-fuse-ld=mold' >> "$GITHUB_ENV"
+          echo 'CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS=-C link-arg=-fuse-ld=mold' >> "$GITHUB_ENV"
+        else
+          echo "mold is not available; keeping the default linker"
+        fi

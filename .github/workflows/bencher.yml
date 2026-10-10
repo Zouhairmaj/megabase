@@ -52,7 +52,9 @@ jobs:
       - uses: ./.github/actions/rust-cache
         if: env.BENCHER_API_KEY != ''
         with:
-          key: bencher
+          key: bencher-mold
+      - uses: ./.github/actions/linux-mold
+        if: env.BENCHER_API_KEY != ''
 
       - uses: bencherdev/bencher@b4cfdddf418fc547e694b8fa6cc7c846a9c77435 # main
         if: env.BENCHER_API_KEY != ''

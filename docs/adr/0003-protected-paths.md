@@ -89,4 +89,4 @@ are rejected.
 
 A required status check named **Protected paths** should be set on `main`
 (human-only: branch protection). Agents keep the policy in this ADR and in
-`PROGRESS.md` Decisions; they do not weaken it for convenience.
+`docs/decisions/`; they do not weaken it for convenience.

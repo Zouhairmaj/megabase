@@ -1,0 +1,19 @@
+# Postgres Meta smoke cases.
+
+[[case]]
+id = "meta.health"
+description = "Postgres Meta health through /pg (admin key)"
+units = ["meta:route:GET /pg/health"]
+[[case.step]]
+method = "GET"
+path = "/pg/health"
+key = "service_role"
+
+[[case]]
+id = "meta.config.version"
+description = "Postgres server version as reported by Postgres Meta"
+units = ["meta:route:GET /pg/config/version"]
+[[case.step]]
+method = "GET"
+path = "/pg/config/version"
+key = "service_role"
