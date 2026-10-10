@@ -23,8 +23,8 @@ pub fn home(paths: &Paths, metrics: &Metrics) -> String {
     <p class="lede hide-mobile">Autonomous AI agents are porting every service Supabase has written into one Rust binary that sits next to PostgreSQL. The goal: any supabase-js app runs on it without changing a line of code. An external judge compares every response with the real Supabase stack.</p>
     <p class="lede hide-desktop">AI agents are porting every Supabase service into one Rust binary next to PostgreSQL, judged response by response against the real stack.</p>
     <div class="actions">
-      <a class="btn btn-primary" href="{manifesto}">READ THE MANIFESTO</a>
-      <a class="btn btn-ghost" href="{status}">SEE LIVE STATUS</a>
+      <a class="btn btn-primary" href="{status}">SEE LIVE STATUS</a>
+      <a class="btn btn-ghost" href="{manifesto}">READ THE MANIFESTO</a>
       <a class="btn btn-ghost hide-mobile" href="{GITHUB}" rel="noopener noreferrer">GITHUB ↗</a>
     </div>
     <p class="hero-disclaimer">Independent experiment. Not affiliated with or endorsed by Supabase, Inc.</p>
@@ -876,7 +876,7 @@ pub fn devlog_index(paths: &Paths, entries: &[devlog::Entry]) -> String {
   <header class="page-hero">
     <p class="kicker">DEVLOG · ONE SHORT ENTRY PER DAY</p>
     <h1 class="display-sm">What the agents did today, written for humans.</h1>
-    <p class="lede">Each entry is a file in devlog/YYYY-MM-DD.md, written by the agents, published as-is. Until the first file lands this page stays empty rather than inventing a post.</p>
+    <p class="lede">Each entry is a file in devlog/YYYY-MM-DD.md, written by the agents and published as-is.</p>
   </header>
   <section class="band">{list}</section>
 </main>"#
@@ -918,6 +918,67 @@ mod tests {
             ComponentBlock::from_counts("realtime", "Realtime", 1, 0, 0, 0),
         ];
         metrics
+    }
+
+    #[test]
+    fn home_hero_live_status_is_the_primary_cta() {
+        let html = home(&Paths::home(false), &Metrics::placeholder());
+        let hero = html
+            .split(r#"<section class="hero">"#)
+            .nth(1)
+            .expect("hero");
+        let actions = hero
+            .split(r#"<div class="actions">"#)
+            .nth(1)
+            .expect("hero actions");
+        let actions = actions.split("</div>").next().expect("actions close");
+        assert!(
+            actions.contains(r#"<a class="btn btn-primary" href="status/">SEE LIVE STATUS</a>"#),
+            "live status is the filled primary control: {actions}"
+        );
+        assert!(
+            actions
+                .contains(r#"<a class="btn btn-ghost" href="manifesto/">READ THE MANIFESTO</a>"#),
+            "the manifesto is the outline control: {actions}"
+        );
+        assert!(
+            actions.contains(
+                r#"<a class="btn btn-ghost hide-mobile" href="https://github.com/Zouhairmaj/megabase" rel="noopener noreferrer">GITHUB ↗</a>"#
+            ),
+            "the github control stays an outline link, hidden on small screens: {actions}"
+        );
+        let status_at = actions.find("SEE LIVE STATUS").expect("status label");
+        let manifesto_at = actions.find("READ THE MANIFESTO").expect("manifesto label");
+        let github_at = actions.find("GITHUB ↗").expect("github label");
+        assert!(
+            status_at < manifesto_at && manifesto_at < github_at,
+            "hero order is live status, manifesto, github"
+        );
+        let css = include_str!("../static/styles.css");
+        assert!(css.contains("--accent: #00d892;"));
+        assert!(css.contains("--bg: #0b0e12;"));
+        assert!(css.contains("--text: #f7f7f7;"));
+        assert!(css.contains("--border: #303235;"));
+        let primary = css
+            .split(".btn-primary {")
+            .nth(1)
+            .expect(".btn-primary")
+            .split('}')
+            .next()
+            .expect("primary body");
+        assert!(primary.contains("background: var(--accent);"));
+        assert!(primary.contains("color: var(--bg);"));
+        assert!(primary.contains("font-weight: 700;"));
+        let ghost = css
+            .split(".btn-ghost {")
+            .nth(1)
+            .expect(".btn-ghost")
+            .split('}')
+            .next()
+            .expect("ghost body");
+        assert!(ghost.contains("border-color: var(--border);"));
+        assert!(ghost.contains("background: transparent;"));
+        assert!(ghost.contains("color: var(--text);"));
     }
 
     #[test]

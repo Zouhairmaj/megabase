@@ -49,6 +49,73 @@ method = "GET"
 path = "/rest/v1/todos?id=nope.1"
 
 [[case]]
+id = "rest.filter.ov"
+description = "Range overlap. [2,3) meets only [1,4)."
+units = ["rest:filter-operator:ov"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/spans?during=ov.[2,3)"
+
+[[case]]
+id = "rest.filter.sl"
+description = "Strictly left of. [5,6) is strictly after only [1,4)."
+units = ["rest:filter-operator:sl"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/spans?during=sl.[5,6)"
+
+[[case]]
+id = "rest.filter.sr"
+description = "Strictly right of. [8,9) is strictly before only [10,12)."
+units = ["rest:filter-operator:sr"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/spans?during=sr.[8,9)"
+
+[[case]]
+id = "rest.filter.nxr"
+description = "Does not extend right of. Only [1,4) ends at or before 5."
+units = ["rest:filter-operator:nxr"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/spans?during=nxr.[1,5)"
+
+[[case]]
+id = "rest.filter.nxl"
+description = "Does not extend left of. Only [10,12) starts at or after 9."
+units = ["rest:filter-operator:nxl"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/spans?during=nxl.[9,20)"
+
+[[case]]
+id = "rest.filter.plfts"
+description = "Plain tsquery, default config and an explicit english config"
+units = ["rest:filter-operator:plfts"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?title=plfts.spec"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?title=plfts(english).unit"
+
+[[case]]
+id = "rest.filter.phfts"
+description = "Phrase tsquery. Stop word 'the' still matches 'write the spec'."
+units = ["rest:filter-operator:phfts"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?title=phfts(english).the%20spec"
+
+[[case]]
+id = "rest.filter.wfts"
+description = "Websearch tsquery with an explicit english config"
+units = ["rest:filter-operator:wfts"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?title=wfts(english).spec"
+
+[[case]]
 id = "rest.limit-offset"
 description = "Pagination with limit and offset"
 units = ["rest:query-param:limit", "rest:query-param:offset", "rest:query-param:order"]
