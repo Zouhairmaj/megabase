@@ -4,6 +4,15 @@ All notable changes to Megabase are documented in this file.
 The format is produced by [release-please](https://github.com/googleapis/release-please).
 Sections: Features, Bug Fixes, Performance, Conformance/judge, Documentation.
 
+## [0.1.8](https://github.com/Zouhairmaj/megabase/compare/v0.1.7...v0.1.8) (2026-10-10)
+
+
+### Features
+
+* **rest:** serve query parameters on get ([#223](https://github.com/Zouhairmaj/megabase/issues/223)) ([34e4538](https://github.com/Zouhairmaj/megabase/commit/34e4538ede0a078b98e905b45b982f4e11d5fe6e))
+* **site:** show release version next to logo ([#221](https://github.com/Zouhairmaj/megabase/issues/221)) ([cca58fb](https://github.com/Zouhairmaj/megabase/commit/cca58fb83235fccaa5f9c65190f4bf9b0fd4d75d))
+* **site:** simplify hero eyebrow and hide conformance % ([#226](https://github.com/Zouhairmaj/megabase/issues/226)) ([f5ebf2c](https://github.com/Zouhairmaj/megabase/commit/f5ebf2ceb13f8b4e0a9dfe4b6b772db8e28345d8))
+
 ## [0.1.7](https://github.com/Zouhairmaj/megabase/compare/v0.1.6...v0.1.7) (2026-10-10)
 
 
