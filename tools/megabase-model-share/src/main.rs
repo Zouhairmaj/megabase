@@ -124,9 +124,15 @@ fn generated_marker(content: &str) -> Option<Marker> {
         .strip_prefix("<!--")?
         .strip_suffix("-->")?
         .trim();
-    if inner.ends_with(":begin") {
+    let valid = |name: &str| {
+        !name.is_empty()
+            && name
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.'))
+    };
+    if inner.strip_suffix(":begin").is_some_and(valid) {
         Some(Marker::Begin)
-    } else if inner.ends_with(":end") {
+    } else if inner.strip_suffix(":end").is_some_and(valid) {
         Some(Marker::End)
     } else {
         None
@@ -319,6 +325,9 @@ mod tests {
         assert_eq!(generated_marker("  <!-- pins:end -->"), Some(Marker::End));
         assert_eq!(generated_marker("<!-- just a comment -->"), None);
         assert_eq!(generated_marker("text"), None);
+        assert_eq!(generated_marker("<!-- a note:end -->"), None);
+        assert_eq!(generated_marker("<!-- a note:begin -->"), None);
+        assert_eq!(generated_marker("<!-- :begin -->"), None);
     }
 
     #[test]
