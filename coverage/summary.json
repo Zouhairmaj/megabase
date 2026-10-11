@@ -3,7 +3,7 @@
   "totals": {
     "units": 1024,
     "implemented": 168,
-    "tested": 94,
+    "tested": 100,
     "conformant": 0
   },
   "percent": {
@@ -12,7 +12,7 @@
     "done": 0.0
   },
   "judge": {
-    "cases": 181,
+    "cases": 200,
     "passing": 0
   },
   "components": {
@@ -317,7 +317,7 @@
     "rest": {
       "units": 93,
       "implemented": 89,
-      "tested": 34,
+      "tested": 40,
       "conformant": 0,
       "groups": {
         "aggregates": {
@@ -359,7 +359,7 @@
         "prefer": {
           "units": 16,
           "implemented": 16,
-          "tested": 1,
+          "tested": 7,
           "conformant": 0
         },
         "query-params": {
@@ -696,12 +696,12 @@
     "rest:prefer:missing=null": "implemented",
     "rest:prefer:resolution=ignore-duplicates": "implemented",
     "rest:prefer:resolution=merge-duplicates": "implemented",
-    "rest:prefer:return=headers-only": "implemented",
-    "rest:prefer:return=minimal": "implemented",
-    "rest:prefer:return=representation": "implemented",
-    "rest:prefer:timezone=*": "implemented",
-    "rest:prefer:tx=commit": "implemented",
-    "rest:prefer:tx=rollback": "implemented",
+    "rest:prefer:return=headers-only": "tested",
+    "rest:prefer:return=minimal": "tested",
+    "rest:prefer:return=representation": "tested",
+    "rest:prefer:timezone=*": "tested",
+    "rest:prefer:tx=commit": "tested",
+    "rest:prefer:tx=rollback": "tested",
     "rest:query-param:and": "tested",
     "rest:query-param:columns": "tested",
     "rest:query-param:limit": "tested",
