@@ -15,6 +15,7 @@ members = [
     "tools/megabase-coverage",
     "tools/megabase-guard",
     "tools/megabase-backlog",
+    "tools/megabase-model-share",
     "judge/harness",
 ]
 exclude = ["site", "fuzz", "third_party/sqlx-mysql"]
