@@ -110,13 +110,16 @@ GoTrue's default API shape (no `X-Supabase-Api-Version: 2024-01-01`):
 
 ## Partial: `POST /recover`
 
-Served up to the mail step (upstream `recover.go:25`). Empty `email` is 400
+Served up to the mail step (upstream `recover.go:25`). With the email provider
+disabled the route is 400 `email_provider_disabled` / `Email logins are
+disabled` before the body is read (`middleware.go:231`). Otherwise a JSON
+`null` string counts as empty, like Go's decoder. Empty `email` is 400
 `Password recovery requires an email`; a bad email and bad PKCE params use the
-signup messages. An email with no user in the request audience is 200 `{}`
-(no enumeration). An existing user would get a recovery token and mail, which
-needs a mailer that is not ported (SMTP crate approval pending), so that path
-stays 501 and `recover` has no `megabase:unit` marker yet. The same mailer
-blocks `invite`, `resend`, and `reauthenticate`.
+signup messages. GoTrue then answers 200 `{}` for known and unknown emails
+alike. Sending the mail needs a mailer that is not ported (SMTP crate approval
+pending), so every request that passes validation is 501, whether or not the
+account exists (no enumeration), and `recover` has no `megabase:unit` marker
+yet. The same mailer blocks `invite`, `resend`, and `reauthenticate`.
 
 ## Edge cases
 
