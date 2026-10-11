@@ -111,6 +111,28 @@ fn eligible_text(bytes: &[u8]) -> bool {
     })
 }
 
+/// Marker lines that open or close a generated `<!-- name:begin -->` region.
+#[derive(Debug, PartialEq)]
+enum Marker {
+    Begin,
+    End,
+}
+
+fn generated_marker(content: &str) -> Option<Marker> {
+    let inner = content
+        .trim()
+        .strip_prefix("<!--")?
+        .strip_suffix("-->")?
+        .trim();
+    if inner.ends_with(":begin") {
+        Some(Marker::Begin)
+    } else if inner.ends_with(":end") {
+        Some(Marker::End)
+    } else {
+        None
+    }
+}
+
 fn git(root: &Path, args: &[&str]) -> Result<Vec<u8>> {
     let output = Command::new("git").current_dir(root).args(args).output()?;
     if !output.status.success() {
@@ -147,6 +169,7 @@ fn collect(root: &Path) -> Result<Report> {
         let blame = git(root, &["blame", "--line-porcelain", "--", filename])
             .with_context(|| format!("blaming {filename}"))?;
         let mut commit = "";
+        let mut in_generated = false;
         for line in std::str::from_utf8(&blame)?.lines() {
             // Header: object id, original line, final line, optional group size.
             let fields: Vec<_> = line.split_whitespace().collect();
@@ -158,7 +181,20 @@ fn collect(root: &Path) -> Result<Report> {
                 && !line.starts_with('\t')
             {
                 commit = fields[0];
-            } else if line.starts_with('\t') {
+            } else if let Some(content) = line.strip_prefix('\t') {
+                // Skip generated `<!-- x:begin -->`..`<!-- x:end -->` regions,
+                // markers included.
+                match generated_marker(content) {
+                    Some(Marker::Begin) => in_generated = true,
+                    Some(Marker::End) => {
+                        in_generated = false;
+                        continue;
+                    }
+                    None => {}
+                }
+                if in_generated {
+                    continue;
+                }
                 if commit.is_empty() {
                     bail!("missing blame header for {filename}");
                 }
@@ -272,6 +308,17 @@ mod tests {
             attribution("subject\n\nModel:\nCo-authored-by: Gemini <g@example.test>"),
             "gemini"
         );
+    }
+
+    #[test]
+    fn detects_generated_region_markers() {
+        assert_eq!(
+            generated_marker("<!-- status:begin -->"),
+            Some(Marker::Begin)
+        );
+        assert_eq!(generated_marker("  <!-- pins:end -->"), Some(Marker::End));
+        assert_eq!(generated_marker("<!-- just a comment -->"), None);
+        assert_eq!(generated_marker("text"), None);
     }
 
     #[test]
