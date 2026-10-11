@@ -3,7 +3,7 @@
   "totals": {
     "units": 1024,
     "implemented": 168,
-    "tested": 91,
+    "tested": 94,
     "conformant": 0
   },
   "percent": {
@@ -12,7 +12,7 @@
     "done": 0.0
   },
   "judge": {
-    "cases": 172,
+    "cases": 181,
     "passing": 0
   },
   "components": {
@@ -317,7 +317,7 @@
     "rest": {
       "units": 93,
       "implemented": 89,
-      "tested": 31,
+      "tested": 34,
       "conformant": 0,
       "groups": {
         "aggregates": {
@@ -347,7 +347,7 @@
         "media-types": {
           "units": 13,
           "implemented": 9,
-          "tested": 1,
+          "tested": 4,
           "conformant": 0
         },
         "ordering": {
@@ -679,9 +679,9 @@
     "rest:media-type:application/vnd.pgrst.array+json;nulls=stripped": "implemented",
     "rest:media-type:application/vnd.pgrst.object+json": "tested",
     "rest:media-type:application/vnd.pgrst.object+json;nulls=stripped": "implemented",
-    "rest:media-type:text/csv": "implemented",
-    "rest:media-type:text/plain": "implemented",
-    "rest:media-type:text/xml": "implemented",
+    "rest:media-type:text/csv": "tested",
+    "rest:media-type:text/plain": "tested",
+    "rest:media-type:text/xml": "tested",
     "rest:order-modifier:asc": "implemented",
     "rest:order-modifier:desc": "implemented",
     "rest:order-modifier:nullsfirst": "implemented",
