@@ -67,6 +67,7 @@ repo = "https://github.com/supabase/supabase"
 tag = "v1.26.08"
 commit = "86854671e95be31e24fa0785cded0579fe692fcb"
 license = "Apache-2.0"
+image = "supabase/studio:2026.08.03-sha-022b374"
 
 [[pin]]
 name = "edge-runtime"

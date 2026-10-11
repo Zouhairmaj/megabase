@@ -92,3 +92,9 @@ Each entry should include:
 - **Action**: Owner Zouhair approved the decorative client canvas `site/static/db-dither.js` as the site hero illustration (issue #228). The file stays JavaScript. A Rust or WASM rewrite was declined for this illustration.
 - **Reason**: The home hero is a browser canvas. Megabase product code stays Rust. This exception is that one path only.
 - **Files affected**: `site/static/db-dither.js`, `HUMAN_LOG.md`, `tools/megabase-guard/`, `docs/adr/0003-protected-paths.md`
+
+- **Date**: 2026-10-11
+- **Action**: Owner Zouhair approved in chat pinning the Studio reference image `supabase/studio:2026.08.03-sha-022b374` on the `supabase` pin in `vendor.toml`, for Phase 0 review item 1.7 (issue #198).
+- **Reason**: `vendor.toml` is a protected path; agents cannot change it. The digest was verified by the Judge side beforehand.
+- **Merge**: On 2026-10-11 the owner also explicitly approved admin-merging PR #274 despite the red `Protected paths` check, which always fails on `vendor.toml` because `tools/megabase-guard` treats it as frozen after bootstrap. This is a one-off owner decision, not a guard exception.
+- **Files affected**: `vendor.toml`, `HUMAN_LOG.md`, `coverage/` (regenerated)
