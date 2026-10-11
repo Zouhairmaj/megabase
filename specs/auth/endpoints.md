@@ -108,6 +108,16 @@ GoTrue's default API shape (no `X-Supabase-Api-Version: 2024-01-01`):
 | Session id not in the database | 403 | `session_not_found` / `Session from session_id claim in JWT does not exist` |
 | Bad logout scope | 400 | `validation_failed` / `Unsupported logout scope "<scope>"` |
 
+## Partial: `POST /recover`
+
+Served up to the mail step (upstream `recover.go:25`). Empty `email` is 400
+`Password recovery requires an email`; a bad email and bad PKCE params use the
+signup messages. An email with no user in the request audience is 200 `{}`
+(no enumeration). An existing user would get a recovery token and mail, which
+needs a mailer that is not ported (SMTP crate approval pending), so that path
+stays 501 and `recover` has no `megabase:unit` marker yet. The same mailer
+blocks `invite`, `resend`, and `reauthenticate`.
+
 ## Edge cases
 
 - Email is lowercased. A confirmed duplicate does not change the password.
