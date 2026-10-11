@@ -439,11 +439,16 @@ id = "rest.prefer.return.minimal.insert"
 description = "return=minimal on a create answers 201 with an empty body"
 units = ["rest:prefer:return=minimal"]
 [[case.step]]
+method = "DELETE"
+path = "/rest/v1/todos?id=eq.9101"
+key = "service_role"
+headers = { Prefer = "return=minimal" }
+[[case.step]]
 method = "POST"
 path = "/rest/v1/todos"
 key = "service_role"
 headers = { Prefer = "return=minimal" }
-json = { id = 9101, title = "prefer-minimal" }
+json = { id = 9101,title = "prefer-minimal" }
 [[case.step]]
 method = "DELETE"
 path = "/rest/v1/todos?id=eq.9101"
@@ -466,11 +471,16 @@ id = "rest.prefer.return.minimal.delete"
 description = "return=minimal on a delete of an existing row answers 204"
 units = ["rest:prefer:return=minimal"]
 [[case.step]]
+method = "DELETE"
+path = "/rest/v1/todos?id=eq.9111"
+key = "service_role"
+headers = { Prefer = "return=minimal" }
+[[case.step]]
 method = "POST"
 path = "/rest/v1/todos"
 key = "service_role"
 headers = { Prefer = "return=minimal" }
-json = { id = 9111, title = "prefer-minimal-delete" }
+json = { id = 9111,title = "prefer-minimal-delete" }
 [[case.step]]
 method = "DELETE"
 path = "/rest/v1/todos?id=eq.9111"
@@ -482,11 +492,16 @@ id = "rest.prefer.return.representation.insert"
 description = "return=representation on a create answers 201 with the row"
 units = ["rest:prefer:return=representation"]
 [[case.step]]
+method = "DELETE"
+path = "/rest/v1/todos?id=eq.9102"
+key = "service_role"
+headers = { Prefer = "return=minimal" }
+[[case.step]]
 method = "POST"
 path = "/rest/v1/todos?select=title,done,priority"
 key = "service_role"
 headers = { Prefer = "return=representation" }
-json = { id = 9102, title = "prefer-representation" }
+json = { id = 9102,title = "prefer-representation" }
 [[case.step]]
 method = "DELETE"
 path = "/rest/v1/todos?id=eq.9102"
@@ -519,11 +534,16 @@ id = "rest.prefer.return.representation.delete.existing"
 description = "return=representation on a delete of an existing row answers 200 with the row"
 units = ["rest:prefer:return=representation"]
 [[case.step]]
+method = "DELETE"
+path = "/rest/v1/todos?id=eq.9112"
+key = "service_role"
+headers = { Prefer = "return=minimal" }
+[[case.step]]
 method = "POST"
 path = "/rest/v1/todos"
 key = "service_role"
 headers = { Prefer = "return=minimal" }
-json = { id = 9112, title = "prefer-representation-delete" }
+json = { id = 9112,title = "prefer-representation-delete" }
 [[case.step]]
 method = "DELETE"
 path = "/rest/v1/todos?id=eq.9112&select=id,title"
@@ -535,11 +555,16 @@ id = "rest.prefer.return.headers-only.insert"
 description = "return=headers-only on a create answers 201 with Location and no body"
 units = ["rest:prefer:return=headers-only"]
 [[case.step]]
+method = "DELETE"
+path = "/rest/v1/todos?id=eq.9103"
+key = "service_role"
+headers = { Prefer = "return=minimal" }
+[[case.step]]
 method = "POST"
 path = "/rest/v1/todos"
 key = "service_role"
 headers = { Prefer = "return=headers-only" }
-json = { id = 9103, title = "prefer-headers-only" }
+json = { id = 9103,title = "prefer-headers-only" }
 [[case.step]]
 method = "DELETE"
 path = "/rest/v1/todos?id=eq.9103"
@@ -562,11 +587,16 @@ id = "rest.prefer.return.headers-only.delete"
 description = "return=headers-only on a delete of an existing row answers 204"
 units = ["rest:prefer:return=headers-only"]
 [[case.step]]
+method = "DELETE"
+path = "/rest/v1/todos?id=eq.9113"
+key = "service_role"
+headers = { Prefer = "return=minimal" }
+[[case.step]]
 method = "POST"
 path = "/rest/v1/todos"
 key = "service_role"
 headers = { Prefer = "return=minimal" }
-json = { id = 9113, title = "prefer-headers-only-delete" }
+json = { id = 9113,title = "prefer-headers-only-delete" }
 [[case.step]]
 method = "DELETE"
 path = "/rest/v1/todos?id=eq.9113"
@@ -617,6 +647,11 @@ id = "rest.prefer.tx.commit"
 description = "tx=commit persists the write and is not echoed"
 units = ["rest:prefer:tx=commit"]
 [[case.step]]
+method = "DELETE"
+path = "/rest/v1/todos?id=eq.9104"
+key = "service_role"
+headers = { Prefer = "return=minimal" }
+[[case.step]]
 method = "POST"
 path = "/rest/v1/todos"
 key = "service_role"
@@ -641,6 +676,11 @@ headers = { Prefer = "tx=commit" }
 id = "rest.prefer.tx.rollback"
 description = "tx=rollback is ignored without an override, so the write persists"
 units = ["rest:prefer:tx=rollback"]
+[[case.step]]
+method = "DELETE"
+path = "/rest/v1/todos?id=eq.9105"
+key = "service_role"
+headers = { Prefer = "return=minimal" }
 [[case.step]]
 method = "POST"
 path = "/rest/v1/todos"
