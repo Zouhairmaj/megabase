@@ -19,10 +19,11 @@ use axum::response::{IntoResponse, Response};
 use serde_json::{Map, Value};
 
 use crate::filter::{parse_filter_value, quote_ident, sql_type_name, UnsafeType};
+use crate::prefer::Prefer;
 use crate::query::percent_decode;
 use crate::read::{
     begin, content_range, database_unavailable, negotiated_schema, not_implemented,
-    options_response, pgrst, profile_header, query_failure, reject_accept, reject_prefer, session,
+    options_response, pgrst, profile_header, query_failure, reject_accept, session,
     set_request_context, unimplemented_unit, unsafe_type, Session, JSON_UTF8,
 };
 use crate::RestState;
@@ -227,10 +228,11 @@ pub(crate) async fn call(
     body: &[u8],
 ) -> Response {
     let path = uri.path();
-    let session = match session(state, headers.get(header::AUTHORIZATION)) {
+    let mut session = match session(state, headers.get(header::AUTHORIZATION)) {
         Ok(session) => session,
         Err(response) => return *response,
     };
+    session.timezone = Prefer::from_headers(headers).timezone;
     let schema = match negotiated_schema(method, headers) {
         Ok(schema) => schema,
         Err(response) => return *response,
@@ -242,7 +244,7 @@ pub(crate) async fn call(
         // megabase:unit rest:route:OPTIONS /rest/v1/rpc/{function}
         return routine_options(state, method, uri, &session, &schema, function).await;
     }
-    if let Some(unit) = reject_prefer(headers.get("prefer")) {
+    if let Some(unit) = Prefer::from_headers(headers).rpc_unserved() {
         return unimplemented_unit(method, path, unit);
     }
     if let Some(unit) = reject_accept(headers.get(header::ACCEPT)) {

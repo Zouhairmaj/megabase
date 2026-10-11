@@ -39,7 +39,18 @@ pub(crate) enum Handling {
     Lenient,
 }
 
-/// Parsed preferences. Kinds that are not served yet are in `unserved`.
+/// `return=` preference (`PreferRepresentation`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Representation {
+    /// `return=representation`.
+    Full,
+    /// `return=headers-only`.
+    HeadersOnly,
+    /// `return=minimal`.
+    Minimal,
+}
+
+/// Parsed preferences.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub(crate) struct Prefer {
     pub(crate) resolution: Option<Resolution>,
@@ -47,8 +58,8 @@ pub(crate) struct Prefer {
     pub(crate) missing: Option<Missing>,
     pub(crate) handling: Option<Handling>,
     pub(crate) max_affected: Option<i64>,
-    /// Unit id of the first `return=`, `tx=` or `timezone=` preference.
-    pub(crate) unserved: Option<&'static str>,
+    pub(crate) representation: Option<Representation>,
+    pub(crate) timezone: Option<String>,
     invalid: Vec<String>,
 }
 
@@ -95,18 +106,25 @@ impl Prefer {
                 self.handling.get_or_insert(Handling::Lenient);
             }
             "return=minimal" => {
-                self.unserved = self.unserved.or(Some("rest:prefer:return=minimal"))
+                self.representation.get_or_insert(Representation::Minimal);
             }
             "return=representation" => {
-                self.unserved = self.unserved.or(Some("rest:prefer:return=representation"));
+                self.representation.get_or_insert(Representation::Full);
             }
             "return=headers-only" => {
-                self.unserved = self.unserved.or(Some("rest:prefer:return=headers-only"));
+                self.representation
+                    .get_or_insert(Representation::HeadersOnly);
             }
-            "tx=commit" => self.unserved = self.unserved.or(Some("rest:prefer:tx=commit")),
-            "tx=rollback" => self.unserved = self.unserved.or(Some("rest:prefer:tx=rollback")),
+            // megabase:unit rest:prefer:tx=commit
+            // megabase:unit rest:prefer:tx=rollback
+            // PostgREST parses `tx=` only when `db-tx-end` allows an override,
+            // which the pinned stack does not. Ignored and never echoed.
+            "tx=commit" | "tx=rollback" => {}
+            // megabase:unit rest:prefer:timezone=*
             _ if pref.starts_with("timezone=") => {
-                self.unserved = self.unserved.or(Some("rest:prefer:timezone=*"));
+                if self.timezone.is_none() {
+                    self.timezone = Some(pref["timezone=".len()..].to_string());
+                }
             }
             _ if pref.starts_with("max-affected=") => {
                 if self.max_affected.is_none() {
@@ -132,6 +150,53 @@ impl Prefer {
             Some(&format!("Invalid preferences: {}", self.invalid.join(", "))),
             None,
         )))
+    }
+
+    /// Unit id of the first preference that RPC routes do not serve yet.
+    pub(crate) fn rpc_unserved(&self) -> Option<&'static str> {
+        match self {
+            Self {
+                resolution: Some(Resolution::Merge),
+                ..
+            } => Some("rest:prefer:resolution=merge-duplicates"),
+            Self {
+                resolution: Some(Resolution::Ignore),
+                ..
+            } => Some("rest:prefer:resolution=ignore-duplicates"),
+            Self {
+                count: Some(Count::Exact),
+                ..
+            } => Some("rest:prefer:count=exact"),
+            Self {
+                count: Some(Count::Planned),
+                ..
+            } => Some("rest:prefer:count=planned"),
+            Self {
+                count: Some(Count::Estimated),
+                ..
+            } => Some("rest:prefer:count=estimated"),
+            Self {
+                missing: Some(Missing::Default),
+                ..
+            } => Some("rest:prefer:missing=default"),
+            Self {
+                missing: Some(Missing::Null),
+                ..
+            } => Some("rest:prefer:missing=null"),
+            Self {
+                handling: Some(Handling::Strict),
+                ..
+            } => Some("rest:prefer:handling=strict"),
+            Self {
+                handling: Some(Handling::Lenient),
+                ..
+            } => Some("rest:prefer:handling=lenient"),
+            Self {
+                max_affected: Some(_),
+                ..
+            } => Some("rest:prefer:max-affected=*"),
+            _ => None,
+        }
     }
 
     /// `max-affected` only binds under `handling=strict`.
@@ -165,6 +230,16 @@ impl Prefer {
                 .to_string(),
             );
         }
+        if let (Some(representation), true) = (self.representation, scope.representation) {
+            out.push(
+                match representation {
+                    Representation::Full => "return=representation",
+                    Representation::HeadersOnly => "return=headers-only",
+                    Representation::Minimal => "return=minimal",
+                }
+                .to_string(),
+            );
+        }
         if let (Some(count), true) = (self.count, scope.count) {
             out.push(
                 match count {
@@ -183,6 +258,9 @@ impl Prefer {
                 }
                 .to_string(),
             );
+        }
+        if let Some(timezone) = &self.timezone {
+            out.push(format!("timezone={timezone}"));
         }
         if let (Some(n), true, Some(Handling::Strict)) =
             (self.max_affected, scope.max_affected, self.handling)
@@ -203,6 +281,8 @@ pub(crate) struct Scope {
     pub(crate) missing: bool,
     pub(crate) count: bool,
     pub(crate) max_affected: bool,
+    /// `return=` only applies to mutations.
+    pub(crate) representation: bool,
 }
 
 /// Add `Preference-Applied` when `value` is set.
@@ -270,15 +350,26 @@ mod tests {
     }
 
     #[test]
-    fn unserved_kinds_are_reported() {
+    fn return_and_timezone_first_wins_and_tx_is_ignored() {
+        let prefer = parse(&[
+            "tx=rollback,  return=headers-only , timezone=America/Los_Angeles",
+            "return=representation, timezone=UTC",
+        ]);
+        assert_eq!(prefer.representation, Some(Representation::HeadersOnly));
+        assert_eq!(prefer.timezone.as_deref(), Some("America/Los_Angeles"));
         assert_eq!(
-            parse(&["return=minimal"]).unserved,
-            Some("rest:prefer:return=minimal")
+            prefer.applied(Scope::default()).unwrap(),
+            "timezone=America/Los_Angeles"
         );
+        let all = Scope {
+            representation: true,
+            ..Scope::default()
+        };
         assert_eq!(
-            parse(&["timezone=UTC"]).unserved,
-            Some("rest:prefer:timezone=*")
+            prefer.applied(all).unwrap(),
+            "return=headers-only, timezone=America/Los_Angeles"
         );
+        assert!(parse(&["tx=commit"]).applied(all).is_none());
     }
 
     #[test]
@@ -291,6 +382,7 @@ mod tests {
             missing: true,
             count: true,
             max_affected: true,
+            representation: true,
         };
         assert_eq!(
             prefer.applied(all).unwrap(),

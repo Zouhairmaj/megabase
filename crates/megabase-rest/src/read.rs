@@ -51,10 +51,16 @@ async fn dispatch(
     body: Bytes,
 ) -> Response {
     let path = uri.path();
+    let prefer = Prefer::from_headers(&headers);
     match classify(path) {
         Target::Outside => not_implemented(&method, path),
         Target::Rpc(function) => {
-            crate::rpc::call(&state, &method, &uri, &headers, &function, &body).await
+            let mut response =
+                crate::rpc::call(&state, &method, &uri, &headers, &function, &body).await;
+            if method != Method::OPTIONS && response.status().is_success() {
+                set_applied(&mut response, prefer.applied(Scope::default()));
+            }
+            response
         }
         Target::Invalid => pgrst(
             StatusCode::NOT_FOUND,
@@ -63,7 +69,13 @@ async fn dispatch(
             None,
             None,
         ),
-        Target::Root => root(&state, &method, &headers).await,
+        Target::Root => {
+            let mut response = root(&state, &method, &headers, &prefer).await;
+            if method != Method::OPTIONS && response.status().is_success() {
+                set_applied(&mut response, prefer.applied(Scope::default()));
+            }
+            response
+        }
         Target::Relation(relation) => {
             relation_route(&state, &method, &uri, &headers, &relation, &body).await
         }
@@ -96,11 +108,17 @@ fn classify(path: &str) -> Target {
     }
 }
 
-async fn root(state: &RestState, method: &Method, headers: &HeaderMap) -> Response {
-    let session = match session(state, headers.get(header::AUTHORIZATION)) {
+async fn root(
+    state: &RestState,
+    method: &Method,
+    headers: &HeaderMap,
+    prefer: &Prefer,
+) -> Response {
+    let mut session = match session(state, headers.get(header::AUTHORIZATION)) {
         Ok(session) => session,
         Err(response) => return *response,
     };
+    session.timezone = prefer.timezone.clone();
     let schema = match negotiated_schema(method, headers) {
         Ok(schema) => schema,
         Err(response) => return *response,
@@ -150,10 +168,12 @@ async fn relation_route(
     body: &[u8],
 ) -> Response {
     let path = uri.path();
-    let session = match session(state, headers.get(header::AUTHORIZATION)) {
+    let mut session = match session(state, headers.get(header::AUTHORIZATION)) {
         Ok(session) => session,
         Err(response) => return *response,
     };
+    let prefer = Prefer::from_headers(headers);
+    session.timezone = prefer.timezone.clone();
     let schema = match negotiated_schema(method, headers) {
         Ok(schema) => schema,
         Err(response) => return *response,
@@ -184,10 +204,6 @@ async fn relation_route(
         Ok(query) => query,
         Err(response) => return *response,
     };
-    let prefer = Prefer::from_headers(headers);
-    if let Some(unit) = prefer.unserved {
-        return unimplemented_unit(method, path, unit);
-    }
     if let Err(response) = prefer.check_strict() {
         return *response;
     }
@@ -492,6 +508,8 @@ pub(crate) struct Session {
     /// `true` when the role is the anon role. PostgREST uses that to choose
     /// 401 versus 403 for `42501`.
     pub(crate) anon: bool,
+    /// `Prefer: timezone=` value, applied with `set_config('timezone', …, true)`.
+    pub(crate) timezone: Option<String>,
 }
 
 pub(crate) fn session(
@@ -527,6 +545,7 @@ fn anon_session() -> Session {
         role: "anon".to_string(),
         claims: r#"{"role":"anon"}"#.to_string(),
         anon: true,
+        timezone: None,
     }
 }
 
@@ -540,6 +559,7 @@ fn session_from_claims(role: Option<String>, mut raw: Map<String, Value>) -> Ses
         role,
         claims: Value::Object(raw).to_string(),
         anon,
+        timezone: None,
     }
 }
 
@@ -805,41 +825,6 @@ pub(crate) fn reject_accept(value: Option<&axum::http::HeaderValue>) -> Option<&
     }
 }
 
-pub(crate) fn reject_prefer(value: Option<&axum::http::HeaderValue>) -> Option<&'static str> {
-    let value = header_str(value)?;
-    if value.trim().is_empty() {
-        return None;
-    }
-    for part in value.split(',') {
-        let token = part.trim();
-        if token.is_empty() {
-            continue;
-        }
-        let lower = token.to_ascii_lowercase();
-        let unit = match lower.as_str() {
-            "count=exact" => "rest:prefer:count=exact",
-            "count=estimated" => "rest:prefer:count=estimated",
-            "count=planned" => "rest:prefer:count=planned",
-            "handling=lenient" => "rest:prefer:handling=lenient",
-            "handling=strict" => "rest:prefer:handling=strict",
-            "missing=default" => "rest:prefer:missing=default",
-            "missing=null" => "rest:prefer:missing=null",
-            "resolution=ignore-duplicates" => "rest:prefer:resolution=ignore-duplicates",
-            "resolution=merge-duplicates" => "rest:prefer:resolution=merge-duplicates",
-            "return=headers-only" => "rest:prefer:return=headers-only",
-            "return=minimal" => "rest:prefer:return=minimal",
-            "return=representation" => "rest:prefer:return=representation",
-            "tx=commit" => "rest:prefer:tx=commit",
-            "tx=rollback" => "rest:prefer:tx=rollback",
-            _ if lower.starts_with("max-affected=") => "rest:prefer:max-affected=*",
-            _ if lower.starts_with("timezone=") => "rest:prefer:timezone=*",
-            _ => "",
-        };
-        return Some(unit);
-    }
-    Some("")
-}
-
 fn header_str(value: Option<&axum::http::HeaderValue>) -> Option<&str> {
     value?.to_str().ok()
 }
@@ -905,6 +890,7 @@ async fn read_relation(
                     missing: true,
                     count: true,
                     max_affected: true,
+                    representation: false,
                 }),
             );
             profile_header(&mut response, schema);
@@ -1247,13 +1233,15 @@ pub(crate) async fn set_request_context(
                 set_config('request.jwt.claims', $2, true),
                 set_config('request.method', $3, true),
                 set_config('request.path', $4, true),
-                set_config('search_path', $5, true)",
+                set_config('search_path', $5, true),
+                set_config('timezone', coalesce($6::text, current_setting('timezone')), true)",
     )
     .bind(&session.role)
     .bind(&session.claims)
     .bind(method)
     .bind(request_path)
     .bind(schema)
+    .bind(session.timezone.as_deref())
     .execute(&mut **tx)
     .await
     .map_err(|error| Box::new(query_failure(&error, session.anon)))?;
@@ -1920,16 +1908,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn prefer_return_is_501() {
+    async fn prefer_return_timezone_and_tx_reach_the_pool() {
         let app = router(RestState::from_config(&Config::default()));
         let request = Request::builder()
             .uri("/rest/v1/todos?done=eq.true")
-            .header("prefer", "count=exact, return=representation")
+            .header("prefer", "return=representation, tx=rollback, timezone=UTC")
             .body(Body::empty())
             .unwrap();
-        let (status, body, _) = send(app, request).await;
-        assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
-        assert_eq!(body["unit"], "rest:prefer:return=representation");
+        let (status, _, _) = send(app, request).await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
     }
 
     #[tokio::test]
