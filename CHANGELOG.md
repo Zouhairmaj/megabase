@@ -4,6 +4,13 @@ All notable changes to Megabase are documented in this file.
 The format is produced by [release-please](https://github.com/googleapis/release-please).
 Sections: Features, Bug Fixes, Performance, Conformance/judge, Documentation.
 
+## [0.1.19](https://github.com/Zouhairmaj/megabase/compare/v0.1.18...v0.1.19) (2026-10-11)
+
+
+### Features
+
+* **site:** add dither database illustration to README banners ([#276](https://github.com/Zouhairmaj/megabase/issues/276)) ([7253521](https://github.com/Zouhairmaj/megabase/commit/7253521f5f8f7e8949d3dbd233815adc6a9018f4))
+
 ## [0.1.18](https://github.com/Zouhairmaj/megabase/compare/v0.1.17...v0.1.18) (2026-10-10)
 
 

@@ -24,6 +24,10 @@ Extends the root `AGENTS.md`; it does not relax it.
 - `megabase-backlog`: `plan` writes `docs/backlog/PLAN.md`. `sync` writes
   to GitHub and is run by the orchestrator only. Keep it idempotent: it
   matches on `megabase-id`.
+- `megabase-model-share` (`just model-share`): prints JSON line shares per
+  model from `git blame` over tracked text files. A `Model:` trailer wins,
+  then a recognized `Co-authored-by:`, else `unknown`. It reads the last
+  paragraph of each commit message, so end a squash body with `Model: <id>`.
 - `megabase-guard` ⛔ implements `docs/adr/0003-protected-paths.md`. Never
   weaken it, and update the ADR in the same PR as any rule change. A
   `review/*` modification of `GOAL.md` or `MANIFESTO.md` is allowed only
