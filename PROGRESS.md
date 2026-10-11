@@ -27,7 +27,7 @@ PHASE 0 COMPLETE. Zouhair reviewed it on 2026-10-10: validated with modification
 | [storage](https://github.com/supabase/storage) | `vendor/storage` | `v1.80.2` | `db42280506a07a165376219b2d6ac7bc92ccdfcc` | Apache-2.0 | `supabase/storage-api:v1.80.2` |
 | [supavisor](https://github.com/supabase/supavisor) | `vendor/supavisor` | `v2.9.13` | `5a51fbfadaa6d6286c1fee0a95d4c629e81a2750` | Apache-2.0 | `supabase/supavisor:2.9.13` |
 | [postgres-meta](https://github.com/supabase/postgres-meta) | `vendor/postgres-meta` | `v0.100.0` | `9a2effd147f2f028fa36553ec2c7eeec80d7f8fc` | Apache-2.0 | `supabase/postgres-meta:v0.100.0` |
-| [supabase](https://github.com/supabase/supabase) | `vendor/supabase` | `v1.26.08` | `86854671e95be31e24fa0785cded0579fe692fcb` | Apache-2.0 | — |
+| [supabase](https://github.com/supabase/supabase) | `vendor/supabase` | `v1.26.08` | `86854671e95be31e24fa0785cded0579fe692fcb` | Apache-2.0 | `supabase/studio:2026.08.03-sha-022b374` |
 | [edge-runtime](https://github.com/supabase/edge-runtime) | `vendor/edge-runtime` | `v1.77.4` | `d4a4f606a90e8c66864219c9b1d31ef0e3e3f626` | MIT | `supabase/edge-runtime:v1.77.4` |
 | [supabase-js](https://github.com/supabase/supabase-js) | `vendor/supabase-js` | `v2.117.3` | `4d23055805ce2cf853686b704cfaec1a701d29c6` | MIT | — |
 <!-- pins:end -->
