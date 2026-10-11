@@ -121,6 +121,16 @@ list in `deny.toml`. The comment there is how to propose one.
   on `main`. Feature PRs never change it.
 - `cargo run --locked -p megabase-backlog -- plan` writes `docs/backlog/PLAN.md`.
 
+## Model attribution
+
+Agent commits include a `Model: <id>` trailer in the final trailer block
+(for example, `Model: codex`). Use the actual model identifier when known.
+`just model-share` counts physical lines (including comments and blank lines)
+in tracked text files in the current checkout. Explicit model trailers win
+over recognized `Co-authored-by:` trailers; otherwise attribution is `unknown`,
+including uncommitted lines. Vendor, third-party, generated and binary files,
+symlinks and lockfiles are excluded. Equal line counts sort by model id.
+
 ## Rust API style
 
 Two references, not a second style guide:

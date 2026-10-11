@@ -1321,6 +1321,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "megabase-model-share"
+version = "0.1.17"
+dependencies = [
+ "anyhow",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "megabase-pooler"
 version = "0.1.17"
 dependencies = [

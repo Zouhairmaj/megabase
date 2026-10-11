@@ -29,6 +29,10 @@ coverage:
 coverage-check:
     cargo run --locked -p megabase-coverage -- check
 
+# Attribute tracked text lines to AI models using commit trailers.
+model-share:
+    cargo run --locked -p megabase-model-share
+
 # Reject protected-path changes (see docs/adr/0003-protected-paths.md).
 guard:
     cargo run --locked -p megabase-guard -- --base origin/main --head HEAD --head-ref "$(git branch --show-current)"
