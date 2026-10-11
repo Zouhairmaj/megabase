@@ -444,6 +444,11 @@ path = "/rest/v1/todos"
 key = "service_role"
 headers = { Prefer = "return=minimal" }
 json = { id = 9101, title = "prefer-minimal" }
+[[case.step]]
+method = "DELETE"
+path = "/rest/v1/todos?id=eq.9101"
+key = "service_role"
+headers = { Prefer = "return=minimal" }
 
 [[case]]
 id = "rest.prefer.return.minimal.update"
@@ -482,6 +487,11 @@ path = "/rest/v1/todos?select=title,done,priority"
 key = "service_role"
 headers = { Prefer = "return=representation" }
 json = { id = 9102, title = "prefer-representation" }
+[[case.step]]
+method = "DELETE"
+path = "/rest/v1/todos?id=eq.9102"
+key = "service_role"
+headers = { Prefer = "return=minimal" }
 
 [[case]]
 id = "rest.prefer.return.representation.update"
@@ -530,6 +540,11 @@ path = "/rest/v1/todos"
 key = "service_role"
 headers = { Prefer = "return=headers-only" }
 json = { id = 9103, title = "prefer-headers-only" }
+[[case.step]]
+method = "DELETE"
+path = "/rest/v1/todos?id=eq.9103"
+key = "service_role"
+headers = { Prefer = "return=minimal" }
 
 [[case]]
 id = "rest.prefer.return.headers-only.update"
@@ -607,6 +622,11 @@ path = "/rest/v1/todos"
 key = "service_role"
 headers = { Prefer = "tx=commit, return=minimal" }
 json = { id = 9104, title = "prefer-tx-commit" }
+[[case.step]]
+method = "DELETE"
+path = "/rest/v1/todos?id=eq.9104"
+key = "service_role"
+headers = { Prefer = "return=minimal" }
 
 [[case]]
 id = "rest.prefer.tx.commit.read"
@@ -627,6 +647,11 @@ path = "/rest/v1/todos"
 key = "service_role"
 headers = { Prefer = "tx=rollback, return=minimal" }
 json = { id = 9105, title = "prefer-tx-rollback" }
+[[case.step]]
+method = "DELETE"
+path = "/rest/v1/todos?id=eq.9105"
+key = "service_role"
+headers = { Prefer = "return=minimal" }
 
 [[case]]
 id = "rest.prefer.tx.rollback.read"
