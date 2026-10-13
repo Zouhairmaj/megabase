@@ -89,6 +89,24 @@ pub(crate) fn percent_decode(raw: &str) -> String {
     decode_component(raw, true)
 }
 
+/// Parse an `application/x-www-form-urlencoded` body into a JSON object of
+/// text values, as `parseSimpleQuery` does in `Payload.hs`.
+///
+/// Empty pairs are dropped, a key with no `=` gets `""`, and the last
+/// duplicate key wins (`HM.fromList`).
+pub(crate) fn form_object(body: &[u8]) -> serde_json::Map<String, serde_json::Value> {
+    let text = String::from_utf8_lossy(body);
+    let mut map = serde_json::Map::new();
+    for pair in text.split('&').filter(|pair| !pair.is_empty()) {
+        let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
+        map.insert(
+            percent_decode(key),
+            serde_json::Value::String(percent_decode(value)),
+        );
+    }
+    map
+}
+
 /// Decode one path segment the way `urlDecode False` does.
 ///
 /// `+` stays `+`. Only two ASCII hex digits after `%` are an escape.
@@ -213,6 +231,16 @@ mod tests {
                 },
             ]
         );
+    }
+
+    #[test]
+    fn form_body_becomes_text_object() {
+        let map = form_object(b"a=1&b=x+y%21&&flag&a=2");
+        assert_eq!(
+            serde_json::Value::Object(map),
+            serde_json::json!({"a": "2", "b": "x y!", "flag": ""})
+        );
+        assert!(form_object(b"").is_empty());
     }
 
     #[test]

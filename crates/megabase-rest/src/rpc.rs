@@ -581,6 +581,15 @@ fn parse_invocation(
         if query_present(uri) {
             return Err(Box::new(not_implemented(method, path)));
         }
+        if crate::read::is_form_urlencoded(headers.get(header::CONTENT_TYPE)) {
+            // megabase:unit rest:media-type:application/x-www-form-urlencoded
+            let map = crate::query::form_object(body);
+            return Ok(Invocation {
+                keys: map.keys().cloned().collect(),
+                get_values: BTreeMap::new(),
+                json_body: Some(Value::Object(map).to_string()),
+            });
+        }
         reject_json_type(method, path, headers.get(header::CONTENT_TYPE))?;
         let (raw, keys) = json_object(path, body)?;
         return Ok(Invocation {

@@ -72,10 +72,23 @@ Upstream: `MediaType.hs:81-83` (`toMime`), `Plan/Negotiate.hs`
   aggregate / domain handlers, `text/csv` as a request `Content-Type`, a
   specific `q=0` entry overriding a matching wildcard.
 
+## Form bodies (`application/x-www-form-urlencoded`)
+
+Upstream: `ApiRequest/Payload.hs:68-72,93` (`parseSimpleQuery`), `Plan.hs:245`.
+
+As a request `Content-Type` on `POST`/`PATCH`/`PUT /rest/v1/{relation}` and
+`POST /rest/v1/rpc/{function}`, the body is split on `&` into `key=value`
+pairs. `+` is a space and `%XX` is decoded. Empty pairs are dropped, a key
+with no `=` has the value `""`, and the last duplicate key wins. The result
+is one JSON object of text values, then handled like a JSON object body
+(Postgres casts the text to the column or argument type). An empty body is
+`{}`. `Accept: application/x-www-form-urlencoded` has no handler and is not
+served. RPC still returns 501 when the query string is non-empty.
+
 ## Not yet served (501 with the unit id)
 
-`application/geo+json`, `application/octet-stream`,
-`application/x-www-form-urlencoded` bodies, `application/vnd.pgrst.plan+{format}`,
+`application/geo+json`, `application/octet-stream` (needs a single unnamed
+`bytea` RPC parameter and a custom handler), `application/vnd.pgrst.plan+{format}`,
 and the singular/stripped/CSV shapes on writes and RPC.
 
 ## Judge cases
