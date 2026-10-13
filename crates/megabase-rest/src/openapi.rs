@@ -11,9 +11,7 @@ use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use serde_json::{json, Map, Value};
 
-use crate::read::{
-    self, begin, pgrst, query_failure, set_request_context, unimplemented_unit, Session, JSON_UTF8,
-};
+use crate::read::{self, begin, pgrst, query_failure, set_request_context, Session, JSON_UTF8};
 
 const OPENAPI_UTF8: &str = "application/openapi+json; charset=utf-8";
 const PRETTY_VERSION: &str = "16.4";
@@ -97,20 +95,15 @@ fn openapi_media(headers: &HeaderMap) -> Result<&'static str, Box<Response>> {
         // megabase:unit rest:media-type:application/openapi+json
         return Ok(OPENAPI_UTF8);
     }
-    if let Some(unit) = read::reject_accept(Some(value)) {
-        if unit.is_empty() {
-            return Err(Box::new(pgrst(
-                StatusCode::NOT_ACCEPTABLE,
-                "PGRST107",
-                &format!("None of these media types are available: {essence}"),
-                None,
-                None,
-            )));
-        }
-        return Err(Box::new(unimplemented_unit(
-            &axum::http::Method::GET,
-            "/rest/v1/",
-            unit,
+    if read::reject_accept(Some(value)).is_some() {
+        // The root serves only the OpenAPI and JSON types; any other type
+        // is not available there, whether or not another route handles it.
+        return Err(Box::new(pgrst(
+            StatusCode::NOT_ACCEPTABLE,
+            "PGRST107",
+            &format!("None of these media types are available: {essence}"),
+            None,
+            None,
         )));
     }
     if essence == "application/json" || essence == "application/*" {
