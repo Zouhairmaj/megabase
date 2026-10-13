@@ -109,6 +109,21 @@ GoTrue's default API shape (no `X-Supabase-Api-Version: 2024-01-01`):
 | Session id not in the database | 403 | `session_not_found` / `Session from session_id claim in JWT does not exist` |
 | Bad logout scope | 400 | `validation_failed` / `Unsupported logout scope "<scope>"` |
 
+## Partial: `POST /recover`
+
+Served up to the mail step (validation is upstream `recover.go:18-28`; the
+mail is `sendPasswordRecovery`, `recover.go:65-70`). With the email provider
+disabled the route is 400 `email_provider_disabled` / `Email logins are
+disabled` before the body is read (`requireEmailProvider`,
+`middleware.go:231-239`, wired at `api.go:256`). Otherwise a JSON
+`null` string counts as empty, like Go's decoder. Empty `email` is 400
+`Password recovery requires an email`; a bad email and bad PKCE params use the
+signup messages. GoTrue then answers 200 `{}` for known and unknown emails
+alike. Sending the mail needs a mailer that is not ported (SMTP crate approval
+pending), so every request that passes validation is 501, whether or not the
+account exists (no enumeration), and `recover` has no `megabase:unit` marker
+yet. The same mailer blocks `invite`, `resend`, and `reauthenticate`.
+
 ## Edge cases
 
 - Email is lowercased. A confirmed duplicate does not change the password.
