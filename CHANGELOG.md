@@ -4,6 +4,14 @@ All notable changes to Megabase are documented in this file.
 The format is produced by [release-please](https://github.com/googleapis/release-please).
 Sections: Features, Bug Fixes, Performance, Conformance/judge, Documentation.
 
+## [0.1.21](https://github.com/Zouhairmaj/megabase/compare/v0.1.20...v0.1.21) (2026-10-13)
+
+
+### Features
+
+* **auth:** validate resend requests before mailer 501 ([#285](https://github.com/Zouhairmaj/megabase/issues/285)) ([387c651](https://github.com/Zouhairmaj/megabase/commit/387c651397eac61fd93397912c2001f32eb4f24f))
+* **rest:** serve x-www-form-urlencoded request bodies ([#283](https://github.com/Zouhairmaj/megabase/issues/283)) ([e91e2cf](https://github.com/Zouhairmaj/megabase/commit/e91e2cf54da13b490d81b084aeb8c56eba8e7ff2))
+
 ## [0.1.20](https://github.com/Zouhairmaj/megabase/compare/v0.1.19...v0.1.20) (2026-10-13)
 
 
