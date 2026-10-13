@@ -10,18 +10,22 @@ const GRAM_UPPER: usize = 3;
 const MIN_SCORE: f64 = 0.33;
 const LEVENSHTEIN_CANDIDATES: usize = 50;
 
-/// Lowercase and keep only letters, digits, spaces and commas.
+/// Lowercase only. Exact matching and edit distance keep punctuation.
 fn normalize(value: &str) -> String {
-    value
+    value.chars().flat_map(char::to_lowercase).collect()
+}
+
+/// Lowercase and keep only letters, digits, spaces and commas, for grams.
+fn gram_text(value: &str) -> String {
+    normalize(value)
         .chars()
         .filter(|c| c.is_alphanumeric() || *c == ' ' || *c == ',')
-        .flat_map(char::to_lowercase)
         .collect()
 }
 
 /// Gram counts of `value` at one gram size.
 fn grams(value: &str, size: usize) -> HashMap<String, f64> {
-    let mut chars: Vec<char> = format!("-{}-", normalize(value)).chars().collect();
+    let mut chars: Vec<char> = format!("-{}-", gram_text(value)).chars().collect();
     while chars.len() < size {
         chars.push('-');
     }
@@ -88,6 +92,9 @@ fn fuzzy_get<'a>(set: &[&'a str], query: &str) -> Vec<(f64, &'a str)> {
         }
         scored.sort_by(|a, b| b.0.total_cmp(&a.0));
         scored.retain(|(score, _)| *score >= MIN_SCORE);
+        if scored.is_empty() {
+            continue;
+        }
         return scored;
     }
     Vec::new()
@@ -188,5 +195,21 @@ mod tests {
             no_rel_between_hint("todos", "notes", &edges).as_deref(),
             Some("Perhaps you meant 'notes' instead of 'todos'.")
         );
+    }
+
+    #[test]
+    fn punctuation_counts_for_exact_match() {
+        let edges = vec![("films".to_string(), "notes".to_string())];
+        assert_eq!(
+            no_rel_between_hint("films", "note_s", &edges).as_deref(),
+            Some("Perhaps you meant 'notes' instead of 'note_s'.")
+        );
+    }
+
+    #[test]
+    fn falls_back_to_bigrams_when_trigrams_score_too_low() {
+        let set = ["abcxxxxxxxxxx", "acb"];
+        let found = fuzzy_get(&set, "abc");
+        assert_eq!(found.first().map(|(_, name)| *name), Some("acb"));
     }
 }

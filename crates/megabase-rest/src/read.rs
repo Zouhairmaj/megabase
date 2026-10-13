@@ -1192,11 +1192,12 @@ async fn load_relationship(
         .map_err(|error| Box::new(query_failure(&error, anon)))?;
     match rows.as_slice() {
         [] => {
+            // The hint is optional: a failed lookup must not replace PGRST200.
             let edges: Vec<(String, String)> = sqlx::query_as(FK_EDGES_SQL)
                 .bind(schema)
                 .fetch_all(&mut **tx)
                 .await
-                .map_err(|error| Box::new(query_failure(&error, anon)))?;
+                .unwrap_or_default();
             let hint = no_rel_between_hint(relation, target, &edges);
             Err(Box::new(pgrst(
             StatusCode::BAD_REQUEST,
