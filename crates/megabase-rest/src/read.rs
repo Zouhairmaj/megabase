@@ -825,6 +825,17 @@ pub(crate) fn reject_accept(value: Option<&axum::http::HeaderValue>) -> Option<&
     }
 }
 
+/// Whether a `Content-Type` names `application/x-www-form-urlencoded`.
+pub(crate) fn is_form_urlencoded(value: Option<&axum::http::HeaderValue>) -> bool {
+    header_str(value)
+        .and_then(|text| text.split(';').next())
+        .is_some_and(|essence| {
+            essence
+                .trim()
+                .eq_ignore_ascii_case("application/x-www-form-urlencoded")
+        })
+}
+
 fn header_str(value: Option<&axum::http::HeaderValue>) -> Option<&str> {
     value?.to_str().ok()
 }

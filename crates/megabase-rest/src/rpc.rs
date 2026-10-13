@@ -581,6 +581,20 @@ fn parse_invocation(
         if query_present(uri) {
             return Err(Box::new(not_implemented(method, path)));
         }
+        if crate::read::is_form_urlencoded(headers.get(header::CONTENT_TYPE)) {
+            // megabase:unit rest:media-type:application/x-www-form-urlencoded
+            // Form fields are named arguments like a query string: repeated keys
+            // reach variadic parameters and the unnamed json fallback stays off.
+            let mut get_values: BTreeMap<String, Vec<String>> = BTreeMap::new();
+            for (key, value) in crate::query::form_pairs(body) {
+                get_values.entry(key).or_default().push(value);
+            }
+            return Ok(Invocation {
+                keys: get_values.keys().cloned().collect(),
+                get_values,
+                json_body: None,
+            });
+        }
         reject_json_type(method, path, headers.get(header::CONTENT_TYPE))?;
         let (raw, keys) = json_object(path, body)?;
         return Ok(Invocation {
@@ -1155,6 +1169,24 @@ mod tests {
             }
             _ => panic!("expected two text binds"),
         }
+    }
+
+    #[test]
+    fn form_rpc_body_keeps_repeated_values_and_skips_json_fallback() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::CONTENT_TYPE,
+            "application/x-www-form-urlencoded".parse().unwrap(),
+        );
+        let uri: Uri = "/rpc/f".parse().unwrap();
+        let invocation =
+            parse_invocation(&Method::POST, "/rpc/f", &uri, &headers, b"v=1&v=2").unwrap();
+        assert_eq!(invocation.keys, keys(&["v"]));
+        assert_eq!(
+            invocation.get_values.get("v").unwrap(),
+            &vec!["1".to_string(), "2".to_string()]
+        );
+        assert!(invocation.json_body.is_none());
     }
 
     #[test]

@@ -973,6 +973,15 @@ fn json_payload(
     body: &[u8],
     relaxed: bool,
 ) -> Result<Payload, Box<Response>> {
+    if read::is_form_urlencoded(content_type) {
+        // megabase:unit rest:media-type:application/x-www-form-urlencoded
+        let map = crate::query::form_object(body);
+        return Ok(Payload {
+            keys: map.keys().cloned().collect(),
+            raw: Value::Object(map).to_string(),
+            object: true,
+        });
+    }
     if let Some(unit) = read::reject_accept(content_type) {
         if !unit.is_empty() {
             return Err(Box::new(unimplemented_unit(&Method::POST, "", unit)));
