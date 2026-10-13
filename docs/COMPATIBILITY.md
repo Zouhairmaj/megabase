@@ -99,7 +99,7 @@ Implemented and tested counts come from markers and `judge/cases/`. Live conform
 | REST | resources | 1 | 10 | 10 | 4 |
 | REST | rpc | 1 | 4 | 4 | 4 |
 | Auth | admin | 1–2 | 28 | 28 | 11 |
-| Auth | database | 1 | 32 | 32 | 30 |
+| Auth | database | 1 | 32 | 32 | 32 |
 | Auth | endpoints | 1–2 | 13 | 4 | 4 |
 | Auth | factors | 2 | 9 | 0 | 0 |
 | Auth | oauth | 2 | 6 | 0 | 0 |

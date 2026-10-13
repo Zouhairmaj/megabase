@@ -3,7 +3,7 @@
   "totals": {
     "units": 1024,
     "implemented": 169,
-    "tested": 122,
+    "tested": 124,
     "conformant": 0
   },
   "percent": {
@@ -12,14 +12,14 @@
     "done": 0.0
   },
   "judge": {
-    "cases": 236,
+    "cases": 238,
     "passing": 0
   },
   "components": {
     "auth": {
       "units": 152,
       "implemented": 79,
-      "tested": 60,
+      "tested": 62,
       "conformant": 0,
       "groups": {
         "admin": {
@@ -31,7 +31,7 @@
         "database": {
           "units": 32,
           "implemented": 32,
-          "tested": 30,
+          "tested": 32,
           "conformant": 0
         },
         "endpoints": {
@@ -629,8 +629,8 @@
     "auth:sql-table:auth.sso_providers": "tested",
     "auth:sql-table:auth.sso_sessions": "tested",
     "auth:sql-table:auth.users": "tested",
-    "auth:sql-table:auth.webauthn_challenges": "implemented",
-    "auth:sql-table:auth.webauthn_credentials": "implemented",
+    "auth:sql-table:auth.webauthn_challenges": "tested",
+    "auth:sql-table:auth.webauthn_credentials": "tested",
     "auth:verify-type:email_change": "tested",
     "auth:verify-type:invite": "tested",
     "auth:verify-type:recovery": "tested",
