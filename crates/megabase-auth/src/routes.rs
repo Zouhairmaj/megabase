@@ -8,7 +8,8 @@
 //! `GET`/`POST /verify` (signup, invite, recovery, email change), and the
 //! user routes are implemented. Invite, recover, resend, reauthenticate,
 //! phone signup, anonymous signup, the other verify types, and mailer
-//! confirmation stay HTTP 501.
+//! confirmation stay HTTP 501. `POST /recover` gates on the email provider
+//! and validates the request, then stays 501 because it needs the mailer.
 
 use std::sync::OnceLock;
 use std::time::SystemTime;
@@ -32,6 +33,7 @@ use crate::error::{
 use crate::jsonutil::{access_claims, session_json, unix_secs};
 use crate::state::AuthState;
 use crate::store::{LogoutScope, SignupCommand, SignupResult, StoreError};
+use crate::token::null_as_empty;
 use crate::COMPONENT;
 
 const UNIT_SIGNUP: &str = "auth:route:POST /auth/v1/signup";
@@ -138,8 +140,48 @@ async fn invite() -> MegabaseNotImplemented {
     MegabaseNotImplemented::new(COMPONENT, UNIT_INVITE)
 }
 
-async fn recover() -> MegabaseNotImplemented {
-    MegabaseNotImplemented::new(COMPONENT, UNIT_RECOVER)
+/// `POST /recover` up to the mail step. The email-provider gate and request
+/// validation match GoTrue. GoTrue answers 200 `{}` for known and unknown
+/// emails alike; delivery needs the unported mailer, so every valid request
+/// stays 501 and the answer never depends on whether the account exists. The
+/// route carries no `megabase:unit` marker.
+async fn recover(State(state): State<AuthState>, body: Body) -> Response {
+    if !state.config.email_enabled {
+        return GoTrueError::new(
+            StatusCode::BAD_REQUEST,
+            "email_provider_disabled",
+            "Email logins are disabled",
+        )
+        .into_response();
+    }
+    let bytes = match read_body(body).await {
+        Ok(bytes) => bytes,
+        Err(error) => return error.into_response(),
+    };
+    let params: RecoverBody = match serde_json::from_slice(&bytes) {
+        Ok(params) => params,
+        Err(error) => return bad_json(error).into_response(),
+    };
+    if params.email.is_empty() {
+        return validation("Password recovery requires an email").into_response();
+    }
+    if let Err(error) = validate_email(&params.email) {
+        return error.into_response();
+    }
+    if let Err(error) = validate_pkce(&params.code_challenge_method, &params.code_challenge) {
+        return error.into_response();
+    }
+    MegabaseNotImplemented::new(COMPONENT, UNIT_RECOVER).into_response()
+}
+
+#[derive(Deserialize)]
+struct RecoverBody {
+    #[serde(default, deserialize_with = "null_as_empty")]
+    email: String,
+    #[serde(default, deserialize_with = "null_as_empty")]
+    code_challenge: String,
+    #[serde(default, deserialize_with = "null_as_empty")]
+    code_challenge_method: String,
 }
 
 async fn resend() -> MegabaseNotImplemented {
@@ -696,7 +738,6 @@ mod tests {
         for (method, path, unit) in [
             ("GET", "/auth/v1/reauthenticate", UNIT_REAUTHENTICATE),
             ("POST", "/auth/v1/invite", UNIT_INVITE),
-            ("POST", "/auth/v1/recover", UNIT_RECOVER),
             ("POST", "/auth/v1/resend", UNIT_RESEND),
         ] {
             let (status, body) = call(app.clone(), method, path, Some("{}"), &[]).await;
@@ -705,6 +746,64 @@ mod tests {
             assert_eq!(body["component"], "auth");
             assert_eq!(body["unit"], unit);
         }
+    }
+
+    #[tokio::test]
+    async fn recover_validates_and_hides_unknown_emails() {
+        let (app, _) = memory_app();
+        let post =
+            |body: &'static str| call(app.clone(), "POST", "/auth/v1/recover", Some(body), &[]);
+        let (status, body) = post("{}").await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(body["msg"], "Password recovery requires an email");
+        let (status, body) = post(r#"{"email":"nope"}"#).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(
+            body["msg"],
+            "Unable to validate email address: invalid format"
+        );
+        let (status, body) = post(r#"{"email":"a@example.com","code_challenge":"x"}"#).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(
+            body["msg"],
+            "PKCE flow requires code_challenge_method and code_challenge"
+        );
+        let (status, body) = post(r#"{"email":null}"#).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(body["msg"], "Password recovery requires an email");
+        // Known and unknown emails get the same answer, so no enumeration.
+        let (status, _) = call(
+            app.clone(),
+            "POST",
+            "/auth/v1/signup",
+            Some(r#"{"email":"real@example.com","password":"secret1"}"#),
+            &[],
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        for body in [
+            r#"{"email":"ghost@example.com"}"#,
+            r#"{"email":"Real@example.com"}"#,
+        ] {
+            let (status, body) = post(body).await;
+            assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
+            assert_eq!(body["unit"], UNIT_RECOVER);
+        }
+
+        let mut config = AuthConfig::reference_defaults();
+        config.email_enabled = false;
+        let off = router(AuthState::new(config, None, Backend::memory()));
+        let (status, body) = call(
+            off,
+            "POST",
+            "/auth/v1/recover",
+            Some(r#"{"email":"a@example.com"}"#),
+            &[],
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(body["error_code"], "email_provider_disabled");
+        assert_eq!(body["msg"], "Email logins are disabled");
     }
 
     #[tokio::test]
