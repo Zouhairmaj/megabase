@@ -395,6 +395,7 @@ units = ["rest:route:HEAD /rest/v1/rpc/{function}"]
 [[case.step]]
 method = "HEAD"
 path = "/rest/v1/rpc/add_numbers?a=4&b=5"
+compare_headers = ["Content-Profile"]
 
 [[case]]
 id = "rest.rpc.head.no-args"
@@ -403,6 +404,7 @@ units = ["rest:route:HEAD /rest/v1/rpc/{function}"]
 [[case.step]]
 method = "HEAD"
 path = "/rest/v1/rpc/add_numbers"
+compare_headers = ["Content-Profile"]
 
 [[case]]
 id = "rest.rpc.head.unknown"
@@ -411,6 +413,7 @@ units = ["rest:route:HEAD /rest/v1/rpc/{function}"]
 [[case.step]]
 method = "HEAD"
 path = "/rest/v1/rpc/does_not_exist"
+compare_headers = ["Content-Profile"]
 
 [[case]]
 id = "rest.rpc.options.known"
@@ -419,6 +422,7 @@ units = ["rest:route:OPTIONS /rest/v1/rpc/{function}"]
 [[case.step]]
 method = "OPTIONS"
 path = "/rest/v1/rpc/add_numbers"
+compare_headers = ["Allow"]
 
 [[case]]
 id = "rest.rpc.options.query"
@@ -427,6 +431,7 @@ units = ["rest:route:OPTIONS /rest/v1/rpc/{function}"]
 [[case.step]]
 method = "OPTIONS"
 path = "/rest/v1/rpc/add_numbers?a=4&b=5"
+compare_headers = ["Allow"]
 
 [[case]]
 id = "rest.rpc.options.unknown"
@@ -435,6 +440,7 @@ units = ["rest:route:OPTIONS /rest/v1/rpc/{function}"]
 [[case.step]]
 method = "OPTIONS"
 path = "/rest/v1/rpc/does_not_exist"
+compare_headers = ["Allow"]
 
 # Adversarial RLS (issue #117). profiles / notes / note_comments are in
 # judge/fixtures/schema.sql. owner-a and owner-b bearers are HS256 tokens
