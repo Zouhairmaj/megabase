@@ -82,10 +82,14 @@ jobs:
           # PAT so `gh pr create` is authored by megabase-agent and CI runs
           # without waiting for approval. GITHUB_TOKEN can open a PR, but its
           # pull_request workflow runs require approval.
-          GH_TOKEN: ${{ secrets.MEGABASE_AGENT_GH_TOKEN || github.token }}
+          # MEGABASE_AGENT_GH_TOKEN is not an Actions secret today, so this fell
+          # back to GITHUB_TOKEN and Claude's pushes never started CI/Judge.
+          # RELEASE_PLEASE_CLASSIC_TOKEN is the megabase-agent classic PAT
+          # (repo + workflow); pushes made with it trigger workflows.
+          GH_TOKEN: ${{ secrets.MEGABASE_AGENT_GH_TOKEN || secrets.RELEASE_PLEASE_CLASSIC_TOKEN || github.token }}
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          github_token: ${{ secrets.MEGABASE_AGENT_GH_TOKEN || github.token }}
+          github_token: ${{ secrets.MEGABASE_AGENT_GH_TOKEN || secrets.RELEASE_PLEASE_CLASSIC_TOKEN || github.token }}
           # Protected-path issues (label protected-paths) must start on review/*
           # because the action only pushes to the invocation branch (no raw git push).
           # AGENTS.md uses review/issue-<n>-<slug>. Unprotected issues keep issue-*.
