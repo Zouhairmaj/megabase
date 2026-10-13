@@ -129,9 +129,11 @@ async fn root(
     };
     // The gateway's `rest-v1-openapi` route only admits the admin ACL group.
     if session.role != "service_role" {
+        // Kong writes this body with an explicit charset.
         return (
             StatusCode::FORBIDDEN,
-            axum::Json(serde_json::json!({"message": "You cannot consume this service"})),
+            [(header::CONTENT_TYPE, "application/json;charset=utf-8")],
+            r#"{"message":"You cannot consume this service"}"#,
         )
             .into_response();
     }
@@ -2093,9 +2095,13 @@ mod tests {
             .uri("/rest/v1/")
             .body(Body::empty())
             .unwrap();
-        let (status, body, _) = send(app, request).await;
+        let (status, body, headers) = send(app, request).await;
         assert_eq!(status, StatusCode::FORBIDDEN);
         assert_eq!(body["message"], "You cannot consume this service");
+        assert_eq!(
+            headers[header::CONTENT_TYPE],
+            "application/json;charset=utf-8"
+        );
     }
 
     #[tokio::test]
