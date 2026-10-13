@@ -943,8 +943,12 @@ mod tests {
         while let Some(at) = rest.find("commit ") {
             let (head, tail) = rest.split_at(at + "commit ".len());
             out.push_str(head);
-            let hex = tail.chars().take_while(char::is_ascii_alphanumeric).count();
-            rest = &tail[hex..];
+            let bytes = tail.as_bytes();
+            let is_stamp = bytes
+                .get(..7)
+                .is_some_and(|s| s.iter().all(u8::is_ascii_hexdigit))
+                && bytes.get(7).is_none_or(|b| !b.is_ascii_alphanumeric());
+            rest = &tail[if is_stamp { 7 } else { 0 }..];
         }
         out.push_str(rest);
         out
@@ -954,6 +958,10 @@ mod tests {
     fn commit_stamp_is_not_a_unit_total() {
         let stripped = without_commit_stamp("<p>commit 1334abc · 2026</p>");
         assert!(!stripped.contains("334"));
+        assert!(!without_commit_stamp("commit 1334abc").contains("334"));
+        assert!(without_commit_stamp("commit 334").contains("334"));
+        assert!(without_commit_stamp("commit 334x").contains("334"));
+        assert!(without_commit_stamp("commit 1334abcd").contains("334"));
     }
 
     #[test]
