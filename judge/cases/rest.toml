@@ -295,7 +295,7 @@ method = "GET"
 path = "/rest/v1/spans?during=adj.%5B4,5)&order=id"
 [[case.step]]
 method = "GET"
-path = "/rest/v1/spans?during=adj.%5B8,10)&order=id"
+path = "/rest/v1/spans?during=adj.%5B8,9)&order=id"
 [[case.step]]
 method = "GET"
 path = "/rest/v1/spans?during=adj.%5B12,13)&order=id"
