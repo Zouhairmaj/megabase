@@ -89,22 +89,27 @@ pub(crate) fn percent_decode(raw: &str) -> String {
     decode_component(raw, true)
 }
 
-/// Parse an `application/x-www-form-urlencoded` body into a JSON object of
-/// text values, as `parseSimpleQuery` does in `Payload.hs`.
+/// Split an `application/x-www-form-urlencoded` body into decoded pairs.
 ///
-/// Empty pairs are dropped, a key with no `=` gets `""`, and the last
-/// duplicate key wins (`HM.fromList`).
-pub(crate) fn form_object(body: &[u8]) -> serde_json::Map<String, serde_json::Value> {
+/// Empty pairs are dropped and a key with no `=` gets `""`.
+pub(crate) fn form_pairs(body: &[u8]) -> Vec<(String, String)> {
     let text = String::from_utf8_lossy(body);
-    let mut map = serde_json::Map::new();
-    for pair in text.split('&').filter(|pair| !pair.is_empty()) {
-        let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
-        map.insert(
-            percent_decode(key),
-            serde_json::Value::String(percent_decode(value)),
-        );
-    }
-    map
+    text.split('&')
+        .filter(|pair| !pair.is_empty())
+        .map(|pair| {
+            let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
+            (percent_decode(key), percent_decode(value))
+        })
+        .collect()
+}
+
+/// Parse a form body into a JSON object of text values, as `parseSimpleQuery`
+/// does in `Payload.hs`. The last duplicate key wins (`HM.fromList`).
+pub(crate) fn form_object(body: &[u8]) -> serde_json::Map<String, serde_json::Value> {
+    form_pairs(body)
+        .into_iter()
+        .map(|(key, value)| (key, serde_json::Value::String(value)))
+        .collect()
 }
 
 /// Decode one path segment the way `urlDecode False` does.

@@ -1322,7 +1322,7 @@ dependencies = [
 
 [[package]]
 name = "megabase-model-share"
-version = "0.1.18"
+version = "0.1.19"
 dependencies = [
  "anyhow",
  "serde",
