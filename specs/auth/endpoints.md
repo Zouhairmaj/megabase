@@ -149,6 +149,8 @@ Ported validation source: `internal/api/resend.go:15-77` in Supabase Auth
 `v2.197.0` (MIT). The public endpoint reads JSON fields `type`, `email`,
 `phone`, `code_challenge`, and `code_challenge_method` with the existing
 1 MiB body limit and `bad_json` errors. Missing or null strings are empty.
+Keys match case-insensitively and the last duplicate wins, like Go
+`encoding/json`.
 
 Validation follows upstream order. All errors below are HTTP 400:
 
@@ -164,11 +166,12 @@ Validation follows upstream order. All errors below are HTTP 400:
    `Only an email address or phone number should be provided.`
 4. A nonempty email requires the email provider; otherwise
    `email_provider_disabled` / `Email logins are disabled`. It then uses
-   the existing email validator (format, length, and lowercase normalization).
+   the existing email validator (format and length only; the normalized
+   value is discarded because the route stops at 501 before any lookup).
    A nonempty phone requires the phone provider; otherwise
    `phone_provider_disabled` / `Phone logins are disabled`. It then uses
-   the existing E.164 validator, stripping a leading `+` and spaces;
-   invalid format returns `validation_failed` /
+   the existing E.164 validator (format only; the normalized value is
+   discarded); invalid format returns `validation_failed` /
    `Invalid phone number format (E.164 required)`.
 5. Both addresses empty returns `validation_failed` /
    `Missing email address or phone number`.

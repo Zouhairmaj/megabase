@@ -186,18 +186,34 @@ struct RecoverBody {
     code_challenge_method: String,
 }
 
-#[derive(Default, Deserialize)]
+#[derive(Default)]
 struct ResendBody {
-    #[serde(default, deserialize_with = "crate::token::null_as_empty")]
     r#type: String,
-    #[serde(default, deserialize_with = "crate::token::null_as_empty")]
     email: String,
-    #[serde(default, deserialize_with = "crate::token::null_as_empty")]
     phone: String,
-    #[serde(default, deserialize_with = "crate::token::null_as_empty")]
     code_challenge: String,
-    #[serde(default, deserialize_with = "crate::token::null_as_empty")]
     code_challenge_method: String,
+}
+
+/// Go `encoding/json` matches object keys to struct tags without regard to
+/// case, and the last duplicate wins; serde's derive is case-sensitive.
+impl<'de> Deserialize<'de> for ResendBody {
+    fn deserialize<D: serde::Deserializer<'de>>(de: D) -> Result<Self, D::Error> {
+        let map = serde_json::Map::<String, serde_json::Value>::deserialize(de)?;
+        let mut body = Self::default();
+        for (key, value) in map {
+            let slot = match key.to_ascii_lowercase().as_str() {
+                "type" => &mut body.r#type,
+                "email" => &mut body.email,
+                "phone" => &mut body.phone,
+                "code_challenge" => &mut body.code_challenge,
+                "code_challenge_method" => &mut body.code_challenge_method,
+                _ => continue,
+            };
+            *slot = crate::token::null_as_empty(value).map_err(serde::de::Error::custom)?;
+        }
+        Ok(body)
+    }
 }
 
 impl ResendBody {
@@ -928,6 +944,15 @@ mod tests {
             body["msg"],
             "Missing one of these types: signup, email_change, sms, phone_change"
         );
+    }
+
+    #[tokio::test]
+    async fn resend_matches_field_names_case_insensitively() {
+        let app = router(AuthState::reference());
+        let request = r#"{"Type":"signup","EMAIL":"a@example.com"}"#;
+        let (status, body) = call(app, "POST", "/auth/v1/resend", Some(request), &[]).await;
+        assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
+        assert_eq!(body["code"], "MEGABASE_NOT_IMPLEMENTED");
     }
 
     #[tokio::test]
