@@ -13,8 +13,9 @@ keeps the Kong prefix, so clients call `/auth/v1/...`. Health and settings
 are public. Signup is public and, with the judge's autoconfirm overlay,
 creates an `auth.users` row and a session. Logout revokes sessions for a
 verified user access token. Invite, recover, resend, and reauthenticate
-answer HTTP 501 with their unit id. They are not public: invite needs
-admin credentials and reauthenticate needs a user session.
+answer HTTP 501 with their unit id after any implemented validation.
+Resend is public; invite needs admin credentials and reauthenticate needs
+a user session in GoTrue.
 
 ## Upstream
 
@@ -126,6 +127,41 @@ GoTrue's default API shape (no `X-Supabase-Api-Version: 2024-01-01`):
 - A wrong method on a registered path is 405. `GET`/`POST /verify` is
   specified in [`verify.md`](verify.md). Any other `/auth/v1` path is 501
   with unit `"<METHOD> <path>"`.
+
+## Partial: POST /resend
+
+Ported validation source: `internal/api/resend.go:15-77` in Supabase Auth
+`v2.197.0` (MIT). The public endpoint reads JSON fields `type`, `email`,
+`phone`, `code_challenge`, and `code_challenge_method` with the existing
+1 MiB body limit and `bad_json` errors. Missing or null strings are empty.
+
+Validation follows upstream order. All errors below are HTTP 400:
+
+1. `type` must be `signup`, `email_change`, `sms`, or `phone_change`;
+   otherwise `validation_failed` / `Missing one of these types: signup, email_change, sms, phone_change`.
+   Signup and email change then use the existing PKCE validation, including
+   `PKCE flow requires code_challenge_method and code_challenge` for an
+   incomplete pair. SMS and phone change do not validate PKCE.
+2. Signup with empty email returns `validation_failed` /
+   `Type provided requires an email address`. SMS with empty phone returns
+   `validation_failed` / `Type provided requires a phone number`.
+3. Both addresses present returns `validation_failed` /
+   `Only an email address or phone number should be provided.`
+4. A nonempty email requires the email provider; otherwise
+   `email_provider_disabled` / `Email logins are disabled`. It then uses
+   the existing email validator (format, length, and lowercase normalization).
+   A nonempty phone requires the phone provider; otherwise
+   `phone_provider_disabled` / `Phone logins are disabled`. It then uses
+   the existing E.164 validator, stripping a leading `+` and spaces;
+   invalid format returns `validation_failed` /
+   `Invalid phone number format (E.164 required)`.
+5. Both addresses empty returns `validation_failed` /
+   `Missing email address or phone number`.
+
+After validation, the endpoint returns HTTP 501 `MEGABASE_NOT_IMPLEMENTED`
+with unit `auth:route:POST /auth/v1/resend`. It performs no user lookup,
+enumeration, writes, or mail/SMS delivery. No coverage marker is added
+until delivery is ported.
 
 ## Out of scope
 

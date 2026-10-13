@@ -612,7 +612,7 @@ fn check_password(config: &AuthConfig, password: &str) -> Result<(), GoTrueError
     Ok(())
 }
 
-fn validate_phone(phone: &str) -> Result<String, GoTrueError> {
+pub(crate) fn validate_phone(phone: &str) -> Result<String, GoTrueError> {
     let phone = phone.strip_prefix('+').unwrap_or(phone).replace(' ', "");
     if !phone_format().is_match(&phone) {
         return Err(validation("Invalid phone number format (E.164 required)"));
