@@ -1267,3 +1267,126 @@ method = "GET"
 path = "/rest/v1/todos?order=id"
 headers = { Accept = "text/xml, application/json" }
 
+
+[[case]]
+id = "rest.aggregate.count"
+description = "count() over every row, bare and aliased"
+units = ["rest:aggregate:count"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?select=count()&id=lte.3"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?select=total:count()&id=lte.3"
+
+[[case]]
+id = "rest.aggregate.count-grouped"
+description = "count() groups by the plain columns selected beside it"
+units = ["rest:aggregate:count"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?select=done,count()&id=lte.3&order=done"
+
+[[case]]
+id = "rest.aggregate.count-filtered"
+description = "count() sees only rows that pass the filter"
+units = ["rest:aggregate:count"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?select=count()&id=lte.3&done=eq.false"
+
+[[case]]
+id = "rest.aggregate.sum"
+description = "sum() of an integer column"
+units = ["rest:aggregate:sum"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?select=priority.sum()&id=lte.3"
+
+[[case]]
+id = "rest.aggregate.sum-grouped"
+description = "sum() grouped by a boolean column"
+units = ["rest:aggregate:sum"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?select=done,priority.sum()&id=lte.3&order=done"
+
+[[case]]
+id = "rest.aggregate.sum-alias-cast"
+description = "sum() with an alias and an output cast"
+units = ["rest:aggregate:sum"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?select=total:priority.sum()::text&id=lte.3"
+
+[[case]]
+id = "rest.aggregate.avg"
+description = "avg() of an integer column"
+units = ["rest:aggregate:avg"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?select=priority.avg()&id=lte.3"
+
+[[case]]
+id = "rest.aggregate.avg-grouped"
+description = "avg() grouped by a boolean column"
+units = ["rest:aggregate:avg"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?select=done,priority.avg()&id=lte.3&order=done"
+
+[[case]]
+id = "rest.aggregate.avg-alias-cast"
+description = "avg() with an alias and an output cast to int"
+units = ["rest:aggregate:avg"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?select=mean:priority.avg()::int&id=lte.3"
+
+[[case]]
+id = "rest.aggregate.max"
+description = "max() of an integer column"
+units = ["rest:aggregate:max"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?select=priority.max()&id=lte.3"
+
+[[case]]
+id = "rest.aggregate.max-text"
+description = "max() of a text column"
+units = ["rest:aggregate:max"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?select=title.max()&id=lte.3"
+
+[[case]]
+id = "rest.aggregate.max-grouped"
+description = "max() grouped by a boolean column"
+units = ["rest:aggregate:max"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?select=done,priority.max()&id=lte.3&order=done"
+
+[[case]]
+id = "rest.aggregate.min"
+description = "min() of an integer column"
+units = ["rest:aggregate:min"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?select=priority.min()&id=lte.3"
+
+[[case]]
+id = "rest.aggregate.min-text"
+description = "min() of a text column"
+units = ["rest:aggregate:min"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?select=title.min()&id=lte.3"
+
+[[case]]
+id = "rest.aggregate.min-grouped"
+description = "min() grouped by a boolean column"
+units = ["rest:aggregate:min"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?select=done,priority.min()&id=lte.3&order=done"

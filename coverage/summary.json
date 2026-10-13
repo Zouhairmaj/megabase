@@ -3,7 +3,7 @@
   "totals": {
     "units": 1024,
     "implemented": 169,
-    "tested": 121,
+    "tested": 126,
     "conformant": 0
   },
   "percent": {
@@ -12,7 +12,7 @@
     "done": 0.0
   },
   "judge": {
-    "cases": 237,
+    "cases": 252,
     "passing": 0
   },
   "components": {
@@ -317,13 +317,13 @@
     "rest": {
       "units": 93,
       "implemented": 90,
-      "tested": 61,
+      "tested": 66,
       "conformant": 0,
       "groups": {
         "aggregates": {
           "units": 5,
           "implemented": 5,
-          "tested": 0,
+          "tested": 5,
           "conformant": 0
         },
         "embedding": {
@@ -635,11 +635,11 @@
     "auth:verify-type:invite": "tested",
     "auth:verify-type:recovery": "tested",
     "auth:verify-type:signup": "tested",
-    "rest:aggregate:avg": "implemented",
-    "rest:aggregate:count": "implemented",
-    "rest:aggregate:max": "implemented",
-    "rest:aggregate:min": "implemented",
-    "rest:aggregate:sum": "implemented",
+    "rest:aggregate:avg": "tested",
+    "rest:aggregate:count": "tested",
+    "rest:aggregate:max": "tested",
+    "rest:aggregate:min": "tested",
+    "rest:aggregate:sum": "tested",
     "rest:embed-join:inner": "tested",
     "rest:embed-join:left": "tested",
     "rest:filter-operator:adj": "tested",

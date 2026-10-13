@@ -64,6 +64,8 @@ services:
       GOTRUE_RATE_LIMIT_TOKEN_REFRESH: "1"
   rest:
     image: ghcr.io/postgrest/postgrest:v16.4@sha256:d155c6718ed9a9f990d159a2ab7c0a3f16944dbb6d0a0344557421042acfe0df
+    environment:
+      PGRST_DB_AGGREGATES_ENABLED: "true"
   realtime:
     image: public.ecr.aws/supabase/realtime:v2.143.3@sha256:768b559241dd234c4e8852c5c0f504e598b80f1df2ad4dd78d5486fbed2f17a2
   storage:
@@ -115,6 +117,7 @@ services:
       dockerfile: Dockerfile
     environment:
       MEGABASE_PORT: "8000"
+      PGRST_DB_AGGREGATES_ENABLED: "true"
       JWT_SECRET: ${JWT_SECRET}
       DATABASE_URL: postgres://supabase_admin:${POSTGRES_PASSWORD}@db:${POSTGRES_PORT}/megabase
     ports:
