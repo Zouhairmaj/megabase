@@ -721,7 +721,7 @@ id = "rest.root.options-cors-preflight"
 description = "CORS preflight on the root"
 units = ["rest:route:OPTIONS /rest/v1/"]
 [[case.step]]
-compare_headers = ["allow"]
+compare_headers = ["allow", "access-control-allow-origin"]
 method = "OPTIONS"
 path = "/rest/v1/"
 headers = { Origin = "http://localhost:3000", "Access-Control-Request-Method" = "GET" }
@@ -783,7 +783,7 @@ id = "rest.options.relation-cors-preflight"
 description = "CORS preflight on a table"
 units = ["rest:route:OPTIONS /rest/v1/{relation}"]
 [[case.step]]
-compare_headers = ["allow"]
+compare_headers = ["allow", "access-control-allow-origin"]
 method = "OPTIONS"
 path = "/rest/v1/todos"
 headers = { Origin = "http://localhost:3000", "Access-Control-Request-Method" = "POST" }
