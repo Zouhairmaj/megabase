@@ -220,7 +220,7 @@ struct RefreshBody {
 }
 
 /// Go `encoding/json` leaves a `string` at its zero value when the JSON is `null`.
-fn null_as_empty<'de, D: serde::Deserializer<'de>>(de: D) -> Result<String, D::Error> {
+pub(crate) fn null_as_empty<'de, D: serde::Deserializer<'de>>(de: D) -> Result<String, D::Error> {
     Ok(Option::<String>::deserialize(de)?.unwrap_or_default())
 }
 

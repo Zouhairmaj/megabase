@@ -4,6 +4,14 @@ All notable changes to Megabase are documented in this file.
 The format is produced by [release-please](https://github.com/googleapis/release-please).
 Sections: Features, Bug Fixes, Performance, Conformance/judge, Documentation.
 
+## [0.1.20](https://github.com/Zouhairmaj/megabase/compare/v0.1.19...v0.1.20) (2026-10-13)
+
+
+### Features
+
+* add megabase-model-share line attribution by model ([#275](https://github.com/Zouhairmaj/megabase/issues/275)) ([b7a694d](https://github.com/Zouhairmaj/megabase/commit/b7a694dea9ccfc41603a5cf369a30ab59c3d50cb))
+* **auth:** validate recover requests and hide unknown emails ([#279](https://github.com/Zouhairmaj/megabase/issues/279)) ([9eda693](https://github.com/Zouhairmaj/megabase/commit/9eda693a6b3ac0b581a5b56285821fae51d9a7e2))
+
 ## [0.1.19](https://github.com/Zouhairmaj/megabase/compare/v0.1.18...v0.1.19) (2026-10-11)
 
 
