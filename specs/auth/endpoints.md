@@ -110,9 +110,11 @@ GoTrue's default API shape (no `X-Supabase-Api-Version: 2024-01-01`):
 
 ## Partial: `POST /recover`
 
-Served up to the mail step (upstream `recover.go:25`). With the email provider
+Served up to the mail step (validation is upstream `recover.go:18-28`; the
+mail is `sendPasswordRecovery`, `recover.go:65-70`). With the email provider
 disabled the route is 400 `email_provider_disabled` / `Email logins are
-disabled` before the body is read (`middleware.go:231`). Otherwise a JSON
+disabled` before the body is read (`requireEmailProvider`,
+`middleware.go:231-239`, wired at `api.go:256`). Otherwise a JSON
 `null` string counts as empty, like Go's decoder. Empty `email` is 400
 `Password recovery requires an email`; a bad email and bad PKCE params use the
 signup messages. GoTrue then answers 200 `{}` for known and unknown emails
