@@ -935,10 +935,39 @@ mod tests {
         }
     }
 
+    /// Drops the 7-hex commit stamp (`commit abc1234`) that pages print from
+    /// `GITHUB_SHA`, so a guard on a literal number cannot collide with a hash.
+    fn without_commit_stamp(html: &str) -> String {
+        let mut out = String::with_capacity(html.len());
+        let mut rest = html;
+        while let Some(at) = rest.find("commit ") {
+            let (head, tail) = rest.split_at(at + "commit ".len());
+            out.push_str(head);
+            let bytes = tail.as_bytes();
+            let is_stamp = bytes
+                .get(..7)
+                .is_some_and(|s| s.iter().all(u8::is_ascii_hexdigit))
+                && bytes.get(7).is_none_or(|b| !b.is_ascii_alphanumeric());
+            rest = &tail[if is_stamp { 7 } else { 0 }..];
+        }
+        out.push_str(rest);
+        out
+    }
+
+    #[test]
+    fn commit_stamp_is_not_a_unit_total() {
+        let stripped = without_commit_stamp("<p>commit 1334abc · 2026</p>");
+        assert!(!stripped.contains("334"));
+        assert!(!without_commit_stamp("commit 1334abc").contains("334"));
+        assert!(without_commit_stamp("commit 334").contains("334"));
+        assert!(without_commit_stamp("commit 334x").contains("334"));
+        assert!(without_commit_stamp("commit 1334abcd").contains("334"));
+    }
+
     #[test]
     fn day0_does_not_invent_a_unit_total() {
         let out = generate_tmp();
-        let home = fs::read_to_string(out.join("index.html")).unwrap();
+        let home = without_commit_stamp(&fs::read_to_string(out.join("index.html")).unwrap());
         assert!(
             !home.contains("334"),
             "placeholder must not hardcode the Kite mock 334"
@@ -1004,13 +1033,15 @@ mod tests {
         assert!(sitemap.contains("https://megabase.sh/status/"));
         assert!(sitemap.contains("https://megabase.sh/docs/quickstart/"));
         assert!(!sitemap.contains("/404"));
-        let docs_index = fs::read_to_string(out.join("docs/index.html")).unwrap();
+        let docs_index =
+            without_commit_stamp(&fs::read_to_string(out.join("docs/index.html")).unwrap());
         assert!(docs_index.contains("docs-card"));
         assert!(docs_index.contains("aria-label=\"Install\""));
         assert!(!docs_index.to_ascii_lowercase().contains("oxide"));
         assert!(!docs_index.contains("334"));
         assert!(docs_index.contains("nav-link is-current"));
-        let quick = fs::read_to_string(out.join("docs/quickstart/index.html")).unwrap();
+        let quick_raw = fs::read_to_string(out.join("docs/quickstart/index.html")).unwrap();
+        let quick = quick_raw.as_str();
         assert!(quick.contains("aria-current=\"page\""));
         assert!(quick.contains("<details"));
         assert!(quick.contains("On this page"));
@@ -1019,7 +1050,7 @@ mod tests {
         assert!(quick.contains("Built from commit"));
         assert!(quick.contains("callout-note"));
         assert!(quick.contains("data-copy"));
-        assert!(!quick.contains("334"));
+        assert!(!without_commit_stamp(quick).contains("334"));
         let _ = fs::remove_dir_all(&out);
     }
 

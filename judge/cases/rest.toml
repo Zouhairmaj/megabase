@@ -116,6 +116,219 @@ method = "GET"
 path = "/rest/v1/todos?title=wfts(english).spec"
 
 [[case]]
+id = "rest.filter.gte"
+description = "Greater than or equal"
+units = ["rest:filter-operator:gte"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?priority=gte.2&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?priority=gte.3&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?priority=gte.4&order=id"
+
+[[case]]
+id = "rest.filter.lte"
+description = "Less than or equal"
+units = ["rest:filter-operator:lte"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?priority=lte.2&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?priority=lte.1&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?priority=lte.0&order=id"
+
+[[case]]
+id = "rest.filter.neq"
+description = "Not equal"
+units = ["rest:filter-operator:neq"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?done=neq.true&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?priority=neq.2&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?title=neq.port%20the%20unit&order=id"
+
+[[case]]
+id = "rest.filter.is"
+description = "IS with null, true and false"
+units = ["rest:filter-operator:is"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?title=is.null&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?done=is.true&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?done=is.false&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?title=not.is.null&order=id"
+
+[[case]]
+id = "rest.filter.isdistinct"
+description = "IS DISTINCT FROM"
+units = ["rest:filter-operator:isdistinct"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?priority=isdistinct.2&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?done=isdistinct.true&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?title=isdistinct.run%20the%20judge&order=id"
+
+[[case]]
+id = "rest.filter.like"
+description = "Case-sensitive pattern match with the * wildcard"
+units = ["rest:filter-operator:like"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?title=like.*spec&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?title=like.port*&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?title=like.*SPEC&order=id"
+
+[[case]]
+id = "rest.filter.ilike"
+description = "Case-insensitive pattern match"
+units = ["rest:filter-operator:ilike"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?title=ilike.*SPEC&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?title=ilike.RUN*&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?title=ilike.*THE*&order=id"
+
+[[case]]
+id = "rest.filter.match"
+description = "POSIX regex match"
+units = ["rest:filter-operator:match"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?title=match.%5Eport&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?title=match.spec%24&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?title=match.%5E%5Bwr%5D&order=id"
+
+[[case]]
+id = "rest.filter.imatch"
+description = "Case-insensitive POSIX regex match"
+units = ["rest:filter-operator:imatch"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?title=imatch.%5EPORT&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?title=imatch.SPEC%24&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?title=imatch.%5E%5BWR%5D&order=id"
+
+[[case]]
+id = "rest.filter.fts"
+description = "Full-text search with the default and an explicit config"
+units = ["rest:filter-operator:fts"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?title=fts.spec&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?title=fts(english).unit&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?title=fts(english).judge&order=id"
+
+[[case]]
+id = "rest.filter.cs"
+description = "Range contains. [2,3) lies inside only [1,4)."
+units = ["rest:filter-operator:cs"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/spans?during=cs.%5B2,3)&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/spans?during=cs.%5B4,8)&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/spans?during=cs.%5B3,5)&order=id"
+
+[[case]]
+id = "rest.filter.cd"
+description = "Range contained by"
+units = ["rest:filter-operator:cd"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/spans?during=cd.%5B0,20)&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/spans?during=cd.%5B1,4)&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/spans?during=cd.%5B0,5)&order=id"
+
+[[case]]
+id = "rest.filter.adj"
+description = "Range adjacent to. Overlapping ranges are not adjacent."
+units = ["rest:filter-operator:adj"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/spans?during=adj.%5B4,5)&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/spans?during=adj.%5B8,9)&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/spans?during=adj.%5B12,13)&order=id"
+
+[[case]]
+id = "rest.filter.any"
+description = "The (any) quantifier over a value list"
+units = ["rest:filter-operator:any", "rest:filter-operator:like", "rest:filter-operator:eq"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?title=like(any).%7B*spec,port*%7D&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?priority=eq(any).%7B1,3%7D&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?title=ilike(any).%7B*SPEC,RUN*%7D&order=id"
+
+[[case]]
+id = "rest.filter.all"
+description = "The (all) quantifier over a value list"
+units = ["rest:filter-operator:all", "rest:filter-operator:like", "rest:filter-operator:gt"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?title=like(all).%7B*the*,*spec%7D&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?priority=gt(all).%7B0,1%7D&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?title=ilike(all).%7B*THE*,*JUDGE%7D&order=id"
+
+[[case]]
 id = "rest.limit-offset"
 description = "Pagination with limit and offset"
 units = ["rest:query-param:limit", "rest:query-param:offset", "rest:query-param:order"]

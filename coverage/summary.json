@@ -3,7 +3,7 @@
   "totals": {
     "units": 1024,
     "implemented": 169,
-    "tested": 105,
+    "tested": 120,
     "conformant": 0
   },
   "percent": {
@@ -12,7 +12,7 @@
     "done": 0.0
   },
   "judge": {
-    "cases": 215,
+    "cases": 230,
     "passing": 0
   },
   "components": {
@@ -317,7 +317,7 @@
     "rest": {
       "units": 93,
       "implemented": 90,
-      "tested": 45,
+      "tested": 60,
       "conformant": 0,
       "groups": {
         "aggregates": {
@@ -335,7 +335,7 @@
         "filtering": {
           "units": 28,
           "implemented": 28,
-          "tested": 13,
+          "tested": 28,
           "conformant": 0
         },
         "logic": {
@@ -642,25 +642,25 @@
     "rest:aggregate:sum": "tested",
     "rest:embed-join:inner": "tested",
     "rest:embed-join:left": "tested",
-    "rest:filter-operator:adj": "implemented",
-    "rest:filter-operator:all": "implemented",
-    "rest:filter-operator:any": "implemented",
-    "rest:filter-operator:cd": "implemented",
-    "rest:filter-operator:cs": "implemented",
+    "rest:filter-operator:adj": "tested",
+    "rest:filter-operator:all": "tested",
+    "rest:filter-operator:any": "tested",
+    "rest:filter-operator:cd": "tested",
+    "rest:filter-operator:cs": "tested",
     "rest:filter-operator:eq": "tested",
-    "rest:filter-operator:fts": "implemented",
+    "rest:filter-operator:fts": "tested",
     "rest:filter-operator:gt": "tested",
-    "rest:filter-operator:gte": "implemented",
-    "rest:filter-operator:ilike": "implemented",
-    "rest:filter-operator:imatch": "implemented",
+    "rest:filter-operator:gte": "tested",
+    "rest:filter-operator:ilike": "tested",
+    "rest:filter-operator:imatch": "tested",
     "rest:filter-operator:in": "tested",
-    "rest:filter-operator:is": "implemented",
-    "rest:filter-operator:isdistinct": "implemented",
-    "rest:filter-operator:like": "implemented",
+    "rest:filter-operator:is": "tested",
+    "rest:filter-operator:isdistinct": "tested",
+    "rest:filter-operator:like": "tested",
     "rest:filter-operator:lt": "tested",
-    "rest:filter-operator:lte": "implemented",
-    "rest:filter-operator:match": "implemented",
-    "rest:filter-operator:neq": "implemented",
+    "rest:filter-operator:lte": "tested",
+    "rest:filter-operator:match": "tested",
+    "rest:filter-operator:neq": "tested",
     "rest:filter-operator:not": "tested",
     "rest:filter-operator:nxl": "tested",
     "rest:filter-operator:nxr": "tested",
