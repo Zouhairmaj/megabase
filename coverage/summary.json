@@ -3,7 +3,7 @@
   "totals": {
     "units": 1024,
     "implemented": 169,
-    "tested": 115,
+    "tested": 121,
     "conformant": 0
   },
   "percent": {
@@ -12,7 +12,7 @@
     "done": 0.0
   },
   "judge": {
-    "cases": 215,
+    "cases": 237,
     "passing": 0
   },
   "components": {
@@ -317,7 +317,7 @@
     "rest": {
       "units": 93,
       "implemented": 90,
-      "tested": 55,
+      "tested": 61,
       "conformant": 0,
       "groups": {
         "aggregates": {
@@ -371,7 +371,7 @@
         "resources": {
           "units": 10,
           "implemented": 10,
-          "tested": 4,
+          "tested": 10,
           "conformant": 0
         },
         "rpc": {
@@ -712,18 +712,18 @@
     "rest:query-param:order": "tested",
     "rest:query-param:select": "tested",
     "rest:route:DELETE /rest/v1/{relation}": "tested",
-    "rest:route:GET /rest/v1/": "implemented",
+    "rest:route:GET /rest/v1/": "tested",
     "rest:route:GET /rest/v1/rpc/{function}": "tested",
     "rest:route:GET /rest/v1/{relation}": "tested",
-    "rest:route:HEAD /rest/v1/": "implemented",
+    "rest:route:HEAD /rest/v1/": "tested",
     "rest:route:HEAD /rest/v1/rpc/{function}": "implemented",
-    "rest:route:HEAD /rest/v1/{relation}": "implemented",
-    "rest:route:OPTIONS /rest/v1/": "implemented",
+    "rest:route:HEAD /rest/v1/{relation}": "tested",
+    "rest:route:OPTIONS /rest/v1/": "tested",
     "rest:route:OPTIONS /rest/v1/rpc/{function}": "implemented",
-    "rest:route:OPTIONS /rest/v1/{relation}": "implemented",
+    "rest:route:OPTIONS /rest/v1/{relation}": "tested",
     "rest:route:PATCH /rest/v1/{relation}": "tested",
     "rest:route:POST /rest/v1/rpc/{function}": "tested",
     "rest:route:POST /rest/v1/{relation}": "tested",
-    "rest:route:PUT /rest/v1/{relation}": "implemented"
+    "rest:route:PUT /rest/v1/{relation}": "tested"
   }
 }
