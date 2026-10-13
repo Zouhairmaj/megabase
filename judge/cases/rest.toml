@@ -388,6 +388,54 @@ units = ["rest:route:GET /rest/v1/rpc/{function}"]
 method = "GET"
 path = "/rest/v1/rpc/add_numbers?a=4&b=5"
 
+[[case]]
+id = "rest.rpc.head.query"
+description = "HEAD on a function with query parameters"
+units = ["rest:route:HEAD /rest/v1/rpc/{function}"]
+[[case.step]]
+method = "HEAD"
+path = "/rest/v1/rpc/add_numbers?a=4&b=5"
+
+[[case]]
+id = "rest.rpc.head.no-args"
+description = "HEAD on a function without its arguments"
+units = ["rest:route:HEAD /rest/v1/rpc/{function}"]
+[[case.step]]
+method = "HEAD"
+path = "/rest/v1/rpc/add_numbers"
+
+[[case]]
+id = "rest.rpc.head.unknown"
+description = "HEAD on an unknown function"
+units = ["rest:route:HEAD /rest/v1/rpc/{function}"]
+[[case.step]]
+method = "HEAD"
+path = "/rest/v1/rpc/does_not_exist"
+
+[[case]]
+id = "rest.rpc.options.known"
+description = "OPTIONS on a known function"
+units = ["rest:route:OPTIONS /rest/v1/rpc/{function}"]
+[[case.step]]
+method = "OPTIONS"
+path = "/rest/v1/rpc/add_numbers"
+
+[[case]]
+id = "rest.rpc.options.query"
+description = "OPTIONS on a function with query parameters"
+units = ["rest:route:OPTIONS /rest/v1/rpc/{function}"]
+[[case.step]]
+method = "OPTIONS"
+path = "/rest/v1/rpc/add_numbers?a=4&b=5"
+
+[[case]]
+id = "rest.rpc.options.unknown"
+description = "OPTIONS on an unknown function"
+units = ["rest:route:OPTIONS /rest/v1/rpc/{function}"]
+[[case.step]]
+method = "OPTIONS"
+path = "/rest/v1/rpc/does_not_exist"
+
 # Adversarial RLS (issue #117). profiles / notes / note_comments are in
 # judge/fixtures/schema.sql. owner-a and owner-b bearers are HS256 tokens
 # for those subjects, signed with the public demo JWT_SECRET. anon has no
