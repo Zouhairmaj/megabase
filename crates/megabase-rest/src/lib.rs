@@ -13,6 +13,7 @@
 
 mod db;
 mod filter;
+mod hint;
 mod mutate;
 mod openapi;
 mod params;
