@@ -344,6 +344,20 @@ units = ["auth:sql-table:auth.users"]
 [[case.db]]
 table = "auth.users"
 
+[[case]]
+id = "auth.sql.table.webauthn_challenges"
+description = "auth.webauthn_challenges columns, RLS and indexes match"
+units = ["auth:sql-table:auth.webauthn_challenges"]
+[[case.db]]
+table = "auth.webauthn_challenges"
+
+[[case]]
+id = "auth.sql.table.webauthn_credentials"
+description = "auth.webauthn_credentials columns, RLS and indexes match"
+units = ["auth:sql-table:auth.webauthn_credentials"]
+[[case.db]]
+table = "auth.webauthn_credentials"
+
 # Issue #6 first admin batch. Anon / validation steps stay before a database
 # read. Service-role list and not-found steps hit Auth tables so a unit
 # cannot become conformant on credential checks alone (judge/AGENTS.md).
