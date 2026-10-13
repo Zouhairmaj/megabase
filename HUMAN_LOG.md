@@ -98,3 +98,8 @@ Each entry should include:
 - **Reason**: `vendor.toml` is a protected path; agents cannot change it. The digest was verified by the Judge side beforehand.
 - **Merge**: On 2026-10-11 the owner also explicitly approved admin-merging PR #274 despite the red `Protected paths` check, which always fails on `vendor.toml` because `tools/megabase-guard` treats it as frozen after bootstrap. This is a one-off owner decision, not a guard exception.
 - **Files affected**: `vendor.toml`, `HUMAN_LOG.md`, `coverage/` (regenerated)
+
+- **Date**: 2026-10-13
+- **Action**: Owner Zouhair approved in chat changing `.github/workflows/claude.yml` so Claude pushes and opens PRs with the megabase-agent classic PAT (`RELEASE_PLEASE_CLASSIC_TOKEN`) before falling back to `GITHUB_TOKEN`, and merging it once green. PR #284 was superseded by #286 (`review/*` branch); #286 was admin-merged as ac47a27 with all checks green but no code-owner review.
+- **Reason**: Pushes made with `GITHUB_TOKEN` do not start workflows, so CI and the Judge never ran on Claude's PRs (#273, #279, #282, #283).
+- **Files affected**: `.github/workflows/claude.yml`, `HUMAN_LOG.md`
