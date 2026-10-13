@@ -2100,7 +2100,7 @@ mod tests {
 
     #[tokio::test]
     async fn preflight_has_origin_and_no_allow() {
-        for path in ["/rest/v1/", "/rest/v1/todos"] {
+        for path in ["/rest/v1/", "/rest/v1/todos", "/rest/v1/rpc/add"] {
             let app = router(RestState::from_config(&Config::default()));
             let request = Request::builder()
                 .method("OPTIONS")
