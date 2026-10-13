@@ -1,6 +1,9 @@
 // Ported from PostgREST src/library/PostgREST/Error.hs `noRelBetweenHint` (MIT), pin from vendor.toml.
 // The fuzzy matcher follows the Haskell `fuzzyset` package PostgREST uses
-// (gram sizes 2 to 3, cosine score, Levenshtein rescoring, minimum score 0.33).
+// (gram sizes 2 to 3, cosine score, Levenshtein rescoring, minimum score 0.33):
+// https://github.com/laserpants/fuzzyset-haskell src/Data/FuzzySet/Internal.hs and
+// src/Data/FuzzySet/Simple.hs (BSD-3-Clause, see NOTICE), version 0.2.4 as pinned
+// in vendor/postgrest/stack.yaml.
 //! `Perhaps you meant ...` hints for `PGRST200` (no relationship found).
 
 use std::collections::HashMap;
