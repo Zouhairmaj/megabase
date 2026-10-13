@@ -17,6 +17,10 @@ is actually in the tree.
 Megabase is one Rust binary. Unimplemented Supabase routes return HTTP 501
 `MEGABASE_NOT_IMPLEMENTED`. That 501 is the current control for many classes
 below: a route that does not exist yet does not accept the request.
+`POST /auth/v1/resend` (and `POST /auth/v1/recover`) is a validation-only
+exception: it parses and validates the JSON request and may answer 400, then
+answers 501 for every valid request. It does not look up the user, so it
+cannot reveal whether an address is registered, and it sends nothing.
 
 ## Saltzer and Schroeder
 
