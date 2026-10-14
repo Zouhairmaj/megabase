@@ -1091,7 +1091,7 @@ mod tests {
         let metrics = load(root);
         let auth = metrics.component("auth").expect("auth in live coverage");
         assert!(
-            auth.implemented > 0,
+            auth.implemented + auth.tested + auth.conformant > 0,
             "live summary lists implemented Auth units; the site must not paint them as not started"
         );
         assert!(

@@ -1460,3 +1460,104 @@ method = "PUT"
 path = "/auth/v1/admin/custom-providers/custom:missing"
 json = {}
 
+
+# Service-role companions for the units above that only had an anon-key case.
+# Each reaches the handler's own validation, lookup or feature gate.
+
+[[case]]
+id = "auth.admin.users.create.empty"
+description = "Admin user create without email or phone is rejected for the service role"
+units = ["auth:route:POST /auth/v1/admin/users"]
+[[case.step]]
+method = "POST"
+path = "/auth/v1/admin/users"
+key = "service_role"
+json = {}
+
+[[case]]
+id = "auth.admin.generate-link.invalid"
+description = "Admin generate_link with an empty body is rejected for the service role"
+units = ["auth:route:POST /auth/v1/admin/generate_link"]
+[[case.step]]
+method = "POST"
+path = "/auth/v1/admin/generate_link"
+key = "service_role"
+json = {}
+
+[[case]]
+id = "auth.admin.sso.providers.list"
+description = "Admin SSO provider list is empty for the service role"
+units = ["auth:route:GET /auth/v1/admin/sso/providers"]
+[[case.step]]
+method = "GET"
+path = "/auth/v1/admin/sso/providers"
+key = "service_role"
+
+[[case]]
+id = "auth.admin.sso.providers.create.invalid"
+description = "Admin SSO provider create with an empty body is rejected for the service role"
+units = ["auth:route:POST /auth/v1/admin/sso/providers"]
+[[case.step]]
+method = "POST"
+path = "/auth/v1/admin/sso/providers"
+key = "service_role"
+json = {}
+
+[[case]]
+id = "auth.admin.sso.providers.put.invalid"
+description = "Admin SSO provider update with an empty body is rejected for the service role"
+units = ["auth:route:PUT /auth/v1/admin/sso/providers/{idp_id}"]
+[[case.step]]
+method = "PUT"
+path = "/auth/v1/admin/sso/providers/00000000-0000-0000-0000-000000000001"
+key = "service_role"
+json = {}
+
+[[case]]
+id = "auth.admin.oauth.clients.create.disabled"
+description = "Admin OAuth client create is feature-disabled on the self-hosted default"
+units = ["auth:route:POST /auth/v1/admin/oauth/clients"]
+[[case.step]]
+method = "POST"
+path = "/auth/v1/admin/oauth/clients"
+key = "service_role"
+json = {}
+
+[[case]]
+id = "auth.admin.oauth.clients.put.disabled"
+description = "Admin OAuth client update is feature-disabled on the self-hosted default"
+units = ["auth:route:PUT /auth/v1/admin/oauth/clients/{client_id}"]
+[[case.step]]
+method = "PUT"
+path = "/auth/v1/admin/oauth/clients/00000000-0000-0000-0000-000000000001"
+key = "service_role"
+json = {}
+
+[[case]]
+id = "auth.admin.oauth.clients.regenerate.disabled"
+description = "Admin OAuth client secret regeneration is feature-disabled on the self-hosted default"
+units = ["auth:route:POST /auth/v1/admin/oauth/clients/{client_id}/regenerate_secret"]
+[[case.step]]
+method = "POST"
+path = "/auth/v1/admin/oauth/clients/00000000-0000-0000-0000-000000000001/regenerate_secret"
+key = "service_role"
+
+[[case]]
+id = "auth.admin.custom-providers.create.invalid"
+description = "Admin custom provider create with an empty body is rejected for the service role"
+units = ["auth:route:POST /auth/v1/admin/custom-providers"]
+[[case.step]]
+method = "POST"
+path = "/auth/v1/admin/custom-providers"
+key = "service_role"
+json = {}
+
+[[case]]
+id = "auth.admin.custom-providers.put.missing"
+description = "Admin custom provider update returns not found for an unknown identifier"
+units = ["auth:route:PUT /auth/v1/admin/custom-providers/{identifier}"]
+[[case.step]]
+method = "PUT"
+path = "/auth/v1/admin/custom-providers/custom:missing"
+key = "service_role"
+json = {}
