@@ -1816,6 +1816,75 @@ key = "service_role"
 headers = { Prefer = "return=minimal" }
 
 [[case]]
+id = "rest.media-type.openapi-json.root"
+description = "Accept application/openapi+json on the root returns the OpenAPI document"
+units = ["rest:media-type:application/openapi+json"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/"
+key = "service_role"
+headers = { Accept = "application/openapi+json" }
+
+[[case]]
+id = "rest.media-type.form-urlencoded.post"
+description = "POST with a urlencoded body inserts a row"
+units = ["rest:media-type:application/x-www-form-urlencoded"]
+[[case.step]]
+method = "DELETE"
+path = "/rest/v1/todos?id=eq.9241"
+key = "service_role"
+headers = { Prefer = "return=minimal" }
+[[case.step]]
+method = "POST"
+path = "/rest/v1/todos?select=id,title,priority"
+key = "service_role"
+headers = { Content-Type = "application/x-www-form-urlencoded", Prefer = "return=representation" }
+body = "id=9241&title=form+body%21&priority=4"
+[[case.step]]
+method = "DELETE"
+path = "/rest/v1/todos?id=eq.9241"
+key = "service_role"
+headers = { Prefer = "return=minimal" }
+
+[[case]]
+id = "rest.media-type.form-urlencoded.patch"
+description = "PATCH with a urlencoded body updates matching rows"
+units = ["rest:media-type:application/x-www-form-urlencoded"]
+[[case.step]]
+method = "DELETE"
+path = "/rest/v1/todos?id=eq.9242"
+key = "service_role"
+headers = { Prefer = "return=minimal" }
+[[case.step]]
+method = "POST"
+path = "/rest/v1/todos"
+key = "service_role"
+headers = { Prefer = "return=minimal" }
+json = { id = 9242, title = "form-before", priority = 1 }
+[[case.step]]
+method = "PATCH"
+path = "/rest/v1/todos?id=eq.9242&select=id,title,priority"
+key = "service_role"
+headers = { Content-Type = "application/x-www-form-urlencoded", Prefer = "return=representation" }
+body = "title=form-after&priority=7"
+[[case.step]]
+method = "DELETE"
+path = "/rest/v1/todos?id=eq.9242"
+key = "service_role"
+headers = { Prefer = "return=minimal" }
+
+[[case]]
+id = "rest.media-type.form-urlencoded.rpc"
+description = "POST to a function with a urlencoded body passes named arguments"
+units = ["rest:media-type:application/x-www-form-urlencoded"]
+[[case.step]]
+method = "POST"
+path = "/rest/v1/rpc/add_numbers"
+key = "service_role"
+headers = { Content-Type = "application/x-www-form-urlencoded" }
+body = "a=6&b=7"
+
+[[case]]
 id = "rest.media-type.plan.json.disabled"
 description = "plan+json is 406 PGRST107 while db-plan-enabled is off"
 units = ["rest:media-type:application/vnd.pgrst.plan+{format}"]
