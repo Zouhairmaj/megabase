@@ -135,9 +135,11 @@ served. RPC still returns 501 when the query string is non-empty.
 
 ## Not yet served (501 with the unit id)
 
-The singular/stripped/CSV/GeoJSON shapes on writes and RPC,
-`application/octet-stream` as an RPC `Accept` (406 upstream without a
-custom handler), and `text/plain` / `text/xml` request bodies on RPC.
+Every non-default `Accept` on writes and RPC (the singular, stripped, CSV
+and GeoJSON shapes, and `application/octet-stream`), and `text/plain` /
+`text/xml` request bodies on RPC. Megabase answers these with 501. Upstream
+answers an octet-stream `Accept` with 406 when no custom handler exists; that
+406 is served only on relations (see above).
 
 ## Query plans (`application/vnd.pgrst.plan+{format}`)
 
