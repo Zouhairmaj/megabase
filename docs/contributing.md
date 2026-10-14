@@ -144,7 +144,8 @@ an RLS-denied insert (`42501`), `order('id')`,
 `PGRST116` on a foreign update, a no-op foreign delete, delete, and
 sign-out, plus the two browser preflights. The job summary lists every
 step. The scenario is a heredoc in the workflow: the Protected paths
-guard rejects a `.js` or `.mjs` file in the tree.
+guard rejects a `.js` or `.mjs` file outside `vendor/` (the only other
+exception is `site/static/db-dither.js`).
 
 While `REALAPP_REQUIRED` in the workflow is `"false"`, a failed scenario
 is a warning annotation and the check stays green. Set it to `"true"`

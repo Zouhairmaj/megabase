@@ -273,6 +273,11 @@ jobs:
           function assert(condition, message) {
             if (!condition) throw new Error(message);
           }
+          // A step that depends on an earlier one reports the missing
+          // prerequisite instead of a TypeError on undefined.
+          function need(value, name) {
+            if (!value) throw new Error(`skipped: ${name} did not succeed`);
+          }
           function noError({ error }) {
             if (error) {
               throw new Error(`unexpected error ${error.code ?? error.status ?? ''} ${error.message}`.trim());
@@ -310,6 +315,7 @@ jobs:
             return userB.id;
           });
           await step('signInWithPassword A', async () => {
+            need(userA, 'signUp A');
             const r = await a.auth.signInWithPassword({ email: emailA, password });
             noError(r);
             assert(r.data.session?.user?.id === userA.id, 'session.user.id differs from signUp');
@@ -329,6 +335,7 @@ jobs:
             return r.error.message;
           });
           await step('getSession and getUser', async () => {
+            need(userA, 'signUp A');
             const s = await a.auth.getSession();
             noError(s);
             assert(s.data.session?.user?.id === userA.id, 'getSession user differs');
@@ -338,6 +345,7 @@ jobs:
             assert(u.data.user?.email === emailA, 'getUser email differs');
           });
           await step('insert().select().single()', async () => {
+            need(userA, 'signUp A');
             const r = await a.from('todos').insert({ task: 'write the spec', user_id: userA.id }).select().single();
             noError(r);
             assert(typeof r.data?.id === 'number', `id is ${JSON.stringify(r.data?.id)}`);
@@ -348,6 +356,8 @@ jobs:
             return `id ${first.id}`;
           });
           await step('second insert', async () => {
+            need(userA, 'signUp A');
+            need(first, 'insert().select().single()');
             const r = await a.from('todos').insert({ task: 'port the unit', user_id: userA.id }).select().single();
             noError(r);
             assert(r.data.id > first.id, `id ${r.data.id} is not after ${first.id}`);
@@ -355,6 +365,7 @@ jobs:
             return `id ${second.id}`;
           });
           await step('check violation is 23514', async () => {
+            need(userA, 'signUp A');
             const e = expectCode(
               await a.from('todos').insert({ task: 'abc', user_id: userA.id }).select().single(),
               '23514',
@@ -362,6 +373,8 @@ jobs:
             return e.message;
           });
           await step('RLS: insert for another user is 42501', async () => {
+            need(userA, 'signUp A');
+            need(userB, 'signUp B');
             const e = expectCode(
               await a.from('todos').insert({ task: 'not mine', user_id: userB.id }).select().single(),
               '42501',
@@ -369,12 +382,15 @@ jobs:
             return e.message;
           });
           await step("list with order('id')", async () => {
+            need(first, 'insert().select().single()');
+            need(second, 'second insert');
             const r = await a.from('todos').select('*').order('id', { ascending: true });
             noError(r);
             assert(r.data.length === 2, `${r.data.length} rows`);
             assert(r.data[0].id === first.id && r.data[1].id === second.id, 'rows are not in id order');
           });
           await step('update().select().single()', async () => {
+            need(first, 'insert().select().single()');
             const r = await a.from('todos').update({ is_complete: true }).eq('id', first.id).select().single();
             noError(r);
             assert(r.data?.id === first.id, 'returned row differs');
@@ -391,6 +407,7 @@ jobs:
             assert(r.data.length === 0, `${r.data.length} rows`);
           });
           await step("RLS: B update().single() is PGRST116", async () => {
+            need(first, 'insert().select().single()');
             const e = expectCode(
               await b.from('todos').update({ is_complete: false }).eq('id', first.id).select().single(),
               'PGRST116',
@@ -398,12 +415,15 @@ jobs:
             return e.message;
           });
           await step('RLS: B delete is a no-op', async () => {
+            need(first, 'insert().select().single()');
             noError(await b.from('todos').delete().eq('id', first.id));
             const r = await a.from('todos').select('id').order('id', { ascending: true });
             noError(r);
             assert(r.data.length === 2, `${r.data.length} rows left for A`);
           });
           await step('delete', async () => {
+            need(first, 'insert().select().single()');
+            need(second, 'second insert');
             noError(await a.from('todos').delete().eq('id', first.id));
             const r = await a.from('todos').select('id');
             noError(r);

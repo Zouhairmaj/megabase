@@ -21,7 +21,8 @@ process exits non-zero when any step fails.
 
 **The script is inline.** GOAL.md rule 1 and the Protected paths guard
 (`tools/megabase-guard`, `NON_RUST_CODE`) reject a `.js`, `.mjs`, `.ts`
-or `.sh` file anywhere outside `vendor/`. The scenario therefore lives as
+or `.sh` file outside `vendor/` (the one other exception is the exact
+path `site/static/db-dither.js`). The scenario therefore lives as
 a heredoc in the workflow's `run:` block, the same way `judge.yml` and
 `ci.yml` carry inline Python. The test is not Megabase code: it is the
 upstream client exercising the server, and the only way to exercise the
