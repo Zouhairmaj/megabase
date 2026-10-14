@@ -49,4 +49,6 @@ keys (`PGRST201`), and embeds in write responses.
 ## Judge cases
 
 `rest.adversarial.rls.embed`, `rest.adversarial.rls.embed-inner`,
-`rest.adversarial.rls.embed-comments`, `rest.adversarial.rls.anon-embed`.
+`rest.adversarial.rls.embed-comments`, `rest.adversarial.rls.anon-embed`, `rest.embed.left-one-to-many`,
+`rest.embed.left-many-to-one`, `rest.embed.alias`,
+`rest.embed.inner-filters-parents`, `rest.embed.no-relationship`.

@@ -1516,3 +1516,48 @@ units = ["rest:logic-operator:and"]
 [[case.step]]
 method = "GET"
 path = "/rest/v1/todos?and=(id.eq.1"
+
+[[case]]
+id = "rest.embed.left-one-to-many"
+description = "A left embed keeps every parent row and returns [] when no child matches"
+units = ["rest:route:GET /rest/v1/{relation}", "rest:query-param:select", "rest:embed-join:left"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/notes?select=body,note_comments(body)&order=body"
+key = "service_role"
+
+[[case]]
+id = "rest.embed.left-many-to-one"
+description = "A left embed over a foreign key on the requested table is a JSON object"
+units = ["rest:route:GET /rest/v1/{relation}", "rest:query-param:select", "rest:embed-join:left"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/note_comments?select=body,notes(body)"
+key = "service_role"
+
+[[case]]
+id = "rest.embed.alias"
+description = "An alias names the embed key"
+units = ["rest:route:GET /rest/v1/{relation}", "rest:query-param:select", "rest:embed-join:left"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/notes?select=body,replies:note_comments!left(body)&order=body"
+key = "service_role"
+
+[[case]]
+id = "rest.embed.inner-filters-parents"
+description = "An inner embed drops parent rows with no matching child"
+units = ["rest:route:GET /rest/v1/{relation}", "rest:query-param:select", "rest:embed-join:inner"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/notes?select=body,note_comments!inner(body)&order=body"
+key = "service_role"
+
+[[case]]
+id = "rest.embed.no-relationship"
+description = "Embedding a table with no foreign key is PGRST200"
+units = ["rest:route:GET /rest/v1/{relation}", "rest:query-param:select", "rest:embed-join:left"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?select=id,notes(body)"
+key = "service_role"
