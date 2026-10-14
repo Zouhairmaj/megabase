@@ -113,8 +113,10 @@ Host `5432` is Supavisor. The overlay publishes Postgres itself on
 `54322` so `prepare` can `CREATE DATABASE` and so snapshots do not go
 through the pooler.
 
-`prepare` creates the `megabase` database on the official cluster and
-loads `judge/fixtures/schema.sql` into it. That file also creates
+`prepare` creates the `megabase` database on the official cluster,
+applies the `public` usage and default privileges the Supabase image sets
+in `postgres` (supabase/postgres `00000000000000-initial-schema.sql`), so
+fixture tables get the same grants on both sides, and then loads `judge/fixtures/schema.sql` into it. That file also creates
 `public.profiles`, `public.notes`, and `public.note_comments` for the
 adversarial RLS cases, and creates `auth.uid()` only when the function
 is missing so the reference body stays the one `auth.sql.function.uid`
