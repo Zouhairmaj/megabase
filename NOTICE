@@ -71,6 +71,13 @@ golang-jwt (Auth JWT parse and validation errors)
   https://github.com/golang-jwt/jwt  v5.3.1, as pinned in vendor/auth/go.mod
   LICENSES/golang-jwt.txt
 
+fuzzyset (Haskell; fuzzy matching behind PostgREST relationship hints)
+  SPDX-License-Identifier: BSD-3-Clause (as listed on Hackage; the LICENSE text
+  and copyright line are not copied yet, check them against the repository)
+  https://github.com/laserpants/fuzzyset-haskell  0.2.4, as pinned in
+  vendor/postgrest/stack.yaml
+  crates/megabase-rest/src/hint.rs
+
 sqlx-mysql (patched copy, not a Supabase pin)
   SPDX-License-Identifier: MIT OR Apache-2.0
   Copyright (c) 2020 LaunchBadge, LLC
