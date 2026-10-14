@@ -75,7 +75,10 @@ pub(crate) fn decode<T: DeserializeOwned>(
     target: &GoStruct,
 ) -> Result<T, GoTrueError> {
     let decoded = match normalized_object(bytes, target) {
-        Some(object) => serde_json::from_value(Value::Object(object)),
+        Some(Ok(object)) => serde_json::from_value(Value::Object(object)),
+        // Go reports the first type mismatch even when a later duplicate
+        // key would have overwritten the field with a valid value.
+        Some(Err(message)) => return Err(bad_json(message)),
         None => serde_json::from_slice(bytes),
     };
     decoded.map_err(|error| bad_json(go_message(bytes, target, &error)))
@@ -83,13 +86,18 @@ pub(crate) fn decode<T: DeserializeOwned>(
 
 /// Re-key the top-level object the way Go's decoder matches fields: an exact
 /// name is kept, otherwise an ASCII case-insensitive match maps to the
-/// canonical field name, and a later duplicate overwrites an earlier one.
-/// `None` when the body is not an object (or too deeply nested for serde).
-fn normalized_object(bytes: &[u8], target: &GoStruct) -> Option<serde_json::Map<String, Value>> {
+/// canonical field name, and a later duplicate overwrites an earlier one. A
+/// `null` for a string field is a no-op in Go, so it keeps an earlier value.
+/// `Some(Err)` carries the first Go type-mismatch message; `None` when the
+/// body is not an object (or too deeply nested for serde).
+fn normalized_object(
+    bytes: &[u8],
+    target: &GoStruct,
+) -> Option<Result<serde_json::Map<String, Value>, String>> {
     let Pairs(pairs) = serde_json::from_slice(bytes).ok()?;
     let mut object = serde_json::Map::new();
     for (key, value) in pairs {
-        let canonical = target
+        let field = target
             .fields
             .iter()
             .find(|(name, _)| *name == key)
@@ -98,11 +106,20 @@ fn normalized_object(bytes: &[u8], target: &GoStruct) -> Option<serde_json::Map<
                     .fields
                     .iter()
                     .find(|(name, _)| name.eq_ignore_ascii_case(&key))
-            })
-            .map_or(key, |(name, _)| (*name).to_string());
-        object.insert(canonical, value);
+            });
+        let Some((name, kind)) = field else {
+            object.insert(key, value);
+            continue;
+        };
+        if let Some(message) = field_mismatch(target, name, *kind, &value) {
+            return Some(Err(message));
+        }
+        if value.is_null() && matches!(kind, Kind::Str) {
+            continue;
+        }
+        object.insert((*name).to_string(), value);
     }
-    Some(object)
+    Some(Ok(object))
 }
 
 fn go_message(bytes: &[u8], target: &GoStruct, serde_error: &serde_json::Error) -> String {
@@ -165,19 +182,26 @@ fn type_error(bytes: &[u8], target: &GoStruct) -> Option<String> {
         else {
             continue;
         };
-        let (matches, go_type) = match kind {
-            Kind::Str => (value.is_string(), "string"),
-            Kind::Map => (value.is_object(), "map[string]interface {}"),
-        };
-        if !matches && !value.is_null() {
-            return Some(format!(
-                "json: cannot unmarshal {} into Go struct field {}.{name} of type {go_type}",
-                value_kind(value),
-                target.name
-            ));
+        if let Some(message) = field_mismatch(target, name, *kind, value) {
+            return Some(message);
         }
     }
     None
+}
+
+/// Go `UnmarshalTypeError` text when `value` does not fit field `name`.
+fn field_mismatch(target: &GoStruct, name: &str, kind: Kind, value: &Value) -> Option<String> {
+    let (matches, go_type) = match kind {
+        Kind::Str => (value.is_string(), "string"),
+        Kind::Map => (value.is_object(), "map[string]interface {}"),
+    };
+    (!matches && !value.is_null()).then(|| {
+        format!(
+            "json: cannot unmarshal {} into Go struct field {}.{name} of type {go_type}",
+            value_kind(value),
+            target.name
+        )
+    })
 }
 
 #[derive(Clone, Copy)]
@@ -578,6 +602,29 @@ mod tests {
             decode_email(r#"{"Email":"first","email":"second"}"#).as_deref(),
             Some("second")
         );
+    }
+
+    #[test]
+    fn null_duplicate_keeps_earlier_string() {
+        let body = br#"{"email":"a@x.co","Email":null}"#;
+        let params =
+            decode::<Params>(body, &SIGNUP_PARAMS).unwrap_or_else(|_| panic!("body is valid"));
+        assert_eq!(params.email.as_deref(), Some("a@x.co"));
+    }
+
+    #[test]
+    fn earlier_type_error_survives_later_valid_duplicate() {
+        for body in [
+            r#"{"Email":1,"email":"a@x.co"}"#,
+            r#"{"email":1,"EMAIL":"a@x.co"}"#,
+        ] {
+            assert_eq!(
+                message(body),
+                format!(
+                    "{PREFIX}json: cannot unmarshal number into Go struct field SignupParams.email of type string"
+                )
+            );
+        }
     }
 
     #[test]
