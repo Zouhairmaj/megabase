@@ -146,9 +146,12 @@ fn database_name(url: &str) -> Result<String> {
 /// What the Supabase Postgres image runs in its `postgres` database before
 /// any user table exists, copied from supabase/postgres
 /// `migrations/db/init-scripts/00000000000000-initial-schema.sql`
-/// (develop @ 8b0ef1ef942e18493bf5c89087eff7b030c0e26d, lines 39-42 and 50-56).
+/// (develop @ 8b0ef1ef942e18493bf5c89087eff7b030c0e26d, lines 39-42).
 /// The image runs lines 39-42 as `postgres`, the role `prepare` connects as,
 /// so `ALTER DEFAULT PRIVILEGES` without `FOR ROLE` targets the same owner.
+/// Lines 50-56 (`FOR USER supabase_admin`) are left out: they only cover
+/// objects `supabase_admin` creates, and `postgres` (not a superuser on the
+/// image) may not change that role's default privileges.
 /// A fresh `CREATE DATABASE` starts from `template1` without them, so tables
 /// the fixtures create would otherwise get fewer grants than on the
 /// reference side. The roles belong to the shared reference cluster and
@@ -158,17 +161,6 @@ grant usage on schema public to postgres, anon, authenticated, service_role;
 alter default privileges in schema public grant all on tables to postgres, anon, authenticated, service_role;
 alter default privileges in schema public grant all on functions to postgres, anon, authenticated, service_role;
 alter default privileges in schema public grant all on sequences to postgres, anon, authenticated, service_role;
-do $$
-begin
-    if exists (select 1 from pg_roles where rolname = 'supabase_admin') then
-        alter default privileges for user supabase_admin in schema public grant all
-            on sequences to postgres, anon, authenticated, service_role;
-        alter default privileges for user supabase_admin in schema public grant all
-            on tables to postgres, anon, authenticated, service_role;
-        alter default privileges for user supabase_admin in schema public grant all
-            on functions to postgres, anon, authenticated, service_role;
-    end if;
-end $$;
 ";
 
 /// Create the Megabase-side database if needed and load judge fixtures into it.
