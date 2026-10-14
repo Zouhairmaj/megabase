@@ -15,6 +15,11 @@ Content negotiation via `Accept` and `Content-Type`. Template:
 
 - `vendor/postgrest/src/library/PostgREST/MediaType.hs` (`toMime` lines 77-95,
   `toContentType` line 68)
+- `Plan.hs:219,229,253`: reads, writes and RPC share `negotiateContent`
+  (`Plan/Negotiate.hs:56-85`).
+- `Query/SqlFragment.hs:226-242` (`asJsonF`, `asJsonSingleF`),
+  `MainTx.hs:163-190,239-243` (`failMutation`, `failNotSingular`),
+  `Response.hs` (`contentTypeHeaders`).
 - Pin: `postgrest v16.4` (`vendor.toml`).
 
 ## Behavior
@@ -29,15 +34,31 @@ relation, entries with no handler are skipped first (see below).
 | `*/*`, `application/json`, `application/*`, none | GET/HEAD/writes/RPC | `application/json; charset=utf-8` |
 | `application/vnd.pgrst.array+json` | GET/HEAD on a relation | `application/json; charset=utf-8` (plain alias) |
 | `application/openapi+json` | root document | `application/openapi+json; charset=utf-8` |
-| `application/vnd.pgrst.object+json` | GET/HEAD on a relation | `application/vnd.pgrst.object+json; charset=utf-8` |
-| `application/vnd.pgrst.object+json;nulls=stripped` | GET/HEAD on a relation | `application/vnd.pgrst.object+json;nulls=stripped; charset=utf-8` |
-| `application/vnd.pgrst.array+json;nulls=stripped` | GET/HEAD on a relation | `application/vnd.pgrst.array+json;nulls=stripped; charset=utf-8` |
+| `application/vnd.pgrst.object+json` | GET/HEAD/writes/RPC | `application/vnd.pgrst.object+json; charset=utf-8` |
+| `application/vnd.pgrst.object+json;nulls=stripped` | GET/HEAD/writes/RPC | `application/vnd.pgrst.object+json;nulls=stripped; charset=utf-8` |
+| `application/vnd.pgrst.array+json;nulls=stripped` | GET/HEAD/writes/RPC | `application/vnd.pgrst.array+json;nulls=stripped; charset=utf-8` |
 | `text/csv` | GET/HEAD on a relation | `text/csv; charset=utf-8` |
 
 Singular object: the result must be exactly one row. The body is that row as
 an object, not an array. Any other row count returns 406 `PGRST116`, message
 `Cannot coerce the result to a single JSON object`, details
 `The result contains N rows`.
+
+On `POST`, `PATCH` and `DELETE` the result is the affected rows, whatever
+`Prefer: return` says: `return=minimal` with two affected rows is still 406.
+The check runs after the statement and the transaction is rolled back, so
+the rows stay unchanged (`MainTx.hs` `failNotSingular`, `SQL.condemn`).
+`PUT` is exempt: its only count check is `PGRST115`. With
+`return=representation` the body is `json_agg(rows)->0` and the response
+`Content-Type` is the negotiated type; without a body no `Content-Type` is
+sent. Status, `Content-Range` and `Location` are those of the plain write
+(`specs/rest/prefer.md`). Check and RLS errors keep their codes.
+
+On RPC the result is the page count: a scalar or a single composite is one
+row, a set must return exactly one row, and a `void` function stays 204. A
+failed check rolls a volatile call back. For a set of scalars the singular
+body is the call row (`{"pgrst_scalar": …}`), as `asJsonSingleF` only reads
+`pgrst_scalar` for a single scalar.
 
 `nulls=stripped` removes object members whose value is JSON `null`
 (`json_strip_nulls`, at every depth), keeping key order. `Content-Range` is
@@ -53,7 +74,9 @@ Upstream: `MediaType.hs:81-83` (`toMime`), `Plan/Negotiate.hs`
   `application/json`, `application/geo+json` and `text/csv`. Entries without
   a handler are skipped before ranking: `text/plain`, `text/xml` and types
   PostgREST does not know. The remaining entries rank as in the table above.
-  `application/geo+json` is recognized but returns 501.
+  `application/geo+json` is recognized but returns 501. Writes and RPC run
+  the same negotiation (`Plan.hs:229,253`), so `text/plain` on a `POST` is
+  the same 406; only `text/csv` is 501 there.
 - **`text/csv`.** 200, `Content-Type: text/csv; charset=utf-8`, the usual
   `Content-Range`. Body: the column names of the first result row joined by
   `,`, `\n`, then each row as record text (`row::text` without its outer
@@ -68,7 +91,7 @@ Upstream: `MediaType.hs:81-83` (`toMime`), `Plan/Negotiate.hs`
   first handled type in rank order.
 - The 406 is decided before the relation lookup, so a missing relation with
   `Accept: text/plain` is 406, not `PGRST205`.
-- **Out of scope:** `Accept` on writes and RPC (still 501), custom
+- **Out of scope:** `text/csv` on writes and RPC (501), custom
   aggregate / domain handlers, `text/csv` as a request `Content-Type`, a
   specific `q=0` entry overriding a matching wildcard.
 
@@ -91,8 +114,11 @@ served. RPC still returns 501 when the query string is non-empty.
 
 `application/geo+json`, `application/octet-stream` (needs a single unnamed
 `bytea` RPC parameter and a custom handler), `application/vnd.pgrst.plan+{format}`,
-and the singular/stripped/CSV shapes on writes and RPC.
+and `text/csv` on writes and RPC.
 
 ## Judge cases
 
 Cases go in separate `review/issue-33-cases` and `review/issue-34-cases` PRs.
+The singular shape on writes and RPC is covered by `rest.media.object.*` in
+`judge/cases/rest.toml` (one-row insert and delete, update matching zero and
+two rows, `return=minimal` with two rows, RPC scalar).
