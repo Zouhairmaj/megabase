@@ -719,12 +719,7 @@ fn plan_mime(part: &str) -> Option<String> {
         };
         let value = value.trim().trim_matches('"');
         match key.trim().to_ascii_lowercase().as_str() {
-            "for" => {
-                target = match value.to_ascii_lowercase().as_str() {
-                    "application/vnd.pgrst.array+json" => "application/json".to_owned(),
-                    other => other.to_owned(),
-                };
-            }
+            "for" => target = canonical_plan_for_target(value),
             "options" => options = value.to_owned(),
             _ => {}
         }
@@ -739,6 +734,50 @@ fn plan_mime(part: &str) -> Option<String> {
         mime.push_str(&flags.join("|"));
     }
     Some(mime)
+}
+
+/// Upstream `decodeMediaType` then `toMime` for the plan `for` target.
+///
+/// Aliases like `application/vnd.pgrst.object` and bare `array` print as their
+/// canonical MIME (see PostgREST `MediaType.hs` `toMime` / `decodeMediaType`).
+fn canonical_plan_for_target(value: &str) -> String {
+    let lower = value.to_ascii_lowercase();
+    let mut pieces = lower.split(';');
+    let essence = pieces.next().unwrap_or("").trim();
+    let nulls_stripped = pieces.any(|param| {
+        let param = param.trim();
+        param == "nulls=stripped"
+            || param
+                .split_once('=')
+                .is_some_and(|(k, v)| k.trim() == "nulls" && v.trim() == "stripped")
+    });
+    match (essence, nulls_stripped) {
+        ("application/vnd.pgrst.array+json" | "application/vnd.pgrst.array", false) => {
+            "application/json".to_owned()
+        }
+        ("application/vnd.pgrst.array+json" | "application/vnd.pgrst.array", true) => {
+            "application/vnd.pgrst.array+json;nulls=stripped".to_owned()
+        }
+        ("application/vnd.pgrst.object+json" | "application/vnd.pgrst.object", false) => {
+            "application/vnd.pgrst.object+json".to_owned()
+        }
+        ("application/vnd.pgrst.object+json" | "application/vnd.pgrst.object", true) => {
+            "application/vnd.pgrst.object+json;nulls=stripped".to_owned()
+        }
+        (
+            "application/json"
+            | "application/geo+json"
+            | "text/csv"
+            | "text/plain"
+            | "text/xml"
+            | "application/openapi+json"
+            | "application/x-www-form-urlencoded"
+            | "application/octet-stream"
+            | "*/*",
+            _,
+        ) => essence.to_owned(),
+        (other, _) => other.to_owned(),
+    }
 }
 
 /// The `q` weight of one `Accept` entry; absent or malformed is 1.
@@ -1971,6 +2010,14 @@ mod tests {
             (
                 "application/vnd.pgrst.plan+json; for=\"application/vnd.pgrst.array+json\"",
                 "application/vnd.pgrst.plan+json; for=\"application/json\"",
+            ),
+            (
+                "application/vnd.pgrst.plan+json; for=\"application/vnd.pgrst.array\"",
+                "application/vnd.pgrst.plan+json; for=\"application/json\"",
+            ),
+            (
+                "application/vnd.pgrst.plan+json; for=\"application/vnd.pgrst.object\"",
+                "application/vnd.pgrst.plan+json; for=\"application/vnd.pgrst.object+json\"",
             ),
             (
                 "application/vnd.pgrst.plan+text; for=\"text/csv\"; options=wal|analyze",
