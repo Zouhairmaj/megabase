@@ -19,6 +19,7 @@ use megabase_core::{bearer_token, JwtError, MegabaseNotImplemented};
 use serde_json::{Map, Value};
 
 use crate::filter::{quote_ident, UnsafeType};
+use crate::hint::no_rel_between_hint;
 use crate::mutate::mutate;
 use crate::openapi::document;
 use crate::params::{build_read_sql_as, parse_get_query, where_clause, QueryFail, Relationship};
@@ -1177,6 +1178,15 @@ const RELATIONSHIPS_SQL: &str = "SELECT (c.relname = $2) AS from_root,
            AND n.nspname = $1 AND fnn.nspname = $1
            AND ((c.relname = $2 AND f.relname = $3) OR (c.relname = $3 AND f.relname = $2))";
 
+/// Every pair of tables in a schema joined by a foreign key.
+const FK_EDGES_SQL: &str = "SELECT DISTINCT c.relname::text, f.relname::text
+         FROM pg_constraint AS con
+         JOIN pg_class AS c ON c.oid = con.conrelid
+         JOIN pg_namespace AS n ON n.oid = c.relnamespace
+         JOIN pg_class AS f ON f.oid = con.confrelid
+         JOIN pg_namespace AS fnn ON fnn.oid = f.relnamespace
+         WHERE con.contype = 'f' AND n.nspname = $1 AND fnn.nspname = $1";
+
 /// Find the one foreign key that links `relation` and the embedded `target`.
 ///
 /// No match is `PGRST200`. A self-reference or several candidate keys stay 501.
@@ -1211,7 +1221,15 @@ async fn load_relationship(
         .await
         .map_err(|error| Box::new(query_failure(&error, anon)))?;
     match rows.as_slice() {
-        [] => Err(Box::new(pgrst(
+        [] => {
+            // The hint is optional: a failed lookup must not replace PGRST200.
+            let edges: Vec<(String, String)> = sqlx::query_as(FK_EDGES_SQL)
+                .bind(schema)
+                .fetch_all(&mut **tx)
+                .await
+                .unwrap_or_default();
+            let hint = no_rel_between_hint(relation, target, &edges);
+            Err(Box::new(pgrst(
             StatusCode::BAD_REQUEST,
             "PGRST200",
             &format!(
@@ -1220,8 +1238,9 @@ async fn load_relationship(
             Some(&format!(
                 "Searched for a foreign key relationship between '{relation}' and '{target}' in the schema '{schema}', but no matches were found."
             )),
-            None,
-        ))),
+            hint.as_deref(),
+        )))
+        }
         [(from_root, key, referenced)] if relation != target => {
             let (root_columns, target_columns) = if *from_root {
                 (key.clone(), referenced.clone())
