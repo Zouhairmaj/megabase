@@ -1816,6 +1816,33 @@ key = "service_role"
 headers = { Prefer = "return=minimal" }
 
 [[case]]
+id = "rest.media-type.plan.json.disabled"
+description = "plan+json is 406 PGRST107 while db-plan-enabled is off"
+units = ["rest:media-type:application/vnd.pgrst.plan+{format}"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos"
+headers = { Accept = "application/vnd.pgrst.plan+json" }
+
+[[case]]
+id = "rest.media-type.plan.text.disabled"
+description = "bare plan type with for and options is 406 PGRST107 while plans are off"
+units = ["rest:media-type:application/vnd.pgrst.plan+{format}"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?order=id"
+headers = { Accept = 'application/vnd.pgrst.plan; for="text/csv"; options=wal|analyze' }
+
+[[case]]
+id = "rest.media-type.plan.fallback"
+description = "plan type with a handled fallback picks the handled type"
+units = ["rest:media-type:application/vnd.pgrst.plan+{format}"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?order=id"
+headers = { Accept = "application/vnd.pgrst.plan+json, application/json" }
+
+[[case]]
 id = "rest.media-type.json.explicit"
 description = "Accept application/json on a relation GET returns a JSON array"
 units = ["rest:media-type:application/json"]
