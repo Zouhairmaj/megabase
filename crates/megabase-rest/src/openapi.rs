@@ -459,7 +459,8 @@ async fn load_routines(
          WHERE t.oid <> 'trigger'::regtype AND COALESCE(a.callable, true)
            AND has_function_privilege(p.oid, 'execute')
            AND prokind = 'f'
-           AND pn.nspname = $1"
+           AND pn.nspname = $1
+         ORDER BY p.oid"
     ))
     .bind(schema)
     .fetch_all(&mut **tx)
