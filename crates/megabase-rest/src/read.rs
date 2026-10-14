@@ -719,7 +719,12 @@ fn plan_mime(part: &str) -> Option<String> {
         };
         let value = value.trim().trim_matches('"');
         match key.trim().to_ascii_lowercase().as_str() {
-            "for" => target = value.to_ascii_lowercase(),
+            "for" => {
+                target = match value.to_ascii_lowercase().as_str() {
+                    "application/vnd.pgrst.array+json" => "application/json".to_owned(),
+                    other => other.to_owned(),
+                };
+            }
             "options" => options = value.to_owned(),
             _ => {}
         }
@@ -1187,6 +1192,8 @@ async fn read_rows(
             singular_check(row.0)?;
         }
         // Shaping stays in Postgres so key order and number text are kept.
+        // megabase:unit rest:media-type:application/vnd.pgrst.object+json;nulls=stripped
+        // megabase:unit rest:media-type:application/vnd.pgrst.array+json;nulls=stripped
         let sql = match (shape.singular(), shape.stripped()) {
             (true, true) => "SELECT json_strip_nulls(($1::json)->0)::text",
             (true, false) => "SELECT (($1::json)->0)::text",
@@ -1960,6 +1967,10 @@ mod tests {
             (
                 "application/vnd.pgrst.plan",
                 "application/vnd.pgrst.plan+text; for=\"application/json\"",
+            ),
+            (
+                "application/vnd.pgrst.plan+json; for=\"application/vnd.pgrst.array+json\"",
+                "application/vnd.pgrst.plan+json; for=\"application/json\"",
             ),
             (
                 "application/vnd.pgrst.plan+text; for=\"text/csv\"; options=wal|analyze",
