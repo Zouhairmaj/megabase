@@ -1883,3 +1883,30 @@ path = "/rest/v1/rpc/add_numbers"
 key = "service_role"
 headers = { Content-Type = "application/x-www-form-urlencoded" }
 body = "a=6&b=7"
+
+[[case]]
+id = "rest.media.array-nulls-stripped"
+description = "Array nulls=stripped drops NULL members from every row"
+units = ["rest:media-type:application/vnd.pgrst.array+json;nulls=stripped"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/rankings?select=id,label,rank&order=id"
+headers = { Accept = "application/vnd.pgrst.array+json;nulls=stripped" }
+
+[[case]]
+id = "rest.media.object-nulls-stripped"
+description = "Object nulls=stripped drops NULL members from the single row"
+units = ["rest:media-type:application/vnd.pgrst.object+json;nulls=stripped"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/rankings?select=id,label,rank&label=eq.unranked"
+headers = { Accept = "application/vnd.pgrst.object+json;nulls=stripped" }
+
+[[case]]
+id = "rest.media.object-nulls-stripped-multiple-rows"
+description = "Object nulls=stripped on several rows is 406 PGRST116"
+units = ["rest:media-type:application/vnd.pgrst.object+json;nulls=stripped"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/rankings?select=id,label,rank"
+headers = { Accept = "application/vnd.pgrst.object+json;nulls=stripped" }
