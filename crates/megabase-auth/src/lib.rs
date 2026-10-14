@@ -18,6 +18,7 @@ mod admin_batch2;
 mod config;
 mod error;
 mod gojson;
+mod hooks;
 mod http;
 mod jsonutil;
 mod ratelimit;

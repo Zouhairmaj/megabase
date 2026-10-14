@@ -33,7 +33,8 @@ use crate::error::{
     bad_json, body_too_large, go_quote, unexpected, validation, GoTrueError, MAX_BODY_BYTES,
 };
 use crate::gojson;
-use crate::jsonutil::{access_claims, session_json, unix_secs};
+use crate::hooks::TokenHookCall;
+use crate::jsonutil::{session_claims, session_json, unix_secs};
 use crate::state::AuthState;
 use crate::store::{LogoutScope, SignupCommand, SignupResult, StoreError};
 use crate::token::null_as_default;
@@ -344,15 +345,28 @@ async fn signup(State(state): State<AuthState>, headers: HeaderMap, body: Body) 
     };
     let aud = request_aud(&headers, &state.config);
     let data = params.data.unwrap_or_default();
+    let now = unix_secs(SystemTime::now());
+    // GoTrue issues the signup session with `models.PasswordGrant`.
+    let hook = TokenHookCall::new(
+        state.config.custom_access_token_hook.as_ref(),
+        &headers,
+        "password",
+        &state.config.jwt_issuer,
+        now,
+        state.config.jwt_exp_seconds,
+    );
     let result = state
         .backend
-        .signup_email(SignupCommand {
-            email,
-            password: params.password,
-            aud,
-            role: state.config.jwt_default_group.clone(),
-            data,
-        })
+        .signup_email(
+            SignupCommand {
+                email,
+                password: params.password,
+                aud,
+                role: state.config.jwt_default_group.clone(),
+                data,
+            },
+            hook.as_ref(),
+        )
         .await;
     let issued = match result {
         Ok(SignupResult::Created(issued)) => issued,
@@ -370,17 +384,14 @@ async fn signup(State(state): State<AuthState>, headers: HeaderMap, body: Body) 
         Err(StoreError::Hash) => {
             return unexpected("Database error creating user").into_response();
         }
+        Err(StoreError::Hook(error)) => return (*error).into_response(),
         Err(error) => {
             tracing::error!(%error, "signup failed");
             return unexpected("Database error saving new user").into_response();
         }
     };
-    let now = unix_secs(SystemTime::now());
-    let claims = access_claims(
-        &issued.user,
-        issued.session_id,
-        issued.amr_at,
-        &issued.amr_method,
+    let claims = session_claims(
+        &issued,
         &state.config.jwt_issuer,
         now,
         state.config.jwt_exp_seconds,

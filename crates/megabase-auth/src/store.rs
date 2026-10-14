@@ -23,6 +23,7 @@ use tokio::sync::Mutex;
 use uuid::Uuid;
 
 use crate::config::BCRYPT_COST;
+use crate::hooks::{self, HookError, MemoryHook, TokenHookCall};
 use crate::schema::SchemaError;
 
 const EMAIL_PROVIDER: &str = "email";
@@ -39,6 +40,10 @@ pub enum StoreError {
     TimedOut,
     #[error(transparent)]
     Postgres(#[from] sqlx::Error),
+    /// The custom access token hook rejected the issuance. The session
+    /// transaction was rolled back.
+    #[error("custom access token hook failed: {0}")]
+    Hook(#[source] Box<HookError>),
 }
 
 /// Same bound the admin routes use for a connect. A stalled query fails
@@ -123,6 +128,9 @@ pub struct IssuedSession {
     /// AMR `method` claim. Password and refresh grants use `password`.
     /// Verify uses `otp`.
     pub amr_method: String,
+    /// Claims the custom access token hook returned. `None` when the hook is
+    /// disabled; the token then carries the standard claims.
+    pub hook_claims: Option<Value>,
 }
 
 pub enum SignupResult {
@@ -284,6 +292,8 @@ struct MemoryDb {
     one_time: Vec<OneTimeToken>,
     oauth_clients: HashMap<Uuid, MemoryClient>,
     oauth_consents: Vec<MemoryConsent>,
+    /// Test stand-in for the custom access token hook function.
+    access_token_hook: Option<Arc<MemoryHook>>,
 }
 
 struct MemoryClient {
@@ -318,6 +328,7 @@ impl Backend {
                 one_time: Vec::new(),
                 oauth_clients: HashMap::new(),
                 oauth_consents: Vec::new(),
+                access_token_hook: None,
             }))),
         }
     }
@@ -342,11 +353,23 @@ impl Backend {
         }
     }
 
-    pub async fn signup_email(&self, cmd: SignupCommand) -> Result<SignupResult, StoreError> {
+    /// Autoconfirm email signup. `hook` runs the custom access token hook for
+    /// the new session.
+    pub async fn signup_email(
+        &self,
+        cmd: SignupCommand,
+        hook: Option<&TokenHookCall<'_>>,
+    ) -> Result<SignupResult, StoreError> {
         match &self.inner {
             BackendKind::None => Err(StoreError::Unavailable),
-            BackendKind::Memory(db) => memory_signup(db, cmd).await,
-            BackendKind::Postgres(pg) => timed(postgres_signup(pg, cmd)).await,
+            BackendKind::Memory(db) => {
+                let mut result = memory_signup(db, cmd).await?;
+                if let SignupResult::Created(issued) = &mut result {
+                    customize_memory(db, hook, issued).await?;
+                }
+                Ok(result)
+            }
+            BackendKind::Postgres(pg) => timed(postgres_signup(pg, cmd, hook)).await,
         }
     }
 
@@ -473,11 +496,12 @@ impl Backend {
         user_id: Uuid,
         provider: &str,
         replacement_hash: Option<String>,
+        hook: Option<&TokenHookCall<'_>>,
     ) -> Result<Option<IssuedSession>, StoreError> {
         match &self.inner {
             BackendKind::None => Err(StoreError::Unavailable),
-            BackendKind::Memory(db) => {
-                let mut db = db.lock().await;
+            BackendKind::Memory(db_handle) => {
+                let mut db = db_handle.lock().await;
                 let Some(user) = db.users.get_mut(&user_id) else {
                     return Ok(None);
                 };
@@ -491,6 +515,8 @@ impl Backend {
                 let traits = json!({ "provider": provider });
                 remember_audit(&issued.user, "login", "account", Some(traits));
                 db.track(&issued);
+                drop(db);
+                customize_memory(db_handle, hook, &mut issued).await?;
                 Ok(Some(issued))
             }
             BackendKind::Postgres(pg) => {
@@ -528,7 +554,7 @@ impl Backend {
                         .execute(&mut *tx)
                         .await?;
                     }
-                    let issued = grant_session(&mut user, now);
+                    let mut issued = grant_session(&mut user, now);
                     insert_session_rows(&mut tx, &issued)
                         .await
                         .map_err(write_to_store)?;
@@ -540,6 +566,7 @@ impl Backend {
                         Some(json!({ "provider": provider })),
                     )
                     .await?;
+                    customize_pg(&mut tx, hook, &mut issued).await?;
                     tx.commit().await?;
                     Ok(Some(issued))
                 })
@@ -549,16 +576,23 @@ impl Backend {
     }
 
     /// Rotate a legacy refresh token (algorithm version 0).
-    pub async fn refresh_login(&self, token: &str) -> Result<RefreshStatus, StoreError> {
+    pub async fn refresh_login(
+        &self,
+        token: &str,
+        hook: Option<&TokenHookCall<'_>>,
+    ) -> Result<RefreshStatus, StoreError> {
         match &self.inner {
             BackendKind::None => Err(StoreError::Unavailable),
             BackendKind::Memory(db) => {
-                let mut db = db.lock().await;
-                Ok(refresh_memory(&mut db, token))
+                let mut status = refresh_memory(&mut *db.lock().await, token);
+                if let RefreshStatus::Issued { session, .. } = &mut status {
+                    customize_memory(db, hook, session).await?;
+                }
+                Ok(status)
             }
             BackendKind::Postgres(pg) => {
                 let token = token.to_string();
-                timed(refresh_postgres(pg, &token)).await
+                timed(refresh_postgres(pg, &token, hook)).await
             }
         }
     }
@@ -567,11 +601,21 @@ impl Backend {
     ///
     /// `Err` is a database failure. A bad or expired token is
     /// [`VerifyOutcome::Rejected`] so the HTTP layer can keep GoTrue's status.
-    pub async fn verify(&self, request: &VerifyRequest) -> Result<VerifyOutcome, StoreError> {
+    pub async fn verify(
+        &self,
+        request: &VerifyRequest,
+        hook: Option<&TokenHookCall<'_>>,
+    ) -> Result<VerifyOutcome, StoreError> {
         match &self.inner {
             BackendKind::None => Err(StoreError::Unavailable),
-            BackendKind::Memory(db) => memory_verify(db, request).await,
-            BackendKind::Postgres(pg) => timed(postgres_verify(pg, request)).await,
+            BackendKind::Memory(db) => {
+                let mut outcome = memory_verify(db, request).await?;
+                if let VerifyOutcome::Session(issued) = &mut outcome {
+                    customize_memory(db, hook, issued).await?;
+                }
+                Ok(outcome)
+            }
+            BackendKind::Postgres(pg) => timed(postgres_verify(pg, request, hook)).await,
         }
     }
 
@@ -878,6 +922,13 @@ impl Backend {
 
 #[cfg(test)]
 impl Backend {
+    /// Install the in-memory custom access token hook function.
+    pub async fn set_access_token_hook_for_test(&self, function: Arc<MemoryHook>) {
+        if let BackendKind::Memory(db) = &self.inner {
+            db.lock().await.access_token_hook = Some(function);
+        }
+    }
+
     pub async fn insert_unconfirmed_for_test(
         &self,
         email: &str,
@@ -1356,6 +1407,7 @@ fn grant_session(user: &mut UserRecord, now: SystemTime) -> IssuedSession {
         session_id,
         amr_at: now,
         amr_method: "password".into(),
+        hook_claims: None,
     }
 }
 
@@ -1409,6 +1461,7 @@ fn refresh_memory(db: &mut MemoryDb, token: &str) -> RefreshStatus {
                     session_id,
                     amr_at: row.amr_at,
                     amr_method: "password".into(),
+                    hook_claims: None,
                 }),
                 rotated: false,
             };
@@ -1441,6 +1494,7 @@ fn refresh_memory(db: &mut MemoryDb, token: &str) -> RefreshStatus {
             session_id: row.session_id,
             amr_at: row.amr_at,
             amr_method: "password".into(),
+            hook_claims: None,
         }),
         rotated: true,
     }
@@ -1452,9 +1506,16 @@ fn refresh_memory(db: &mut MemoryDb, token: &str) -> RefreshStatus {
 /// `GOTRUE_SECURITY_REFRESH_TOKEN_ALGORITHM_VERSION` unset). A longer token is
 /// not stored in `token`, and sessions from this crate have no HMAC key, so
 /// the lookup misses. GoTrue maps that miss to refresh-token-not-found.
-async fn refresh_postgres(pg: &Pg, token: &str) -> Result<RefreshStatus, StoreError> {
+async fn refresh_postgres(
+    pg: &Pg,
+    token: &str,
+    hook: Option<&TokenHookCall<'_>>,
+) -> Result<RefreshStatus, StoreError> {
     let mut tx = pg.pool.begin().await?;
-    let status = refresh_postgres_tx(&mut tx, token).await?;
+    let mut status = refresh_postgres_tx(&mut tx, token).await?;
+    if let RefreshStatus::Issued { session, .. } = &mut status {
+        customize_pg(&mut tx, hook, session).await?;
+    }
     tx.commit().await?;
     Ok(status)
 }
@@ -1591,6 +1652,7 @@ async fn refresh_postgres_tx(
             session_id,
             amr_at,
             amr_method: "password".into(),
+            hook_claims: None,
         }),
         rotated,
     })
@@ -1653,6 +1715,40 @@ where
     }
 }
 
+/// Run the custom access token hook as the last statement of the session
+/// transaction. An error drops `tx`, which rolls the session back.
+async fn customize_pg(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    hook: Option<&TokenHookCall<'_>>,
+    issued: &mut IssuedSession,
+) -> Result<(), StoreError> {
+    let Some(call) = hook else {
+        return Ok(());
+    };
+    let claims = hooks::run_pg(tx, call, issued)
+        .await
+        .map_err(|error| StoreError::Hook(Box::new(error)))?;
+    issued.hook_claims = Some(claims);
+    Ok(())
+}
+
+/// [`customize_pg`] for the in-memory test backend. Memory writes are not
+/// transactional, so a hook failure leaves the session in place.
+async fn customize_memory(
+    db: &Mutex<MemoryDb>,
+    hook: Option<&TokenHookCall<'_>>,
+    issued: &mut IssuedSession,
+) -> Result<(), StoreError> {
+    let Some(call) = hook else {
+        return Ok(());
+    };
+    let function = db.lock().await.access_token_hook.as_ref().map(Arc::clone);
+    let claims = hooks::run_memory(call, issued, function.as_deref())
+        .map_err(|error| StoreError::Hook(Box::new(error)))?;
+    issued.hook_claims = Some(claims);
+    Ok(())
+}
+
 fn ts(time: SystemTime) -> chrono::DateTime<chrono::Utc> {
     chrono::DateTime::<chrono::Utc>::from(time)
 }
@@ -1661,7 +1757,11 @@ fn from_ts(time: chrono::DateTime<chrono::Utc>) -> SystemTime {
     SystemTime::from(time)
 }
 
-async fn postgres_signup(pg: &Pg, cmd: SignupCommand) -> Result<SignupResult, StoreError> {
+async fn postgres_signup(
+    pg: &Pg,
+    cmd: SignupCommand,
+    hook: Option<&TokenHookCall<'_>>,
+) -> Result<SignupResult, StoreError> {
     let preexisting = {
         let mut conn = pg.pool.acquire().await?;
         find_email(&mut conn, &cmd.email, &cmd.aud)
@@ -1687,7 +1787,8 @@ async fn postgres_signup(pg: &Pg, cmd: SignupCommand) -> Result<SignupResult, St
             tx.commit().await?;
             return Ok(SignupResult::AlreadyExists);
         }
-        let issued = confirm_existing_tx(&mut tx, user, &cmd).await?;
+        let mut issued = confirm_existing_tx(&mut tx, user, &cmd).await?;
+        customize_pg(&mut tx, hook, &mut issued).await?;
         tx.commit().await?;
         return Ok(SignupResult::Created(Box::new(issued)));
     }
@@ -1695,7 +1796,8 @@ async fn postgres_signup(pg: &Pg, cmd: SignupCommand) -> Result<SignupResult, St
         return Err(StoreError::Unavailable);
     };
     match insert_new_tx(&mut tx, &cmd, hash).await {
-        Ok(issued) => {
+        Ok(mut issued) => {
+            customize_pg(&mut tx, hook, &mut issued).await?;
             tx.commit().await?;
             Ok(SignupResult::Created(Box::new(issued)))
         }
@@ -3448,7 +3550,11 @@ fn apply_email_change(user: &mut UserRecord, tokens: &mut UserTokens, now: Syste
     refresh_providers(user);
 }
 
-async fn postgres_verify(pg: &Pg, request: &VerifyRequest) -> Result<VerifyOutcome, StoreError> {
+async fn postgres_verify(
+    pg: &Pg,
+    request: &VerifyRequest,
+    hook: Option<&TokenHookCall<'_>>,
+) -> Result<VerifyOutcome, StoreError> {
     let mut tx = pg.pool.begin().await?;
     let found = match locate_postgres(&mut tx, request).await? {
         Located::Reject(rejected) => {
@@ -3543,6 +3649,7 @@ async fn postgres_verify(pg: &Pg, request: &VerifyRequest) -> Result<VerifyOutco
             insert_session_rows(&mut tx, &issued)
                 .await
                 .map_err(write_to_store)?;
+            customize_pg(&mut tx, hook, &mut issued).await?;
             VerifyOutcome::Session(Box::new(issued))
         }
     };
