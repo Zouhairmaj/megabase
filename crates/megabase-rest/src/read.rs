@@ -1144,6 +1144,8 @@ async fn read_rows(
             singular_check(row.0)?;
         }
         // Shaping stays in Postgres so key order and number text are kept.
+        // megabase:unit rest:media-type:application/vnd.pgrst.object+json;nulls=stripped
+        // megabase:unit rest:media-type:application/vnd.pgrst.array+json;nulls=stripped
         let sql = match (shape.singular(), shape.stripped()) {
             (true, true) => "SELECT json_strip_nulls(($1::json)->0)::text",
             (true, false) => "SELECT (($1::json)->0)::text",
