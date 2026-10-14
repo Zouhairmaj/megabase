@@ -13,7 +13,7 @@ use crate::filter::{
     append_predicate, parse_filter_value, quote_ident, BoundFilter, FilterBody, FilterParseError,
     ParsedFilter, ServedOp, UnsafeType,
 };
-use crate::query::percent_decode;
+use crate::query::{percent_decode, query_parts};
 
 /// Why a query string is not a served read.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -491,7 +491,7 @@ fn collect(query: &str) -> Collected {
     if query.is_empty() {
         return out;
     }
-    for part in query.split('&') {
+    for part in query_parts(query) {
         if part.is_empty() {
             continue;
         }

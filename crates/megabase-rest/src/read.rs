@@ -26,7 +26,7 @@ use crate::params::{
     build_read_sql_as, parse_get_query, where_clause, BodyHandler, QueryFail, Relationship,
 };
 use crate::prefer::{set_applied, Count, Prefer, Scope};
-use crate::query::path_decode;
+use crate::query::{path_decode, query_parts};
 use crate::relationship::{ambiguous_hint, find_relationship, Candidate, FindError, ForeignKey};
 use crate::RestState;
 
@@ -383,7 +383,7 @@ fn parse_resource_query(
 }
 
 fn query_is_blank(raw: &str) -> bool {
-    raw.split('&').all(|part| part.is_empty())
+    query_parts(raw).all(|part| part.is_empty())
 }
 
 pub(crate) fn negotiated_schema(
@@ -614,7 +614,7 @@ fn jwt_failure(error: &JwtError) -> Response {
         }
         _ => (StatusCode::UNAUTHORIZED, "PGRST301"),
     };
-    let mut response = pgrst(status, code, &error.to_string(), None, None);
+    let mut response = pgrst(status, code, &error.to_string(), error.details(), None);
     if status == StatusCode::UNAUTHORIZED {
         let value = format!(
             "Bearer error=\"invalid_token\", error_description=\"{}\"",
@@ -2124,6 +2124,45 @@ mod tests {
         let (status, body, _) = send(app, request).await;
         assert_eq!(status, StatusCode::UNAUTHORIZED);
         assert_eq!(body["code"], "PGRST301");
+    }
+
+    #[tokio::test]
+    async fn jwt_failures_carry_jose_jwt_details() {
+        let forged = sign(
+            "a-different-secret-that-is-also-32-bytes-long",
+            &json!({"role": "service_role"}),
+        );
+        // `{"alg":"none","typ":"JWT"}` . `{"role":"service_role"}` . empty
+        let unsecured = "eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0.eyJyb2xlIjoic2VydmljZV9yb2xlIn0.";
+        for (token, message, details) in [
+            (
+                forged.as_str(),
+                "No suitable key or wrong key type",
+                "None of the keys was able to decode the JWT",
+            ),
+            (
+                unsecured,
+                "Wrong or unsupported encoding algorithm",
+                "JWT is unsecured but expected 'alg' was not 'none'",
+            ),
+        ] {
+            let app = router(state_with_secret(SECRET));
+            let request = Request::builder()
+                .uri("/rest/v1/notes?select=body")
+                .header(header::AUTHORIZATION, format!("Bearer {token}"))
+                .body(Body::empty())
+                .unwrap();
+            let (status, body, headers) = send(app, request).await;
+            assert_eq!(status, StatusCode::UNAUTHORIZED);
+            assert_eq!(
+                body,
+                json!({"code": "PGRST301", "message": message, "details": details, "hint": null})
+            );
+            assert_eq!(
+                headers[header::WWW_AUTHENTICATE],
+                format!("Bearer error=\"invalid_token\", error_description=\"{message}\"")
+            );
+        }
     }
 
     #[test]

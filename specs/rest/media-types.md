@@ -168,7 +168,7 @@ bodies (one unnamed `text` / `xml` parameter upstream) are still 501.
 Upstream: `ApiRequest/Payload.hs:68-72,93` (`parseSimpleQuery`), `Plan.hs:245`.
 
 As a request `Content-Type` on `POST`/`PATCH`/`PUT /rest/v1/{relation}` and
-`POST /rest/v1/rpc/{function}`, the body is split on `&` into `key=value`
+`POST /rest/v1/rpc/{function}`, the body is split on `&` and `;` into `key=value`
 pairs. `+` is a space and `%XX` is decoded. Empty pairs are dropped, a key
 with no `=` has the value `""`, and the last duplicate key wins. The result
 is one JSON object of text values for relation writes, then handled like a

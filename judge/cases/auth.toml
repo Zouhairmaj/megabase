@@ -1643,3 +1643,140 @@ method = "PUT"
 path = "/auth/v1/admin/custom-providers/custom:missing"
 key = "service_role"
 json = {}
+
+# Level 1 depth (#333): extra cases for the refresh_token grant, health,
+# settings and logout. Additions only.
+
+[[case]]
+id = "auth.token.refresh.invalid"
+description = "Refresh-token grant with an unknown token is rejected"
+units = ["auth:route:POST /auth/v1/token", "auth:grant-type:refresh_token"]
+[[case.step]]
+method = "POST"
+path = "/auth/v1/token?grant_type=refresh_token"
+json = { refresh_token = "not-a-real-refresh-token" }
+
+[[case]]
+id = "auth.token.refresh.missing-token"
+description = "Refresh-token grant without a refresh_token field fails validation"
+units = ["auth:route:POST /auth/v1/token", "auth:grant-type:refresh_token"]
+[[case.step]]
+method = "POST"
+path = "/auth/v1/token?grant_type=refresh_token"
+json = {}
+
+[[case]]
+id = "auth.token.refresh.reuse"
+description = "Presenting a refresh token a second time behaves like the reference"
+units = ["auth:route:POST /auth/v1/token", "auth:grant-type:refresh_token"]
+[[case.step]]
+method = "POST"
+path = "/auth/v1/signup"
+json = { email = "judge-refresh-reuse-{{run}}@example.com", password = "judge-password-1" }
+capture = { refresh = "/refresh_token" }
+[[case.step]]
+method = "POST"
+path = "/auth/v1/token?grant_type=refresh_token"
+json = { refresh_token = "{{refresh}}" }
+[[case.step]]
+method = "POST"
+path = "/auth/v1/token?grant_type=refresh_token"
+json = { refresh_token = "{{refresh}}" }
+
+[[case]]
+id = "auth.health.head"
+description = "HEAD on the health route"
+units = ["auth:route:GET /auth/v1/health"]
+[[case.step]]
+method = "HEAD"
+path = "/auth/v1/health"
+
+[[case]]
+id = "auth.health.post"
+description = "POST on the health route is not allowed"
+units = ["auth:route:GET /auth/v1/health"]
+[[case.step]]
+method = "POST"
+path = "/auth/v1/health"
+json = {}
+
+[[case]]
+id = "auth.health.no-key"
+description = "Health without an API key is rejected by the gateway"
+units = ["auth:route:GET /auth/v1/health"]
+[[case.step]]
+method = "GET"
+path = "/auth/v1/health"
+key = "none"
+
+[[case]]
+id = "auth.settings.accept-text"
+description = "Settings ignores a text/plain Accept header"
+units = ["auth:route:GET /auth/v1/settings"]
+[[case.step]]
+method = "GET"
+path = "/auth/v1/settings"
+headers = { Accept = "text/plain" }
+
+[[case]]
+id = "auth.settings.no-key"
+description = "Settings without an API key is rejected by the gateway"
+units = ["auth:route:GET /auth/v1/settings"]
+[[case.step]]
+method = "GET"
+path = "/auth/v1/settings"
+key = "none"
+
+[[case]]
+id = "auth.settings.post"
+description = "POST on the settings route is not allowed"
+units = ["auth:route:GET /auth/v1/settings"]
+[[case.step]]
+method = "POST"
+path = "/auth/v1/settings"
+json = {}
+
+[[case]]
+id = "auth.logout.no-bearer"
+description = "Logout with only the anon key is rejected"
+units = ["auth:route:POST /auth/v1/logout"]
+[[case.step]]
+method = "POST"
+path = "/auth/v1/logout"
+
+[[case]]
+id = "auth.logout.invalid-bearer"
+description = "Logout with a malformed bearer token is rejected"
+units = ["auth:route:POST /auth/v1/logout"]
+[[case.step]]
+method = "POST"
+path = "/auth/v1/logout"
+headers = { Authorization = "Bearer not-a-jwt" }
+
+[[case]]
+id = "auth.logout.scope-others"
+description = "Logout with scope=others returns 204"
+units = ["auth:route:POST /auth/v1/logout"]
+[[case.step]]
+method = "POST"
+path = "/auth/v1/signup"
+json = { email = "judge-logout-others-{{run}}@example.com", password = "judge-password-1" }
+capture = { token = "/access_token" }
+[[case.step]]
+method = "POST"
+path = "/auth/v1/logout?scope=others"
+headers = { Authorization = "Bearer {{token}}" }
+
+[[case]]
+id = "auth.logout.scope-invalid"
+description = "Logout with an unknown scope is rejected"
+units = ["auth:route:POST /auth/v1/logout"]
+[[case.step]]
+method = "POST"
+path = "/auth/v1/signup"
+json = { email = "judge-logout-scope-{{run}}@example.com", password = "judge-password-1" }
+capture = { token = "/access_token" }
+[[case.step]]
+method = "POST"
+path = "/auth/v1/logout?scope=bogus"
+headers = { Authorization = "Bearer {{token}}" }

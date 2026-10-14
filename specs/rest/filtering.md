@@ -49,7 +49,10 @@ required by AGENTS.md.
 ## Inputs
 
 `GET /rest/v1/{relation}` with a query string. `{relation}` is one path
-segment in schema `public`. `+` in the query is a space. `+` in the path
+segment in schema `public`. Pairs are separated by `&` or `;`
+(http-types `parseQueryReplacePlus`, `QueryParams.hs:197`), and a part
+with no `=` is dropped, so `id=eq.1;drop table t--` is the filter
+`id=eq.1` alone. `+` in the query is a space. `+` in the path
 stays `+`. `%HH` is percent-decoded only when both characters are hex
 digits. `%+1` is not an escape: the query keeps a literal `%` and then
 treats `+` as a space.
