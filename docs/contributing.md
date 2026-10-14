@@ -127,6 +127,30 @@ not filtered and run every Judge shard.
 CodeQL is GitHub code scanning default setup. There is no `codeql.yml`,
 so this filter does not skip it.
 
+## Real app smoke test
+
+`.github/workflows/realapp.yml` (check `Real app (supabase-js)`) runs
+the `nextjs-todo-list` scenario from issue #320 with the official
+`@supabase/supabase-js` client, at the tag `vendor.toml` pins for
+`vendor/supabase-js`, against a Megabase built from the pull request
+([0038](decisions/0038-realapp-smoke-test.md)). The job starts the
+reference stack's PostgreSQL image, creates a `realapp` database,
+starts Megabase against it (which installs `auth.users` and
+`auth.uid()`), applies the example's migration, then signs up two
+users and walks sign-in, sign-out, wrong password, `getSession` /
+`getUser`, `insert().select().single()`, a check violation (`23514`),
+an RLS-denied insert (`42501`), `order('id')`,
+`update().select().single()`, the other user and anon seeing no rows,
+`PGRST116` on a foreign update, a no-op foreign delete, delete, and
+sign-out, plus the two browser preflights. The job summary lists every
+step. The scenario is a heredoc in the workflow: the Protected paths
+guard rejects a `.js` or `.mjs` file in the tree.
+
+While `REALAPP_REQUIRED` in the workflow is `"false"`, a failed scenario
+is a warning annotation and the check stays green. Set it to `"true"`
+once the client bugs #320 lists are closed. Site-only pull requests
+report success without building.
+
 ## Fuzzing
 
 OpenSSF Scorecard's Fuzzing check treats a Rust repo as fuzzed when a `*.rs`

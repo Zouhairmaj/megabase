@@ -1,0 +1,495 @@
+name: Real app
+
+# Smoke test with the official client. The Judge compares Megabase with
+# the reference stack request by request; this workflow runs the
+# nextjs-todo-list scenario (issue #320) through @supabase/supabase-js
+# against a Megabase built from the pull request, so a client-visible
+# regression (null fields, CORS, `.single()` on writes) fails here even
+# when every Judge case passes. Decision 0038.
+#
+# The scenario is inline. GOAL.md rule 1 and the Protected paths guard
+# reject a `.js` / `.mjs` / `.sh` file anywhere in the tree, so the
+# script is a heredoc like the inline Python in judge.yml.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Cancel superseded PR runs. Keep main and workflow_dispatch to completion.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  # Composite actions cannot read secrets or vars. Empty on fork PRs.
+  SCCACHE_R2_ACCESS_KEY_ID: ${{ secrets.SCCACHE_R2_ACCESS_KEY_ID }}
+  SCCACHE_R2_SECRET_ACCESS_KEY: ${{ secrets.SCCACHE_R2_SECRET_ACCESS_KEY }}
+  SCCACHE_BUCKET_NAME: ${{ vars.SCCACHE_BUCKET }}
+  SCCACHE_ENDPOINT_URL: ${{ vars.SCCACHE_ENDPOINT }}
+  # The official client, at the tag vendor.toml pins for vendor/supabase-js.
+  SUPABASE_JS_VERSION: 2.117.3
+  # "false": a failed scenario is a warning annotation and the check stays
+  # green. Set "true" once the client bugs issue #320 lists are fixed; the
+  # check then fails on any step failure.
+  REALAPP_REQUIRED: "false"
+  # Demo values from vendor/supabase/docker/.env.example (not secrets). The
+  # scenario signs its own anon key with JWT_SECRET, so the submodule is not
+  # needed for this job.
+  JWT_SECRET: your-super-secret-jwt-token-with-at-least-32-characters-long
+  POSTGRES_PASSWORD: your-super-secret-and-long-postgres-password
+
+jobs:
+  # Same classification as CI: a site-only pull request reports success
+  # without building. See .github/actions/pr-paths.
+  changes:
+    name: Path filter
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      server: ${{ steps.paths.outputs.server }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+      - id: paths
+        uses: ./.github/actions/pr-paths
+
+  smoke:
+    name: Real app (supabase-js)
+    runs-on: ubuntu-latest
+    needs: changes
+    if: always() && !cancelled()
+    timeout-minutes: 40
+    permissions:
+      contents: read
+    steps:
+      - name: Not applicable
+        if: needs.changes.result == 'success' && needs.changes.outputs.server == 'false'
+        run: echo "Site-only pull request. This check reports success without running."
+      - name: Select
+        id: run
+        if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
+        run: echo "run=true" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        if: steps.run.outputs.run == 'true'
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+        if: steps.run.outputs.run == 'true'
+        with:
+          toolchain: stable
+      - uses: ./.github/actions/sccache
+        if: steps.run.outputs.run == 'true'
+      - uses: ./.github/actions/rust-cache
+        if: steps.run.outputs.run == 'true'
+        with:
+          key: mold
+      - uses: ./.github/actions/linux-mold
+        if: steps.run.outputs.run == 'true'
+      - name: Build Megabase
+        if: steps.run.outputs.run == 'true'
+        run: cargo build --release --locked -p megabase --bin megabase
+
+      # The Judge's reference database image (judge/compose.override.yml),
+      # digest-pinned on public ECR. Megabase bootstraps the API roles on a
+      # stock PostgreSQL too (decision 0037); this image keeps the job on
+      # the same Postgres the reference stack runs, and its initdb already
+      # has them, so the idempotent bootstrap must also succeed here.
+      - name: Start PostgreSQL
+        if: steps.run.outputs.run == 'true'
+        run: |
+          set -euo pipefail
+          image='public.ecr.aws/supabase/postgres:17.6.1.136@sha256:f371b5f3f2ac0a05703f33d6e6134515fb2498cab708fb948a0aeb7481467c00'
+          attempt=1
+          until docker pull "$image"; do
+            if [ "$attempt" -ge 5 ]; then
+              echo "failed to pull $image" >&2
+              exit 1
+            fi
+            sleep $((attempt * 5))
+            attempt=$((attempt + 1))
+          done
+          # Same environment and command as the `db` service in the official
+          # compose file. Host 54322, like the Judge, so a runner-local
+          # PostgreSQL on 5432 cannot collide.
+          docker run -d --name realapp-db -p 54322:5432 \
+            -e POSTGRES_HOST=/var/run/postgresql \
+            -e PGPORT=5432 -e POSTGRES_PORT=5432 \
+            -e PGPASSWORD="$POSTGRES_PASSWORD" -e POSTGRES_PASSWORD="$POSTGRES_PASSWORD" \
+            -e PGDATABASE=postgres -e POSTGRES_DB=postgres \
+            -e JWT_SECRET="$JWT_SECRET" -e JWT_EXP=3600 \
+            "$image" \
+            postgres -c config_file=/etc/postgresql/postgresql.conf -c log_min_messages=fatal
+          for _ in $(seq 1 60); do
+            if docker exec realapp-db pg_isready -U postgres -h localhost >/dev/null 2>&1; then
+              break
+            fi
+            sleep 2
+          done
+          docker exec realapp-db pg_isready -U postgres -h localhost
+          # Fresh database for the app. `supabase_admin` can CREATE in schema
+          # auth (judge/README.md); the migration below runs as the same
+          # role, so Megabase's default privileges for the API roles apply
+          # to the app's table.
+          docker exec realapp-db psql -U supabase_admin -h localhost -d postgres \
+            -v ON_ERROR_STOP=1 -c 'CREATE DATABASE realapp'
+
+      - name: Start Megabase on :8000
+        if: steps.run.outputs.run == 'true'
+        run: |
+          set -euo pipefail
+          MEGABASE_PORT=8000 MEGABASE_HOST=127.0.0.1 \
+            JWT_SECRET="$JWT_SECRET" \
+            DATABASE_URL="postgres://supabase_admin:${POSTGRES_PASSWORD}@127.0.0.1:54322/realapp" \
+            GOTRUE_MAILER_AUTOCONFIRM=true \
+            ./target/release/megabase > /tmp/megabase.log 2>&1 &
+          echo $! > /tmp/megabase.pid
+          for _ in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:8000/_megabase/health >/dev/null 2>&1; then
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::Megabase did not become healthy"
+          cat /tmp/megabase.log
+          exit 1
+
+      # The example's migration, applied after Megabase installed auth.users
+      # and auth.uid(). Inline because the submodule is not checked out here.
+      - name: Apply the app schema
+        if: steps.run.outputs.run == 'true'
+        run: |
+          set -euo pipefail
+          docker exec -i realapp-db psql -U supabase_admin -h localhost -d realapp \
+            -v ON_ERROR_STOP=1 <<'SQL'
+          -- Ported from supabase/supabase
+          -- examples/todo-list/nextjs-todo-list/supabase/migrations/20230712094349_init.sql
+          -- (Apache-2.0), pin v1.26.08.
+          create table todos (
+            id bigint generated by default as identity primary key,
+            user_id uuid references auth.users not null,
+            task text check (char_length(task) > 3),
+            is_complete boolean default false,
+            inserted_at timestamp with time zone default timezone('utc'::text, now()) not null
+          );
+          alter table todos enable row level security;
+          create policy "Individuals can create todos." on todos for
+              insert with check (auth.uid() = user_id);
+          create policy "Individuals can view their own todos. " on todos for
+              select using (auth.uid() = user_id);
+          create policy "Individuals can update their own todos." on todos for
+              update using (auth.uid() = user_id);
+          create policy "Individuals can delete their own todos." on todos for
+              delete using (auth.uid() = user_id);
+          SQL
+
+      - name: Install the pinned client
+        if: steps.run.outputs.run == 'true'
+        run: |
+          set -euo pipefail
+          node --version
+          node -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 20 ? 0 : 1)' \
+            || { echo "::error::supabase-js ${SUPABASE_JS_VERSION} needs Node 20 or newer"; exit 1; }
+          mkdir -p "$RUNNER_TEMP/realapp"
+          cd "$RUNNER_TEMP/realapp"
+          npm init -y >/dev/null
+          npm install --no-audit --no-fund --ignore-scripts --no-package-lock \
+            "@supabase/supabase-js@${SUPABASE_JS_VERSION}"
+          npm ls @supabase/supabase-js
+
+      - name: Run the scenario
+        id: scenario
+        if: steps.run.outputs.run == 'true'
+        continue-on-error: true
+        env:
+          MEGABASE_URL: http://127.0.0.1:8000
+          RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/realapp"
+          cat > scenario.mjs <<'JS'
+          // Real-app smoke test: the official supabase-js client against Megabase.
+          // Scenario from issue #320 (nextjs-todo-list, 2026-10-14). The query
+          // shapes mirror vendor/supabase/examples/todo-list/nextjs-todo-list
+          // components/TodoList.tsx. Each step records pass or fail; the process
+          // exits 1 when any step failed.
+          import { createClient } from '@supabase/supabase-js';
+          import { createHmac } from 'node:crypto';
+          import { appendFileSync } from 'node:fs';
+
+          const url = process.env.MEGABASE_URL;
+          const secret = process.env.JWT_SECRET;
+          const run = process.env.RUN_ID ?? String(Date.now());
+          if (!url || !secret) {
+            console.error('MEGABASE_URL and JWT_SECRET are required');
+            process.exit(2);
+          }
+
+          // Anon key with the demo claims of .env.example, signed with JWT_SECRET.
+          const b64url = (text) => Buffer.from(text).toString('base64url');
+          function signHs256(claims) {
+            const header = b64url(JSON.stringify({ alg: 'HS256', typ: 'JWT' }));
+            const payload = b64url(JSON.stringify(claims));
+            const signature = createHmac('sha256', secret)
+              .update(`${header}.${payload}`)
+              .digest('base64url');
+            return `${header}.${payload}.${signature}`;
+          }
+          const now = Math.floor(Date.now() / 1000);
+          const anonKey = signHs256({ role: 'anon', iss: 'supabase-demo', iat: now, exp: now + 3600 });
+
+          const client = () =>
+            createClient(url, anonKey, {
+              auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+            });
+          const a = client();
+          const b = client();
+          const anon = client();
+          const password = 'correct-horse-battery-staple';
+          const emailA = `user-a-${run}@example.com`;
+          const emailB = `user-b-${run}@example.com`;
+
+          const results = [];
+          async function step(name, fn) {
+            try {
+              const detail = await fn();
+              results.push({ name, ok: true, detail: detail ?? '' });
+              console.log(`ok    ${name}${detail ? ` (${detail})` : ''}`);
+            } catch (error) {
+              results.push({ name, ok: false, detail: error.message });
+              console.log(`FAIL  ${name}: ${error.message}`);
+            }
+          }
+          function assert(condition, message) {
+            if (!condition) throw new Error(message);
+          }
+          function noError({ error }) {
+            if (error) {
+              throw new Error(`unexpected error ${error.code ?? error.status ?? ''} ${error.message}`.trim());
+            }
+          }
+          function expectCode({ error }, code) {
+            assert(error, `expected an error with code ${code}, got none`);
+            assert(
+              error.code === code,
+              `expected code ${code}, got ${error.code ?? error.status}: ${error.message}`,
+            );
+            return error;
+          }
+
+          let userA;
+          let userB;
+          let first;
+          let second;
+
+          await step('signUp A returns user and session', async () => {
+            const r = await a.auth.signUp({ email: emailA, password });
+            noError(r);
+            assert(r.data.user?.email === emailA, `user.email is ${r.data.user?.email}`);
+            assert(r.data.user?.id, 'user.id is missing');
+            assert(r.data.session?.access_token, 'session is missing (autoconfirm)');
+            userA = r.data.user;
+            return userA.id;
+          });
+          await step('signUp B returns user and session', async () => {
+            const r = await b.auth.signUp({ email: emailB, password });
+            noError(r);
+            assert(r.data.user?.email === emailB, `user.email is ${r.data.user?.email}`);
+            assert(r.data.session?.access_token, 'session is missing (autoconfirm)');
+            userB = r.data.user;
+            return userB.id;
+          });
+          await step('signInWithPassword A', async () => {
+            const r = await a.auth.signInWithPassword({ email: emailA, password });
+            noError(r);
+            assert(r.data.session?.user?.id === userA.id, 'session.user.id differs from signUp');
+          });
+          await step('signOut then signInWithPassword A', async () => {
+            noError(await a.auth.signOut());
+            const cleared = await a.auth.getSession();
+            noError(cleared);
+            assert(cleared.data.session === null, 'session survived signOut');
+            noError(await a.auth.signInWithPassword({ email: emailA, password }));
+          });
+          await step('wrong password is rejected with 400', async () => {
+            const r = await client().auth.signInWithPassword({ email: emailA, password: 'not-the-password' });
+            assert(r.error, 'expected an error');
+            assert(r.error.status === 400, `status is ${r.error.status}: ${r.error.message}`);
+            assert(r.data.session === null, 'a session came back');
+            return r.error.message;
+          });
+          await step('getSession and getUser', async () => {
+            const s = await a.auth.getSession();
+            noError(s);
+            assert(s.data.session?.user?.id === userA.id, 'getSession user differs');
+            const u = await a.auth.getUser();
+            noError(u);
+            assert(u.data.user?.id === userA.id, 'getUser user differs');
+            assert(u.data.user?.email === emailA, 'getUser email differs');
+          });
+          await step('insert().select().single()', async () => {
+            const r = await a.from('todos').insert({ task: 'write the spec', user_id: userA.id }).select().single();
+            noError(r);
+            assert(typeof r.data?.id === 'number', `id is ${JSON.stringify(r.data?.id)}`);
+            assert(r.data.task === 'write the spec', 'task differs');
+            assert(r.data.is_complete === false, `is_complete is ${r.data.is_complete}`);
+            assert(r.data.user_id === userA.id, 'user_id differs');
+            first = r.data;
+            return `id ${first.id}`;
+          });
+          await step('second insert', async () => {
+            const r = await a.from('todos').insert({ task: 'port the unit', user_id: userA.id }).select().single();
+            noError(r);
+            assert(r.data.id > first.id, `id ${r.data.id} is not after ${first.id}`);
+            second = r.data;
+            return `id ${second.id}`;
+          });
+          await step('check violation is 23514', async () => {
+            const e = expectCode(
+              await a.from('todos').insert({ task: 'abc', user_id: userA.id }).select().single(),
+              '23514',
+            );
+            return e.message;
+          });
+          await step('RLS: insert for another user is 42501', async () => {
+            const e = expectCode(
+              await a.from('todos').insert({ task: 'not mine', user_id: userB.id }).select().single(),
+              '42501',
+            );
+            return e.message;
+          });
+          await step("list with order('id')", async () => {
+            const r = await a.from('todos').select('*').order('id', { ascending: true });
+            noError(r);
+            assert(r.data.length === 2, `${r.data.length} rows`);
+            assert(r.data[0].id === first.id && r.data[1].id === second.id, 'rows are not in id order');
+          });
+          await step('update().select().single()', async () => {
+            const r = await a.from('todos').update({ is_complete: true }).eq('id', first.id).select().single();
+            noError(r);
+            assert(r.data?.id === first.id, 'returned row differs');
+            assert(r.data.is_complete === true, `is_complete is ${r.data.is_complete}`);
+          });
+          await step('RLS: B sees no rows', async () => {
+            const r = await b.from('todos').select('*');
+            noError(r);
+            assert(r.data.length === 0, `${r.data.length} rows`);
+          });
+          await step('RLS: anon sees no rows', async () => {
+            const r = await anon.from('todos').select('*');
+            noError(r);
+            assert(r.data.length === 0, `${r.data.length} rows`);
+          });
+          await step("RLS: B update().single() is PGRST116", async () => {
+            const e = expectCode(
+              await b.from('todos').update({ is_complete: false }).eq('id', first.id).select().single(),
+              'PGRST116',
+            );
+            return e.message;
+          });
+          await step('RLS: B delete is a no-op', async () => {
+            noError(await b.from('todos').delete().eq('id', first.id));
+            const r = await a.from('todos').select('id').order('id', { ascending: true });
+            noError(r);
+            assert(r.data.length === 2, `${r.data.length} rows left for A`);
+          });
+          await step('delete', async () => {
+            noError(await a.from('todos').delete().eq('id', first.id));
+            const r = await a.from('todos').select('id');
+            noError(r);
+            assert(r.data.length === 1 && r.data[0].id === second.id, `rows left: ${JSON.stringify(r.data)}`);
+          });
+          await step('signOut A and B', async () => {
+            noError(await a.auth.signOut());
+            noError(await b.auth.signOut());
+            const s = await a.auth.getSession();
+            noError(s);
+            assert(s.data.session === null, 'session survived signOut');
+          });
+
+          // Browser preflights the client sends from http://localhost:3000.
+          async function preflight(path, method) {
+            const res = await fetch(`${url}${path}`, {
+              method: 'OPTIONS',
+              headers: {
+                Origin: 'http://localhost:3000',
+                'Access-Control-Request-Method': method,
+                'Access-Control-Request-Headers': 'apikey,authorization,content-type,x-client-info',
+              },
+            });
+            assert(res.status >= 200 && res.status < 300, `status ${res.status}`);
+            const origin = res.headers.get('access-control-allow-origin');
+            assert(origin === '*' || origin === 'http://localhost:3000', `allow-origin is ${origin}`);
+            const allowed = (res.headers.get('access-control-allow-headers') ?? '').toLowerCase();
+            for (const header of ['apikey', 'authorization', 'content-type']) {
+              assert(allowed === '*' || allowed.includes(header), `allow-headers lacks ${header}: "${allowed}"`);
+            }
+            const methods = (res.headers.get('access-control-allow-methods') ?? '').toUpperCase();
+            assert(methods === '*' || methods.includes(method), `allow-methods lacks ${method}: "${methods}"`);
+            return `status ${res.status}`;
+          }
+          await step('CORS preflight /auth/v1/signup', () => preflight('/auth/v1/signup', 'POST'));
+          await step('CORS preflight /rest/v1/todos', () => preflight('/rest/v1/todos', 'PATCH'));
+
+          const failed = results.filter((r) => !r.ok);
+          const lines = [
+            '### Real app (supabase-js)',
+            '',
+            `@supabase/supabase-js ${process.env.SUPABASE_JS_VERSION ?? ''}: ${results.length - failed.length}/${results.length} steps passed`,
+            '',
+            '| Step | Result | Detail |',
+            '|---|---|---|',
+            ...results.map((r) => `| ${r.name} | ${r.ok ? 'pass' : '**fail**'} | ${String(r.detail).replace(/\|/g, '\\|')} |`),
+            '',
+          ];
+          if (process.env.GITHUB_STEP_SUMMARY) {
+            appendFileSync(process.env.GITHUB_STEP_SUMMARY, lines.join('\n'));
+          }
+          console.log(`${results.length - failed.length}/${results.length} steps passed`);
+          process.exit(failed.length === 0 ? 0 : 1);
+          JS
+          node scenario.mjs
+
+      - name: Verdict
+        if: steps.run.outputs.run == 'true'
+        env:
+          OUTCOME: ${{ steps.scenario.outcome }}
+        run: |
+          set -euo pipefail
+          echo "scenario outcome: ${OUTCOME}"
+          if [ "$OUTCOME" = "success" ]; then
+            exit 0
+          fi
+          if [ "$REALAPP_REQUIRED" = "true" ]; then
+            echo "::error::Real app scenario failed (REALAPP_REQUIRED=true)"
+            exit 1
+          fi
+          echo "::warning::Real app scenario failed. The check stays green while REALAPP_REQUIRED is false (issue #320)."
+
+      - name: Megabase log
+        if: always() && steps.run.outputs.run == 'true' && steps.scenario.outcome != 'success'
+        run: |
+          cat /tmp/megabase.log || true
+          docker logs --tail 80 realapp-db || true
+
+      - name: Stop
+        if: always() && steps.run.outputs.run == 'true'
+        run: |
+          if [ -f /tmp/megabase.pid ]; then
+            kill "$(cat /tmp/megabase.pid)" || true
+          fi
+          docker rm -f realapp-db >/dev/null 2>&1 || true
+
+      - name: sccache stats
+        if: always() && steps.run.outputs.run == 'true'
+        run: sccache --show-stats
