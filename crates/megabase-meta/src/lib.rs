@@ -77,18 +77,18 @@ pub fn router_with_state(state: MetaState) -> Router {
 
 /// Kong's `acl` plugin (`allow: [admin]`) on the `meta` service.
 async fn admin_only(State(state): State<MetaState>, request: Request, next: Next) -> Response {
-    if is_service_role(&state, request.headers()) {
+    if is_service_role(&state, request.headers(), request.uri().query()) {
         next.run(request).await
     } else {
         kong::acl_forbidden()
     }
 }
 
-fn is_service_role(state: &MetaState, headers: &HeaderMap) -> bool {
+fn is_service_role(state: &MetaState, headers: &HeaderMap, query: Option<&str>) -> bool {
     let Some(jwt) = state.jwt.as_deref() else {
         return false;
     };
-    kong::api_key(headers, None)
+    kong::api_key(headers, query)
         .and_then(|key| jwt.verify(key).ok())
         .is_some_and(|claims| claims.role.as_deref() == Some("service_role"))
 }
@@ -212,6 +212,20 @@ mod tests {
         }
         let (status, _) = get(router(), "/pg/health", Some(&key("service_role"))).await;
         assert_eq!(status, StatusCode::FORBIDDEN, "no secret, no admin");
+    }
+
+    #[tokio::test]
+    async fn apikey_query_parameter_is_read_and_the_header_wins() {
+        let admin = key("service_role");
+        let (status, _) = get(app(), &format!("/pg/health?apikey={admin}"), None).await;
+        assert_eq!(status, StatusCode::OK);
+        let (status, _) = get(
+            app(),
+            &format!("/pg/health?apikey={admin}"),
+            Some(&key("anon")),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "header takes precedence");
     }
 
     #[tokio::test]
