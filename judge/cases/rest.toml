@@ -1575,6 +1575,10 @@ key = "service_role"
 headers = { Prefer = "return=representation, missing=default" }
 json = [{ id = 9211,title = "prefer-missing",priority = 5 },{ id = 9212,title = "prefer-missing",done = true }]
 [[case.step]]
+method = "GET"
+path = "/rest/v1/todos?id=in.(9211,9212)&select=id,done,priority&order=id"
+key = "service_role"
+[[case.step]]
 method = "DELETE"
 path = "/rest/v1/todos?id=in.(9211,9212)"
 key = "service_role"
@@ -1595,6 +1599,10 @@ path = "/rest/v1/todos?select=id,done,priority&order=id"
 key = "service_role"
 headers = { Prefer = "return=representation, missing=null" }
 json = [{ id = 9221,title = "prefer-missing",priority = 5 },{ id = 9222,title = "prefer-missing",done = true }]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?id=in.(9221,9222)&select=id,done,priority&order=id"
+key = "service_role"
 [[case.step]]
 method = "DELETE"
 path = "/rest/v1/todos?id=in.(9221,9222)"
@@ -1622,6 +1630,10 @@ path = "/rest/v1/todos?select=id,title,priority"
 key = "service_role"
 headers = { Prefer = "resolution=merge-duplicates, return=representation" }
 json = { id = 9231,title = "prefer-merged",priority = 2 }
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?id=eq.9231&select=id,title,priority"
+key = "service_role"
 [[case.step]]
 method = "DELETE"
 path = "/rest/v1/todos?id=eq.9231"
