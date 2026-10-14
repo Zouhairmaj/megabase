@@ -17,8 +17,10 @@ use axum::response::{IntoResponse, Response};
 use megabase_core::MegabaseNotImplemented;
 use serde::Deserialize;
 
-use crate::error::{bad_json, unexpected, validation, GoTrueError};
+use crate::error::{unexpected, validation, GoTrueError};
+use crate::gojson::{self, GoStruct, PASSWORD_GRANT_PARAMS, REFRESH_TOKEN_GRANT_PARAMS};
 use crate::jsonutil::{access_claims, session_json, unix_secs};
+use crate::ratelimit::limit_by_header;
 use crate::routes::{insert_header, query_param, read_body, request_aud, JsonOk};
 use crate::state::AuthState;
 use crate::store::{LoginChannel, RefreshStatus, StoreError};
@@ -42,10 +44,21 @@ pub(crate) async fn token(
     // for form posts, and this handler still requires a JSON body afterwards.
     let grant_type = query_param(uri.query(), "grant_type").unwrap_or_default();
     match grant_type.as_str() {
-        "password" => password_grant(state, headers, body).await,
-        "refresh_token" => refresh_grant(state, body).await,
-        "id_token" => MegabaseNotImplemented::new(COMPONENT, UNIT_ID_TOKEN).into_response(),
-        "pkce" => MegabaseNotImplemented::new(COMPONENT, UNIT_PKCE).into_response(),
+        "password" | "refresh_token" | "id_token" | "pkce" => {
+            // Go `Token` applies the limiter once the grant type is known and
+            // before the handler reads the body.
+            if let Err(error) =
+                limit_by_header(&state.token_limiter, &state.rate_limit_header, &headers)
+            {
+                return error.into_response();
+            }
+            match grant_type.as_str() {
+                "password" => password_grant(state, headers, body).await,
+                "refresh_token" => refresh_grant(state, body).await,
+                "id_token" => MegabaseNotImplemented::new(COMPONENT, UNIT_ID_TOKEN).into_response(),
+                _ => MegabaseNotImplemented::new(COMPONENT, UNIT_PKCE).into_response(),
+            }
+        }
         "web3" => MegabaseNotImplemented::new(COMPONENT, UNIT_WEB3).into_response(),
         _ => GoTrueError::new(
             StatusCode::BAD_REQUEST,
@@ -58,7 +71,7 @@ pub(crate) async fn token(
 
 // megabase:unit auth:grant-type:password
 async fn password_grant(state: AuthState, headers: HeaderMap, body: Body) -> Response {
-    let params = match grant_json::<PasswordBody>(body).await {
+    let params = match grant_json::<PasswordBody>(body, &PASSWORD_GRANT_PARAMS).await {
         Ok(params) => params,
         Err(error) => return error.into_response(),
     };
@@ -154,7 +167,7 @@ async fn password_grant(state: AuthState, headers: HeaderMap, body: Body) -> Res
 
 // megabase:unit auth:grant-type:refresh_token
 async fn refresh_grant(state: AuthState, body: Body) -> Response {
-    let params = match grant_json::<RefreshBody>(body).await {
+    let params = match grant_json::<RefreshBody>(body, &REFRESH_TOKEN_GRANT_PARAMS).await {
         Ok(params) => params,
         Err(error) => return error.into_response(),
     };
@@ -236,9 +249,12 @@ struct WeakPassword {
     reasons: Vec<&'static str>,
 }
 
-async fn grant_json<T: for<'de> Deserialize<'de>>(body: Body) -> Result<T, GoTrueError> {
+async fn grant_json<T: for<'de> Deserialize<'de>>(
+    body: Body,
+    target: &GoStruct,
+) -> Result<T, GoTrueError> {
     let bytes = read_body(body).await?;
-    serde_json::from_slice(&bytes).map_err(bad_json)
+    gojson::decode(&bytes, target)
 }
 
 fn invalid_login() -> Response {
@@ -528,6 +544,80 @@ mod tests {
         assert!(body["user"]["confirmed_at"].is_string());
         assert_eq!(body["refresh_token"].as_str().unwrap().len(), 12);
         assert!(body["weak_password"].is_null());
+    }
+
+    #[tokio::test]
+    async fn password_grant_limits_each_header_key_after_the_burst() {
+        let mut app = state(AuthConfig::reference_defaults(), true, Backend::memory());
+        app.rate_limit_header = "x-rate-key".into();
+        let send = |key: Option<&'static str>| {
+            let app = app.clone();
+            async move {
+                let mut builder = Request::builder()
+                    .method("POST")
+                    .uri("/auth/v1/token?grant_type=password")
+                    .header("content-type", "application/json");
+                if let Some(key) = key {
+                    builder = builder.header("x-rate-key", key);
+                }
+                let request = builder
+                    .body(Body::from(r#"{"email":"a@example.com","password":"x"}"#))
+                    .unwrap();
+                let response = router(app).oneshot(request).await.unwrap();
+                let status = response.status();
+                let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+                    .await
+                    .unwrap();
+                (status, serde_json::from_slice::<Value>(&bytes).unwrap())
+            }
+        };
+        for _ in 0..30 {
+            let (status, body) = send(Some("k1")).await;
+            assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+        }
+        let (status, body) = send(Some("k1")).await;
+        assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
+        assert_eq!(body["code"], 429);
+        assert_eq!(body["error_code"], "over_request_rate_limit");
+        assert_eq!(body["msg"], "Request rate limit reached");
+
+        let (status, _) = send(Some("k2")).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "other keys have a bucket");
+        let (status, _) = send(None).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "no header, no limit");
+    }
+
+    #[tokio::test]
+    async fn grants_report_go_json_errors() {
+        let app = state(AuthConfig::reference_defaults(), true, Backend::memory());
+        let (status, body, _) =
+            call(&app, "/auth/v1/token?grant_type=password", Some("not-json")).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(body["error_code"], "bad_json");
+        assert_eq!(
+            body["msg"],
+            "Could not parse request body as JSON: invalid character 'o' in literal null (expecting 'u')"
+        );
+        let (_, body, _) = call(
+            &app,
+            "/auth/v1/token?grant_type=password",
+            Some(r#"{"password":1}"#),
+        )
+        .await;
+        assert_eq!(
+            body["msg"],
+            "Could not parse request body as JSON: json: cannot unmarshal number into Go struct field PasswordGrantParams.password of type string"
+        );
+        let (_, body, _) = call(
+            &app,
+            "/auth/v1/token?grant_type=refresh_token",
+            Some(r#"{"refresh_token":{}}"#),
+        )
+        .await;
+        assert_eq!(
+            body["msg"],
+            "Could not parse request body as JSON: json: cannot unmarshal object into Go struct field RefreshTokenGrantParams.refresh_token of type string"
+        );
     }
 
     #[tokio::test]
