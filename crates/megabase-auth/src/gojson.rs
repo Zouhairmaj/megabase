@@ -74,7 +74,35 @@ pub(crate) fn decode<T: DeserializeOwned>(
     bytes: &[u8],
     target: &GoStruct,
 ) -> Result<T, GoTrueError> {
-    serde_json::from_slice(bytes).map_err(|error| bad_json(go_message(bytes, target, &error)))
+    let decoded = match normalized_object(bytes, target) {
+        Some(object) => serde_json::from_value(Value::Object(object)),
+        None => serde_json::from_slice(bytes),
+    };
+    decoded.map_err(|error| bad_json(go_message(bytes, target, &error)))
+}
+
+/// Re-key the top-level object the way Go's decoder matches fields: an exact
+/// name is kept, otherwise an ASCII case-insensitive match maps to the
+/// canonical field name, and a later duplicate overwrites an earlier one.
+/// `None` when the body is not an object (or too deeply nested for serde).
+fn normalized_object(bytes: &[u8], target: &GoStruct) -> Option<serde_json::Map<String, Value>> {
+    let Pairs(pairs) = serde_json::from_slice(bytes).ok()?;
+    let mut object = serde_json::Map::new();
+    for (key, value) in pairs {
+        let canonical = target
+            .fields
+            .iter()
+            .find(|(name, _)| *name == key)
+            .or_else(|| {
+                target
+                    .fields
+                    .iter()
+                    .find(|(name, _)| name.eq_ignore_ascii_case(&key))
+            })
+            .map_or(key, |(name, _)| (*name).to_string());
+        object.insert(canonical, value);
+    }
+    Some(object)
 }
 
 fn go_message(bytes: &[u8], target: &GoStruct, serde_error: &serde_json::Error) -> String {
@@ -529,5 +557,36 @@ mod tests {
         let params: Params = decode(br#"{"email":"a@example.com"}"#, &SIGNUP_PARAMS)
             .unwrap_or_else(|_| panic!("valid body"));
         assert_eq!(params.email.as_deref(), Some("a@example.com"));
+    }
+
+    #[test]
+    fn keys_match_fields_case_insensitively_last_wins() {
+        let decode_email = |body: &str| {
+            decode::<Params>(body.as_bytes(), &SIGNUP_PARAMS)
+                .unwrap_or_else(|_| panic!("{body} is valid"))
+                .email
+        };
+        assert_eq!(
+            decode_email(r#"{"EMAIL":"a@x.co"}"#).as_deref(),
+            Some("a@x.co")
+        );
+        assert_eq!(
+            decode_email(r#"{"email":"first","Email":"second"}"#).as_deref(),
+            Some("second")
+        );
+        assert_eq!(
+            decode_email(r#"{"Email":"first","email":"second"}"#).as_deref(),
+            Some("second")
+        );
+    }
+
+    #[test]
+    fn case_variant_key_reports_go_type_error() {
+        assert_eq!(
+            message(r#"{"Email":1}"#),
+            format!(
+                "{PREFIX}json: cannot unmarshal number into Go struct field SignupParams.email of type string"
+            )
+        );
     }
 }

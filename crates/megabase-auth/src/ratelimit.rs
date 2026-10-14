@@ -22,6 +22,8 @@ pub(crate) const TOKEN_BURST: f64 = 30.0;
 const ENTRY_TTL: Duration = Duration::from_secs(60 * 60);
 /// Sweep expired entries once the table grows past this size.
 const SWEEP_AT: usize = 1024;
+/// Sweep at most once per interval, so live keys do not force a scan per request.
+const SWEEP_INTERVAL: Duration = Duration::from_secs(60);
 
 struct Bucket {
     tokens: f64,
@@ -32,7 +34,13 @@ struct Bucket {
 pub(crate) struct KeyedLimiter {
     rate: f64,
     burst: f64,
-    buckets: Mutex<HashMap<String, Bucket>>,
+    table: Mutex<Table>,
+}
+
+#[derive(Default)]
+struct Table {
+    buckets: HashMap<String, Bucket>,
+    last_sweep: Option<Instant>,
 }
 
 impl KeyedLimiter {
@@ -41,7 +49,7 @@ impl KeyedLimiter {
         Self {
             rate: rate.max(0.0),
             burst,
-            buckets: Mutex::new(HashMap::new()),
+            table: Mutex::new(Table::default()),
         }
     }
 
@@ -51,11 +59,18 @@ impl KeyedLimiter {
     }
 
     fn allow_at(&self, key: &str, now: Instant) -> bool {
-        let mut buckets = self.buckets.lock().unwrap_or_else(PoisonError::into_inner);
-        if buckets.len() >= SWEEP_AT {
-            buckets.retain(|_, bucket| now.saturating_duration_since(bucket.last) < ENTRY_TTL);
+        let mut guard = self.table.lock().unwrap_or_else(PoisonError::into_inner);
+        let table = &mut *guard;
+        let sweep_due = table
+            .last_sweep
+            .is_none_or(|at| now.saturating_duration_since(at) >= SWEEP_INTERVAL);
+        if table.buckets.len() >= SWEEP_AT && sweep_due {
+            table
+                .buckets
+                .retain(|_, bucket| now.saturating_duration_since(bucket.last) < ENTRY_TTL);
+            table.last_sweep = Some(now);
         }
-        let bucket = buckets.entry(key.to_string()).or_insert(Bucket {
+        let bucket = table.buckets.entry(key.to_string()).or_insert(Bucket {
             tokens: self.burst,
             last: now,
         });
@@ -126,12 +141,37 @@ mod tests {
         }
         let later = start + ENTRY_TTL + Duration::from_secs(1);
         assert!(limiter.allow_at("new", later));
-        let size = limiter
-            .buckets
+        assert_eq!(table_len(&limiter), 1);
+    }
+
+    fn table_len(limiter: &KeyedLimiter) -> usize {
+        limiter
+            .table
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .len();
-        assert_eq!(size, 1);
+            .buckets
+            .len()
+    }
+
+    #[test]
+    fn sweep_runs_at_most_once_per_interval() {
+        let limiter = KeyedLimiter::new(0.0, 1.0);
+        let start = Instant::now();
+        for n in 0..SWEEP_AT {
+            assert!(limiter.allow_at(&n.to_string(), start));
+        }
+        // First sweep finds nothing expired and records its time.
+        let first = start + ENTRY_TTL - Duration::from_secs(30);
+        assert!(limiter.allow_at("x", first));
+        assert_eq!(table_len(&limiter), SWEEP_AT + 1);
+        // Entries are now expired, but the last sweep was 31 s ago: no scan.
+        let inside = start + ENTRY_TTL + Duration::from_secs(1);
+        assert!(limiter.allow_at("y", inside));
+        assert_eq!(table_len(&limiter), SWEEP_AT + 2);
+        // Past the interval the sweep runs again.
+        let after = first + SWEEP_INTERVAL;
+        assert!(limiter.allow_at("z", after));
+        assert_eq!(table_len(&limiter), 3);
     }
 
     #[test]
