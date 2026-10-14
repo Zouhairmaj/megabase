@@ -1814,3 +1814,65 @@ method = "DELETE"
 path = "/rest/v1/todos?id=eq.9232"
 key = "service_role"
 headers = { Prefer = "return=minimal" }
+
+[[case]]
+id = "rest.media-type.json.explicit"
+description = "Accept application/json on a relation GET returns a JSON array"
+units = ["rest:media-type:application/json"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?select=id,title&order=id&limit=2"
+headers = { Accept = "application/json" }
+
+[[case]]
+id = "rest.media-type.json.head"
+description = "Accept application/json on HEAD has the JSON headers and no body"
+units = ["rest:media-type:application/json"]
+[[case.step]]
+method = "HEAD"
+path = "/rest/v1/todos?order=id"
+headers = { Accept = "application/json" }
+
+[[case]]
+id = "rest.media-type.json.none"
+description = "No Accept header falls back to application/json"
+units = ["rest:media-type:application/json", "rest:media-type:*/*"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?select=id,title&order=id&limit=2"
+
+[[case]]
+id = "rest.media-type.any.get"
+description = "Accept */* on a relation GET returns JSON"
+units = ["rest:media-type:*/*"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?select=id,title&order=id&limit=2"
+headers = { Accept = "*/*" }
+
+[[case]]
+id = "rest.media-type.any.head"
+description = "Accept */* on HEAD has the JSON headers and no body"
+units = ["rest:media-type:*/*"]
+[[case.step]]
+method = "HEAD"
+path = "/rest/v1/todos?order=id"
+headers = { Accept = "*/*" }
+
+[[case]]
+id = "rest.media-type.any.fallback"
+description = "An unsupported type with a wildcard fallback serves JSON"
+units = ["rest:media-type:*/*", "rest:media-type:application/json"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?select=id,title&order=id&limit=2"
+headers = { Accept = "text/xml, */*;q=0.1" }
+
+[[case]]
+id = "rest.media-type.json.unsupported"
+description = "An unsupported Accept alone is 406 PGRST107"
+units = ["rest:media-type:application/json", "rest:media-type:*/*"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos"
+headers = { Accept = "application/x-unknown" }
