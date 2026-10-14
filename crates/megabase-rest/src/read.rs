@@ -652,7 +652,12 @@ fn negotiate_read(
         // megabase:unit rest:media-type:text/xml
         let unknown = axum::http::HeaderValue::from_str(part)
             .is_ok_and(|entry| reject_accept(Some(&entry)) == Some(""));
-        if matches!(essence.as_str(), "text/plain" | "text/xml") || unknown {
+        // megabase:unit rest:media-type:application/vnd.pgrst.plan+{format}
+        if let Some(mime) = plan_mime(part) {
+            // `db-plan-enabled` is off (the default, and the Judge config):
+            // the plan type has no handler, so it is only named in the 406.
+            skipped.push(mime);
+        } else if matches!(essence.as_str(), "text/plain" | "text/xml") || unknown {
             skipped.push(essence);
         } else {
             kept.push(part);
@@ -691,6 +696,44 @@ fn negotiate_read(
         Some(unit) => Err(Box::new(unimplemented_unit(method, path, unit))),
         None => Ok(None),
     }
+}
+
+/// The `toMime` form of an `application/vnd.pgrst.plan[+json|+text]` entry, or
+/// `None` for any other media type.
+///
+/// Upstream `decodeMediaType` reads `for` (default `application/json`) and the
+/// `options` flags; `toMime` prints them back in a fixed order.
+fn plan_mime(part: &str) -> Option<String> {
+    let mut pieces = part.split(';');
+    let essence = pieces.next()?.trim().to_ascii_lowercase();
+    let format = match essence.as_str() {
+        "application/vnd.pgrst.plan" | "application/vnd.pgrst.plan+text" => "text",
+        "application/vnd.pgrst.plan+json" => "json",
+        _ => return None,
+    };
+    let mut target = "application/json".to_owned();
+    let mut options = String::new();
+    for param in pieces {
+        let Some((key, value)) = param.split_once('=') else {
+            continue;
+        };
+        let value = value.trim().trim_matches('"');
+        match key.trim().to_ascii_lowercase().as_str() {
+            "for" => target = value.to_ascii_lowercase(),
+            "options" => options = value.to_owned(),
+            _ => {}
+        }
+    }
+    let flags: Vec<&str> = ["analyze", "verbose", "settings", "buffers", "wal"]
+        .into_iter()
+        .filter(|flag| options.split('|').any(|given| given == *flag))
+        .collect();
+    let mut mime = format!("application/vnd.pgrst.plan+{format}; for=\"{target}\"");
+    if !flags.is_empty() {
+        mime.push_str("; options=");
+        mime.push_str(&flags.join("|"));
+    }
+    Some(mime)
 }
 
 /// The `q` weight of one `Accept` entry; absent or malformed is 1.
@@ -1899,6 +1942,38 @@ mod tests {
                 .unwrap();
             let (status, body, _) = send(app, request).await;
             assert_eq!(status, StatusCode::NOT_ACCEPTABLE);
+            assert_eq!(body["code"], "PGRST107");
+            assert_eq!(
+                body["message"],
+                format!("None of these media types are available: {listed}")
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn plan_accept_is_406_while_plans_are_disabled() {
+        for (accept, listed) in [
+            (
+                "application/vnd.pgrst.plan+json",
+                "application/vnd.pgrst.plan+json; for=\"application/json\"",
+            ),
+            (
+                "application/vnd.pgrst.plan",
+                "application/vnd.pgrst.plan+text; for=\"application/json\"",
+            ),
+            (
+                "application/vnd.pgrst.plan+text; for=\"text/csv\"; options=wal|analyze",
+                "application/vnd.pgrst.plan+text; for=\"text/csv\"; options=analyze|wal",
+            ),
+        ] {
+            let app = router(RestState::from_config(&Config::default()));
+            let request = Request::builder()
+                .uri("/rest/v1/todos")
+                .header(header::ACCEPT, accept)
+                .body(Body::empty())
+                .unwrap();
+            let (status, body, _) = send(app, request).await;
+            assert_eq!(status, StatusCode::NOT_ACCEPTABLE, "{accept}");
             assert_eq!(body["code"], "PGRST107");
             assert_eq!(
                 body["message"],
