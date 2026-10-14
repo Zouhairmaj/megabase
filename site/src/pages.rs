@@ -1347,6 +1347,9 @@ mod tests {
             .parent()
             .expect("repo root");
         let metrics = crate::metrics::load(root);
+        // Once every implemented unit is tested, the live summary has no
+        // implemented-only cells to paint; the legend still lists the state.
+        let has_implemented_only = metrics.components.iter().any(|c| c.implemented > 0);
         let home = home_page(&metrics);
         let status = status(&Paths::nested("status", false), &metrics);
         assert!(home.contains(r#"<figure class="hero-art" aria-hidden="true">"#));
@@ -1364,8 +1367,10 @@ mod tests {
             assert!(html.contains("not started"));
             assert!(html.contains("tested"));
             assert!(html.contains("conformant (matches real Supabase)"));
-            assert!(html.contains("data-status=\"implemented\""));
-            assert!(html.contains("#005441"));
+            if has_implemented_only {
+                assert!(html.contains("data-status=\"implemented\""));
+                assert!(html.contains("#005441"));
+            }
         }
     }
 
