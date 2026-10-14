@@ -102,6 +102,7 @@ None.
 ### Judge disputes
 
 - `rest.insert.rls-denied`, `rest.put.anon-denied` (#338): the reference database `postgres` grants `ALL` on `public.todos` to `anon` (Supabase default privileges, applied before the fixtures load), so PostgREST returns `42501` with `new row violates row-level security policy for table "todos"`. `prepare` loads the fixtures into the `megabase` database before Megabase starts and installs its default privileges, so `anon` only has the fixture `GRANT SELECT` and Postgres itself returns `42501` `permission denied for table todos` with a `GRANT INSERT[, UPDATE]` hint. Megabase forwards the Postgres error as PostgREST does; granting on existing tables at startup would widen access on user databases. Aligning those grants belongs in `judge/` prepare (apply the image's default privileges in the `megabase` database before the fixtures), which needs a `review/*` branch.
+- `rest.root.options` (#337): Kong's 403 body on the admin-only root carries `request_id`, 32 hex digits generated per request. Megabase now sends the same field, but `judge/harness/src/normalize.rs` does not treat `request_id` as volatile, so two independent random ids never match. Tracked by #344 (`review/judge-volatile-request-id`).
 
 ## Phase 0
 
