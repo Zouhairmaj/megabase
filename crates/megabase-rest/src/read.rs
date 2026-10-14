@@ -22,7 +22,9 @@ use crate::filter::{quote_ident, UnsafeType};
 use crate::hint::no_rel_between_hint;
 use crate::mutate::mutate;
 use crate::openapi::document;
-use crate::params::{build_read_sql_as, parse_get_query, where_clause, QueryFail, Relationship};
+use crate::params::{
+    build_read_sql_as, parse_get_query, where_clause, BodyHandler, QueryFail, Relationship,
+};
 use crate::prefer::{set_applied, Count, Prefer, Scope};
 use crate::query::path_decode;
 use crate::RestState;
@@ -223,11 +225,34 @@ async fn relation_route(
     if let Err(response) = prefer.check_strict() {
         return *response;
     }
-    let negotiated = if matches!(*method, Method::GET | Method::HEAD) {
-        negotiate_read(method, path, headers.get(header::ACCEPT))
+    let accept = headers.get(header::ACCEPT);
+    let is_read = matches!(*method, Method::GET | Method::HEAD);
+    let negotiated = if is_read {
+        negotiate_read(method, path, accept)
     } else {
-        negotiate_write(method, path, headers.get(header::ACCEPT))
+        negotiate_write(method, path, accept)
     };
+    let pool = state.pool.as_ref();
+    // `dbMediaHandlers`: a handler the schema defines for the relation (or
+    // `anyelement`) wins over the builtin ones and over the 406. Megabase
+    // does not run custom handlers, so it answers 501 instead of a plausible
+    // JSON body or `PGRST107`.
+    if let (true, Some(pool)) = (is_read, pool) {
+        match custom_media_handler(
+            pool,
+            &schema,
+            relation,
+            accept,
+            query.is_default_select(),
+            session.anon,
+        )
+        .await
+        {
+            Ok(Some(mime)) => return custom_handler_not_implemented(method, path, &mime),
+            Ok(None) => {}
+            Err(response) => return *response,
+        }
+    }
     let shape = match negotiated {
         Ok(shape) => shape,
         Err(response) => return *response,
@@ -235,7 +260,6 @@ async fn relation_route(
     if method == Method::GET && headers.get(header::RANGE).is_some() {
         return not_implemented(method, path);
     }
-    let pool = state.pool.as_ref();
     match *method {
         Method::GET => {
             // megabase:unit rest:route:GET /rest/v1/{relation}
@@ -607,7 +631,8 @@ fn jwt_failure(error: &JwtError) -> Response {
 /// Negotiate the body shape of a `GET`/`HEAD` relation read from `Accept`.
 ///
 /// Types with no handler on a table or view are skipped, as `negotiateContent`
-/// does: `text/plain` and `text/xml` (no custom aggregate is registered) and
+/// does: `text/plain`, `text/xml` and `application/octet-stream` (no custom
+/// aggregate is registered; `initialMediaHandlers` has none for them) and
 /// types PostgREST does not know. The rest go to [`ReadShape::from_accept`] and
 /// [`reject_accept`]. When nothing is left the answer is 406 `PGRST107`, also
 /// for a header whose every type has `q=0`. `Ok(None)` is plain JSON.
@@ -634,6 +659,11 @@ pub(crate) fn negotiate_write(
             method,
             path,
             "rest:media-type:text/csv",
+        ))),
+        Some(ReadShape::GeoJson) => Err(Box::new(unimplemented_unit(
+            method,
+            path,
+            "rest:media-type:application/geo+json",
         ))),
         shape => Ok(shape),
     }
@@ -663,6 +693,7 @@ fn negotiate_accept(
             .to_ascii_lowercase();
         // megabase:unit rest:media-type:text/plain
         // megabase:unit rest:media-type:text/xml
+        // megabase:unit rest:media-type:application/octet-stream
         let unknown = axum::http::HeaderValue::from_str(part)
             .is_ok_and(|entry| reject_accept(Some(&entry)) == Some(""));
         // megabase:unit rest:media-type:application/vnd.pgrst.plan+{format}
@@ -670,7 +701,11 @@ fn negotiate_accept(
             // `db-plan-enabled` is off (the default, and the Judge config):
             // the plan type has no handler, so it is only named in the 406.
             skipped.push(mime);
-        } else if matches!(essence.as_str(), "text/plain" | "text/xml") || unknown {
+        } else if matches!(
+            essence.as_str(),
+            "text/plain" | "text/xml" | "application/octet-stream"
+        ) || unknown
+        {
             skipped.push(essence);
         } else {
             kept.push(part);
@@ -844,6 +879,8 @@ pub(crate) enum ReadShape {
     ArrayStripped,
     /// `text/csv`: the builtin `asCsvF` handler.
     Csv,
+    /// `application/geo+json`: the builtin `asGeoJsonF` handler.
+    GeoJson,
 }
 
 /// The preferred `Accept` entry: its lowercase essence and whether it carries
@@ -919,6 +956,8 @@ impl ReadShape {
             }
             // megabase:unit rest:media-type:text/csv
             ("text/csv", _) => Some(Self::Csv),
+            // megabase:unit rest:media-type:application/geo+json
+            ("application/geo+json", _) => Some(Self::GeoJson),
             _ => None,
         }
     }
@@ -933,6 +972,16 @@ impl ReadShape {
         matches!(self, Self::ObjectStripped | Self::ArrayStripped)
     }
 
+    /// The SQL handler that builds a `GET` body (`handlerF`). The JSON shapes
+    /// are post-processed from the plain array.
+    fn handler(self) -> BodyHandler {
+        match self {
+            Self::Csv => BodyHandler::Csv,
+            Self::GeoJson => BodyHandler::GeoJson,
+            Self::Object | Self::ObjectStripped | Self::ArrayStripped => BodyHandler::Json,
+        }
+    }
+
     /// `MediaType.hs` `toContentType`: the mime plus `; charset=utf-8`.
     pub(crate) fn content_type(self) -> &'static str {
         match self {
@@ -942,7 +991,130 @@ impl ReadShape {
             }
             Self::ArrayStripped => "application/vnd.pgrst.array+json;nulls=stripped; charset=utf-8",
             Self::Csv => "text/csv; charset=utf-8",
+            Self::GeoJson => "application/geo+json; charset=utf-8",
         }
+    }
+}
+
+/// Lowercase essences of the acceptable `Accept` entries (`q > 0`), in header
+/// order, as `iAcceptMediaType` lists them for `negotiateContent`.
+fn accept_essences(value: Option<&axum::http::HeaderValue>) -> Vec<String> {
+    header_str(value)
+        .map(|text| {
+            text.split(',')
+                .map(str::trim)
+                .filter(|part| !part.is_empty() && quality(part) > 0.0)
+                .map(|part| {
+                    part.split(';')
+                        .next()
+                        .unwrap_or("")
+                        .trim()
+                        .to_ascii_lowercase()
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// The media-type domains and aggregates `SchemaCache.hs` `mediaHandlers`
+/// discovers, restricted to one relation. Ported from the pinned query: a
+/// domain whose name is a media type (or `*/*`), returned by a one-argument
+/// aggregate in an exposed schema whose argument is the relation's row type
+/// or `anyelement`.
+const CUSTOM_MEDIA_HANDLER_SQL: &str = "WITH media_types AS (
+         SELECT t.oid, lower(t.typname) AS typname
+         FROM pg_type AS t
+         JOIN pg_type AS b ON t.typbasetype = b.oid
+         WHERE t.typbasetype <> 0
+           AND (t.typname ~* '^[A-Za-z0-9.-]+/[A-Za-z0-9.\\+-]+$' OR t.typname = '*/*')
+       ), relation_type AS (
+         SELECT c.reltype AS oid
+         FROM pg_class AS c
+         JOIN pg_namespace AS n ON n.oid = c.relnamespace
+         WHERE n.nspname = $1 AND c.relname = $2
+           AND c.relkind IN ('v', 'r', 'm', 'f', 'p')
+       )
+       SELECT mt.typname
+       FROM media_types AS mt
+       JOIN pg_proc AS proc ON proc.prorettype = mt.oid
+       JOIN pg_namespace AS ps ON ps.oid = proc.pronamespace
+       JOIN pg_aggregate AS agg ON agg.aggfnoid = proc.oid
+       WHERE ps.nspname = ANY($3::text[])
+         AND proc.pronargs = 1
+         AND (
+           (proc.proargtypes[0] = (SELECT oid FROM relation_type)
+             AND mt.typname = ANY($4::text[]))
+           OR (proc.proargtypes[0] = 'pg_catalog.anyelement'::regtype
+             AND EXISTS (SELECT 1 FROM relation_type)
+             AND mt.typname = ANY($5::text[]))
+         )
+       ORDER BY array_position($5::text[], mt.typname) NULLS LAST
+       LIMIT 1";
+
+/// The custom media handler `negotiateContent` would pick for a relation
+/// read, if the schema defines one. Custom handlers override the builtin
+/// ones (`HM.union mHdlers initialMediaHandlers`) and are looked up per
+/// accepted type: the relation's `*/*` and the type itself when the select
+/// is the default `*` (`lookupHandler`), then `anyelement` with the type.
+/// Megabase runs none of them yet, so a match is answered with 501.
+///
+/// # Errors
+///
+/// The catalog query failed.
+async fn custom_media_handler(
+    pool: &sqlx::PgPool,
+    schema: &str,
+    relation: &str,
+    accept: Option<&axum::http::HeaderValue>,
+    default_select: bool,
+    anon: bool,
+) -> Result<Option<String>, Box<Response>> {
+    let accepted = accept_essences(accept);
+    if accepted.is_empty() {
+        return Ok(None);
+    }
+    let mut relation_types: Vec<String> = Vec::new();
+    if default_select {
+        relation_types.push("*/*".to_string());
+        relation_types.extend(accepted.iter().cloned());
+    }
+    let exposed: Vec<String> = EXPOSED_SCHEMAS.iter().map(|s| (*s).to_string()).collect();
+    sqlx::query_scalar::<sqlx::Postgres, String>(CUSTOM_MEDIA_HANDLER_SQL)
+        .bind(schema)
+        .bind(relation)
+        .bind(&exposed)
+        .bind(&relation_types)
+        .bind(&accepted)
+        .fetch_optional(pool)
+        .await
+        .map_err(|error| Box::new(query_failure(&error, anon)))
+}
+
+/// 501 for a schema-defined media handler. The unit is the media type's own
+/// when the coverage map has one, else the route.
+fn custom_handler_not_implemented(method: &Method, path: &str, mime: &str) -> Response {
+    let unit = match mime {
+        "*/*" => "rest:media-type:*/*",
+        "application/json" => "rest:media-type:application/json",
+        "application/octet-stream" => "rest:media-type:application/octet-stream",
+        "application/geo+json" => "rest:media-type:application/geo+json",
+        "text/csv" => "rest:media-type:text/csv",
+        "text/plain" => "rest:media-type:text/plain",
+        "text/xml" => "rest:media-type:text/xml",
+        _ => "",
+    };
+    unimplemented_unit(method, path, unit)
+}
+
+/// The body handler of a relation read. `negotiateContent` answers `NoAgg`
+/// for every `HEAD` (`ActRelationRead _ True`): the source query still runs
+/// and is counted, no aggregate is called (`ST_AsGeoJSON`, `json_agg`, ...),
+/// and the body is the constant `''::text`. `GET` builds the shape's body.
+fn read_handler(shape: Option<ReadShape>, headers_only: bool) -> BodyHandler {
+    if headers_only {
+        BodyHandler::NoAgg
+    } else {
+        shape.map_or(BodyHandler::Json, ReadShape::handler)
     }
 }
 
@@ -1234,7 +1406,7 @@ async fn read_rows(
         read,
         &column_types,
         &rels,
-        shape == Some(ReadShape::Csv),
+        read_handler(shape, headers_only),
     )
     .map_err(|error| Box::new(unsafe_type(&error)))?;
     let request_path = format!("/{relation}");
@@ -1262,24 +1434,29 @@ async fn read_rows(
         ),
         None => None,
     };
-    // CSV is built in SQL (`asCsvF`); only the JSON shapes are post-processed.
-    if let Some(shape) = shape.filter(|shape| *shape != ReadShape::Csv) {
+    // CSV and GeoJSON are built in SQL (`asCsvF`, `asGeoJsonF`); only the
+    // JSON shapes are post-processed. `HEAD` has no body to shape, but
+    // `failNotSingular` still checks the count of a singular type.
+    if let Some(shape) = shape.filter(|shape| !matches!(shape, ReadShape::Csv | ReadShape::GeoJson))
+    {
         if shape.singular() {
             singular_check(row.0)?;
         }
-        // Shaping stays in Postgres so key order and number text are kept.
-        // megabase:unit rest:media-type:application/vnd.pgrst.object+json;nulls=stripped
-        // megabase:unit rest:media-type:application/vnd.pgrst.array+json;nulls=stripped
-        let sql = match (shape.singular(), shape.stripped()) {
-            (true, true) => "SELECT json_strip_nulls(($1::json)->0)::text",
-            (true, false) => "SELECT (($1::json)->0)::text",
-            (false, _) => "SELECT json_strip_nulls($1::json)::text",
-        };
-        row.1 = sqlx::query_scalar(sql)
-            .bind(&row.1)
-            .fetch_one(&mut *tx)
-            .await
-            .map_err(|error| Box::new(query_failure(&error, session.anon)))?;
+        if !headers_only {
+            // Shaping stays in Postgres so key order and number text are kept.
+            // megabase:unit rest:media-type:application/vnd.pgrst.object+json;nulls=stripped
+            // megabase:unit rest:media-type:application/vnd.pgrst.array+json;nulls=stripped
+            let sql = match (shape.singular(), shape.stripped()) {
+                (true, true) => "SELECT json_strip_nulls(($1::json)->0)::text",
+                (true, false) => "SELECT (($1::json)->0)::text",
+                (false, _) => "SELECT json_strip_nulls($1::json)::text",
+            };
+            row.1 = sqlx::query_scalar(sql)
+                .bind(&row.1)
+                .fetch_one(&mut *tx)
+                .await
+                .map_err(|error| Box::new(query_failure(&error, session.anon)))?;
+        }
     }
     tx.commit()
         .await
@@ -1998,12 +2175,93 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn geo_json_accept_is_501() {
+    async fn geo_json_accept_reaches_the_pool_check() {
+        for accept in [
+            "application/geo+json",
+            "text/plain, application/geo+json",
+            "application/geo+json;q=0.9, application/octet-stream",
+        ] {
+            let app = router(RestState::from_config(&Config::default()));
+            let request = Request::builder()
+                .uri("/rest/v1/todos")
+                .header(header::ACCEPT, accept)
+                .body(Body::empty())
+                .unwrap();
+            let (status, _, _) = send(app, request).await;
+            assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{accept}");
+        }
+    }
+
+    #[test]
+    fn get_reads_use_the_shape_handler_and_head_reads_run_no_aggregate() {
+        assert_eq!(
+            read_handler(Some(ReadShape::GeoJson), false),
+            BodyHandler::GeoJson
+        );
+        assert_eq!(read_handler(Some(ReadShape::Csv), false), BodyHandler::Csv);
+        assert_eq!(
+            read_handler(Some(ReadShape::Object), false),
+            BodyHandler::Json
+        );
+        assert_eq!(read_handler(None, false), BodyHandler::Json);
+        // `NoAgg` for every HEAD: no `ST_AsGeoJSON`, `json_agg` or CSV build.
+        for shape in [
+            None,
+            Some(ReadShape::GeoJson),
+            Some(ReadShape::Csv),
+            Some(ReadShape::Object),
+            Some(ReadShape::ArrayStripped),
+        ] {
+            assert_eq!(read_handler(shape, true), BodyHandler::NoAgg, "{shape:?}");
+        }
+        assert_eq!(
+            ReadShape::GeoJson.content_type(),
+            "application/geo+json; charset=utf-8"
+        );
+    }
+
+    #[test]
+    fn accept_essences_keep_order_and_drop_q0() {
+        let value = HeaderValue::from_static(
+            "application/octet-stream;q=0.5, Text/Plain, */*;q=0, , application/json; charset=utf-8",
+        );
+        assert_eq!(
+            accept_essences(Some(&value)),
+            vec!["application/octet-stream", "text/plain", "application/json"]
+        );
+        assert!(accept_essences(None).is_empty());
+    }
+
+    #[test]
+    fn custom_handler_501_names_the_media_type_unit_or_the_route() {
+        let (method, path) = (Method::GET, "/rest/v1/todos");
+        let response = custom_handler_not_implemented(&method, path, "application/octet-stream");
+        assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
+        let response = custom_handler_not_implemented(&method, path, "image/png");
+        assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
+    }
+
+    #[test]
+    fn custom_handler_probe_mirrors_the_schema_cache_query() {
+        // The shape of the pinned `mediaHandlers` query: media-type domains,
+        // one-argument aggregates over the relation row type or `anyelement`.
+        assert!(CUSTOM_MEDIA_HANDLER_SQL.contains("t.typbasetype <> 0"));
+        assert!(CUSTOM_MEDIA_HANDLER_SQL.contains("t.typname = '*/*'"));
+        assert!(CUSTOM_MEDIA_HANDLER_SQL.contains("pg_aggregate"));
+        assert!(CUSTOM_MEDIA_HANDLER_SQL.contains("proc.pronargs = 1"));
+        assert!(CUSTOM_MEDIA_HANDLER_SQL.contains("'pg_catalog.anyelement'::regtype"));
+        assert!(CUSTOM_MEDIA_HANDLER_SQL.contains("EXISTS (SELECT 1 FROM relation_type)"));
+    }
+
+    #[tokio::test]
+    async fn geo_json_accept_on_a_write_stays_501() {
         let app = router(RestState::from_config(&Config::default()));
         let request = Request::builder()
+            .method(Method::POST)
             .uri("/rest/v1/todos")
             .header(header::ACCEPT, "application/geo+json")
-            .body(Body::empty())
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(r#"{"title":"x"}"#))
             .unwrap();
         let (status, body, _) = send(app, request).await;
         assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
@@ -2011,11 +2269,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn text_plain_and_xml_are_406_on_a_relation() {
+    async fn text_plain_xml_and_octet_stream_are_406_on_a_relation() {
         for (accept, listed) in [
             ("text/plain", "text/plain"),
             ("text/xml;q=0.5", "text/xml"),
             ("text/plain, text/xml", "text/plain, text/xml"),
+            ("application/octet-stream", "application/octet-stream"),
+            (
+                "application/octet-stream, text/plain",
+                "application/octet-stream, text/plain",
+            ),
         ] {
             let app = router(RestState::from_config(&Config::default()));
             let request = Request::builder()
@@ -2122,9 +2385,25 @@ mod tests {
             Ok(Some(ReadShape::Csv))
         ));
         assert!(matches!(pick("text/csv;q=0, application/json"), Ok(None)));
+        assert!(matches!(
+            pick("application/geo+json"),
+            Ok(Some(ReadShape::GeoJson))
+        ));
+        assert!(matches!(
+            pick("application/octet-stream, application/geo+json"),
+            Ok(Some(ReadShape::GeoJson))
+        ));
+        assert!(matches!(
+            pick("application/json, application/geo+json;q=0.5"),
+            Ok(None)
+        ));
+        assert!(matches!(
+            pick("application/octet-stream, application/json"),
+            Ok(None)
+        ));
         assert_eq!(
-            pick("application/geo+json").unwrap_err().status(),
-            StatusCode::NOT_IMPLEMENTED
+            pick("application/octet-stream").unwrap_err().status(),
+            StatusCode::NOT_ACCEPTABLE
         );
         assert_eq!(
             pick("text/csv;q=0").unwrap_err().status(),

@@ -114,7 +114,9 @@ over those inputs. Optional arguments (the last `pronargdefaults` inputs)
 may be omitted. Extra keys do not match. Repeated `GET` keys keep the last
 value, except a `VARIADIC` argument, which keeps every value in order. `POST` of exactly one
 unnamed `json` or `jsonb` argument receives the raw body when no named
-overload matches. `GET` has no unnamed fallback. `OPTIONS` uses the query
+overload matches; an `application/octet-stream` body reaches one unnamed
+`bytea` argument instead ([media-types.md](media-types.md)). `GET` has no
+unnamed fallback. `OPTIONS` uses the query
 keys and does not call the function, so a required argument that is absent
 is `PGRST202`.
 

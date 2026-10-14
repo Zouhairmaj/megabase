@@ -208,11 +208,42 @@ struct Invocation {
     get_values: BTreeMap<String, Vec<String>>,
     /// Raw JSON object for `POST`. Absent for `GET` and `HEAD`.
     json_body: Option<String>,
+    /// The whole `POST` body for `Content-Type: application/octet-stream`
+    /// (`RawPay` in `Payload.hs`). It reaches a single unnamed `bytea`
+    /// parameter and nothing else.
+    raw_bytea: Option<Vec<u8>>,
+}
+
+/// The single-unnamed-parameter fallback a `POST` body allows
+/// (`hasSingleUnnamedParam` in `Plan.hs`): the body's media type decides
+/// which parameter type may receive it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Unnamed {
+    /// `GET`, `HEAD`, `OPTIONS`, or a form body: no fallback.
+    None,
+    /// A JSON body may reach one unnamed `json` or `jsonb` parameter.
+    Json,
+    /// An `application/octet-stream` body may reach one unnamed `bytea`
+    /// parameter.
+    Bytea,
+}
+
+impl Invocation {
+    fn unnamed(&self) -> Unnamed {
+        if self.raw_bytea.is_some() {
+            Unnamed::Bytea
+        } else if self.json_body.is_some() {
+            Unnamed::Json
+        } else {
+            Unnamed::None
+        }
+    }
 }
 
 enum Bind {
     Text(String),
     TextArray(Vec<String>),
+    Bytes(Vec<u8>),
 }
 
 struct Built {
@@ -340,9 +371,9 @@ async fn routine_options(
         Ok(procs) => procs,
         Err(response) => return *response,
     };
-    match find_proc(&procs, &keys, false) {
+    match find_proc(&procs, &keys, Unnamed::None) {
         Found::One(proc) => options_response(allow_list(proc.volatility)),
-        Found::None => no_rpc(schema, function, &keys, false),
+        Found::None => no_rpc(schema, function, &keys, Unnamed::None),
         Found::Ambiguous(procs) => ambiguous(&procs),
     }
 }
@@ -369,15 +400,10 @@ async fn invoke(state: &RestState, call: &Call<'_>, method: &str, head: bool) ->
         Ok(procs) => procs,
         Err(response) => return *response,
     };
-    let proc = match find_proc(&procs, &invocation.keys, invocation.json_body.is_some()) {
+    let proc = match find_proc(&procs, &invocation.keys, invocation.unnamed()) {
         Found::One(proc) => proc,
         Found::None => {
-            return no_rpc(
-                schema,
-                function,
-                &invocation.keys,
-                invocation.json_body.is_some(),
-            );
+            return no_rpc(schema, function, &invocation.keys, invocation.unnamed());
         }
         Found::Ambiguous(procs) => return ambiguous(&procs),
     };
@@ -465,13 +491,13 @@ fn parse_args(value: &Value) -> Result<Vec<Param>, ()> {
     Ok(params)
 }
 
-fn find_proc<'a>(procs: &'a [Proc], keys: &BTreeSet<String>, post_json: bool) -> Found<'a> {
+fn find_proc<'a>(procs: &'a [Proc], keys: &BTreeSet<String>, unnamed: Unnamed) -> Found<'a> {
     let mut named = Vec::new();
     let mut fallback = Vec::new();
     for proc in procs {
-        if matches_params(proc, keys) {
+        if matches_params(proc, keys, unnamed) {
             named.push(proc);
-        } else if post_json && single_unnamed_json(proc) {
+        } else if single_unnamed(proc, unnamed) {
             fallback.push(proc);
         }
     }
@@ -484,9 +510,11 @@ fn find_proc<'a>(procs: &'a [Proc], keys: &BTreeSet<String>, post_json: bool) ->
     }
 }
 
-fn matches_params(proc: &Proc, keys: &BTreeSet<String>) -> bool {
+fn matches_params(proc: &Proc, keys: &BTreeSet<String>, unnamed: Unnamed) -> bool {
     if proc.params.is_empty() {
-        return keys.is_empty();
+        // `matchesParams`: a raw (non-JSON) `POST` body never reaches a
+        // function without parameters.
+        return keys.is_empty() && unnamed != Unnamed::Bytea;
     }
     let mut required = BTreeSet::new();
     let mut optional = BTreeSet::new();
@@ -510,21 +538,32 @@ fn matches_params(proc: &Proc, keys: &BTreeSet<String>) -> bool {
             .all(|key| required.contains(key.as_str()) || optional.contains(key.as_str()))
 }
 
-fn single_unnamed_json(proc: &Proc) -> bool {
-    match proc.params.as_slice() {
-        [param] => param.name.is_empty() && matches!(param.pg_type.as_str(), "json" | "jsonb"),
-        _ => false,
-    }
+/// `hasSingleUnnamedParam`: exactly one parameter, no name, and a type the
+/// body's media type may reach.
+fn single_unnamed(proc: &Proc, unnamed: Unnamed) -> bool {
+    let [param] = proc.params.as_slice() else {
+        return false;
+    };
+    param.name.is_empty()
+        && match unnamed {
+            Unnamed::None => false,
+            Unnamed::Json => matches!(param.pg_type.as_str(), "json" | "jsonb"),
+            Unnamed::Bytea => param.pg_type == "bytea",
+        }
 }
 
-fn no_rpc(schema: &str, name: &str, keys: &BTreeSet<String>, post_json: bool) -> Response {
+fn no_rpc(schema: &str, name: &str, keys: &BTreeSet<String>, unnamed: Unnamed) -> Response {
     let list = keys
         .iter()
         .map(String::as_str)
         .collect::<Vec<_>>()
         .join(", ");
     let func = format!("{schema}.{name}");
-    let message = if keys.is_empty() {
+    // `NoRpc` in `Error.hs`: a raw body leaves the parameters out of the
+    // message and names only the single unnamed parameter in the details.
+    let message = if unnamed == Unnamed::Bytea {
+        format!("Could not find the function {func} in the schema cache")
+    } else if keys.is_empty() {
         format!("Could not find the function {func} without parameters in the schema cache")
     } else {
         format!("Could not find the function {func}({list}) in the schema cache")
@@ -536,14 +575,16 @@ fn no_rpc(schema: &str, name: &str, keys: &BTreeSet<String>, post_json: bool) ->
     } else {
         format!(" with parameters {list}")
     };
-    let details = if post_json {
-        format!(
+    let details = match unnamed {
+        Unnamed::Bytea => format!(
+            "Searched for the function {func} with a single unnamed bytea parameter, but no matches were found in the schema cache."
+        ),
+        Unnamed::Json => format!(
             "Searched for the function {func}{detail_params} or with a single unnamed json/jsonb parameter, but no matches were found in the schema cache."
-        )
-    } else {
-        format!(
+        ),
+        Unnamed::None => format!(
             "Searched for the function {func}{detail_params}, but no matches were found in the schema cache."
-        )
+        ),
     };
     pgrst(
         StatusCode::NOT_FOUND,
@@ -594,6 +635,18 @@ fn parse_invocation(
                 keys: get_values.keys().cloned().collect(),
                 get_values,
                 json_body: None,
+                raw_bytea: None,
+            });
+        }
+        if is_octet_stream(headers.get(header::CONTENT_TYPE)) {
+            // megabase:unit rest:media-type:application/octet-stream
+            // `RawPay`: the body is not parsed and carries no keys, so only
+            // the single unnamed `bytea` fallback can match.
+            return Ok(Invocation {
+                keys: BTreeSet::new(),
+                get_values: BTreeMap::new(),
+                json_body: None,
+                raw_bytea: Some(body.to_vec()),
             });
         }
         reject_json_type(method, path, headers.get(header::CONTENT_TYPE))?;
@@ -602,6 +655,7 @@ fn parse_invocation(
             keys,
             get_values: BTreeMap::new(),
             json_body: Some(raw),
+            raw_bytea: None,
         });
     }
     let get_values = get_arguments(uri.query().unwrap_or(""))
@@ -610,7 +664,22 @@ fn parse_invocation(
         keys: get_values.keys().cloned().collect(),
         get_values,
         json_body: None,
+        raw_bytea: None,
     })
+}
+
+/// Whether a `Content-Type` names `application/octet-stream`
+/// (`decodeMediaType`: the essence is matched case-insensitively, parameters
+/// are ignored).
+fn is_octet_stream(value: Option<&HeaderValue>) -> bool {
+    value
+        .and_then(|value| value.to_str().ok())
+        .and_then(|text| text.split(';').next())
+        .is_some_and(|essence| {
+            essence
+                .trim()
+                .eq_ignore_ascii_case("application/octet-stream")
+        })
 }
 
 fn query_present(uri: &Uri) -> bool {
@@ -844,6 +913,12 @@ fn positional_source(
     proc: &Proc,
     invocation: &Invocation,
 ) -> Result<(String, Vec<Bind>), UnsafeType> {
+    // `singleParameter`: a `bytea` parameter is bound as bytes, not cast
+    // from text (a text cast would read the body as a bytea literal).
+    if let Some(bytes) = &invocation.raw_bytea {
+        let call = format!("{}($1::bytea)", qualified(proc));
+        return Ok((select_call(proc, &call), vec![Bind::Bytes(bytes.clone())]));
+    }
     let cast = sql_type_name(&proc.params[0].cast_type)?;
     let raw = invocation.json_body.clone().unwrap_or_default();
     let call = format!("{}(($1::text)::{cast})", qualified(proc));
@@ -983,6 +1058,7 @@ async fn execute(
         query = match bind {
             Bind::Text(value) => query.bind(value),
             Bind::TextArray(values) => query.bind(values),
+            Bind::Bytes(bytes) => query.bind(bytes),
         };
     }
     let (guc_status, guc_headers, page_total, body) = query
@@ -1188,6 +1264,7 @@ mod tests {
             keys: get_values.keys().cloned().collect(),
             get_values,
             json_body: None,
+            raw_bytea: None,
         }
     }
 
@@ -1251,6 +1328,7 @@ mod tests {
                 keys: keys(&["a"]),
                 get_values,
                 json_body: None,
+                raw_bytea: None,
             }
         };
         let built = statement(&proc, &invocation, None).unwrap();
@@ -1270,6 +1348,7 @@ mod tests {
                 keys: keys(&["xs"]),
                 get_values,
                 json_body: None,
+                raw_bytea: None,
             }
         };
         let built = statement(&proc, &invocation, None).unwrap();
@@ -1294,6 +1373,7 @@ mod tests {
             keys: keys(&["a"]),
             get_values: BTreeMap::new(),
             json_body: Some(r#"{"a":2}"#.to_string()),
+            raw_bytea: None,
         };
         let built = statement(&proc, &invocation, None).unwrap();
         assert!(built
@@ -1323,11 +1403,120 @@ mod tests {
             keys: keys(&["a"]),
             get_values: BTreeMap::new(),
             json_body: Some(r#"{"a":1}"#.to_string()),
+            raw_bytea: None,
         };
         let built = statement(&proc, &invocation, None).unwrap();
         assert!(built
             .sql
             .contains("\"public\".\"ingest\"(($1::text)::jsonb)"));
+    }
+
+    fn unnamed_param(pg_type: &str) -> Param {
+        Param {
+            name: String::new(),
+            pg_type: pg_type.to_string(),
+            cast_type: pg_type.to_string(),
+            required: true,
+            variadic: false,
+        }
+    }
+
+    #[test]
+    fn octet_stream_body_is_bound_as_bytea_to_the_unnamed_parameter() {
+        let proc = scalar("byte_count", vec![unnamed_param("bytea")]);
+        let invocation = Invocation {
+            keys: BTreeSet::new(),
+            get_values: BTreeMap::new(),
+            json_body: None,
+            raw_bytea: Some(b"\x00\xffraw".to_vec()),
+        };
+        let built = statement(&proc, &invocation, None).unwrap();
+        assert!(built.sql.contains("\"public\".\"byte_count\"($1::bytea)"));
+        assert!(!built.sql.contains("$1::text"));
+        match built.binds.as_slice() {
+            [Bind::Bytes(bytes)] => assert_eq!(bytes, b"\x00\xffraw"),
+            _ => panic!("expected one bytea bind"),
+        }
+    }
+
+    #[test]
+    fn octet_stream_post_parses_as_a_raw_body_without_keys() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::CONTENT_TYPE,
+            "Application/Octet-Stream; x=y".parse().unwrap(),
+        );
+        let uri: Uri = "/rpc/byte_count".parse().unwrap();
+        let invocation = parse_invocation(
+            &Method::POST,
+            "/rpc/byte_count",
+            &uri,
+            &headers,
+            b"not json",
+        )
+        .unwrap();
+        assert!(invocation.keys.is_empty());
+        assert!(invocation.json_body.is_none());
+        assert_eq!(invocation.raw_bytea.as_deref(), Some(&b"not json"[..]));
+        assert_eq!(invocation.unnamed(), Unnamed::Bytea);
+        // `GET` ignores the body media type (`shouldParsePayload`).
+        let invocation =
+            parse_invocation(&Method::GET, "/rpc/byte_count", &uri, &headers, b"").unwrap();
+        assert_eq!(invocation.unnamed(), Unnamed::None);
+    }
+
+    #[test]
+    fn octet_stream_matches_only_a_single_unnamed_bytea_parameter() {
+        let bytea = scalar("f", vec![unnamed_param("bytea")]);
+        assert!(matches!(
+            find_proc(&[bytea], &BTreeSet::new(), Unnamed::Bytea),
+            Found::One(_)
+        ));
+        let json = scalar("f", vec![unnamed_param("json")]);
+        assert!(matches!(
+            find_proc(&[json], &BTreeSet::new(), Unnamed::Bytea),
+            Found::None
+        ));
+        let bytea = scalar("f", vec![unnamed_param("bytea")]);
+        assert!(matches!(
+            find_proc(&[bytea], &BTreeSet::new(), Unnamed::Json),
+            Found::None
+        ));
+        // `matchesParams`: a parameterless function is not called with a raw body.
+        let none = scalar("f", Vec::new());
+        assert!(matches!(
+            find_proc(&[none], &BTreeSet::new(), Unnamed::Bytea),
+            Found::None
+        ));
+        let none = scalar("f", Vec::new());
+        assert!(matches!(
+            find_proc(&[none], &BTreeSet::new(), Unnamed::Json),
+            Found::One(_)
+        ));
+        // Only optional named parameters still match an empty key set.
+        let optional = scalar("f", vec![param("a", "integer", false)]);
+        assert!(matches!(
+            find_proc(&[optional], &BTreeSet::new(), Unnamed::Bytea),
+            Found::One(_)
+        ));
+    }
+
+    #[test]
+    fn no_rpc_for_a_raw_body_names_the_bytea_parameter_only() {
+        let response = no_rpc("public", "add_numbers", &BTreeSet::new(), Unnamed::Bytea);
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        let body = futures_executor(axum::body::to_bytes(response.into_body(), usize::MAX));
+        let value: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value["code"], "PGRST202");
+        assert_eq!(
+            value["message"],
+            "Could not find the function public.add_numbers in the schema cache"
+        );
+        assert_eq!(
+            value["details"],
+            "Searched for the function public.add_numbers with a single unnamed bytea parameter, but no matches were found in the schema cache."
+        );
+        assert!(value["hint"].is_null());
     }
 
     #[test]
@@ -1461,7 +1650,7 @@ mod tests {
             }],
         );
         assert!(matches!(
-            find_proc(&[add], &keys(&["a", "b"]), false),
+            find_proc(&[add], &keys(&["a", "b"]), Unnamed::None),
             Found::One(_)
         ));
         let add = scalar(
@@ -1469,11 +1658,11 @@ mod tests {
             vec![param("a", "integer", true), param("b", "integer", true)],
         );
         assert!(matches!(
-            find_proc(&[add], &keys(&["a"]), false),
+            find_proc(&[add], &keys(&["a"]), Unnamed::None),
             Found::None
         ));
         assert!(matches!(
-            find_proc(&[with_default], &keys(&["a"]), true),
+            find_proc(&[with_default], &keys(&["a"]), Unnamed::Json),
             Found::One(_)
         ));
         let with_default = scalar(
@@ -1481,12 +1670,12 @@ mod tests {
             vec![param("a", "integer", true), param("b", "integer", false)],
         );
         assert!(matches!(
-            find_proc(&[with_default], &keys(&["a", "c"]), true),
+            find_proc(&[with_default], &keys(&["a", "c"]), Unnamed::Json),
             Found::None
         ));
         let named = scalar("add_numbers", vec![param("a", "integer", true)]);
         assert!(matches!(
-            find_proc(&[named, unnamed], &keys(&["a"]), true),
+            find_proc(&[named, unnamed], &keys(&["a"]), Unnamed::Json),
             Found::One(proc) if proc.params[0].name == "a"
         ));
         let unnamed = scalar(
@@ -1500,7 +1689,7 @@ mod tests {
             }],
         );
         assert!(matches!(
-            find_proc(&[unnamed], &keys(&["z"]), true),
+            find_proc(&[unnamed], &keys(&["z"]), Unnamed::Json),
             Found::One(_)
         ));
         let unnamed = scalar(
@@ -1514,20 +1703,20 @@ mod tests {
             }],
         );
         assert!(matches!(
-            find_proc(&[unnamed], &keys(&["z"]), false),
+            find_proc(&[unnamed], &keys(&["z"]), Unnamed::None),
             Found::None
         ));
         let left = scalar("f", vec![param("a", "integer", true)]);
         let right = scalar("f", vec![param("a", "text", true)]);
         assert!(matches!(
-            find_proc(&[left, right], &keys(&["a"]), false),
+            find_proc(&[left, right], &keys(&["a"]), Unnamed::None),
             Found::Ambiguous(procs) if procs.len() == 2
         ));
     }
 
     #[test]
     fn no_rpc_orders_keys_and_post_mentions_unnamed_json() {
-        let response = no_rpc("public", "add_numbers", &keys(&["b", "a"]), true);
+        let response = no_rpc("public", "add_numbers", &keys(&["b", "a"]), Unnamed::Json);
         let body = axum::body::to_bytes(response.into_body(), usize::MAX);
         let body = futures_executor(body);
         let value: Value = serde_json::from_slice(&body).unwrap();
@@ -1541,7 +1730,7 @@ mod tests {
         );
         assert!(value["hint"].is_null());
 
-        let response = no_rpc("public", "ping", &BTreeSet::new(), false);
+        let response = no_rpc("public", "ping", &BTreeSet::new(), Unnamed::None);
         let body = futures_executor(axum::body::to_bytes(response.into_body(), usize::MAX));
         let value: Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(
