@@ -45,12 +45,13 @@ pub fn sensitive_request_headers() -> [axum::http::HeaderName; 3] {
 
 /// Apply the production layer stack. The last layer is the outermost.
 ///
-/// Request path, outer to inner: catch panic, assign `x-request-id`, mark
+/// Request path, outer to inner: assign `x-request-id`, mark
 /// `Authorization` / `apikey` / `Cookie` sensitive, trace, copy the request id
-/// onto the response, CORS, enforce the body limit, then the timeout. CORS
-/// sits outside the limit and the deadline so a 413 or 504 carries
-/// `Access-Control-Allow-Origin` like Kong's own error pages, and inside the
-/// request id so a preflight answer still carries `x-request-id`. `Bytes` and
+/// onto the response, CORS, catch panic, enforce the body limit, then the
+/// timeout. CORS sits outside the panic catcher, the limit and the deadline so
+/// a 500, 413 or 504 carries `Access-Control-Allow-Origin` like Kong's own
+/// error pages, and inside the request id so a preflight answer still carries
+/// `x-request-id`. `Bytes` and
 /// `Json` use the same byte cap. Axum's extractor default is 2 MiB, which
 /// would reject a smaller body than `RequestBodyLimitLayer` allows.
 pub fn apply_http_layers(router: Router, config: &Config) -> Router {
@@ -62,6 +63,7 @@ pub fn apply_http_layers(router: Router, config: &Config) -> Router {
             config.http_timeout,
         ))
         .layer(RequestBodyLimitLayer::new(config.request_body_limit))
+        .layer(CatchPanicLayer::custom(|_| panic_response()))
         .layer(CorsLayer)
         .layer(PropagateRequestIdLayer::x_request_id())
         .layer(
@@ -93,7 +95,6 @@ pub fn apply_http_layers(router: Router, config: &Config) -> Router {
         )
         .layer(SetSensitiveRequestHeadersLayer::from_shared(sensitive))
         .layer(SetRequestIdLayer::x_request_id(MakeRequestUuid))
-        .layer(CatchPanicLayer::custom(|_| panic_response()))
 }
 
 /// Whole-request deadline with the same contract as `tower_http::timeout::TimeoutLayer`.
@@ -452,5 +453,26 @@ mod tests {
         let body = std::str::from_utf8(&bytes).unwrap();
         assert!(body.contains("internal_error"), "{body}");
         assert!(!body.contains("secret boom"), "{body}");
+    }
+
+    #[tokio::test]
+    async fn panic_500_carries_the_cors_origin() {
+        let response = limited(Duration::from_secs(2), 1024)
+            .oneshot(
+                Request::builder()
+                    .uri("/panic")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            response.status(),
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR
+        );
+        assert_eq!(
+            response.headers()[axum::http::header::ACCESS_CONTROL_ALLOW_ORIGIN],
+            "*"
+        );
     }
 }

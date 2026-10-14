@@ -6,8 +6,10 @@ a unit in the denominator; it is what lets browsers reach every Auth,
 REST, Storage, Realtime, and Functions unit.
 Level: 1
 
-Every browser call to `/auth/v1/*` (and to the other Supabase prefixes)
-is preceded by a CORS preflight. In the self-hosted stack Kong answers
+A cross-origin browser call to `/auth/v1/*` (and to the other Supabase
+prefixes) that needs a CORS preflight (a non-simple method or headers such
+as `apikey` or `Authorization`) is preceded by one; simple requests go
+straight to the normal response path. In the self-hosted stack Kong answers
 that preflight itself with its `cors` plugin and stamps
 `Access-Control-Allow-Origin` on every other response. Without this,
 sign-up and sign-in from any web app fail before GoTrue sees a request.
