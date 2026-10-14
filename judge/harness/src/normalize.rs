@@ -271,6 +271,9 @@ mod tests {
         let a = norm(json!("ce55366902c7c85d40604d4146383607"));
         assert_eq!(a, norm(json!("ec5590d0f1ea47e5879ff6ae02e32c1e")));
         assert_eq!(a["request_id"], "<request_id>");
+        let mut missing = json!({"message": "m"});
+        json(&mut missing, &[]);
+        assert_ne!(a, missing);
         assert_ne!(a, norm(json!("not-a-request-id")));
         assert_ne!(a, norm(json!(42)));
         assert_ne!(a, norm(Value::Null));
