@@ -3,7 +3,7 @@
   "totals": {
     "units": 1024,
     "implemented": 169,
-    "tested": 163,
+    "tested": 165,
     "conformant": 0
   },
   "percent": {
@@ -12,7 +12,7 @@
     "done": 0.0
   },
   "judge": {
-    "cases": 326,
+    "cases": 330,
     "passing": 0
   },
   "components": {
@@ -317,7 +317,7 @@
     "rest": {
       "units": 93,
       "implemented": 90,
-      "tested": 84,
+      "tested": 86,
       "conformant": 0,
       "groups": {
         "aggregates": {
@@ -347,7 +347,7 @@
         "media-types": {
           "units": 13,
           "implemented": 10,
-          "tested": 4,
+          "tested": 6,
           "conformant": 0
         },
         "ordering": {
@@ -675,11 +675,11 @@
     "rest:logic-operator:or": "tested",
     "rest:media-type:*/*": "implemented",
     "rest:media-type:application/json": "implemented",
-    "rest:media-type:application/openapi+json": "implemented",
+    "rest:media-type:application/openapi+json": "tested",
     "rest:media-type:application/vnd.pgrst.array+json;nulls=stripped": "implemented",
     "rest:media-type:application/vnd.pgrst.object+json": "tested",
     "rest:media-type:application/vnd.pgrst.object+json;nulls=stripped": "implemented",
-    "rest:media-type:application/x-www-form-urlencoded": "implemented",
+    "rest:media-type:application/x-www-form-urlencoded": "tested",
     "rest:media-type:text/csv": "tested",
     "rest:media-type:text/plain": "tested",
     "rest:media-type:text/xml": "tested",
