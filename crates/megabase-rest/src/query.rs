@@ -35,7 +35,7 @@ pub(crate) fn classify_query(query: &str) -> ClassifiedQuery {
             filters,
         };
     }
-    for part in query.split('&') {
+    for part in query_parts(query) {
         if part.is_empty() {
             continue;
         }
@@ -84,6 +84,15 @@ fn reserved_unit(key: &str) -> Option<&'static str> {
     }
 }
 
+/// Split a query string or form body into its raw `key=value` parts.
+///
+/// http-types `parseQueryReplacePlus` (and `parseSimpleQuery`, built on it)
+/// separates pairs on both `&` and `;`, so `id=eq.1;x` is the pair `id=eq.1`
+/// followed by the valueless key `x`. Empty parts are kept; callers skip them.
+pub(crate) fn query_parts(text: &str) -> std::str::Split<'_, [char; 2]> {
+    text.split(['&', ';'])
+}
+
 /// Decode a query component the way `parseQueryReplacePlus True` does.
 pub(crate) fn percent_decode(raw: &str) -> String {
     decode_component(raw, true)
@@ -94,7 +103,7 @@ pub(crate) fn percent_decode(raw: &str) -> String {
 /// Empty pairs are dropped and a key with no `=` gets `""`.
 pub(crate) fn form_pairs(body: &[u8]) -> Vec<(String, String)> {
     let text = String::from_utf8_lossy(body);
-    text.split('&')
+    query_parts(&text)
         .filter(|pair| !pair.is_empty())
         .map(|pair| {
             let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
@@ -272,6 +281,27 @@ mod tests {
         assert!(query.embed);
         assert!(query.filters.is_empty());
         assert_eq!(query.reserved, None);
+    }
+
+    #[test]
+    fn semicolon_separates_pairs_like_http_types() {
+        // `id=eq.<uuid>;drop table ...--` is `id=eq.<uuid>` plus a bare key,
+        // so the filter value never carries the second "statement".
+        let query = classify_query(
+            "id=eq.00000000-0000-4000-8000-0000000000c3;drop%20table%20public.notes--&select=body",
+        );
+        assert_eq!(
+            query.filters,
+            vec![RawFilter {
+                column: "id".into(),
+                value: "eq.00000000-0000-4000-8000-0000000000c3".into(),
+            }]
+        );
+        assert_eq!(query.reserved, Some("rest:query-param:select"));
+        assert_eq!(
+            serde_json::Value::Object(form_object(b"a=1;b=2")),
+            serde_json::json!({"a": "1", "b": "2"})
+        );
     }
 
     #[test]

@@ -21,7 +21,7 @@ use serde_json::{Map, Value};
 use crate::filter::{parse_filter_value, quote_ident, sql_type_name, UnsafeType};
 use crate::params::parse_get_query;
 use crate::prefer::Prefer;
-use crate::query::percent_decode;
+use crate::query::{percent_decode, query_parts};
 use crate::read::{
     begin, content_range, database_unavailable, negotiate_write, negotiated_schema,
     not_implemented, options_response, pgrst, profile_header, query_fail, query_failure,
@@ -684,7 +684,7 @@ fn is_octet_stream(value: Option<&HeaderValue>) -> bool {
 
 fn query_present(uri: &Uri) -> bool {
     uri.query()
-        .is_some_and(|raw| raw.split('&').any(|part| !part.is_empty()))
+        .is_some_and(|raw| query_parts(raw).any(|part| !part.is_empty()))
 }
 
 fn reject_json_type(
@@ -783,7 +783,7 @@ fn get_arguments(raw: &str) -> Result<BTreeMap<String, Vec<String>>, ()> {
     if raw.is_empty() {
         return Ok(values);
     }
-    for part in raw.split('&') {
+    for part in query_parts(raw) {
         if part.is_empty() {
             continue;
         }
