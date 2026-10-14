@@ -2524,8 +2524,15 @@ mod tests {
     fn logic_leaf_not_and_negated_groups_render_sql() {
         let query = parse_get_query("or=(id.not.eq.1,and(priority.gt.1,done.is.null))").unwrap();
         let sql = build_read_sql("public", "todos", &query, &[], &HashMap::new()).unwrap();
-        assert!(sql.sql.contains(" OR ("), "{}", sql.sql);
-        assert!(sql.sql.contains("NOT"), "{}", sql.sql);
+        assert!(
+            sql.sql.contains(concat!(
+                r#" WHERE (NOT "todos"."id" = $1 OR ("todos"."priority" > $2 "#,
+                r#"AND "todos"."done" IS NULL))"#,
+            )),
+            "{}",
+            sql.sql
+        );
+        assert_eq!(sql.params, vec!["1", "1"]);
 
         let query = parse_get_query("not.and=(id.eq.1,id.eq.2)").unwrap();
         let sql = build_read_sql("public", "todos", &query, &[], &HashMap::new()).unwrap();
