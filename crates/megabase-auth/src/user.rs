@@ -35,6 +35,7 @@ use crate::store::{
     hash_new_password, password_matches, OAuthGrantView, RevokeGrant, StoreError, UnlinkError,
     UserRecord, UserUpdate, UserUpdateError,
 };
+use crate::token::null_as_default;
 use crate::COMPONENT;
 
 const UNIT_PUT: &str = "auth:route:PUT /auth/v1/user";
@@ -439,19 +440,19 @@ pub(crate) async fn revoke_grant(
 
 #[derive(Deserialize)]
 struct UpdateBody {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     email: String,
     #[serde(default)]
     password: Option<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     nonce: String,
     #[serde(default)]
     data: Option<Map<String, Value>>,
     #[serde(default)]
     app_metadata: Option<Map<String, Value>>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     phone: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     channel: String,
 }
 
@@ -956,6 +957,42 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::OK, "{body}");
+    }
+
+    /// supabase-js v2 `updateUser` sends `null` PKCE fields; Go reads `null`
+    /// as the zero value, so every optional field may be `null`.
+    #[tokio::test]
+    async fn put_reads_null_fields_as_absent() {
+        let (app, _) = app(|_| {});
+        let created = signup(&app, "put-null@example.com").await;
+        let auth = bearer(created["access_token"].as_str().unwrap());
+        let supabase_js =
+            r#"{"data":{"name":"Grace"},"code_challenge":null,"code_challenge_method":null}"#;
+        let (status, body) = call(
+            app.clone(),
+            "PUT",
+            "/auth/v1/user",
+            Some(supabase_js),
+            &[("authorization", &auth)],
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(body["user_metadata"]["name"], "Grace");
+        assert_eq!(body["email"], "put-null@example.com");
+
+        let all_null = r#"{"email":null,"password":null,"nonce":null,"data":null,"app_metadata":null,"phone":null,"channel":null}"#;
+        let (status, body) = call(
+            app,
+            "PUT",
+            "/auth/v1/user",
+            Some(all_null),
+            &[("authorization", &auth)],
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(body["user_metadata"]["name"], "Grace");
+        assert_eq!(body["email"], "put-null@example.com");
+        assert_eq!(body["phone"], "");
     }
 
     #[tokio::test]

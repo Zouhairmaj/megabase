@@ -24,6 +24,7 @@ use crate::routes::{insert_header, query_param, read_body, request_aud, validate
 use crate::state::AuthState;
 use crate::store::StoreError;
 use crate::store::{email_otp_hash, VerifyKind, VerifyOutcome, VerifyRequest, SINGLE_CONFIRMATION};
+use crate::token::null_as_default;
 use crate::COMPONENT;
 
 const UNIT_EMAIL: &str = "auth:verify-type:email";
@@ -34,17 +35,17 @@ const UNIT_PKCE: &str = "auth:grant-type:pkce";
 
 #[derive(Debug, Deserialize)]
 struct VerifyBody {
-    #[serde(default, rename = "type")]
+    #[serde(default, rename = "type", deserialize_with = "null_as_default")]
     kind: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     token: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     token_hash: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     email: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     phone: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     redirect_to: String,
 }
 
@@ -637,6 +638,14 @@ mod tests {
         let (status, body, _, _) =
             call(router.clone(), "POST", "/auth/v1/verify", Some("{}")).await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(body["msg"], "Verify requires a verification type");
+
+        // Go reads `null` as the zero value, so null fields are absent fields.
+        let nulls = r#"{"type":null,"token":null,"token_hash":null,"email":null,"phone":null,"redirect_to":null}"#;
+        let (status, body, _, _) =
+            call(router.clone(), "POST", "/auth/v1/verify", Some(nulls)).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+        assert_eq!(body["error_code"], "validation_failed");
         assert_eq!(body["msg"], "Verify requires a verification type");
 
         let (status, body, _, _) = call(

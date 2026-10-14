@@ -205,23 +205,30 @@ async fn refresh_grant(state: AuthState, body: Body) -> Response {
 
 #[derive(Deserialize)]
 struct PasswordBody {
-    #[serde(default, deserialize_with = "null_as_empty")]
+    #[serde(default, deserialize_with = "null_as_default")]
     email: String,
-    #[serde(default, deserialize_with = "null_as_empty")]
+    #[serde(default, deserialize_with = "null_as_default")]
     phone: String,
-    #[serde(default, deserialize_with = "null_as_empty")]
+    #[serde(default, deserialize_with = "null_as_default")]
     password: String,
 }
 
 #[derive(Deserialize)]
 struct RefreshBody {
-    #[serde(default, deserialize_with = "null_as_empty")]
+    #[serde(default, deserialize_with = "null_as_default")]
     refresh_token: String,
 }
 
-/// Go `encoding/json` leaves a `string` at its zero value when the JSON is `null`.
-pub(crate) fn null_as_empty<'de, D: serde::Deserializer<'de>>(de: D) -> Result<String, D::Error> {
-    Ok(Option::<String>::deserialize(de)?.unwrap_or_default())
+/// Go `encoding/json` leaves a field at its zero value when the JSON is `null`,
+/// so `null` and an absent key read the same for every request-body field.
+/// supabase-js sends `"code_challenge":null` on `/signup`, `/recover`, `/user`
+/// and friends when the PKCE flow is off.
+pub(crate) fn null_as_default<'de, D, T>(de: D) -> Result<T, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Default + Deserialize<'de>,
+{
+    Ok(Option::<T>::deserialize(de)?.unwrap_or_default())
 }
 
 struct WeakPassword {
