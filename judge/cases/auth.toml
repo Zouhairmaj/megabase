@@ -35,6 +35,39 @@ method = "POST"
 path = "/auth/v1/signup"
 json = { email = "judge-weak-{{run}}@example.com", password = "123" }
 
+# The exact body supabase-js v2 `signUp({ email, password })` sends: null PKCE
+# fields and empty `data` / `gotrue_meta_security` objects. Go reads `null` as
+# the zero value, so this is a plain email/password sign-up.
+[[case]]
+id = "auth.signup.supabase-js-null-fields"
+description = "Sign-up accepts the supabase-js v2 body with null PKCE fields and empty objects"
+units = ["auth:route:POST /auth/v1/signup"]
+[[case.step]]
+method = "POST"
+path = "/auth/v1/signup"
+headers = { "Content-Type" = "application/json;charset=UTF-8", "X-Client-Info" = "supabase-js-node/2.49.1" }
+body = '{"email":"judge-jsnull-{{run}}@example.com","password":"judge-password-1","data":{},"gotrue_meta_security":{},"code_challenge":null,"code_challenge_method":null}'
+
+[[case]]
+id = "auth.signup.all-optional-null"
+description = "Sign-up treats every null optional field as absent"
+units = ["auth:route:POST /auth/v1/signup"]
+[[case.step]]
+method = "POST"
+path = "/auth/v1/signup"
+headers = { "Content-Type" = "application/json" }
+body = '{"email":"judge-allnull-{{run}}@example.com","password":"judge-password-1","phone":null,"data":null,"channel":null,"code_challenge":null,"code_challenge_method":null}'
+
+[[case]]
+id = "auth.signup.null-password"
+description = "Sign-up with a null password fails validation, not JSON parsing"
+units = ["auth:route:POST /auth/v1/signup"]
+[[case.step]]
+method = "POST"
+path = "/auth/v1/signup"
+headers = { "Content-Type" = "application/json" }
+body = '{"email":"judge-nullpw-{{run}}@example.com","password":null}'
+
 [[case]]
 id = "auth.token.password"
 description = "Sign up, then exchange email/password for a session"
@@ -47,6 +80,22 @@ json = { email = "judge-token-{{run}}@example.com", password = "judge-password-1
 method = "POST"
 path = "/auth/v1/token?grant_type=password"
 json = { email = "judge-token-{{run}}@example.com", password = "judge-password-1" }
+
+# supabase-js v2 `signInWithPassword` body: `gotrue_meta_security` is an empty
+# object and clients may send the unused `phone` as null.
+[[case]]
+id = "auth.token.password.supabase-js-null-fields"
+description = "Password grant accepts the supabase-js v2 body with a null phone and empty objects"
+units = ["auth:route:POST /auth/v1/token", "auth:grant-type:password"]
+[[case.step]]
+method = "POST"
+path = "/auth/v1/signup"
+json = { email = "judge-tokennull-{{run}}@example.com", password = "judge-password-1" }
+[[case.step]]
+method = "POST"
+path = "/auth/v1/token?grant_type=password"
+headers = { "Content-Type" = "application/json;charset=UTF-8", "X-Client-Info" = "supabase-js-node/2.49.1" }
+body = '{"email":"judge-tokennull-{{run}}@example.com","password":"judge-password-1","phone":null,"gotrue_meta_security":{}}'
 
 [[case]]
 id = "auth.token.wrong-password"
@@ -765,6 +814,22 @@ method = "PUT"
 path = "/auth/v1/user"
 headers = { Authorization = "Bearer {{token}}", "Content-Type" = "application/json" }
 body = '{"data":{"name":"Grace","drop":null}}'
+
+# supabase-js v2 `updateUser` adds null PKCE fields to every body.
+[[case]]
+id = "auth.user.put.supabase-js-null-fields"
+description = "PUT /user accepts the supabase-js v2 body with null PKCE fields"
+units = ["auth:route:PUT /auth/v1/user"]
+[[case.step]]
+method = "POST"
+path = "/auth/v1/signup"
+json = { email = "judge-putnull-{{run}}@example.com", password = "judge-password-1" }
+capture = { token = "/access_token" }
+[[case.step]]
+method = "PUT"
+path = "/auth/v1/user"
+headers = { Authorization = "Bearer {{token}}", "Content-Type" = "application/json;charset=UTF-8", "X-Client-Info" = "supabase-js-node/2.49.1" }
+body = '{"data":{"name":"Grace"},"code_challenge":null,"code_challenge_method":null}'
 
 [[case]]
 id = "auth.user.put-same-password"
