@@ -2521,6 +2521,26 @@ mod tests {
     }
 
     #[test]
+    fn logic_leaf_not_and_negated_groups_render_sql() {
+        let query = parse_get_query("or=(id.not.eq.1,and(priority.gt.1,done.is.null))").unwrap();
+        let sql = build_read_sql("public", "todos", &query, &[], &HashMap::new()).unwrap();
+        assert!(sql.sql.contains(" OR ("), "{}", sql.sql);
+        assert!(sql.sql.contains("NOT"), "{}", sql.sql);
+
+        let query = parse_get_query("not.and=(id.eq.1,id.eq.2)").unwrap();
+        let sql = build_read_sql("public", "todos", &query, &[], &HashMap::new()).unwrap();
+        assert!(sql.sql.contains(" WHERE NOT ("), "{}", sql.sql);
+        assert_eq!(sql.params, vec!["1", "2"]);
+
+        for bad in ["or=(id.eq.1,)", "not.or=()", "or=(id.nope.1)"] {
+            assert!(
+                matches!(parse_get_query(bad).unwrap_err(), QueryFail::Parse { .. }),
+                "{bad}"
+            );
+        }
+    }
+
+    #[test]
     fn sql_orders_limits_and_binds_filter_values() {
         let query = parse_get_query("select=id,title&order=id.desc&limit=1&offset=2").unwrap();
         let sql = build_read_sql("public", "todos", &query, &[], &HashMap::new()).unwrap();
