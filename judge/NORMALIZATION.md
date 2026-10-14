@@ -26,6 +26,7 @@ Headers the gateway invents (`date`, `server`, `via`, `x-kong-*`,
 | ISO-8601 / RFC 3339 timestamp | `<timestamp>` |
 | UUID | `<uuid>` |
 | JSON keys `expires_at`, `iat`, `exp` | replaced by `"<key>"` when the value is not null |
+| JSON key `request_id` (gateway request id) | `"<request_id>"` only when the value is a 32-character lowercase hex string; any other value or type, or a missing key, still differs |
 | JSON key `refresh_token` | same; the *next* step can still capture the raw value before this runs |
 | JSON pointer in the case's `ignore` | removed from both bodies |
 

@@ -20,6 +20,14 @@ pub const DEFAULT_HEADERS: &[&str] = &[
 /// beyond their presence and type.
 const VOLATILE_KEYS: &[&str] = &["expires_at", "iat", "exp", "refresh_token"];
 
+/// Gateway request id (`request_id` in Kong error bodies): random per
+/// request, so only its presence and shape (32 lowercase hex) are compared.
+fn is_request_id(key: &str, v: &Value) -> bool {
+    key == "request_id"
+        && matches!(v, Value::String(s) if s.len() == 32
+            && s.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)))
+}
+
 /// `auth.users` columns whose *contents* are secrets or per-insert hashes.
 /// Empty strings stay empty so an autoconfirmed sign-up that cleared a
 /// token still differs from one that left a random value.
@@ -133,7 +141,8 @@ fn walk(value: &mut Value, secrets: bool) {
         Value::Array(items) => items.iter_mut().for_each(|v| walk(v, secrets)),
         Value::Object(map) => {
             for (key, v) in map.iter_mut() {
-                let replace_volatile = VOLATILE_KEYS.contains(&key.as_str()) && !v.is_null();
+                let replace_volatile = (VOLATILE_KEYS.contains(&key.as_str()) && !v.is_null())
+                    || is_request_id(key, v);
                 let replace_secret = secrets
                     && AUTH_USER_SECRET_KEYS.contains(&key.as_str())
                     && matches!(v, Value::String(s) if !s.is_empty());
@@ -250,6 +259,24 @@ mod tests {
             v,
             json!({"expires_at": "<expires_at>", "user": {"keep": 1}, "refresh_token": null})
         );
+    }
+
+    #[test]
+    fn request_id_shape_is_compared_not_value() {
+        let norm = |id: Value| {
+            let mut v = json!({"message": "m", "request_id": id});
+            json(&mut v, &[]);
+            v
+        };
+        let a = norm(json!("ce55366902c7c85d40604d4146383607"));
+        assert_eq!(a, norm(json!("ec5590d0f1ea47e5879ff6ae02e32c1e")));
+        assert_eq!(a["request_id"], "<request_id>");
+        let mut missing = json!({"message": "m"});
+        json(&mut missing, &[]);
+        assert_ne!(a, missing);
+        assert_ne!(a, norm(json!("not-a-request-id")));
+        assert_ne!(a, norm(json!(42)));
+        assert_ne!(a, norm(Value::Null));
     }
 
     #[test]
