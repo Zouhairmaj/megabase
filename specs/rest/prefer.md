@@ -99,5 +99,11 @@ with a conflict target), missing, return (mutations), count (reads), handling,
 
 ## Judge cases
 
-None yet; judge cases land in a separate `review/` PR (AGENTS.md step 8).
-Conformance is not measured.
+`judge/cases/rest.toml` has one case per unit: `rest.prefer.count.estimated`,
+`rest.prefer.count.planned`, `rest.prefer.handling.strict`,
+`rest.prefer.handling.lenient`, `rest.prefer.max-affected`,
+`rest.prefer.missing.default`, `rest.prefer.missing.null`,
+`rest.prefer.resolution.merge-duplicates` and
+`rest.prefer.resolution.ignore-duplicates`. A `POST` with
+`resolution=merge-duplicates` and `return=representation` answers `200` when no
+row was inserted (`Response.hs` `isInsertIfGTZero`) and `201` otherwise.
