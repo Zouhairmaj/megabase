@@ -704,7 +704,7 @@ fn negotiate_read(
 /// Upstream `decodeMediaType` reads `for` (default `application/json`) and the
 /// `options` flags; `toMime` prints them back in a fixed order.
 fn plan_mime(part: &str) -> Option<String> {
-    let mut pieces = part.split(';');
+    let mut pieces = split_params(part).into_iter();
     let essence = pieces.next()?.trim().to_ascii_lowercase();
     let format = match essence.as_str() {
         "application/vnd.pgrst.plan" | "application/vnd.pgrst.plan+text" => "text",
@@ -734,6 +734,26 @@ fn plan_mime(part: &str) -> Option<String> {
         mime.push_str(&flags.join("|"));
     }
     Some(mime)
+}
+
+/// Splits a media-type entry on `;`, keeping semicolons inside double quotes
+/// as part of the parameter value.
+fn split_params(part: &str) -> Vec<&str> {
+    let mut pieces = Vec::new();
+    let mut quoted = false;
+    let mut start = 0;
+    for (index, ch) in part.char_indices() {
+        match ch {
+            '"' => quoted = !quoted,
+            ';' if !quoted => {
+                pieces.push(&part[start..index]);
+                start = index + 1;
+            }
+            _ => {}
+        }
+    }
+    pieces.push(&part[start..]);
+    pieces
 }
 
 /// Upstream `decodeMediaType` then `toMime` for the plan `for` target.
@@ -2018,6 +2038,10 @@ mod tests {
             (
                 "application/vnd.pgrst.plan+json; for=\"application/vnd.pgrst.object\"",
                 "application/vnd.pgrst.plan+json; for=\"application/vnd.pgrst.object+json\"",
+            ),
+            (
+                "application/vnd.pgrst.plan+json; for=\"application/vnd.pgrst.object+json;nulls=stripped\"",
+                "application/vnd.pgrst.plan+json; for=\"application/vnd.pgrst.object+json;nulls=stripped\"",
             ),
             (
                 "application/vnd.pgrst.plan+text; for=\"text/csv\"; options=wal|analyze",
