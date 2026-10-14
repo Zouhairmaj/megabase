@@ -11,7 +11,7 @@
 //! unlink, and the OAuth grant list and revoke.
 //! Every other Auth path returns `MEGABASE_NOT_IMPLEMENTED`. Database objects
 //! listed in `specs/auth/database.md` are installed when `DATABASE_URL` is
-//! set.
+//! set, after the standard API roles in `specs/core/roles.md`.
 
 mod admin;
 mod admin_batch2;
@@ -19,6 +19,7 @@ mod config;
 mod error;
 mod http;
 mod jsonutil;
+mod roles;
 mod routes;
 mod schema;
 mod state;
@@ -28,6 +29,7 @@ mod user;
 mod verify;
 
 pub use config::AuthConfig;
+pub use roles::{install_roles, RolesError};
 pub use schema::{install_schema, SchemaError};
 pub use state::AuthState;
 pub use store::Backend;
