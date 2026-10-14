@@ -32,6 +32,7 @@ use crate::config::{AuthConfig, AUTH_VERSION};
 use crate::error::{
     bad_json, body_too_large, go_quote, unexpected, validation, GoTrueError, MAX_BODY_BYTES,
 };
+use crate::gojson;
 use crate::jsonutil::{access_claims, session_json, unix_secs};
 use crate::state::AuthState;
 use crate::store::{LogoutScope, SignupCommand, SignupResult, StoreError};
@@ -286,9 +287,9 @@ async fn signup(State(state): State<AuthState>, headers: HeaderMap, body: Body) 
         Ok(bytes) => bytes,
         Err(error) => return error.into_response(),
     };
-    let params: SignupBody = match serde_json::from_slice(&bytes) {
+    let params: SignupBody = match gojson::decode(&bytes, &gojson::SIGNUP_PARAMS) {
         Ok(params) => params,
-        Err(error) => return bad_json(error).into_response(),
+        Err(error) => return error.into_response(),
     };
     if params.email.is_empty() && params.phone.is_empty() {
         if !state.config.anonymous_users {

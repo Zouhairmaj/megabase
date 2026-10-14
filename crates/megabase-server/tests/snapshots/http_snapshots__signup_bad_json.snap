@@ -6,7 +6,7 @@ expression: bad_json
   "body": {
     "code": 400,
     "error_code": "bad_json",
-    "msg": "Could not parse request body as JSON: expected ident at line 1 column 2"
+    "msg": "Could not parse request body as JSON: invalid character 'o' in literal null (expecting 'u')"
   },
   "content_type": "application/json",
   "status": 400

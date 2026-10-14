@@ -2,10 +2,13 @@
 
 //! Runtime flags the admin routes read. Names match GoTrue's `GOTRUE_*` env.
 
+use std::sync::Arc;
+
 use megabase_core::jwt::Hs256;
 
 use crate::config::{optional_bool, AuthConfig};
 use crate::error::ConfigError;
+use crate::ratelimit::{KeyedLimiter, TOKEN_BURST};
 use crate::store::Backend;
 
 const DEFAULT_ADMIN_ROLES: &[&str] = &["service_role", "supabase_admin"];
@@ -37,6 +40,11 @@ pub struct AuthState {
     pub cursor_pagination: bool,
     /// Signup and settings flags. Unset `GOTRUE_*` follows the reference stack.
     pub config: AuthConfig,
+    /// `GOTRUE_RATE_LIMIT_HEADER`. Empty (the default) turns the limiters off.
+    pub rate_limit_header: String,
+    /// Token-grant limiter: `GOTRUE_RATE_LIMIT_TOKEN_REFRESH` (default 150)
+    /// per five minutes, burst 30, one bucket per header value.
+    pub(crate) token_limiter: Arc<KeyedLimiter>,
     /// Shared Auth pool. `try_from_env` leaves this empty. `megabase_server::run`
     /// replaces it with `Backend::connect` before `router_with_state`, and
     /// closes it on shutdown. Signup, logout, verify, the password and
@@ -98,6 +106,12 @@ impl AuthState {
                 false,
             ),
             config,
+            rate_limit_header: lookup("GOTRUE_RATE_LIMIT_HEADER").unwrap_or_default(),
+            token_limiter: Arc::new(KeyedLimiter::new(
+                token_refresh_rate(lookup("GOTRUE_RATE_LIMIT_TOKEN_REFRESH").as_deref())?
+                    / (60.0 * 5.0),
+                TOKEN_BURST,
+            )),
             backend: Backend::none(),
         })
     }
@@ -130,6 +144,8 @@ impl AuthState {
             otp_length: defaults.otp_length,
             cursor_pagination: defaults.cursor_pagination,
             config,
+            rate_limit_header: defaults.rate_limit_header,
+            token_limiter: defaults.token_limiter,
             backend,
         }
     }
@@ -137,6 +153,19 @@ impl AuthState {
     pub fn is_admin_role(&self, role: Option<&str>) -> bool {
         role.is_some_and(|role| self.admin_roles.iter().any(|allowed| allowed == role))
     }
+}
+
+fn token_refresh_rate(raw: Option<&str>) -> Result<f64, ConfigError> {
+    let Some(raw) = raw.filter(|value| !value.is_empty()) else {
+        return Ok(150.0);
+    };
+    raw.parse::<f64>()
+        .ok()
+        .filter(|rate| rate.is_finite())
+        .ok_or_else(|| ConfigError::Invalid {
+            key: "GOTRUE_RATE_LIMIT_TOKEN_REFRESH".into(),
+            value: raw.into(),
+        })
 }
 
 fn security_flag(lookup: &impl Fn(&str) -> Option<String>, key: &str) -> Result<bool, ConfigError> {
