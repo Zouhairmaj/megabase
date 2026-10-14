@@ -54,7 +54,9 @@ A scalar or a single composite is one JSON value with `Content-Range:
 0-0/*`. A set is a JSON array; an empty set is `[]` with `Content-Range:
 */*`. The status is 200, `Content-Type` is `application/json; charset=utf-8`,
 and `Content-Profile` is the schema. `HEAD` sends those headers and an empty
-body.
+body. The `application/vnd.pgrst.object+json` and `nulls=stripped` shapes
+apply as in [media-types](media-types.md): the `Content-Type` is the
+negotiated type, and a set that is not exactly one row is 406 `PGRST116`.
 
 `void` is 204 with `Content-Range: 0-0/*`, an empty body, and no
 `Content-Type` or `Content-Profile`.
@@ -123,8 +125,9 @@ includes `Prefer`, a `select` other than `*`, `columns`, `on_conflict`,
 `order`, `limit`, `offset`, `and`, `or`, embedded resources, a query value
 that is a filter operator, a `Range` header on `GET`, a `POST` query string,
 a JSON array or a JSON value that is not an object, and the media types that
-already have their own unit ids (`text/csv`, `application/vnd.pgrst.object+json`,
-and the rest of `reject_accept`).
+already have their own unit ids and are not served on RPC (`text/csv` and the
+rest of `reject_accept`; the JSON shapes are served, see
+[media-types](media-types.md)).
 
 ## Judge cases
 

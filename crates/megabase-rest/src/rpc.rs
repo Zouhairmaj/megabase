@@ -23,9 +23,10 @@ use crate::params::parse_get_query;
 use crate::prefer::Prefer;
 use crate::query::percent_decode;
 use crate::read::{
-    begin, content_range, database_unavailable, negotiated_schema, not_implemented,
-    options_response, pgrst, profile_header, query_fail, query_failure, reject_accept, session,
-    set_request_context, unimplemented_unit, unsafe_type, Session, JSON_UTF8,
+    begin, content_range, database_unavailable, negotiate_write, negotiated_schema,
+    not_implemented, options_response, pgrst, profile_header, query_fail, query_failure,
+    reject_accept, session, set_request_context, singular_check, unimplemented_unit, unsafe_type,
+    ReadShape, Session, JSON_UTF8,
 };
 use crate::RestState;
 
@@ -248,9 +249,11 @@ pub(crate) async fn call(
     if let Some(unit) = Prefer::from_headers(headers).rpc_unserved() {
         return unimplemented_unit(method, path, unit);
     }
-    if let Some(unit) = reject_accept(headers.get(header::ACCEPT)) {
-        return unimplemented_unit(method, path, unit);
-    }
+    // `Plan.hs` `callReadPlan` negotiates `Accept` like a relation read.
+    let shape = match negotiate_write(method, path, headers.get(header::ACCEPT)) {
+        Ok(shape) => shape,
+        Err(response) => return *response,
+    };
     if method == Method::GET && headers.get(header::RANGE).is_some() {
         return not_implemented(method, path);
     }
@@ -258,48 +261,38 @@ pub(crate) async fn call(
         Ok(invocation) => invocation,
         Err(response) => return *response,
     };
+    let call = Call {
+        session: &session,
+        schema: &schema,
+        function,
+        invocation: &invocation,
+        shape,
+    };
     match *method {
         Method::GET => {
             // megabase:unit rest:route:GET /rest/v1/rpc/{function}
-            invoke(
-                state,
-                &session,
-                &schema,
-                "GET",
-                function,
-                &invocation,
-                false,
-            )
-            .await
+            invoke(state, &call, "GET", false).await
         }
         Method::HEAD => {
             // megabase:unit rest:route:HEAD /rest/v1/rpc/{function}
-            invoke(
-                state,
-                &session,
-                &schema,
-                "HEAD",
-                function,
-                &invocation,
-                true,
-            )
-            .await
+            invoke(state, &call, "HEAD", true).await
         }
         Method::POST => {
             // megabase:unit rest:route:POST /rest/v1/rpc/{function}
-            invoke(
-                state,
-                &session,
-                &schema,
-                "POST",
-                function,
-                &invocation,
-                false,
-            )
-            .await
+            invoke(state, &call, "POST", false).await
         }
         _ => invalid_method(method),
     }
+}
+
+/// One resolved RPC request: who calls what, with which arguments and shape.
+struct Call<'a> {
+    session: &'a Session,
+    schema: &'a str,
+    function: &'a str,
+    invocation: &'a Invocation,
+    /// Negotiated `Accept` shape; `None` is plain JSON.
+    shape: Option<ReadShape>,
 }
 
 fn is_rpc_method(method: &Method) -> bool {
@@ -361,15 +354,14 @@ fn allow_list(volatility: Volatility) -> &'static str {
     }
 }
 
-async fn invoke(
-    state: &RestState,
-    session: &Session,
-    schema: &str,
-    method: &str,
-    function: &str,
-    invocation: &Invocation,
-    head: bool,
-) -> Response {
+async fn invoke(state: &RestState, call: &Call<'_>, method: &str, head: bool) -> Response {
+    let Call {
+        session,
+        schema,
+        function,
+        invocation,
+        shape,
+    } = *call;
     let Some(pool) = state.pool.as_ref() else {
         return database_unavailable();
     };
@@ -389,11 +381,11 @@ async fn invoke(
         }
         Found::Ambiguous(procs) => return ambiguous(&procs),
     };
-    let built = match statement(proc, invocation) {
+    let built = match statement(proc, invocation, shape) {
         Ok(built) => built,
         Err(error) => return unsafe_type(&error),
     };
-    match execute(pool, session, schema, method, proc, &built, head).await {
+    match execute(pool, session, schema, method, proc, &built, head, shape).await {
         Ok(response) => response,
         Err(response) => *response,
     }
@@ -755,7 +747,11 @@ fn shaping_key(key: &str) -> bool {
     }
 }
 
-fn statement(proc: &Proc, invocation: &Invocation) -> Result<Built, UnsafeType> {
+fn statement(
+    proc: &Proc,
+    invocation: &Invocation,
+    shape: Option<ReadShape>,
+) -> Result<Built, UnsafeType> {
     let positional = matches!(proc.params.as_slice(), [param] if param.name.is_empty());
     let specified: Vec<&Param> = if positional {
         Vec::new()
@@ -785,7 +781,7 @@ fn statement(proc: &Proc, invocation: &Invocation) -> Result<Built, UnsafeType> 
         );
         return Ok(Built { sql, binds });
     }
-    let agg = aggregate_expr(proc);
+    let agg = aggregate_expr(proc, shape);
     let page = if proc.returns_set {
         "pg_catalog.count(_postgrest_t)::bigint"
     } else {
@@ -803,15 +799,41 @@ fn statement(proc: &Proc, invocation: &Invocation) -> Result<Built, UnsafeType> 
     Ok(Built { sql, binds })
 }
 
-fn aggregate_expr(proc: &Proc) -> &'static str {
-    match (proc.returns_composite, proc.returns_set) {
-        (false, false) => {
-            "coalesce((pg_catalog.json_agg(_postgrest_t.pgrst_scalar)->0)::text, 'null')"
+/// The body aggregate: `SqlFragment.hs` `asJsonF` for the array shapes and
+/// `asJsonSingleF` for the singular ones.
+///
+/// `asJsonSingleF` reads `pgrst_scalar` only for a single scalar
+/// (`funcReturnsScalar`); a set of scalars aggregates the whole call row. The
+/// array shape reads `pgrst_scalar` for every scalar function.
+fn aggregate_expr(proc: &Proc, shape: Option<ReadShape>) -> String {
+    let scalar_column = "pg_catalog.json_agg(_postgrest_t.pgrst_scalar)";
+    let row = "pg_catalog.json_agg(_postgrest_t)";
+    let singular = shape.is_some_and(ReadShape::singular);
+    let (agg, default) = if singular {
+        let source = if !proc.returns_composite && !proc.returns_set {
+            scalar_column
+        } else {
+            row
+        };
+        (format!("{source}->0"), "'null'")
+    } else {
+        let source = if proc.returns_composite {
+            row
+        } else {
+            scalar_column
+        };
+        if proc.returns_set {
+            (source.to_string(), "'[]'")
+        } else {
+            (format!("{source}->0"), "'null'")
         }
-        (false, true) => "coalesce(pg_catalog.json_agg(_postgrest_t.pgrst_scalar)::text, '[]')",
-        (true, false) => "coalesce((pg_catalog.json_agg(_postgrest_t)->0)::text, 'null')",
-        (true, true) => "coalesce(pg_catalog.json_agg(_postgrest_t)::text, '[]')",
-    }
+    };
+    let agg = if shape.is_some_and(ReadShape::stripped) {
+        format!("json_strip_nulls({agg})")
+    } else {
+        agg
+    };
+    format!("coalesce(({agg})::text, {default})")
 }
 
 fn qualified(proc: &Proc) -> String {
@@ -933,6 +955,7 @@ fn direct_assignments(
     Ok(parts.join(", "))
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn execute(
     pool: &sqlx::PgPool,
     session: &Session,
@@ -941,6 +964,7 @@ async fn execute(
     proc: &Proc,
     built: &Built,
     head: bool,
+    shape: Option<ReadShape>,
 ) -> Result<Response, Box<Response>> {
     let mut tx = begin(pool).await?;
     if read_only(method, proc) {
@@ -965,12 +989,23 @@ async fn execute(
         .fetch_one(&mut *tx)
         .await
         .map_err(|error| Box::new(query_failure(&error, session.anon)))?;
+    // megabase:unit rest:media-type:application/vnd.pgrst.object+json
+    // megabase:unit rest:media-type:application/vnd.pgrst.object+json;nulls=stripped
+    // `MainTx.hs` `CallReadPlan`: `failNotSingular` on the page count. The
+    // dropped transaction rolls a volatile call back.
+    if shape.is_some_and(ReadShape::singular) {
+        if let Err(response) = singular_check(page_total) {
+            drop(tx);
+            return Err(response);
+        }
+    }
     let response = call_response(
         schema,
         head,
         proc,
         page_total,
         body.as_deref().unwrap_or(""),
+        shape,
     );
     let response = apply_guc(guc_status, guc_headers, response)?;
     tx.commit()
@@ -983,14 +1018,22 @@ fn read_only(method: &str, proc: &Proc) -> bool {
     method != "POST" || proc.volatility != Volatility::Volatile
 }
 
-fn call_response(schema: &str, head: bool, proc: &Proc, page_total: i64, body: &str) -> Response {
+fn call_response(
+    schema: &str,
+    head: bool,
+    proc: &Proc,
+    page_total: i64,
+    body: &str,
+    shape: Option<ReadShape>,
+) -> Response {
     if proc.is_void() {
         let range = content_range(0, 1);
         return bare_response(StatusCode::NO_CONTENT, Some(&range), None, None);
     }
     let range = content_range(0, page_total);
     let payload = if head { None } else { Some(body) };
-    let mut response = bare_response(StatusCode::OK, Some(&range), Some(JSON_UTF8), payload);
+    let content_type = shape.map_or(JSON_UTF8, ReadShape::content_type);
+    let mut response = bare_response(StatusCode::OK, Some(&range), Some(content_type), payload);
     profile_header(&mut response, schema);
     response
 }
@@ -1164,7 +1207,7 @@ mod tests {
             "add_numbers",
             vec![param("a", "integer", true), param("b", "integer", true)],
         );
-        let built = statement(&proc, &get_invocation(&[("b", "5"), ("a", "4")])).unwrap();
+        let built = statement(&proc, &get_invocation(&[("b", "5"), ("a", "4")]), None).unwrap();
         assert!(built.sql.contains(
             "\"public\".\"add_numbers\"(\"a\" := ($1::text)::integer, \"b\" := ($2::text)::integer)"
         ));
@@ -1210,7 +1253,7 @@ mod tests {
                 json_body: None,
             }
         };
-        let built = statement(&proc, &invocation).unwrap();
+        let built = statement(&proc, &invocation, None).unwrap();
         match built.binds.as_slice() {
             [Bind::Text(value)] => assert_eq!(value, "2"),
             _ => panic!("expected one text bind"),
@@ -1229,7 +1272,7 @@ mod tests {
                 json_body: None,
             }
         };
-        let built = statement(&proc, &invocation).unwrap();
+        let built = statement(&proc, &invocation, None).unwrap();
         assert!(built
             .sql
             .contains("VARIADIC \"xs\" := ($1::text[])::integer[]"));
@@ -1252,7 +1295,7 @@ mod tests {
             get_values: BTreeMap::new(),
             json_body: Some(r#"{"a":2}"#.to_string()),
         };
-        let built = statement(&proc, &invocation).unwrap();
+        let built = statement(&proc, &invocation, None).unwrap();
         assert!(built
             .sql
             .contains("json_to_record(pgrst_payload.json_data) AS _(\"a\" integer) LIMIT 1"));
@@ -1281,7 +1324,7 @@ mod tests {
             get_values: BTreeMap::new(),
             json_body: Some(r#"{"a":1}"#.to_string()),
         };
-        let built = statement(&proc, &invocation).unwrap();
+        let built = statement(&proc, &invocation, None).unwrap();
         assert!(built
             .sql
             .contains("\"public\".\"ingest\"(($1::text)::jsonb)"));
@@ -1290,11 +1333,11 @@ mod tests {
     #[test]
     fn quoted_name_is_doubled_and_unsafe_cast_is_rejected() {
         let proc = scalar("a\"b", vec![param("a", "integer", true)]);
-        let built = statement(&proc, &get_invocation(&[("a", "1")])).unwrap();
+        let built = statement(&proc, &get_invocation(&[("a", "1")]), None).unwrap();
         assert!(built.sql.contains("\"public\".\"a\"\"b\""));
 
         let proc = scalar("f", vec![param("a", "int; drop table t", true)]);
-        assert!(statement(&proc, &get_invocation(&[("a", "1")])).is_err());
+        assert!(statement(&proc, &get_invocation(&[("a", "1")]), None).is_err());
     }
 
     #[test]
@@ -1302,7 +1345,7 @@ mod tests {
         let mut proc = scalar("gone", Vec::new());
         proc.ret_name = "void".to_string();
         proc.volatility = Volatility::Volatile;
-        let built = statement(&proc, &get_invocation(&[])).unwrap();
+        let built = statement(&proc, &get_invocation(&[]), None).unwrap();
         assert!(built.sql.contains("NULL::text AS body"));
         assert!(built
             .sql
@@ -1314,10 +1357,87 @@ mod tests {
         proc.ret_name = "int4".to_string();
         proc.returns_set = true;
         proc.volatility = Volatility::Stable;
-        let built = statement(&proc, &get_invocation(&[])).unwrap();
+        let built = statement(&proc, &get_invocation(&[]), None).unwrap();
         assert!(built.sql.contains("pg_catalog.count(_postgrest_t)::bigint"));
         assert!(built.sql.contains("json_agg(_postgrest_t.pgrst_scalar)"));
         assert!(read_only("POST", &proc));
+    }
+
+    #[test]
+    fn aggregate_follows_the_negotiated_shape() {
+        let single_scalar = scalar("f", Vec::new());
+        let mut set_of_scalars = scalar("f", Vec::new());
+        set_of_scalars.returns_set = true;
+        let mut composite = scalar("f", Vec::new());
+        composite.returns_composite = true;
+        let mut set_of_composites = scalar("f", Vec::new());
+        set_of_composites.returns_composite = true;
+        set_of_composites.returns_set = true;
+
+        // `asJsonF`: unchanged plain JSON.
+        assert_eq!(
+            aggregate_expr(&single_scalar, None),
+            "coalesce((pg_catalog.json_agg(_postgrest_t.pgrst_scalar)->0)::text, 'null')"
+        );
+        assert_eq!(
+            aggregate_expr(&set_of_scalars, None),
+            "coalesce((pg_catalog.json_agg(_postgrest_t.pgrst_scalar))::text, '[]')"
+        );
+        assert_eq!(
+            aggregate_expr(&composite, None),
+            "coalesce((pg_catalog.json_agg(_postgrest_t)->0)::text, 'null')"
+        );
+        assert_eq!(
+            aggregate_expr(&set_of_composites, None),
+            "coalesce((pg_catalog.json_agg(_postgrest_t))::text, '[]')"
+        );
+        assert_eq!(
+            aggregate_expr(&set_of_composites, Some(ReadShape::ArrayStripped)),
+            "coalesce((json_strip_nulls(pg_catalog.json_agg(_postgrest_t)))::text, '[]')"
+        );
+        // `asJsonSingleF`: element 0, `pgrst_scalar` only for a single scalar.
+        assert_eq!(
+            aggregate_expr(&single_scalar, Some(ReadShape::Object)),
+            "coalesce((pg_catalog.json_agg(_postgrest_t.pgrst_scalar)->0)::text, 'null')"
+        );
+        assert_eq!(
+            aggregate_expr(&set_of_scalars, Some(ReadShape::Object)),
+            "coalesce((pg_catalog.json_agg(_postgrest_t)->0)::text, 'null')"
+        );
+        assert_eq!(
+            aggregate_expr(&set_of_composites, Some(ReadShape::ObjectStripped)),
+            "coalesce((json_strip_nulls(pg_catalog.json_agg(_postgrest_t)->0))::text, 'null')"
+        );
+    }
+
+    #[tokio::test]
+    async fn object_accept_on_rpc_is_not_501() {
+        for method in ["GET", "POST"] {
+            let (status, body, _) = send(
+                Request::builder()
+                    .method(method)
+                    .uri("/rest/v1/rpc/add_numbers")
+                    .header("accept", "application/vnd.pgrst.object+json")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"a":1,"b":2}"#))
+                    .unwrap(),
+            )
+            .await;
+            assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{method}");
+            assert_eq!(body["code"], "PGRST000", "{method}");
+        }
+        let (status, body, _) = send(
+            Request::builder()
+                .method("POST")
+                .uri("/rest/v1/rpc/add_numbers")
+                .header("accept", "text/csv")
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"a":1,"b":2}"#))
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
+        assert_eq!(body["unit"], "rest:media-type:text/csv");
     }
 
     #[test]
@@ -1488,7 +1608,7 @@ mod tests {
     #[test]
     fn scalar_response_sets_range_and_profile_and_head_omits_the_body() {
         let proc = scalar("add_numbers", Vec::new());
-        let response = call_response("public", false, &proc, 1, "7");
+        let response = call_response("public", false, &proc, 1, "7", None);
         assert_eq!(response.status(), StatusCode::OK);
         assert_eq!(
             response.headers().get(header::CONTENT_TYPE).unwrap(),
@@ -1499,13 +1619,18 @@ mod tests {
             "0-0/*"
         );
         assert_eq!(response.headers().get("content-profile").unwrap(), "public");
-        let head = call_response("public", true, &proc, 1, "7");
+        let head = call_response("public", true, &proc, 1, "7", None);
         assert_eq!(head.headers().get(header::CONTENT_TYPE).unwrap(), JSON_UTF8);
         assert!(head.headers().get(header::CONTENT_LENGTH).is_none());
+        let object = call_response("public", false, &proc, 1, "7", Some(ReadShape::Object));
+        assert_eq!(
+            object.headers().get(header::CONTENT_TYPE).unwrap(),
+            "application/vnd.pgrst.object+json; charset=utf-8"
+        );
 
         let mut void_proc = scalar("gone", Vec::new());
         void_proc.ret_name = "void".to_string();
-        let response = call_response("public", false, &void_proc, 1, "");
+        let response = call_response("public", false, &void_proc, 1, "", None);
         assert_eq!(response.status(), StatusCode::NO_CONTENT);
         assert!(response.headers().get(header::CONTENT_TYPE).is_none());
         assert!(response.headers().get("content-profile").is_none());
