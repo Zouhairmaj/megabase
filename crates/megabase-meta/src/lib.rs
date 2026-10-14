@@ -24,6 +24,7 @@ use axum::{
 };
 use megabase_core::{kong, Hs256};
 use serde_json::{json, Value};
+use sqlx::{Connection, PgConnection};
 
 pub const COMPONENT: &str = "meta";
 
@@ -39,6 +40,9 @@ const VERSION_SQL: &str = "SELECT
       pg_stat_activity
   ) AS active_connections,
   current_setting('max_connections') :: int8 AS max_connections";
+
+/// `PG_CONN_TIMEOUT_SECS` default (`src/server/constants.ts`).
+const CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
 
 /// Database pool and service-role verifier for `/pg`.
 #[derive(Clone, Default)]
@@ -104,13 +108,17 @@ async fn health() -> Response {
 }
 
 /// `GET /config/version`: the first row of `VERSION_SQL`.
+///
+/// `src/server/routes/config.ts` builds a `PostgresMeta` per request and
+/// ends it after the query, so the count in `active_connections` includes
+/// that request's own backend. The query runs on a dedicated connection
+/// with the pool's options, closed afterwards, for the same count.
 // megabase:unit meta:route:GET /pg/config/version
 async fn version(State(state): State<MetaState>) -> Response {
     let Some(pool) = state.pool.as_ref() else {
         return no_connection();
     };
-    let row: Result<(String, i64, i64, i64), sqlx::Error> =
-        sqlx::query_as(VERSION_SQL).fetch_one(pool).await;
+    let row = version_row(pool).await;
     match row {
         Ok((version, version_number, active_connections, max_connections)) => fastify_json(
             StatusCode::OK,
@@ -133,6 +141,20 @@ async fn version(State(state): State<MetaState>) -> Response {
             )
         }
     }
+}
+
+async fn version_row(pool: &sqlx::PgPool) -> Result<(String, i64, i64, i64), sqlx::Error> {
+    let options = pool.connect_options();
+    let mut connection =
+        tokio::time::timeout(CONNECT_TIMEOUT, PgConnection::connect_with(&options))
+            .await
+            .map_err(|_| sqlx::Error::PoolTimedOut)??;
+    let row = sqlx::query_as(VERSION_SQL).fetch_one(&mut connection).await;
+    // `pgMeta.end()`: a failed close only loses the goodbye message.
+    if let Err(error) = connection.close().await {
+        tracing::warn!(%error, "closing the postgres-meta connection failed");
+    }
+    row
 }
 
 /// `src/server/routes/index.ts` `onRequest` with no `PG_CONNECTION`: the

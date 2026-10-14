@@ -46,10 +46,14 @@ Both use `Content-Type: application/json; charset=utf-8` (Fastify).
 
 ## Edge cases
 
-`active_connections` counts every backend in the cluster at query time. The
-reference stack and Megabase share one cluster in the judge, so the value is
-expected to match but can differ by a connection that opens or closes
-between the two requests.
+`active_connections` counts every backend in the cluster at query time.
+`src/server/routes/config.ts:33-37` opens a new `PostgresMeta` connection for
+the request and ends it after the query, so the count includes the request's
+own backend and nothing postgres-meta keeps open between requests. Megabase
+runs the query on a new connection built from the shared pool's options and
+closes it afterwards, not on a pooled connection. The reference stack and
+Megabase share one cluster in the judge, so the values match unless another
+client opens or closes a connection between the two requests.
 
 ## Out of scope
 
