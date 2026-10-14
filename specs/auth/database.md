@@ -526,9 +526,9 @@ order: `is_sso_user` before `deleted_at` before `is_anonymous`.
 | is_super_admin | bool | NULL |
 | created_at | timestamptz | NULL |
 | updated_at | timestamptz | NULL |
-| phone | text | NULL, UNIQUE (`users_phone_key`) |
+| phone | text | NULL DEFAULT `NULL::character varying`, UNIQUE (`users_phone_key`) |
 | phone_confirmed_at | timestamptz | NULL |
-| phone_change | text | NULL DEFAULT `''` |
+| phone_change | text | NULL DEFAULT `''::character varying` |
 | phone_change_token | varchar(255) | NULL DEFAULT `''` |
 | phone_change_sent_at | timestamptz | NULL |
 | confirmed_at | timestamptz | `GENERATED ALWAYS AS (LEAST (email_confirmed_at, phone_confirmed_at)) STORED` |
@@ -547,6 +547,12 @@ schema `auth` only when `indexdef` lacks `lower(`); partial unique token
 indexes matching `WHERE … !~ '^[0-9 ]*$'`; `users_email_partial_key`;
 `users_is_anonymous_idx`. Comment: `Auth: Stores user login data within a
 secure schema.` RLS on. Select grant to `postgres` when that role exists.
+
+`phone` and `phone_change` were `VARCHAR(15)` with defaults
+(`20210710035447`); `20230116124310` changed the type to `text` and
+PostgreSQL kept the varchar default expressions. The installer sets
+`NULL::character varying` and `''::character varying` after the retype so
+`pg_get_expr` matches the pin.
 
 ---
 
@@ -793,6 +799,30 @@ Indexes: `webauthn_challenges_user_id_idx` on `user_id`,
 rows). No table comment. Installer `DROP NOT NULL` on `user_id` so a
 table that already has a required `user_id` can still store signup
 challenges.
+
+---
+
+## Table privileges
+
+The Supabase Postgres image grants `postgres` and `dashboard_user` `ALL`
+on the `auth` tables (the image's init scripts are not vendored;
+`vendor/supabase-js/packages/core/auth-js/infra/db/00-schema.sql:83`
+repeats the `postgres` grant). On the pinned reference stack every
+`auth` table except `auth.schema_migrations` carries, besides its owner:
+
+- `postgres`: `SELECT`, `INSERT`, `UPDATE`, `DELETE`, `TRUNCATE`,
+  `REFERENCES`, `TRIGGER`, `MAINTAIN`. `SELECT` is `WITH GRANT OPTION` on
+  the tables listed in `20240612123726_enable_rls_update_grants.up.sql`
+  (lines 20–35) and plain on the rest.
+- `dashboard_user`: the same eight privileges, no grant option.
+
+`auth.schema_migrations` has only the `postgres` `SELECT` grant with grant
+option from `20240612123726`. The installer runs
+`crates/megabase-auth/sql/table_grants.sql` last: `GRANT ALL ON TABLE
+auth.<t>` to each of the two roles that exists in `pg_roles` and each
+table that exists. A stock cluster without those roles gets no grant.
+Sequences and functions are not compared by the judge and are not
+granted.
 
 ---
 

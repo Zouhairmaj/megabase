@@ -168,6 +168,13 @@ EXCEPTION
         RAISE NOTICE 'Unable to change data type of phone, phone_change columns due to internal error (OrioleDB)';
 END $$;
 
+-- 20210710035447 created phone / phone_change as VARCHAR(15) with
+-- defaults; 20230116124310 changed the type to text and kept the varchar
+-- default expressions, so the pin's defaults read NULL::character varying
+-- and ''::character varying.
+ALTER TABLE auth.users ALTER COLUMN phone SET DEFAULT NULL::character varying;
+ALTER TABLE auth.users ALTER COLUMN phone_change SET DEFAULT ''::character varying;
+
 ALTER TABLE auth.users ALTER COLUMN id SET NOT NULL;
 ALTER TABLE auth.users ALTER COLUMN is_sso_user SET NOT NULL;
 ALTER TABLE auth.users ALTER COLUMN is_anonymous SET NOT NULL;
