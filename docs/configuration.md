@@ -114,11 +114,25 @@ Megabase speaks TLS to PostgreSQL.
 Every response passes through the gateway layers in `megabase-server`: a
 request id (`x-request-id`, echoed when the caller sends one), a layer that
 marks `Authorization`, `apikey`, and `Cookie` as sensitive so those values
-stay out of traces, a 150-second timeout (504), and a 50 MiB body limit (413)
-unless the variables above override them. `Bytes` and `Json` use that same cap. A panic catch
+stay out of traces, Kong's CORS behavior, a 150-second timeout (504), and a
+50 MiB body limit (413) unless the variables above override them. `Bytes`
+and `Json` use that same cap. A panic catch
 returns JSON `{"code":"internal_error","message":"internal error"}` without
 the panic text. SIGINT and SIGTERM stop the listener. In-flight requests may
 finish for 10 seconds, then the Auth and REST pools close.
+
+## CORS
+
+The gateway reproduces the `cors` plugin that the pinned `kong.yml` attaches,
+with Kong's defaults, to every service except Postgres Meta (`/pg/`), the
+blocked Realtime admin routes, and MCP. A preflight (`OPTIONS` with `Origin`
+and `Access-Control-Request-Method`) gets `200` with an empty body,
+`Access-Control-Allow-Origin: *`, `Access-Control-Allow-Methods:
+GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS,TRACE,CONNECT`, and
+`Access-Control-Allow-Headers` echoing the requested headers. It needs no
+`apikey`. Every other response, including 501s, carries
+`Access-Control-Allow-Origin: *`. There is no CORS setting because the
+self-hosted stack has none; see `specs/server/cors.md`.
 
 ## Checked SQL
 
