@@ -1446,6 +1446,78 @@ method = "GET"
 path = "/rest/v1/todos?select=done,priority.min()&id=lte.3&order=done"
 
 [[case]]
+id = "rest.order.asc"
+description = "order modifier: explicit ascending"
+units = ["rest:order-modifier:asc"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?select=id,title,priority&order=priority.asc"
+
+[[case]]
+id = "rest.order.desc"
+description = "order modifier: explicit descending"
+units = ["rest:order-modifier:desc"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?select=id,title,priority&order=priority.desc"
+
+[[case]]
+id = "rest.order.asc-text"
+description = "order modifier: ascending on a text column"
+units = ["rest:order-modifier:asc"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?select=id,title,priority&order=title.asc"
+
+[[case]]
+id = "rest.order.desc-text"
+description = "order modifier: descending on a text column"
+units = ["rest:order-modifier:desc"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?select=id,title,priority&order=title.desc"
+
+[[case]]
+id = "rest.order.nullsfirst"
+description = "order modifier: nullsfirst without a direction"
+units = ["rest:order-modifier:nullsfirst"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/rankings?select=id,label,rank&order=rank.nullsfirst"
+
+[[case]]
+id = "rest.order.nullslast"
+description = "order modifier: nullslast without a direction"
+units = ["rest:order-modifier:nullslast"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/rankings?select=id,label,rank&order=rank.nullslast"
+
+[[case]]
+id = "rest.order.asc-nullsfirst"
+description = "order modifier: asc with nullsfirst"
+units = ["rest:order-modifier:asc", "rest:order-modifier:nullsfirst"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/rankings?select=id,label,rank&order=rank.asc.nullsfirst"
+
+[[case]]
+id = "rest.order.desc-nullslast"
+description = "order modifier: desc with nullslast"
+units = ["rest:order-modifier:desc", "rest:order-modifier:nullslast"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/rankings?select=id,label,rank&order=rank.desc.nullslast"
+
+[[case]]
+id = "rest.order.multi-term"
+description = "order modifier: two terms keep request order"
+units = ["rest:order-modifier:asc", "rest:order-modifier:desc"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?select=id,title,priority&order=done.desc,priority.asc"
+
+[[case]]
 id = "rest.logic.and"
 description = "and=(...) keeps rows matching every filter"
 units = ["rest:logic-operator:and"]
