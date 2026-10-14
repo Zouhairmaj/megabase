@@ -50,8 +50,9 @@ On success, `JwtClaims`:
    secret fallback when `kid` is absent or unknown
    (`auth.go:102–106`). `kid` is ignored in this unit (no JWKS).
 4. HMAC-SHA256 over the original `header.payload` bytes with `JWT_SECRET`.
-   Constant-time compare to the decoded signature (`BadCrypto` on mismatch
-   or undecodable signature).
+   Constant-time compare to the decoded signature (`KeyError` on mismatch
+   or undecodable signature: jose-jwt tries each key and reports
+   `KeyError "None of the keys was able to decode the JWT"` when all fail).
 5. Decode the payload as a JSON object (`MalformedPayload`).
 6. If `exp` is present and not a number: `ExpNotNumber`. If
    `now - 30 > exp`: `Expired`. The 30-second skew is PostgREST
@@ -70,10 +71,18 @@ On success, `JwtClaims`:
 | `Empty` | token is empty | Empty JWT is sent in Authorization header |
 | `UnexpectedParts(n)` | not 3 segments | Expected 3 parts in JWT; got n |
 | `BadAlgorithm` | `alg` ≠ `HS256` | Wrong or unsupported encoding algorithm |
-| `BadCrypto` | HMAC mismatch / bad signature b64 | JWT cryptographic operation failed |
+| `KeyError` | HMAC mismatch / bad signature b64 | No suitable key or wrong key type |
+| `BadCrypto` | signing fails to serialize (`Hs256::sign` only) | JWT cryptographic operation failed |
 | `MalformedHeader` / `MalformedPayload` | JSON not an object | Parsing claims failed |
 | `ExpNotNumber` | `exp` present but not numeric | The JWT 'exp' claim must be a number |
 | `Expired` | `exp` in the past beyond skew | JWT expired |
+
+`JwtError::details()` is the PostgREST `details` field (`Error.hs:676`:
+only `KeyError` and `BadAlgorithm` carry one, the jose-jwt text).
+`KeyError` gives `None of the keys was able to decode the JWT`; `BadAlgorithm`
+with `alg` `none` gives `JWT is unsecured but expected 'alg' was not 'none'`
+(`vendor/postgrest/test/spec/Feature/Query/ErrorSpec.hs:116` and `:229`).
+Other algorithms have no vendored jose-jwt text and report `null`.
 
 Bearer extraction (`bearer_token`) is separate: scheme `Bearer`
 case-insensitive, then a single non-whitespace token
@@ -136,7 +145,7 @@ bytes as `SecretTooShort`. A key of 32 bytes or more is accepted.
 - `Hs256::new` with 31 bytes: `SecretTooShort`. With 32 bytes: accepted.
 - Demo `ANON_KEY` / `SERVICE_ROLE_KEY` (whitespace in the JSON payload)
   verify with the demo `JWT_SECRET`.
-- Token signed with a different secret: `BadCrypto`.
+- Token signed with a different secret, or a tampered payload: `KeyError`.
 - `alg=none` with empty or leftover signature: `BadAlgorithm`.
 - Two-part token: `UnexpectedParts(2)`.
 - Expired `exp` (well before `now - 30`): `Expired`.

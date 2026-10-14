@@ -64,6 +64,9 @@ pub enum JwtError {
     UnexpectedParts(usize),
     #[error("Wrong or unsupported encoding algorithm")]
     BadAlgorithm(String),
+    /// jose-jwt `KeyError`: no configured key verifies the signature.
+    #[error("No suitable key or wrong key type")]
+    KeyError,
     #[error("JWT cryptographic operation failed")]
     BadCrypto,
     #[error("Parsing claims failed")]
@@ -74,6 +77,24 @@ pub enum JwtError {
     ExpNotNumber,
     #[error("JWT expired")]
     Expired,
+}
+
+impl JwtError {
+    /// PostgREST `details` for this error, as jose-jwt reports it.
+    ///
+    /// Only `KeyError` and `BadAlgorithm` carry details (`Error.hs`
+    /// `details (JwtDecodeErr jde)`). Megabase knows the jose-jwt text for an
+    /// unsecured (`alg` `none`) token and for a signature no key verifies;
+    /// other algorithms report none.
+    pub fn details(&self) -> Option<&'static str> {
+        match self {
+            Self::BadAlgorithm(alg) if alg == "none" => {
+                Some("JWT is unsecured but expected 'alg' was not 'none'")
+            }
+            Self::KeyError => Some("None of the keys was able to decode the JWT"),
+            _ => None,
+        }
+    }
 }
 
 /// HMAC-SHA256 verifier bound to one `JWT_SECRET`.
@@ -162,13 +183,15 @@ impl Hs256 {
             return Err(JwtError::BadAlgorithm(alg.to_string()));
         }
 
-        let signature = decode_segment(signature_b64).map_err(|_| JwtError::BadCrypto)?;
+        // jose-jwt tries every key and reports `KeyError` once all of them
+        // fail, whether the signature is undecodable or does not match.
+        let signature = decode_segment(signature_b64).map_err(|_| JwtError::KeyError)?;
         let signing_input = format!("{header_b64}.{payload_b64}");
         let mut mac =
             HmacSha256::new_from_slice(&self.secret).map_err(|_| JwtError::SecretMissing)?;
         mac.update(signing_input.as_bytes());
         mac.verify_slice(&signature)
-            .map_err(|_| JwtError::BadCrypto)?;
+            .map_err(|_| JwtError::KeyError)?;
 
         let payload_json = decode_segment(payload_b64).map_err(|_| JwtError::MalformedPayload)?;
         let payload: Value =
@@ -354,7 +377,7 @@ mod tests {
         );
         assert_eq!(
             verifier().verify_at(&token, DURING_DEMO).unwrap_err(),
-            JwtError::BadCrypto
+            JwtError::KeyError
         );
     }
 
@@ -371,7 +394,7 @@ mod tests {
         let forged = format!("{h}.{forged_payload}.{sig}");
         assert_eq!(
             verifier().verify_at(&forged, DURING_DEMO).unwrap_err(),
-            JwtError::BadCrypto
+            JwtError::KeyError
         );
     }
 
@@ -597,14 +620,32 @@ mod tests {
     }
 
     #[test]
-    fn undecodable_signature_is_bad_crypto() {
+    fn undecodable_signature_is_key_error() {
         let header = URL_SAFE_NO_PAD.encode(serde_json::to_vec(&hs256_header()).unwrap());
         let payload = URL_SAFE_NO_PAD.encode(br#"{"role":"anon"}"#);
         let token = format!("{header}.{payload}.!!!");
         assert_eq!(
             verifier().verify_at(&token, DURING_DEMO).unwrap_err(),
-            JwtError::BadCrypto
+            JwtError::KeyError
         );
+    }
+
+    #[test]
+    fn details_match_jose_jwt() {
+        assert_eq!(
+            JwtError::BadAlgorithm("none".into()).details(),
+            Some("JWT is unsecured but expected 'alg' was not 'none'")
+        );
+        assert_eq!(JwtError::BadAlgorithm("RS256".into()).details(), None);
+        assert_eq!(
+            JwtError::KeyError.details(),
+            Some("None of the keys was able to decode the JWT")
+        );
+        assert_eq!(
+            JwtError::KeyError.to_string(),
+            "No suitable key or wrong key type"
+        );
+        assert_eq!(JwtError::Expired.details(), None);
     }
 
     #[test]
