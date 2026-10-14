@@ -638,6 +638,11 @@ pub(crate) fn negotiate_write(
             path,
             "rest:media-type:text/csv",
         ))),
+        Some(ReadShape::GeoJson) => Err(Box::new(unimplemented_unit(
+            method,
+            path,
+            "rest:media-type:application/geo+json",
+        ))),
         shape => Ok(shape),
     }
 }
