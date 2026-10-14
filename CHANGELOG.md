@@ -4,6 +4,18 @@ All notable changes to Megabase are documented in this file.
 The format is produced by [release-please](https://github.com/googleapis/release-please).
 Sections: Features, Bug Fixes, Performance, Conformance/judge, Documentation.
 
+## [0.1.22](https://github.com/Zouhairmaj/megabase/compare/v0.1.21...v0.1.22) (2026-10-14)
+
+
+### Bug Fixes
+
+* **rest:** honour aggregates-enabled so aggregate Judge cases pass ([#22](https://github.com/Zouhairmaj/megabase/issues/22)) ([#292](https://github.com/Zouhairmaj/megabase/issues/292)) ([45f3546](https://github.com/Zouhairmaj/megabase/commit/45f354657de733119ce326ee9ab9cc3eaf545332))
+
+
+### Documentation
+
+* add 13 October devlog entry ([#296](https://github.com/Zouhairmaj/megabase/issues/296)) ([f18d91c](https://github.com/Zouhairmaj/megabase/commit/f18d91ce0d1d78fc9e7948357f2d6e4c1ea52be9))
+
 ## [0.1.21](https://github.com/Zouhairmaj/megabase/compare/v0.1.20...v0.1.21) (2026-10-13)
 
 
