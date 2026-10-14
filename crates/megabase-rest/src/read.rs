@@ -27,6 +27,7 @@ use crate::params::{
 };
 use crate::prefer::{set_applied, Count, Prefer, Scope};
 use crate::query::path_decode;
+use crate::relationship::{ambiguous_hint, find_relationship, Candidate, FindError, ForeignKey};
 use crate::RestState;
 
 pub(crate) const JSON_UTF8: &str = "application/json; charset=utf-8";
@@ -1464,22 +1465,28 @@ async fn read_rows(
     Ok((row.0, row.1, built.offset, total))
 }
 
-/// Foreign keys between two tables of one schema, in either direction.
-const RELATIONSHIPS_SQL: &str = "SELECT (c.relname = $2) AS from_root,
+/// Foreign keys of one schema with an end on the requested table
+/// (`allM2OandO2ORels` in `SchemaCache.hs`). `one_to_one` holds when the key
+/// columns are a primary key or unique constraint of the referencing table.
+const RELATIONSHIPS_SQL: &str = "SELECT con.conname::text, c.relname::text, f.relname::text,
          ARRAY(SELECT a.attname::text FROM unnest(con.conkey) WITH ORDINALITY AS k(num, ord)
                JOIN pg_attribute AS a ON a.attrelid = con.conrelid AND a.attnum = k.num
                ORDER BY k.ord),
          ARRAY(SELECT a.attname::text FROM unnest(con.confkey) WITH ORDINALITY AS k(num, ord)
                JOIN pg_attribute AS a ON a.attrelid = con.confrelid AND a.attnum = k.num
-               ORDER BY k.ord)
+               ORDER BY k.ord),
+         (SELECT array_agg(k ORDER BY k) FROM unnest(con.conkey) AS k) IN (
+             SELECT array_agg(k ORDER BY k) FROM pg_constraint AS u, unnest(u.conkey) AS k
+             WHERE u.contype IN ('p', 'u') AND u.conrelid = con.conrelid
+             GROUP BY u.oid)
          FROM pg_constraint AS con
          JOIN pg_class AS c ON c.oid = con.conrelid
          JOIN pg_namespace AS n ON n.oid = c.relnamespace
          JOIN pg_class AS f ON f.oid = con.confrelid
          JOIN pg_namespace AS fnn ON fnn.oid = f.relnamespace
-         WHERE con.contype = 'f'
+         WHERE con.contype = 'f' AND con.conparentid = 0
            AND n.nspname = $1 AND fnn.nspname = $1
-           AND ((c.relname = $2 AND f.relname = $3) OR (c.relname = $3 AND f.relname = $2))";
+           AND (c.relname = $2 OR f.relname = $2)";
 
 /// Every pair of tables in a schema joined by a foreign key.
 const FK_EDGES_SQL: &str = "SELECT DISTINCT c.relname::text, f.relname::text
@@ -1490,9 +1497,11 @@ const FK_EDGES_SQL: &str = "SELECT DISTINCT c.relname::text, f.relname::text
          JOIN pg_namespace AS fnn ON fnn.oid = f.relnamespace
          WHERE con.contype = 'f' AND n.nspname = $1 AND fnn.nspname = $1";
 
-/// Find the one foreign key that links `relation` and the embedded `target`.
+/// Find the one foreign key `target` names from `relation`: the embedded
+/// table, a constraint name, or a single key column (`findRel`).
 ///
-/// No match is `PGRST200`. A self-reference or several candidate keys stay 501.
+/// No match is `PGRST200`; several column or constraint matches are
+/// `PGRST201`. A self-reference or several table-name matches stay 501.
 async fn load_relationship(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     schema: &str,
@@ -1516,15 +1525,35 @@ async fn load_relationship(
             MegabaseNotImplemented::new(crate::COMPONENT, "rest:embed-join:left").into_response(),
         ));
     }
-    let rows: Vec<(bool, Vec<String>, Vec<String>)> = sqlx::query_as(RELATIONSHIPS_SQL)
+    type KeyRow = (
+        String,
+        String,
+        String,
+        Vec<String>,
+        Vec<String>,
+        Option<bool>,
+    );
+    let rows: Vec<KeyRow> = sqlx::query_as(RELATIONSHIPS_SQL)
         .bind(schema)
         .bind(relation)
-        .bind(target)
         .fetch_all(&mut **tx)
         .await
         .map_err(|error| Box::new(query_failure(&error, anon)))?;
-    match rows.as_slice() {
-        [] => {
+    let keys: Vec<ForeignKey> = rows
+        .into_iter()
+        .map(
+            |(name, table, foreign_table, columns, referenced, one_to_one)| ForeignKey {
+                name,
+                table,
+                foreign_table,
+                columns: columns.into_iter().zip(referenced).collect(),
+                one_to_one: one_to_one.unwrap_or(false),
+            },
+        )
+        .collect();
+    match find_relationship(relation, target, &keys) {
+        Ok(rel) => Ok(rel),
+        Err(FindError::NotFound) => {
             // The hint is optional: a failed lookup must not replace PGRST200.
             let edges: Vec<(String, String)> = sqlx::query_as(FK_EDGES_SQL)
                 .bind(schema)
@@ -1544,19 +1573,25 @@ async fn load_relationship(
             hint.as_deref(),
         )))
         }
-        [(from_root, key, referenced)] if relation != target => {
-            let (root_columns, target_columns) = if *from_root {
-                (key.clone(), referenced.clone())
-            } else {
-                (referenced.clone(), key.clone())
-            };
-            Ok(Relationship {
-                to_many: !*from_root,
-                root_columns,
-                target_columns,
-            })
+        Err(FindError::Ambiguous(rels)) => {
+            let body = serde_json::json!({
+                "code": "PGRST201",
+                "message": format!(
+                    "Could not embed because more than one relationship was found for '{relation}' and '{target}'"
+                ),
+                "details": rels.iter().map(Candidate::compressed).collect::<Vec<_>>(),
+                "hint": ambiguous_hint(target, &rels),
+            });
+            Err(Box::new(
+                (
+                    StatusCode::MULTIPLE_CHOICES,
+                    [(header::CONTENT_TYPE, JSON_UTF8)],
+                    body.to_string(),
+                )
+                    .into_response(),
+            ))
         }
-        _ => Err(Box::new(
+        Err(FindError::Unsupported) => Err(Box::new(
             MegabaseNotImplemented::new(crate::COMPONENT, "rest:embed-join:left").into_response(),
         )),
     }

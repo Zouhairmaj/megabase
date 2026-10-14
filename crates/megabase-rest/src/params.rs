@@ -1832,7 +1832,7 @@ pub(crate) fn build_read_sql_as(
                     let Some(rel) = rels.get(&embed.name) else {
                         continue;
                     };
-                    let target = quote_ident(&embed.name);
+                    let target = quote_ident(&rel.table);
                     let cond = join_condition(rel, &relation_ident, &target);
                     push_embed(
                         &mut select_sql,
@@ -1930,7 +1930,9 @@ pub(crate) fn build_read_sql_as(
 /// Foreign-key link between the requested table and an embedded one.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Relationship {
-    /// `true` when the embedded table holds the foreign key (an array result).
+    /// Embedded table. The embed name may be a key column or constraint instead.
+    pub table: String,
+    /// `true` for a one-to-many link (an array result).
     pub to_many: bool,
     /// Columns on the requested table, in key order.
     pub root_columns: Vec<String>,
@@ -1956,7 +1958,7 @@ fn push_embed(
     rel: &Relationship,
     cond: &str,
 ) {
-    let target = quote_ident(&embed.name);
+    let target = quote_ident(&rel.table);
     let mut cols = String::new();
     push_select(&mut cols, params, &target, &embed.select);
     let sub = format!("SELECT {cols} FROM {schema}.{target} WHERE {cond}");
@@ -2488,6 +2490,7 @@ mod tests {
         let rels = HashMap::from([(
             "notes".to_string(),
             Relationship {
+                table: "notes".into(),
                 to_many: true,
                 root_columns: vec!["id".into()],
                 target_columns: vec!["user_id".into()],
@@ -2505,6 +2508,36 @@ mod tests {
             sql.contains("AND EXISTS") || sql.contains("WHERE EXISTS"),
             "{sql}"
         );
+    }
+
+    #[test]
+    fn column_hint_embed_reads_the_referenced_table() {
+        let query = parse_get_query("select=*,author:user_id!inner(name)").unwrap();
+        assert_eq!(query.embed_names(), vec!["user_id"]);
+        let rels = HashMap::from([(
+            "user_id".to_string(),
+            Relationship {
+                table: "users".into(),
+                to_many: false,
+                root_columns: vec!["user_id".into()],
+                target_columns: vec!["id".into()],
+            },
+        )]);
+        let sql = build_read_sql("public", "messages", &query, &[], &rels)
+            .unwrap()
+            .sql;
+        assert!(
+            sql.contains(
+                "(SELECT to_json(_t) FROM (SELECT \"users\".\"name\" FROM \"public\".\"users\" \
+                 WHERE \"users\".\"id\" = \"messages\".\"user_id\") _t) AS \"author\""
+            ),
+            "{sql}"
+        );
+        assert!(
+            sql.contains("EXISTS (SELECT 1 FROM \"public\".\"users\" WHERE"),
+            "{sql}"
+        );
+        assert!(!sql.contains("\"user_id\" AS"), "{sql}");
     }
 
     #[test]

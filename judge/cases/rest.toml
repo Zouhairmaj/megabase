@@ -1634,6 +1634,61 @@ method = "GET"
 path = "/rest/v1/todos?select=id,notes(body)"
 key = "service_role"
 
+# Embed targets that name a foreign key column or constraint (issue #336).
+[[case]]
+id = "rest.embed.column-hint-alias"
+description = "An aliased foreign key column embeds the referenced row as an object"
+units = ["rest:route:GET /rest/v1/{relation}", "rest:query-param:select", "rest:embed-join:left"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/note_comments?select=body,note:note_id(body)&order=body"
+key = "service_role"
+
+[[case]]
+id = "rest.embed.column-hint-key"
+description = "An unaliased foreign key column embed keeps the column name as its key"
+units = ["rest:route:GET /rest/v1/{relation}", "rest:query-param:select", "rest:embed-join:left"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/note_comments?select=body,user_id(display_name)&order=body"
+key = "service_role"
+
+[[case]]
+id = "rest.embed.column-hint-inner"
+description = "A foreign key column embed accepts !inner"
+units = ["rest:route:GET /rest/v1/{relation}", "rest:query-param:select", "rest:embed-join:inner"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/notes?select=*,author:user_id!inner(*)&order=body"
+key = "service_role"
+
+[[case]]
+id = "rest.embed.constraint-target"
+description = "A foreign key constraint name embeds the referenced row"
+units = ["rest:route:GET /rest/v1/{relation}", "rest:query-param:select", "rest:embed-join:left"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/note_comments?select=body,parent:note_comments_note_id_fkey(body)&order=body"
+key = "service_role"
+
+[[case]]
+id = "rest.embed.column-hint-ambiguous"
+description = "A referenced column shared by several foreign keys is PGRST201"
+units = ["rest:route:GET /rest/v1/{relation}", "rest:query-param:select", "rest:embed-join:left"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/profiles?select=display_name,id(body)"
+key = "service_role"
+
+[[case]]
+id = "rest.embed.column-hint-not-a-key"
+description = "A column outside any foreign key is no relationship (PGRST200)"
+units = ["rest:route:GET /rest/v1/{relation}", "rest:query-param:select", "rest:embed-join:left"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/notes?select=id,body(*)"
+key = "service_role"
+
 # Prefer count / handling / missing / resolution / max-affected (issue #37).
 # Each case differs from the same request with the preference ignored.
 [[case]]
