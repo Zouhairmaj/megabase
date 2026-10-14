@@ -139,7 +139,7 @@ Upstream: `MediaType.hs:80-88` (`toMime`), `Plan/Negotiate.hs`
 - The 406 is decided before the relation lookup, so a missing relation with
   `Accept: text/plain` is 406, not `PGRST205`.
 - **Out of scope:** `text/csv` and `application/geo+json` on writes and RPC
-  (501, including `Prefer: return=representation`), custom
+  (501, including `Prefer: return=representation`), executing custom
   aggregate / domain handlers, `text/csv` as a request `Content-Type`, a
   specific `q=0` entry overriding a matching wildcard.
 
