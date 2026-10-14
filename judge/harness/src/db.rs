@@ -143,6 +143,26 @@ fn database_name(url: &str) -> Result<String> {
     Ok(config.get_dbname().unwrap_or("postgres").to_string())
 }
 
+/// What the Supabase Postgres image runs in its `postgres` database before
+/// any user table exists, copied from supabase/postgres
+/// `migrations/db/init-scripts/00000000000000-initial-schema.sql`
+/// (develop @ 8b0ef1ef942e18493bf5c89087eff7b030c0e26d, lines 39-42).
+/// The image runs lines 39-42 as `postgres`, the role `prepare` connects as,
+/// so `ALTER DEFAULT PRIVILEGES` without `FOR ROLE` targets the same owner.
+/// Lines 50-56 (`FOR USER supabase_admin`) are left out: they only cover
+/// objects `supabase_admin` creates, and `postgres` (not a superuser on the
+/// image) may not change that role's default privileges.
+/// A fresh `CREATE DATABASE` starts from `template1` without them, so tables
+/// the fixtures create would otherwise get fewer grants than on the
+/// reference side. The roles belong to the shared reference cluster and
+/// already exist; a missing one fails loudly.
+const SUPABASE_DEFAULT_PRIVILEGES: &str = "
+grant usage on schema public to postgres, anon, authenticated, service_role;
+alter default privileges in schema public grant all on tables to postgres, anon, authenticated, service_role;
+alter default privileges in schema public grant all on functions to postgres, anon, authenticated, service_role;
+alter default privileges in schema public grant all on sequences to postgres, anon, authenticated, service_role;
+";
+
 /// Create the Megabase-side database if needed and load judge fixtures into it.
 ///
 /// The official stack keeps using the cluster's `postgres` database. Sharing
@@ -165,11 +185,16 @@ pub fn prepare(admin_url: &str, megabase_url: &str, fixtures: &str) -> Result<()
             .batch_execute(&format!("CREATE DATABASE {dbname}"))
             .with_context(|| format!("CREATE DATABASE {dbname}"))?;
         eprintln!("created database {dbname}");
+        drop(admin);
+        let mut fresh = connect_retry(megabase_url, WAIT_TIMEOUT)?;
+        fresh
+            .batch_execute(SUPABASE_DEFAULT_PRIVILEGES)
+            .context("applying Supabase default privileges in the megabase database")?;
+        eprintln!("applied Supabase default privileges in {dbname}");
     } else {
         eprintln!("database {dbname} already exists");
+        drop(admin);
     }
-    drop(admin);
-
     let mut megabase = connect_retry(megabase_url, WAIT_TIMEOUT)?;
     let loaded: bool = megabase
         .query_one(
