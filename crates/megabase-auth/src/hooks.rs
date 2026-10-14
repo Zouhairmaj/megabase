@@ -510,8 +510,11 @@ async fn invoke_pg(
         return PgOutcome::Failed(error);
     }
     let can_switch: Result<bool, sqlx::Error> = sqlx::query_scalar(
-        "SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = $1)
-                AND pg_has_role($1, 'MEMBER')",
+        "SELECT CASE
+                    WHEN EXISTS (SELECT 1 FROM pg_roles WHERE rolname = $1)
+                    THEN pg_has_role($1, 'MEMBER')
+                    ELSE false
+                END",
     )
     .bind(AUTH_ADMIN_ROLE)
     .fetch_one(&mut *conn)
