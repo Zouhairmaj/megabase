@@ -1561,3 +1561,184 @@ units = ["rest:route:GET /rest/v1/{relation}", "rest:query-param:select", "rest:
 method = "GET"
 path = "/rest/v1/todos?select=id,notes(body)"
 key = "service_role"
+
+# Prefer count / handling / missing / resolution / max-affected (issue #37).
+# Each case differs from the same request with the preference ignored.
+[[case]]
+id = "rest.prefer.count.estimated"
+description = "count=estimated reports an exact total below db-max-rows"
+units = ["rest:prefer:count=estimated"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?select=id&id=lt.4&order=id"
+headers = { Prefer = "count=estimated" }
+
+[[case]]
+id = "rest.prefer.count.planned"
+description = "count=planned reports the planner row estimate for a primary-key lookup"
+units = ["rest:prefer:count=planned"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?select=id&id=eq.1"
+headers = { Prefer = "count=planned" }
+
+[[case]]
+id = "rest.prefer.handling.strict"
+description = "handling=strict rejects an invalid preference with PGRST122"
+units = ["rest:prefer:handling=strict"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?select=id&id=eq.1"
+headers = { Prefer = "handling=strict, not-a-preference" }
+
+[[case]]
+id = "rest.prefer.handling.lenient"
+description = "handling=lenient ignores an invalid preference"
+units = ["rest:prefer:handling=lenient"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?select=id&id=eq.1"
+headers = { Prefer = "handling=lenient, not-a-preference" }
+
+[[case]]
+id = "rest.prefer.max-affected"
+description = "max-affected under handling=strict rolls back an over-limit update"
+units = ["rest:prefer:max-affected=*"]
+[[case.step]]
+method = "DELETE"
+path = "/rest/v1/todos?id=in.(9201,9202)"
+key = "service_role"
+headers = { Prefer = "return=minimal" }
+[[case.step]]
+method = "POST"
+path = "/rest/v1/todos"
+key = "service_role"
+headers = { Prefer = "return=minimal" }
+json = [{ id = 9201,title = "prefer-maff" },{ id = 9202,title = "prefer-maff" }]
+[[case.step]]
+method = "PATCH"
+path = "/rest/v1/todos?title=eq.prefer-maff"
+key = "service_role"
+headers = { Prefer = "handling=strict, max-affected=1, return=minimal" }
+json = { priority = 7 }
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?title=eq.prefer-maff&select=id,priority&order=id"
+key = "service_role"
+[[case.step]]
+method = "DELETE"
+path = "/rest/v1/todos?id=in.(9201,9202)"
+key = "service_role"
+headers = { Prefer = "return=minimal" }
+
+[[case]]
+id = "rest.prefer.missing.default"
+description = "missing=default fills an absent not-null column from its default in a bulk insert"
+units = ["rest:prefer:missing=default"]
+[[case.step]]
+method = "DELETE"
+path = "/rest/v1/todos?id=in.(9211,9212)"
+key = "service_role"
+headers = { Prefer = "return=minimal" }
+[[case.step]]
+method = "POST"
+path = "/rest/v1/todos?select=id,done,priority&order=id"
+key = "service_role"
+headers = { Prefer = "return=representation, missing=default" }
+json = [{ id = 9211,title = "prefer-missing",priority = 5 },{ id = 9212,title = "prefer-missing",done = true }]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?id=in.(9211,9212)&select=id,done,priority&order=id"
+key = "service_role"
+[[case.step]]
+method = "DELETE"
+path = "/rest/v1/todos?id=in.(9211,9212)"
+key = "service_role"
+headers = { Prefer = "return=minimal" }
+
+[[case]]
+id = "rest.prefer.missing.null"
+description = "missing=null sends NULL for an absent not-null column, so the insert fails"
+units = ["rest:prefer:missing=null"]
+[[case.step]]
+method = "DELETE"
+path = "/rest/v1/todos?id=in.(9221,9222)"
+key = "service_role"
+headers = { Prefer = "return=minimal" }
+[[case.step]]
+method = "POST"
+path = "/rest/v1/todos?select=id,done,priority&order=id"
+key = "service_role"
+headers = { Prefer = "return=representation, missing=null" }
+json = [{ id = 9221,title = "prefer-missing",priority = 5 },{ id = 9222,title = "prefer-missing",done = true }]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?id=in.(9221,9222)&select=id,done,priority&order=id"
+key = "service_role"
+[[case.step]]
+method = "DELETE"
+path = "/rest/v1/todos?id=in.(9221,9222)"
+key = "service_role"
+headers = { Prefer = "return=minimal" }
+
+[[case]]
+id = "rest.prefer.resolution.merge-duplicates"
+description = "resolution=merge-duplicates updates the existing row on a primary-key conflict"
+units = ["rest:prefer:resolution=merge-duplicates"]
+[[case.step]]
+method = "DELETE"
+path = "/rest/v1/todos?id=eq.9231"
+key = "service_role"
+headers = { Prefer = "return=minimal" }
+[[case.step]]
+method = "POST"
+path = "/rest/v1/todos"
+key = "service_role"
+headers = { Prefer = "return=minimal" }
+json = { id = 9231,title = "prefer-original",priority = 1 }
+[[case.step]]
+method = "POST"
+path = "/rest/v1/todos?select=id,title,priority"
+key = "service_role"
+headers = { Prefer = "resolution=merge-duplicates, return=representation" }
+json = { id = 9231,title = "prefer-merged",priority = 2 }
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?id=eq.9231&select=id,title,priority"
+key = "service_role"
+[[case.step]]
+method = "DELETE"
+path = "/rest/v1/todos?id=eq.9231"
+key = "service_role"
+headers = { Prefer = "return=minimal" }
+
+[[case]]
+id = "rest.prefer.resolution.ignore-duplicates"
+description = "resolution=ignore-duplicates keeps the existing row on a primary-key conflict"
+units = ["rest:prefer:resolution=ignore-duplicates"]
+[[case.step]]
+method = "DELETE"
+path = "/rest/v1/todos?id=eq.9232"
+key = "service_role"
+headers = { Prefer = "return=minimal" }
+[[case.step]]
+method = "POST"
+path = "/rest/v1/todos"
+key = "service_role"
+headers = { Prefer = "return=minimal" }
+json = { id = 9232,title = "prefer-original",priority = 1 }
+[[case.step]]
+method = "POST"
+path = "/rest/v1/todos?select=id,title,priority"
+key = "service_role"
+headers = { Prefer = "resolution=ignore-duplicates, return=representation" }
+json = { id = 9232,title = "prefer-ignored",priority = 2 }
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?id=eq.9232&select=id,title,priority"
+key = "service_role"
+[[case.step]]
+method = "DELETE"
+path = "/rest/v1/todos?id=eq.9232"
+key = "service_role"
+headers = { Prefer = "return=minimal" }

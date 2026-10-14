@@ -3,7 +3,7 @@
   "totals": {
     "units": 1024,
     "implemented": 169,
-    "tested": 133,
+    "tested": 142,
     "conformant": 0
   },
   "percent": {
@@ -12,7 +12,7 @@
     "done": 0.0
   },
   "judge": {
-    "cases": 274,
+    "cases": 283,
     "passing": 0
   },
   "components": {
@@ -317,7 +317,7 @@
     "rest": {
       "units": 93,
       "implemented": 90,
-      "tested": 71,
+      "tested": 80,
       "conformant": 0,
       "groups": {
         "aggregates": {
@@ -359,7 +359,7 @@
         "prefer": {
           "units": 16,
           "implemented": 16,
-          "tested": 7,
+          "tested": 16,
           "conformant": 0
         },
         "query-params": {
@@ -687,16 +687,16 @@
     "rest:order-modifier:desc": "implemented",
     "rest:order-modifier:nullsfirst": "implemented",
     "rest:order-modifier:nullslast": "implemented",
-    "rest:prefer:count=estimated": "implemented",
+    "rest:prefer:count=estimated": "tested",
     "rest:prefer:count=exact": "tested",
-    "rest:prefer:count=planned": "implemented",
-    "rest:prefer:handling=lenient": "implemented",
-    "rest:prefer:handling=strict": "implemented",
-    "rest:prefer:max-affected=*": "implemented",
-    "rest:prefer:missing=default": "implemented",
-    "rest:prefer:missing=null": "implemented",
-    "rest:prefer:resolution=ignore-duplicates": "implemented",
-    "rest:prefer:resolution=merge-duplicates": "implemented",
+    "rest:prefer:count=planned": "tested",
+    "rest:prefer:handling=lenient": "tested",
+    "rest:prefer:handling=strict": "tested",
+    "rest:prefer:max-affected=*": "tested",
+    "rest:prefer:missing=default": "tested",
+    "rest:prefer:missing=null": "tested",
+    "rest:prefer:resolution=ignore-duplicates": "tested",
+    "rest:prefer:resolution=merge-duplicates": "tested",
     "rest:prefer:return=headers-only": "tested",
     "rest:prefer:return=minimal": "tested",
     "rest:prefer:return=representation": "tested",

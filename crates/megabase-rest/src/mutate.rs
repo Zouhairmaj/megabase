@@ -235,6 +235,13 @@ pub(crate) async fn mutate(
     } else {
         Vec::new()
     };
+    // Without a conflict target the statement has no `ON CONFLICT`, so there is
+    // no upsert to track (and a view has no `xmax` to read).
+    let tracked = if conflict.is_empty() {
+        None
+    } else {
+        prefer.resolution
+    };
     let options = WriteOptions {
         resolution: prefer.resolution,
         conflict: &conflict,
@@ -245,7 +252,7 @@ pub(crate) async fn mutate(
         Kind::Update if keys.is_empty() => MutationSql {
             sql: format!(
                 "WITH mutated AS (SELECT {} FROM {}.{} WHERE false)",
-                returning(relation, &kind, &column_types, &ret),
+                returning(relation, &kind, prefer.resolution, &column_types, &ret),
                 quote_ident(schema),
                 quote_ident(relation)
             ),
@@ -289,7 +296,15 @@ pub(crate) async fn mutate(
     {
         return *response;
     }
-    finish_sql(&mut built, relation, query, &column_types, &ret, &kind);
+    finish_sql(
+        &mut built,
+        relation,
+        query,
+        &column_types,
+        &ret,
+        &kind,
+        tracked,
+    );
     let mut statement =
         sqlx::query_as::<sqlx::Postgres, (i64, i64, String, Option<String>)>(&built.sql);
     for param in &built.params {
@@ -339,6 +354,7 @@ pub(crate) async fn mutate(
         schema,
         relation,
         prefer.representation,
+        tracked,
     );
     let applied = prefer.applied(Scope {
         resolution: matches!(kind, Kind::Create) && !conflict.is_empty(),
@@ -444,11 +460,26 @@ enum Ret {
 /// prefixed like the other generated names.
 const INSERTED: &str = "_megabase_inserted";
 
+/// Whether the response status depends on how many rows were inserted.
+///
+/// `Response.hs`: a `PUT` upsert and a `POST` with `resolution=merge-duplicates`
+/// answer `200` when the write only updated existing rows.
+fn tracks_inserts(kind: &Kind, resolution: Option<Resolution>) -> bool {
+    matches!(kind, Kind::Upsert)
+        || (matches!(kind, Kind::Create) && resolution == Some(Resolution::Merge))
+}
+
 /// `RETURNING` list for `ret`.
 ///
 /// Only a full upsert reads `xmax` to tell inserted rows from updated ones. A
 /// view has no such system column.
-fn returning(relation: &str, kind: &Kind, column_types: &[(&str, &str)], ret: &Ret) -> String {
+fn returning(
+    relation: &str,
+    kind: &Kind,
+    resolution: Option<Resolution>,
+    column_types: &[(&str, &str)],
+    ret: &Ret,
+) -> String {
     let table = quote_ident(relation);
     match ret {
         Ret::One => "1".to_string(),
@@ -466,7 +497,7 @@ fn returning(relation: &str, kind: &Kind, column_types: &[(&str, &str)], ret: &R
                     .map(|(name, _)| format!("{table}.{}", quote_ident(name)))
                     .collect()
             };
-            if matches!(kind, Kind::Upsert) {
+            if tracks_inserts(kind, resolution) {
                 parts.push(format!("({table}.xmax = 0) AS {INSERTED}"));
             }
             parts.join(", ")
@@ -484,6 +515,7 @@ fn finish_sql(
     column_types: &[(&str, &str)],
     ret: &Ret,
     kind: &Kind,
+    resolution: Option<Resolution>,
 ) {
     let (src, inserted, body, location) = match ret {
         Ret::One => (
@@ -530,7 +562,7 @@ fn finish_sql(
                 )
             };
             let select = query.representation_select("_megabase_src", relation, &mut built.params);
-            let inserted = if matches!(kind, Kind::Upsert) {
+            let inserted = if tracks_inserts(kind, resolution) {
                 format!("(SELECT count(*) FROM mutated WHERE {INSERTED})::bigint")
             } else {
                 "0::bigint".to_string()
@@ -559,9 +591,13 @@ fn mutation_response(
     schema: &str,
     relation: &str,
     representation: Option<Representation>,
+    resolution: Option<Resolution>,
 ) -> Response {
     let full = representation == Some(Representation::Full);
     let (status, range) = match kind {
+        Kind::Create if full && tracks_inserts(kind, resolution) && outcome.inserted <= 0 => {
+            (StatusCode::OK, Some("*/*".to_string()))
+        }
         Kind::Create => (StatusCode::CREATED, Some("*/*".to_string())),
         Kind::Update if full => (StatusCode::OK, Some(content_range(0, outcome.count))),
         Kind::Update => (
@@ -767,7 +803,13 @@ fn write_sql(
             }
             sql.push_str(&format!(
                 " RETURNING {})",
-                returning(relation, kind, column_types, ret)
+                returning(
+                    relation,
+                    kind,
+                    options.resolution.filter(|_| !options.conflict.is_empty()),
+                    column_types,
+                    ret
+                )
             ));
             sql
         }
@@ -792,7 +834,7 @@ fn write_sql(
             }
             sql.push_str(&format!(
                 " RETURNING {})",
-                returning(relation, kind, column_types, ret)
+                returning(relation, kind, options.resolution, column_types, ret)
             ));
             sql
         }
@@ -821,7 +863,7 @@ fn delete_sql(
     };
     sql.push_str(&format!(
         " RETURNING {})",
-        returning(relation, &Kind::Delete, column_types, ret)
+        returning(relation, &Kind::Delete, None, column_types, ret)
     ));
     Ok(MutationSql { sql, params })
 }
@@ -1161,6 +1203,7 @@ mod tests {
                 "public",
                 "todos",
                 Some(Representation::Full),
+                None,
             );
             assert_eq!(full.status(), status);
             assert_eq!(
@@ -1175,6 +1218,7 @@ mod tests {
             "public",
             "todos",
             Some(Representation::Full),
+            None,
         );
         assert_eq!(upsert_new.status(), StatusCode::CREATED);
         let upsert_old = mutation_response(
@@ -1183,8 +1227,49 @@ mod tests {
             "public",
             "todos",
             Some(Representation::Full),
+            None,
         );
         assert_eq!(upsert_old.status(), StatusCode::OK);
+    }
+
+    #[test]
+    fn merge_duplicates_create_answers_200_when_nothing_was_inserted() {
+        let status = |resolution, inserted| {
+            mutation_response(
+                &Kind::Create,
+                &outcome(1, inserted),
+                "public",
+                "todos",
+                Some(Representation::Full),
+                resolution,
+            )
+            .status()
+        };
+        assert_eq!(status(Some(Resolution::Merge), 0), StatusCode::OK);
+        assert_eq!(status(Some(Resolution::Merge), 1), StatusCode::CREATED);
+        assert_eq!(status(Some(Resolution::Ignore), 0), StatusCode::CREATED);
+        assert_eq!(status(None, 0), StatusCode::CREATED);
+    }
+
+    #[test]
+    fn merge_duplicates_without_conflict_target_skips_insert_tracking() {
+        let types = [("id", "int8")];
+        let sql = |conflict: &[String]| {
+            let options = WriteOptions {
+                resolution: Some(Resolution::Merge),
+                conflict,
+                defaults: &[],
+            };
+            returning(
+                "v",
+                &Kind::Create,
+                options.resolution.filter(|_| !options.conflict.is_empty()),
+                &types,
+                &Ret::Full,
+            )
+        };
+        assert!(!sql(&[]).contains("xmax"));
+        assert!(sql(&["id".to_string()]).contains("xmax"));
     }
 
     #[test]
@@ -1194,14 +1279,16 @@ mod tests {
             Some(Representation::Minimal),
             Some(Representation::HeadersOnly),
         ] {
-            let update = mutation_response(&Kind::Update, &outcome(2, 0), "public", "todos", rep);
+            let update =
+                mutation_response(&Kind::Update, &outcome(2, 0), "public", "todos", rep, None);
             assert_eq!(update.status(), StatusCode::NO_CONTENT);
             assert_eq!(
                 update.headers().get(header::CONTENT_RANGE),
                 Some(&HeaderValue::from_static("0-1/*"))
             );
             assert!(update.headers().get(header::CONTENT_TYPE).is_none());
-            let create = mutation_response(&Kind::Create, &outcome(1, 1), "public", "todos", rep);
+            let create =
+                mutation_response(&Kind::Create, &outcome(1, 1), "public", "todos", rep, None);
             assert_eq!(create.status(), StatusCode::CREATED);
             assert!(create.headers().get(header::CONTENT_TYPE).is_none());
         }
@@ -1232,6 +1319,7 @@ mod tests {
             &[("id", "bigint")],
             &Ret::Full,
             &Kind::Delete,
+            None,
         );
         assert!(built
             .sql
@@ -1249,6 +1337,7 @@ mod tests {
             &[("id", "bigint")],
             &Ret::Keys(vec!["id".to_string()]),
             &Kind::Create,
+            None,
         );
         assert!(keyed.sql.contains("ORDER BY k.ord"));
         assert!(keyed.sql.contains("ARRAY[$1]"));
@@ -1258,14 +1347,39 @@ mod tests {
     #[test]
     fn returning_names_columns_only_when_needed() {
         let columns = [("id", "bigint"), ("secret", "text")];
-        assert_eq!(returning("t", &Kind::Create, &columns, &Ret::One), "1");
         assert_eq!(
-            returning("t", &Kind::Create, &columns, &Ret::Keys(vec!["id".into()])),
+            returning("t", &Kind::Create, None, &columns, &Ret::One),
+            "1"
+        );
+        assert_eq!(
+            returning(
+                "t",
+                &Kind::Create,
+                None,
+                &columns,
+                &Ret::Keys(vec!["id".into()])
+            ),
             "\"t\".\"id\""
         );
-        let full = returning("t", &Kind::Upsert, &columns, &Ret::Full);
+        let full = returning("t", &Kind::Upsert, None, &columns, &Ret::Full);
         assert!(full.contains("\"t\".\"secret\""));
         assert!(full.contains("xmax = 0"));
+        let merged = returning(
+            "t",
+            &Kind::Create,
+            Some(Resolution::Merge),
+            &columns,
+            &Ret::Full,
+        );
+        assert!(merged.contains("xmax = 0"));
+        let ignored = returning(
+            "t",
+            &Kind::Create,
+            Some(Resolution::Ignore),
+            &columns,
+            &Ret::Full,
+        );
+        assert!(!ignored.contains("xmax"));
         let mut minimal = MutationSql {
             sql: "WITH mutated AS (DELETE FROM t RETURNING 1)".to_string(),
             params: Vec::new(),
@@ -1278,6 +1392,7 @@ mod tests {
             &columns,
             &Ret::One,
             &Kind::Delete,
+            None,
         );
         assert!(!minimal.sql.contains("_megabase_src"));
     }
