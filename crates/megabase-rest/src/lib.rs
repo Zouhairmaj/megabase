@@ -8,9 +8,12 @@
 //! [`specs/rest/query-params.md`](../../../specs/rest/query-params.md).
 //! RPC is specified in [`specs/rest/rpc.md`](../../../specs/rest/rpc.md).
 //! `Prefer` serves `return`, `timezone` and `tx`
-//! ([`specs/rest/prefer.md`](../../../specs/rest/prefer.md)). Embeds, the other
+//! ([`specs/rest/prefer.md`](../../../specs/rest/prefer.md)). A request with
+//! `Origin` gets PostgREST's CORS response headers
+//! ([`specs/rest/cors.md`](../../../specs/rest/cors.md)). Embeds, the other
 //! preferences, and the other media types return `MEGABASE_NOT_IMPLEMENTED`.
 
+mod cors;
 mod db;
 mod filter;
 mod hint;

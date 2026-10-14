@@ -35,7 +35,10 @@ pub(crate) const JSON_UTF8: &str = "application/json; charset=utf-8";
 const EXPOSED_SCHEMAS: &[&str] = &["public", "graphql_public"];
 
 pub(crate) fn router(state: RestState) -> Router {
-    Router::new().fallback(dispatch).with_state(state)
+    Router::new()
+        .fallback(dispatch)
+        .with_state(state)
+        .layer(axum::middleware::from_fn(crate::cors::postgrest_cors))
 }
 
 enum Target {
@@ -55,16 +58,9 @@ async fn dispatch(
 ) -> Response {
     let path = uri.path();
     let prefer = Prefer::from_headers(&headers);
-    let target = classify(path);
-    if method == Method::OPTIONS
-        && is_preflight(&headers)
-        && matches!(target, Target::Root | Target::Relation(_) | Target::Rpc(_))
-    {
-        // The gateway's CORS plugin answers a preflight before authentication
-        // and before PostgREST, so no `Allow` header is set.
-        return preflight_response();
-    }
-    match target {
+    // A CORS preflight never arrives here: the gateway's Kong `cors` layer in
+    // `megabase-server` answers it before authentication (`specs/rest/cors.md`).
+    match classify(path) {
         Target::Outside => not_implemented(&method, path),
         Target::Rpc(function) => {
             let mut response =
@@ -229,16 +225,14 @@ async fn relation_route(
     if let Err(response) = prefer.check_strict() {
         return *response;
     }
-    let shape = if matches!(*method, Method::GET | Method::HEAD) {
-        match negotiate_read(method, path, headers.get(header::ACCEPT)) {
-            Ok(shape) => shape,
-            Err(response) => return *response,
-        }
+    let negotiated = if matches!(*method, Method::GET | Method::HEAD) {
+        negotiate_read(method, path, headers.get(header::ACCEPT))
     } else {
-        if let Some(unit) = reject_accept(headers.get(header::ACCEPT)) {
-            return unimplemented_unit(method, path, unit);
-        }
-        None
+        negotiate_write(method, path, headers.get(header::ACCEPT))
+    };
+    let shape = match negotiated {
+        Ok(shape) => shape,
+        Err(response) => return *response,
     };
     if method == Method::GET && headers.get(header::RANGE).is_some() {
         return not_implemented(method, path);
@@ -297,6 +291,7 @@ async fn relation_route(
                 &prefer,
                 body,
                 headers.get(header::CONTENT_TYPE),
+                shape,
             )
             .await
         }
@@ -312,6 +307,7 @@ async fn relation_route(
                 &prefer,
                 body,
                 headers.get(header::CONTENT_TYPE),
+                shape,
             )
             .await
         }
@@ -327,6 +323,7 @@ async fn relation_route(
                 &prefer,
                 body,
                 headers.get(header::CONTENT_TYPE),
+                shape,
             )
             .await
         }
@@ -342,6 +339,7 @@ async fn relation_route(
                 &prefer,
                 body,
                 headers.get(header::CONTENT_TYPE),
+                shape,
             )
             .await
         }
@@ -471,17 +469,8 @@ async fn relation_options(state: &RestState, schema: &str, relation: &str, anon:
     options_response(&allow.join(","))
 }
 
-fn is_preflight(headers: &HeaderMap) -> bool {
-    headers.contains_key(header::ORIGIN)
-        && headers.contains_key(header::ACCESS_CONTROL_REQUEST_METHOD)
-}
-
-fn preflight_response() -> Response {
-    let mut response = options_response("");
-    response.headers_mut().remove(header::ALLOW);
-    response
-}
-
+/// `OPTIONS` reply: `Allow` and an empty body. `Access-Control-Allow-Origin`
+/// comes from the CORS layers (`crate::cors`, and Kong's at the gateway).
 pub(crate) fn options_response(allow: &str) -> Response {
     let mut response = Response::builder()
         .status(StatusCode::OK)
@@ -490,10 +479,6 @@ pub(crate) fn options_response(allow: &str) -> Response {
     if let Ok(value) = HeaderValue::from_str(allow) {
         response.headers_mut().insert(header::ALLOW, value);
     }
-    response.headers_mut().insert(
-        header::ACCESS_CONTROL_ALLOW_ORIGIN,
-        HeaderValue::from_static("*"),
-    );
     response
 }
 
@@ -630,6 +615,34 @@ fn jwt_failure(error: &JwtError) -> Response {
 /// [`reject_accept`]. When nothing is left the answer is 406 `PGRST107`, also
 /// for a header whose every type has `q=0`. `Ok(None)` is plain JSON.
 fn negotiate_read(
+    method: &Method,
+    path: &str,
+    value: Option<&axum::http::HeaderValue>,
+) -> Result<Option<ReadShape>, Box<Response>> {
+    negotiate_accept(method, path, value)
+}
+
+/// Negotiate `Accept` for a write or an RPC call.
+///
+/// `Plan.hs` runs the same `negotiateContent` for `mutateReadPlan` and
+/// `callReadPlan` as for a read, so the JSON shapes and the 406 apply alike.
+/// Only `text/csv` differs: its builtin handler is not served on these routes.
+pub(crate) fn negotiate_write(
+    method: &Method,
+    path: &str,
+    value: Option<&axum::http::HeaderValue>,
+) -> Result<Option<ReadShape>, Box<Response>> {
+    match negotiate_accept(method, path, value)? {
+        Some(ReadShape::Csv) => Err(Box::new(unimplemented_unit(
+            method,
+            path,
+            "rest:media-type:text/csv",
+        ))),
+        shape => Ok(shape),
+    }
+}
+
+fn negotiate_accept(
     method: &Method,
     path: &str,
     value: Option<&axum::http::HeaderValue>,
@@ -830,7 +843,8 @@ struct ReadMode {
     shape: Option<ReadShape>,
 }
 
-/// Response shape negotiated from `Accept` on GET and HEAD reads.
+/// Response shape negotiated from `Accept` on relation reads and writes and
+/// on RPC calls. Writes and RPC serve every shape but [`ReadShape::Csv`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ReadShape {
     Object,
@@ -881,8 +895,9 @@ fn preferred_accept(value: Option<&axum::http::HeaderValue>) -> Option<(String, 
     best.map(|(_, _, essence, stripped)| (essence, stripped))
 }
 
-/// The 406 `PGRST116` error for a singular read that matched `rows` rows.
-fn singular_check(rows: i64) -> Result<(), Box<Response>> {
+/// The 406 `PGRST116` error for a singular request that produced `rows` rows
+/// (`MainTx.hs` `failNotSingular`). The caller rolls its transaction back.
+pub(crate) fn singular_check(rows: i64) -> Result<(), Box<Response>> {
     if rows == 1 {
         return Ok(());
     }
@@ -920,11 +935,13 @@ impl ReadShape {
         }
     }
 
-    fn singular(self) -> bool {
+    /// Whether the body is one object and the row count must be exactly one.
+    pub(crate) fn singular(self) -> bool {
         matches!(self, Self::Object | Self::ObjectStripped)
     }
 
-    fn stripped(self) -> bool {
+    /// Whether `nulls=stripped` removes JSON `null` members.
+    pub(crate) fn stripped(self) -> bool {
         matches!(self, Self::ObjectStripped | Self::ArrayStripped)
     }
 
@@ -940,7 +957,7 @@ impl ReadShape {
     }
 
     /// `MediaType.hs` `toContentType`: the mime plus `; charset=utf-8`.
-    fn content_type(self) -> &'static str {
+    pub(crate) fn content_type(self) -> &'static str {
         match self {
             Self::Object => "application/vnd.pgrst.object+json; charset=utf-8",
             Self::ObjectStripped => {
@@ -2360,28 +2377,50 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn preflight_has_origin_and_no_allow() {
-        for path in ["/rest/v1/", "/rest/v1/todos", "/rest/v1/rpc/add"] {
+    async fn origin_adds_postgrest_cors_headers_to_every_route() {
+        for (method, path) in [
+            ("GET", "/rest/v1/todos"),
+            ("OPTIONS", "/rest/v1/"),
+            ("POST", "/rest/v1/rpc/add"),
+        ] {
             let app = router(RestState::from_config(&Config::default()));
             let request = Request::builder()
-                .method("OPTIONS")
+                .method(method)
                 .uri(path)
                 .header(header::ORIGIN, "http://localhost:3000")
-                .header(header::ACCESS_CONTROL_REQUEST_METHOD, "GET")
                 .body(Body::empty())
                 .unwrap();
             let response = app.oneshot(request).await.unwrap();
-            assert_eq!(response.status(), StatusCode::OK, "{path}");
-            assert!(response.headers().get(header::ALLOW).is_none(), "{path}");
             assert_eq!(
-                response
-                    .headers()
-                    .get(header::ACCESS_CONTROL_ALLOW_ORIGIN)
-                    .and_then(|value| value.to_str().ok()),
-                Some("*"),
-                "{path}"
+                response.headers()[header::ACCESS_CONTROL_ALLOW_ORIGIN],
+                "*",
+                "{method} {path}"
+            );
+            assert_eq!(
+                response.headers()[header::ACCESS_CONTROL_EXPOSE_HEADERS],
+                crate::cors::EXPOSED_HEADERS,
+                "{method} {path}"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn without_origin_postgrest_adds_no_cors_headers() {
+        let app = router(RestState::from_config(&Config::default()));
+        let request = Request::builder()
+            .method("OPTIONS")
+            .uri("/rest/v1/")
+            .body(Body::empty())
+            .unwrap();
+        let response = app.oneshot(request).await.unwrap();
+        assert!(response
+            .headers()
+            .get(header::ACCESS_CONTROL_ALLOW_ORIGIN)
+            .is_none());
+        assert!(response
+            .headers()
+            .get(header::ACCESS_CONTROL_EXPOSE_HEADERS)
+            .is_none());
     }
 
     fn admin_request(method: &str, uri: &str, body: Body) -> Request<Body> {
@@ -2430,21 +2469,62 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn write_object_accept_is_501() {
+    async fn write_object_accept_is_not_501() {
+        for method in ["POST", "PATCH", "PUT", "DELETE"] {
+            let app = router(RestState::from_config(&Config::default()));
+            let request = Request::builder()
+                .method(method)
+                .uri("/rest/v1/todos?id=eq.1")
+                .header(header::ACCEPT, "application/vnd.pgrst.object+json")
+                .header(header::CONTENT_TYPE, "application/json")
+                .header("prefer", "return=representation")
+                .body(Body::from(r#"{"id":1}"#))
+                .unwrap();
+            let (status, body, _) = send(app, request).await;
+            assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{method}");
+            assert_eq!(body["code"], "PGRST000", "{method}");
+        }
+    }
+
+    #[tokio::test]
+    async fn write_csv_accept_stays_501() {
         let app = router(RestState::from_config(&Config::default()));
         let request = Request::builder()
             .method("POST")
             .uri("/rest/v1/todos")
-            .header(header::ACCEPT, "application/vnd.pgrst.object+json")
+            .header(header::ACCEPT, "text/csv")
             .header(header::CONTENT_TYPE, "application/json")
             .body(Body::from(r#"{"id":1}"#))
             .unwrap();
         let (status, body, _) = send(app, request).await;
         assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
+        assert_eq!(body["unit"], "rest:media-type:text/csv");
+    }
+
+    #[test]
+    fn negotiate_write_keeps_json_shapes_and_rejects_csv() {
+        let hv = |text: &'static str| Some(HeaderValue::from_static(text));
+        let negotiate = |text: &'static str| {
+            negotiate_write(&Method::POST, "/rest/v1/todos", hv(text).as_ref())
+        };
+        assert_eq!(negotiate("application/json").unwrap(), None);
         assert_eq!(
-            body["unit"],
-            "rest:media-type:application/vnd.pgrst.object+json"
+            negotiate("application/vnd.pgrst.object+json").unwrap(),
+            Some(ReadShape::Object)
         );
+        assert_eq!(
+            negotiate("application/vnd.pgrst.object+json;nulls=stripped").unwrap(),
+            Some(ReadShape::ObjectStripped)
+        );
+        assert_eq!(
+            negotiate("application/vnd.pgrst.array+json;nulls=stripped").unwrap(),
+            Some(ReadShape::ArrayStripped)
+        );
+        let csv = negotiate("text/csv").unwrap_err();
+        assert_eq!(csv.status(), StatusCode::NOT_IMPLEMENTED);
+        // `negotiateContent` is shared with reads: no handler is 406.
+        let plain = negotiate("text/plain").unwrap_err();
+        assert_eq!(plain.status(), StatusCode::NOT_ACCEPTABLE);
     }
 
     #[tokio::test]

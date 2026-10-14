@@ -2013,3 +2013,96 @@ method = "POST"
 path = "/rest/v1/rpc/add_numbers"
 headers = { "Content-Type" = "application/octet-stream" }
 body = "raw bytes for the judge"
+
+[[case]]
+id = "rest.media.object.insert"
+description = "Singular object on a one-row insert with return=representation answers one object"
+units = ["rest:media-type:application/vnd.pgrst.object+json", "rest:prefer:return=representation"]
+[[case.step]]
+method = "DELETE"
+path = "/rest/v1/todos?id=eq.9321"
+key = "service_role"
+headers = { Prefer = "return=minimal" }
+[[case.step]]
+method = "POST"
+path = "/rest/v1/todos?select=id,title,done,priority"
+key = "service_role"
+headers = { Accept = "application/vnd.pgrst.object+json", Prefer = "return=representation" }
+json = { id = 9321, title = "singular-insert" }
+[[case.step]]
+method = "DELETE"
+path = "/rest/v1/todos?id=eq.9321"
+key = "service_role"
+headers = { Prefer = "return=minimal" }
+
+[[case]]
+id = "rest.media.object.delete"
+description = "Singular object on a one-row delete with return=representation answers the deleted row"
+units = ["rest:media-type:application/vnd.pgrst.object+json", "rest:prefer:return=representation"]
+[[case.step]]
+method = "DELETE"
+path = "/rest/v1/todos?id=eq.9323"
+key = "service_role"
+headers = { Prefer = "return=minimal" }
+[[case.step]]
+method = "POST"
+path = "/rest/v1/todos"
+key = "service_role"
+headers = { Prefer = "return=minimal" }
+json = { id = 9323, title = "singular-delete" }
+[[case.step]]
+method = "DELETE"
+path = "/rest/v1/todos?id=eq.9323&select=id,title"
+key = "service_role"
+headers = { Accept = "application/vnd.pgrst.object+json", Prefer = "return=representation" }
+
+[[case]]
+id = "rest.media.object.patch-no-rows"
+description = "Singular object on an update matching no row is 406 PGRST116"
+units = ["rest:media-type:application/vnd.pgrst.object+json"]
+[[case.step]]
+method = "PATCH"
+path = "/rest/v1/todos?id=eq.9322&select=id,title"
+key = "service_role"
+headers = { Accept = "application/vnd.pgrst.object+json", Prefer = "return=representation" }
+json = { title = "singular-missing" }
+
+[[case]]
+id = "rest.media.object.patch-two-rows-rolls-back"
+description = "Singular object on an update matching two rows is 406 PGRST116 and the rows stay unchanged"
+units = ["rest:media-type:application/vnd.pgrst.object+json"]
+[[case.step]]
+method = "PATCH"
+path = "/rest/v1/todos?id=in.(1,2)&select=id,title"
+key = "service_role"
+headers = { Accept = "application/vnd.pgrst.object+json", Prefer = "return=representation" }
+json = { title = "singular-rolled-back" }
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?title=eq.singular-rolled-back&select=id"
+key = "service_role"
+
+[[case]]
+id = "rest.media.object.patch-minimal-two-rows-rolls-back"
+description = "Singular object with return=minimal still needs exactly one affected row"
+units = ["rest:media-type:application/vnd.pgrst.object+json", "rest:prefer:return=minimal"]
+[[case.step]]
+method = "PATCH"
+path = "/rest/v1/todos?id=in.(1,2)"
+key = "service_role"
+headers = { Accept = "application/vnd.pgrst.object+json", Prefer = "return=minimal" }
+json = { title = "singular-minimal-rolled-back" }
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?title=eq.singular-minimal-rolled-back&select=id"
+key = "service_role"
+
+[[case]]
+id = "rest.media.object.rpc"
+description = "Singular object on an RPC scalar answers the value with the object media type"
+units = ["rest:media-type:application/vnd.pgrst.object+json", "rest:route:POST /rest/v1/rpc/{function}"]
+[[case.step]]
+method = "POST"
+path = "/rest/v1/rpc/add_numbers"
+headers = { Accept = "application/vnd.pgrst.object+json" }
+json = { a = 2, b = 3 }
