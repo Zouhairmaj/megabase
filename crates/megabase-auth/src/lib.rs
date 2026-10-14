@@ -8,7 +8,8 @@
 //! `POST /token` for the password and refresh-token grants. Issue #21
 //! serves `GET`/`POST /verify` for signup, invite, recovery, and email
 //! change. Issue #19 serves `GET` and `PUT /user`, identity authorize and
-//! unlink, and the OAuth grant list and revoke.
+//! unlink, and the OAuth grant list and revoke. Issue #339 runs the
+//! `pg-functions://` custom access token hook at every token issuance.
 //! Every other Auth path returns `MEGABASE_NOT_IMPLEMENTED`. Database objects
 //! listed in `specs/auth/database.md` are installed when `DATABASE_URL` is
 //! set, after the standard API roles in `specs/core/roles.md`.

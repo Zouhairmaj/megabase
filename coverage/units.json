@@ -83,9 +83,9 @@
       "license": "MIT"
     }
   ],
-  "total": 1024,
+  "total": 1031,
   "by_component": {
-    "auth": 152,
+    "auth": 159,
     "functions": 276,
     "meta": 69,
     "pooler": 16,
@@ -2496,6 +2496,97 @@
         "repo": "auth",
         "file": "internal/api/api.go",
         "line": 315
+      }
+    },
+    {
+      "id": "auth:hook:after_user_created",
+      "component": "auth",
+      "group": "hooks",
+      "kind": "hook",
+      "name": "after_user_created",
+      "level": 2,
+      "source": {
+        "repo": "auth",
+        "file": "internal/conf/configuration.go",
+        "line": 942
+      }
+    },
+    {
+      "id": "auth:hook:before_user_created",
+      "component": "auth",
+      "group": "hooks",
+      "kind": "hook",
+      "name": "before_user_created",
+      "level": 2,
+      "source": {
+        "repo": "auth",
+        "file": "internal/conf/configuration.go",
+        "line": 941
+      }
+    },
+    {
+      "id": "auth:hook:custom_access_token",
+      "component": "auth",
+      "group": "hooks",
+      "kind": "hook",
+      "name": "custom_access_token",
+      "level": 1,
+      "source": {
+        "repo": "auth",
+        "file": "internal/conf/configuration.go",
+        "line": 937
+      }
+    },
+    {
+      "id": "auth:hook:mfa_verification_attempt",
+      "component": "auth",
+      "group": "hooks",
+      "kind": "hook",
+      "name": "mfa_verification_attempt",
+      "level": 2,
+      "source": {
+        "repo": "auth",
+        "file": "internal/conf/configuration.go",
+        "line": 935
+      }
+    },
+    {
+      "id": "auth:hook:password_verification_attempt",
+      "component": "auth",
+      "group": "hooks",
+      "kind": "hook",
+      "name": "password_verification_attempt",
+      "level": 2,
+      "source": {
+        "repo": "auth",
+        "file": "internal/conf/configuration.go",
+        "line": 936
+      }
+    },
+    {
+      "id": "auth:hook:send_email",
+      "component": "auth",
+      "group": "hooks",
+      "kind": "hook",
+      "name": "send_email",
+      "level": 2,
+      "source": {
+        "repo": "auth",
+        "file": "internal/conf/configuration.go",
+        "line": 938
+      }
+    },
+    {
+      "id": "auth:hook:send_sms",
+      "component": "auth",
+      "group": "hooks",
+      "kind": "hook",
+      "name": "send_sms",
+      "level": 2,
+      "source": {
+        "repo": "auth",
+        "file": "internal/conf/configuration.go",
+        "line": 939
       }
     },
     {

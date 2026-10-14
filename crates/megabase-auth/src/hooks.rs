@@ -456,6 +456,7 @@ pub(crate) enum PgOutcome {
 ///
 /// A [`HookError`] with GoTrue's status and message. Every database error,
 /// including the ones around the call, is GoTrue's hook failure.
+// megabase:unit auth:hook:custom_access_token
 pub(crate) async fn run_pg(
     conn: &mut sqlx::PgConnection,
     call: &TokenHookCall<'_>,

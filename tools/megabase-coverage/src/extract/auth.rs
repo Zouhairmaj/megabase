@@ -49,7 +49,31 @@ pub fn extract(ctx: &mut Ctx, repo: &Repo) -> Result<()> {
     grant_types(ctx, repo)?;
     providers(ctx, repo)?;
     verify_types(ctx, repo)?;
+    hooks(ctx, repo)?;
     sql_objects(ctx, repo)?;
+    Ok(())
+}
+
+/// Auth hooks: one unit per `HookConfiguration` extensibility point.
+/// The custom access token hook is Level 1 (RBAC claims); the rest wait.
+fn hooks(ctx: &mut Ctx, repo: &Repo) -> Result<()> {
+    let file = "internal/conf/configuration.go";
+    let text = repo.read(file)?;
+    let (start, body) = function_body(&text, "type HookConfiguration struct")?;
+    let field_re = Regex::new(r#"ExtensibilityPointConfiguration\s+`json:"([a-z_]+)""#).unwrap();
+    let found: Vec<_> = field_re.captures_iter(body).collect();
+    for c in require(found, "auth hooks")? {
+        let name = c[1].to_string();
+        let level = if name == "custom_access_token" { 1 } else { 2 };
+        ctx.out.item(UnitSpec {
+            component: C,
+            group: "hooks",
+            kind: "hook",
+            name,
+            level,
+            source: repo.source(file, &text, start + c.get(0).unwrap().start()),
+        });
+    }
     Ok(())
 }
 
