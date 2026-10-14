@@ -19,11 +19,12 @@ use axum::response::{IntoResponse, Response};
 use serde_json::{Map, Value};
 
 use crate::filter::{parse_filter_value, quote_ident, sql_type_name, UnsafeType};
+use crate::params::parse_get_query;
 use crate::prefer::Prefer;
 use crate::query::percent_decode;
 use crate::read::{
     begin, content_range, database_unavailable, negotiated_schema, not_implemented,
-    options_response, pgrst, profile_header, query_failure, reject_accept, session,
+    options_response, pgrst, profile_header, query_fail, query_failure, reject_accept, session,
     set_request_context, unimplemented_unit, unsafe_type, Session, JSON_UTF8,
 };
 use crate::RestState;
@@ -327,7 +328,15 @@ async fn routine_options(
     function: &str,
 ) -> Response {
     let path = uri.path();
-    let keys = match get_arguments(uri.query().unwrap_or("")) {
+    let query = uri.query().unwrap_or("");
+    // PostgREST parses an OPTIONS query as read filters, not function
+    // arguments, so `a=4` is a PGRST100 parse error.
+    if !query.is_empty() {
+        if let Err(fail) = parse_get_query(query) {
+            return query_fail(method, path, fail);
+        }
+    }
+    let keys = match get_arguments(query) {
         Ok(values) => values.into_keys().collect(),
         Err(()) => return not_implemented(method, path),
     };
@@ -1432,6 +1441,14 @@ mod tests {
             .build()
             .unwrap();
         runtime.block_on(future).unwrap()
+    }
+
+    #[test]
+    fn options_query_with_bare_arguments_is_a_filter_parse_error() {
+        assert!(matches!(
+            parse_get_query("a=4&b=5"),
+            Err(crate::params::QueryFail::Parse { .. })
+        ));
     }
 
     #[test]
