@@ -56,5 +56,5 @@ JSON-path leaves (`data->a.eq.1`) stay 501
 
 ## Judge cases
 
-Not yet written. Judge cases are protected paths and go in a separate
-`review/issue-31-cases` PR.
+`judge/cases/rest.toml`, ids `rest.logic.*`: `and`, `or`, `not-or`,
+`not-and`, `leaf-not`, `nested`, `nested-not`, `empty-tree`, `unclosed`.

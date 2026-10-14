@@ -682,13 +682,22 @@ fn parse_order_value(input: &str) -> Result<Vec<OrderTerm>, QueryFail> {
     parse_order(input).map_err(|err| named_error("order", input, &err))
 }
 
+/// PostgREST echoes the value without its `not.` / `and` / `or` prefix.
+fn logic_echo(input: &str) -> &str {
+    let rest = input.strip_prefix("not.").unwrap_or(input);
+    rest.strip_prefix("and")
+        .or_else(|| rest.strip_prefix("or"))
+        .unwrap_or(rest)
+}
+
 fn parse_logic_tree(input: &str) -> Result<LogicNode, QueryFail> {
+    let echo = logic_echo(input);
     let mut at = At::start(input);
-    let node = logic_tree(&mut at).map_err(|err| named_error("logic tree", input, &err))?;
+    let node = logic_tree(&mut at).map_err(|err| named_error("logic tree", echo, &err))?;
     let at = skip_ws(&at);
     if !at.eof() {
         let err = char_err(&at, "end of input");
-        return Err(named_error("logic tree", input, &err));
+        return Err(named_error("logic tree", echo, &err));
     }
     Ok(node)
 }
@@ -1198,7 +1207,17 @@ fn logic_tree<'a>(at: &mut At<'a>) -> Result<LogicNode, PErr> {
             *at = saved;
             match logic_expr(at) {
                 Ok(node) => Ok(node),
-                Err(expr_err) => Err(merge(filter_err, expr_err)),
+                Err(expr_err) => {
+                    // Both alternatives failed at the same spot: PostgREST quotes with `show`.
+                    let same_spot =
+                        (filter_err.line, filter_err.col) == (expr_err.line, expr_err.col);
+                    let unexpected = expr_err.unexpected.clone();
+                    let mut merged = merge(filter_err, expr_err);
+                    if same_spot {
+                        merged.unexpected = unexpected;
+                    }
+                    Err(merged)
+                }
             }
         }
     }
@@ -1225,12 +1244,19 @@ fn logic_expr<'a>(at: &mut At<'a>) -> Result<LogicNode, PErr> {
             line: at.line,
             col: at.col,
             unexpected: at.peek().map(show_string_char).unwrap_or_default(),
-            expects: vec!["logic operator (and, or)".to_string()],
+            expects: if negated {
+                vec!["logic operator (and, or)".to_string()]
+            } else {
+                vec![
+                    "negation operator (not)".to_string(),
+                    "logic operator (and, or)".to_string(),
+                ]
+            },
         });
     };
     at_skip(at);
     if at.peek() != Some('(') {
-        return Err(char_err(at, "\"(\""));
+        return Err(string_char_err(at, &["\"(\""]));
     }
     *at = at.bump('(');
     let mut children = Vec::new();
@@ -1246,7 +1272,7 @@ fn logic_expr<'a>(at: &mut At<'a>) -> Result<LogicNode, PErr> {
             *at = at.bump(')');
             break;
         }
-        return Err(char_err(at, "\")\""));
+        return Err(string_char_err(at, &["\",\"", "\")\""]));
     }
     if children.is_empty() {
         return Err(char_err(at, "field name (* or [a..z0..9_$])"));
@@ -1592,6 +1618,16 @@ fn char_err<'a>(at: &At<'a>, expect: &str) -> PErr {
         col: at.col,
         unexpected: at.peek().map(show_haskell_char).unwrap_or_default(),
         expects: vec![expect.to_string()],
+    }
+}
+
+/// Like `char_err`, but the unexpected character is quoted as a Haskell string char.
+fn string_char_err<'a>(at: &At<'a>, expects: &[&str]) -> PErr {
+    PErr {
+        line: at.line,
+        col: at.col,
+        unexpected: at.peek().map(show_string_char).unwrap_or_default(),
+        expects: expects.iter().map(|item| (*item).to_string()).collect(),
     }
 }
 
@@ -2518,6 +2554,58 @@ mod tests {
             parse_get_query("and=(id.eq.1").unwrap_err(),
             QueryFail::Parse { .. }
         ));
+    }
+
+    #[test]
+    fn logic_leaf_not_and_negated_groups_render_sql() {
+        let query = parse_get_query("or=(id.not.eq.1,and(priority.gt.1,done.is.null))").unwrap();
+        let sql = build_read_sql("public", "todos", &query, &[], &HashMap::new()).unwrap();
+        assert!(
+            sql.sql.contains(concat!(
+                r#" WHERE (NOT "todos"."id" = $1 OR ("todos"."priority" > $2 "#,
+                r#"AND "todos"."done" IS NULL))"#,
+            )),
+            "{}",
+            sql.sql
+        );
+        assert_eq!(sql.params, vec!["1", "1"]);
+
+        let query = parse_get_query("not.and=(id.eq.1,id.eq.2)").unwrap();
+        let sql = build_read_sql("public", "todos", &query, &[], &HashMap::new()).unwrap();
+        assert!(sql.sql.contains(" WHERE NOT ("), "{}", sql.sql);
+        assert_eq!(sql.params, vec!["1", "2"]);
+
+        for bad in ["or=(id.eq.1,)", "not.or=()", "or=(id.nope.1)"] {
+            assert!(
+                matches!(parse_get_query(bad).unwrap_err(), QueryFail::Parse { .. }),
+                "{bad}"
+            );
+        }
+    }
+
+    #[test]
+    fn logic_parse_errors_match_postgrest_text() {
+        let cases = [
+            (
+                "or=()",
+                "\"failed to parse logic tree (())\" (line 1, column 4)",
+                "unexpected \")\" expecting field name (* or [a..z0..9_$]), negation operator (not) or logic operator (and, or)",
+            ),
+            (
+                "and=(id.eq.1",
+                "\"failed to parse logic tree ((id.eq.1)\" (line 1, column 12)",
+                "unexpected end of input expecting \",\" or \")\"",
+            ),
+        ];
+        for (input, want_message, want_details) in cases {
+            match parse_get_query(input).unwrap_err() {
+                QueryFail::Parse { message, details } => {
+                    assert_eq!(message, want_message, "{input}");
+                    assert_eq!(details, want_details, "{input}");
+                }
+                other => panic!("{input}: {other:?}"),
+            }
+        }
     }
 
     #[test]

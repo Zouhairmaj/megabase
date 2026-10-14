@@ -1518,6 +1518,78 @@ method = "GET"
 path = "/rest/v1/todos?select=id,title,priority&order=done.desc,priority.asc"
 
 [[case]]
+id = "rest.logic.and"
+description = "and=(...) keeps rows matching every filter"
+units = ["rest:logic-operator:and"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?and=(done.eq.false,priority.gte.2)&order=id"
+
+[[case]]
+id = "rest.logic.or"
+description = "or=(...) keeps rows matching either filter"
+units = ["rest:logic-operator:or"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?or=(priority.eq.1,priority.eq.3)&order=id"
+
+[[case]]
+id = "rest.logic.not-or"
+description = "not.or=(...) negates the whole group"
+units = ["rest:logic-operator:or", "rest:logic-operator:not"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?not.or=(id.eq.1,id.eq.2)&order=id"
+
+[[case]]
+id = "rest.logic.not-and"
+description = "not.and=(...) negates the whole group"
+units = ["rest:logic-operator:and", "rest:logic-operator:not"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?not.and=(done.eq.true,priority.gte.2)&order=id"
+
+[[case]]
+id = "rest.logic.leaf-not"
+description = "A leaf inside a group may be negated with not.<op>"
+units = ["rest:logic-operator:or", "rest:logic-operator:not"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?or=(id.not.eq.1,priority.eq.2)&order=id"
+
+[[case]]
+id = "rest.logic.nested"
+description = "Nested and/or trees evaluate as a boolean tree"
+units = ["rest:logic-operator:or", "rest:logic-operator:and"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?or=(id.eq.1,and(done.eq.false,priority.gt.1))&order=id"
+
+[[case]]
+id = "rest.logic.nested-not"
+description = "A negated nested group inside or"
+units = ["rest:logic-operator:or", "rest:logic-operator:and", "rest:logic-operator:not"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?or=(id.eq.1,not.and(done.eq.false,priority.gt.1))&order=id"
+
+[[case]]
+id = "rest.logic.empty-tree"
+description = "An empty logic tree is a PGRST100 parse error"
+units = ["rest:logic-operator:or"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?or=()"
+
+[[case]]
+id = "rest.logic.unclosed"
+description = "A logic tree missing its closing parenthesis is a parse error"
+units = ["rest:logic-operator:and"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?and=(id.eq.1"
+
+[[case]]
 id = "rest.embed.left-one-to-many"
 description = "A left embed keeps every parent row and returns [] when no child matches"
 units = ["rest:route:GET /rest/v1/{relation}", "rest:query-param:select", "rest:embed-join:left"]
