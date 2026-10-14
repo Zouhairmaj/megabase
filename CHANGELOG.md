@@ -4,6 +4,13 @@ All notable changes to Megabase are documented in this file.
 The format is produced by [release-please](https://github.com/googleapis/release-please).
 Sections: Features, Bug Fixes, Performance, Conformance/judge, Documentation.
 
+## [0.1.25](https://github.com/Zouhairmaj/megabase/compare/v0.1.24...v0.1.25) (2026-10-14)
+
+
+### Features
+
+* **rest:** serve application/geo+json and application/octet-stream media types ([#328](https://github.com/Zouhairmaj/megabase/issues/328)) ([e9ffa29](https://github.com/Zouhairmaj/megabase/commit/e9ffa29c7e8b331161cf3873ea8107d84391dd0f))
+
 ## [0.1.24](https://github.com/Zouhairmaj/megabase/compare/v0.1.23...v0.1.24) (2026-10-14)
 
 
