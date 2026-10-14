@@ -9,9 +9,10 @@ Issue #316. GoTrue decodes request bodies with Go's `encoding/json`, where
 `gotrue_meta_security` objects on `signUp`, `updateUser` and similar calls,
 so Megabase must accept them.
 
-Every non-`Option` field of an Auth request struct uses
-`#[serde(default, deserialize_with = "null_as_default")]`
-(`crates/megabase-auth/src/token.rs`): an explicit `null` and a missing key
+Every non-`Option` field of an Auth request struct either uses
+`#[serde(default, deserialize_with = "null_as_default")]` or, for
+`ResendBody`, is filled by its custom `Deserialize` impl, which calls the same
+helper (`crates/megabase-auth/src/token.rs`): an explicit `null` and a missing key
 both yield `Default::default()` (empty string, empty list or map). This
 covers `/token`, `/recover`, `/resend`, `/signup`, `POST /verify`,
 `PUT /user` and the admin link, OAuth-client and custom-provider bodies.

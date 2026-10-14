@@ -831,6 +831,23 @@ path = "/auth/v1/user"
 headers = { Authorization = "Bearer {{token}}", "Content-Type" = "application/json;charset=UTF-8", "X-Client-Info" = "supabase-js-node/2.49.1" }
 body = '{"data":{"name":"Grace"},"code_challenge":null,"code_challenge_method":null}'
 
+# Go decodes `null` into the zero value, so null email/phone/nonce/channel are
+# "not provided" and only the metadata changes.
+[[case]]
+id = "auth.user.put.null-update-fields"
+description = "PUT /user reads null email, phone, nonce and channel as absent and still merges metadata"
+units = ["auth:route:PUT /auth/v1/user"]
+[[case.step]]
+method = "POST"
+path = "/auth/v1/signup"
+json = { email = "judge-putnullfields-{{run}}@example.com", password = "judge-password-1" }
+capture = { token = "/access_token" }
+[[case.step]]
+method = "PUT"
+path = "/auth/v1/user"
+headers = { Authorization = "Bearer {{token}}", "Content-Type" = "application/json" }
+body = '{"email":null,"phone":null,"nonce":null,"channel":null,"data":{"name":"Grace"}}'
+
 [[case]]
 id = "auth.user.put-same-password"
 description = "PUT /user rejects a password equal to the stored hash"
