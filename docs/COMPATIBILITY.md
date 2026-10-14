@@ -113,11 +113,11 @@ Implemented and tested counts come from markers and `judge/cases/`. Live conform
 | Auth | verify | 1–2 | 10 | 6 | 6 |
 | Auth | well-known | 2 | 3 | 0 | 0 |
 | Realtime | client-events | 3 | 3 | 0 | 0 |
-| Realtime | http-api | 3 | 3 | 0 | 0 |
+| Realtime | http-api | 3 | 3 | 1 | 1 |
 | Realtime | protocol | 3 | 6 | 0 | 0 |
 | Realtime | server-events | 3 | 6 | 0 | 0 |
 | Realtime | websocket | 3 | 1 | 0 | 0 |
-| Storage | bucket | 2 | 6 | 0 | 0 |
+| Storage | bucket | 2 | 6 | 2 | 2 |
 | Storage | cdn | 2 | 3 | 0 | 0 |
 | Storage | database | 2 | 46 | 0 | 0 |
 | Storage | health | 2 | 1 | 0 | 0 |
@@ -141,7 +141,7 @@ Implemented and tested counts come from markers and `judge/cases/`. Live conform
 | Pooler | tenants | 4 | 7 | 0 | 0 |
 | Meta | column-privileges | 4 | 3 | 0 | 0 |
 | Meta | columns | 4 | 5 | 0 | 0 |
-| Meta | endpoints | 4 | 14 | 0 | 0 |
+| Meta | endpoints | 4 | 14 | 2 | 2 |
 | Meta | extensions | 4 | 5 | 0 | 0 |
 | Meta | functions | 4 | 5 | 0 | 0 |
 | Meta | policies | 4 | 5 | 0 | 0 |

@@ -17,7 +17,12 @@ async fn send(
     path: &str,
     headers: &[(&str, &str)],
 ) -> (StatusCode, HeaderMap, Vec<u8>) {
-    let mut builder = Request::builder().method(method).uri(path);
+    // A client key, so Kong's `key-auth` (which runs after `cors`) lets the
+    // request through; it is not a service-role key.
+    let mut builder = Request::builder()
+        .method(method)
+        .uri(path)
+        .header("apikey", "anon-key");
     for (name, value) in headers {
         builder = builder.header(*name, *value);
     }
@@ -229,7 +234,13 @@ async fn kong_services_without_the_plugin_get_no_cors_answer() {
         "/mcp",
     ] {
         let (status, headers, _) = send("OPTIONS", path, BROWSER_PREFLIGHT).await;
-        assert_eq!(status, StatusCode::NOT_IMPLEMENTED, "{path}");
+        // `/pg/` admits only the admin ACL group, so a client key is Kong's 403.
+        let expected = if path.starts_with("/pg/") {
+            StatusCode::FORBIDDEN
+        } else {
+            StatusCode::NOT_IMPLEMENTED
+        };
+        assert_eq!(status, expected, "{path}");
         assert!(
             headers.get(header::ACCESS_CONTROL_ALLOW_ORIGIN).is_none(),
             "{path}"

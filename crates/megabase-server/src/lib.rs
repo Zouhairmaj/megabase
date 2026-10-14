@@ -17,6 +17,7 @@ use axum::{
     Json, Router,
 };
 mod cors;
+mod key_auth;
 mod layers;
 
 use megabase_core::Config;
@@ -24,6 +25,8 @@ use tower::ServiceExt;
 use tracing::info;
 
 pub use cors::{cors_applies, CORS_ALLOW_METHODS, ROUTES_WITHOUT_CORS};
+use key_auth::reject_missing_key;
+pub use key_auth::{key_auth_applies, KEY_AUTH_EXEMPT_ROUTES, KEY_AUTH_ROUTES};
 use layers::apply_http_layers;
 
 /// Megabase's own liveness probe. The `/_megabase` prefix is not used by any
@@ -83,19 +86,27 @@ struct Gateway {
     fallback: Router,
 }
 
-fn component_router(
-    component: &str,
-    auth: &megabase_auth::AuthState,
-    rest: &megabase_rest::RestState,
-) -> Router {
-    match component {
-        megabase_auth::COMPONENT => megabase_auth::router_with_state(auth.clone()),
-        megabase_rest::COMPONENT => megabase_rest::router(rest.clone()),
-        megabase_realtime::COMPONENT => megabase_realtime::router(),
-        megabase_storage::COMPONENT => megabase_storage::router(),
-        megabase_functions::COMPONENT => megabase_functions::router(),
-        megabase_meta::COMPONENT => megabase_meta::router(),
-        _ => megabase_studio::router(),
+/// Per-component state the gateway hands to each router.
+struct Services<'a> {
+    auth: &'a megabase_auth::AuthState,
+    rest: &'a megabase_rest::RestState,
+    meta: &'a megabase_meta::MetaState,
+    storage: &'a megabase_storage::StorageState,
+}
+
+impl Services<'_> {
+    fn router(&self, component: &str) -> Router {
+        match component {
+            megabase_auth::COMPONENT => megabase_auth::router_with_state(self.auth.clone()),
+            megabase_rest::COMPONENT => megabase_rest::router(self.rest.clone()),
+            megabase_realtime::COMPONENT => megabase_realtime::router(),
+            megabase_storage::COMPONENT => {
+                megabase_storage::router_with_state(self.storage.clone())
+            }
+            megabase_functions::COMPONENT => megabase_functions::router(),
+            megabase_meta::COMPONENT => megabase_meta::router_with_state(self.meta.clone()),
+            _ => megabase_studio::router(),
+        }
     }
 }
 
@@ -118,23 +129,25 @@ pub fn create_router_with(auth: &megabase_auth::AuthState) -> Router {
 /// Gateway plus the production tower-http stack from `config`.
 pub fn create_router_from(auth: &megabase_auth::AuthState, config: &Config) -> Router {
     let rest = megabase_rest::RestState::from_config(config);
-    create_router_with_rest(auth, config, &rest)
+    let meta = megabase_meta::MetaState::new(None, config.jwt_hs256().ok());
+    let storage = megabase_storage::StorageState::new(None, config.jwt_hs256().ok());
+    apply_http_layers(
+        assemble(&Services {
+            auth,
+            rest: &rest,
+            meta: &meta,
+            storage: &storage,
+        }),
+        config,
+    )
 }
 
-fn create_router_with_rest(
-    auth: &megabase_auth::AuthState,
-    config: &Config,
-    rest: &megabase_rest::RestState,
-) -> Router {
-    apply_http_layers(assemble(auth, rest), config)
-}
-
-fn assemble(auth: &megabase_auth::AuthState, rest: &megabase_rest::RestState) -> Router {
+fn assemble(services: &Services<'_>) -> Router {
     let gateway = Gateway {
         routes: Arc::new(
             GATEWAY_ROUTES
                 .iter()
-                .map(|(prefix, component)| (*prefix, component_router(component, auth, rest)))
+                .map(|(prefix, component)| (*prefix, services.router(component)))
                 .collect(),
         ),
         fallback: megabase_studio::router(),
@@ -147,6 +160,9 @@ fn assemble(auth: &megabase_auth::AuthState, rest: &megabase_rest::RestState) ->
 
 async fn dispatch(State(gateway): State<Gateway>, request: Request) -> Response {
     let path = request.uri().path();
+    if let Some(rejection) = reject_missing_key(path, request.uri().query(), request.headers()) {
+        return rejection;
+    }
     let router = match_gateway_route(path)
         .and_then(|(prefix, _)| {
             gateway
@@ -190,23 +206,36 @@ pub async fn run(config: Config) -> std::io::Result<()> {
         info!("DATABASE_URL unset; skipping role and auth schema install");
     }
     let mut rest = megabase_rest::RestState::from_config(&config);
+    // REST, Postgres Meta and Storage share one pool; each request that
+    // changes session state does so with `SET LOCAL` inside a transaction.
+    let mut pool = None;
     if let Some(url) = config.database_url.as_deref() {
         info!("connecting rest pool");
-        let pool = megabase_rest::connect(url)
+        let shared = megabase_rest::connect(url)
             .await
             .map_err(std::io::Error::other)?;
-        rest = rest.with_pool(pool);
+        info!("installing storage bucket schema");
+        megabase_storage::install_schema(&shared)
+            .await
+            .map_err(std::io::Error::other)?;
+        rest = rest.with_pool(shared.clone());
+        pool = Some(shared);
     }
+    let meta = megabase_meta::MetaState::new(pool.clone(), config.jwt_hs256().ok());
+    let storage = megabase_storage::StorageState::new(pool, config.jwt_hs256().ok());
     let addr = config.bind_address();
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     info!("megabase listening on {}", listener.local_addr()?);
-    serve_until_drained(
-        listener,
-        create_router_with_rest(&auth, &config, &rest),
-        shutdown_signal(),
-        SHUTDOWN_DRAIN,
-    )
-    .await?;
+    let app = apply_http_layers(
+        assemble(&Services {
+            auth: &auth,
+            rest: &rest,
+            meta: &meta,
+            storage: &storage,
+        }),
+        &config,
+    );
+    serve_until_drained(listener, app, shutdown_signal(), SHUTDOWN_DRAIN).await?;
     auth.backend.close().await;
     rest.close().await;
     info!("megabase stopped");

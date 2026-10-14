@@ -40,10 +40,11 @@ pub struct AuthState {
     pub cursor_pagination: bool,
     /// Signup and settings flags. Unset `GOTRUE_*` follows the reference stack.
     pub config: AuthConfig,
-    /// `GOTRUE_RATE_LIMIT_HEADER`. Empty (the default) turns the limiters off.
+    /// `GOTRUE_RATE_LIMIT_HEADER`; unset is the reference stack's header.
+    /// Set it empty to turn the limiters off.
     pub rate_limit_header: String,
-    /// Token-grant limiter: `GOTRUE_RATE_LIMIT_TOKEN_REFRESH` (default 150)
-    /// per five minutes, burst 30, one bucket per header value.
+    /// Token-grant limiter: `GOTRUE_RATE_LIMIT_TOKEN_REFRESH` (reference
+    /// stack default 1) per five minutes, burst 30, one bucket per header value.
     pub(crate) token_limiter: Arc<KeyedLimiter>,
     /// Shared Auth pool. `try_from_env` leaves this empty. `megabase_server::run`
     /// replaces it with `Backend::connect` before `router_with_state`, and
@@ -106,7 +107,8 @@ impl AuthState {
                 false,
             ),
             config,
-            rate_limit_header: lookup("GOTRUE_RATE_LIMIT_HEADER").unwrap_or_default(),
+            rate_limit_header: lookup("GOTRUE_RATE_LIMIT_HEADER")
+                .unwrap_or_else(|| REFERENCE_RATE_LIMIT_HEADER.into()),
             token_limiter: Arc::new(KeyedLimiter::new(
                 token_refresh_rate(lookup("GOTRUE_RATE_LIMIT_TOKEN_REFRESH").as_deref())?
                     / (60.0 * 5.0),
@@ -155,9 +157,19 @@ impl AuthState {
     }
 }
 
+/// `GOTRUE_RATE_LIMIT_HEADER` of the reference stack
+/// (`judge/compose.override.yml`). Like the other unset `GOTRUE_*` defaults
+/// in [`crate::AuthConfig`], an unset variable follows that stack rather than
+/// GoTrue's empty default. Requests without the header are never limited.
+const REFERENCE_RATE_LIMIT_HEADER: &str = "X-Megabase-Judge-Rate-Key";
+
+/// `GOTRUE_RATE_LIMIT_TOKEN_REFRESH` of the reference stack, which lowers
+/// GoTrue's default of 150 so the burst cannot refill during a slow run.
+const REFERENCE_TOKEN_REFRESH_RATE: f64 = 1.0;
+
 fn token_refresh_rate(raw: Option<&str>) -> Result<f64, ConfigError> {
     let Some(raw) = raw.filter(|value| !value.is_empty()) else {
-        return Ok(150.0);
+        return Ok(REFERENCE_TOKEN_REFRESH_RATE);
     };
     raw.parse::<f64>()
         .ok()
@@ -345,5 +357,18 @@ mod tests {
             _ => None,
         });
         assert_eq!(from_docker.uri_allow_list, ["https://preview.example/**"]);
+    }
+
+    #[test]
+    fn unset_rate_limit_settings_follow_the_reference_stack() {
+        assert_eq!(
+            AuthState::reference().rate_limit_header,
+            REFERENCE_RATE_LIMIT_HEADER
+        );
+        assert_eq!(token_refresh_rate(None).unwrap(), 1.0);
+        assert_eq!(token_refresh_rate(Some("150")).unwrap(), 150.0);
+        let off =
+            AuthState::from_lookup(|key| (key == "GOTRUE_RATE_LIMIT_HEADER").then(String::new));
+        assert_eq!(off.rate_limit_header, "");
     }
 }

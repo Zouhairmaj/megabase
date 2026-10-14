@@ -2,12 +2,12 @@
   "schema": 1,
   "totals": {
     "units": 1031,
-    "implemented": 173,
-    "tested": 172,
+    "implemented": 178,
+    "tested": 177,
     "conformant": 0
   },
   "percent": {
-    "coverage": 16.8,
+    "coverage": 17.3,
     "conformance": 0.0,
     "done": 0.0
   },
@@ -166,8 +166,8 @@
     },
     "meta": {
       "units": 69,
-      "implemented": 0,
-      "tested": 0,
+      "implemented": 2,
+      "tested": 2,
       "conformant": 0,
       "groups": {
         "column-privileges": {
@@ -184,8 +184,8 @@
         },
         "endpoints": {
           "units": 14,
-          "implemented": 0,
-          "tested": 0,
+          "implemented": 2,
+          "tested": 2,
           "conformant": 0
         },
         "extensions": {
@@ -284,8 +284,8 @@
     },
     "realtime": {
       "units": 19,
-      "implemented": 0,
-      "tested": 0,
+      "implemented": 1,
+      "tested": 1,
       "conformant": 0,
       "groups": {
         "client-events": {
@@ -296,8 +296,8 @@
         },
         "http-api": {
           "units": 3,
-          "implemented": 0,
-          "tested": 0,
+          "implemented": 1,
+          "tested": 1,
           "conformant": 0
         },
         "protocol": {
@@ -390,14 +390,14 @@
     },
     "storage": {
       "units": 149,
-      "implemented": 0,
-      "tested": 0,
+      "implemented": 2,
+      "tested": 2,
       "conformant": 0,
       "groups": {
         "bucket": {
           "units": 6,
-          "implemented": 0,
-          "tested": 0,
+          "implemented": 2,
+          "tested": 2,
           "conformant": 0
         },
         "cdn": {
@@ -642,6 +642,9 @@
     "auth:verify-type:invite": "tested",
     "auth:verify-type:recovery": "tested",
     "auth:verify-type:signup": "tested",
+    "meta:route:GET /pg/config/version": "tested",
+    "meta:route:GET /pg/health": "tested",
+    "realtime:route:GET /realtime/v1/api/ping": "tested",
     "rest:aggregate:avg": "tested",
     "rest:aggregate:count": "tested",
     "rest:aggregate:max": "tested",
@@ -734,6 +737,8 @@
     "rest:route:PATCH /rest/v1/{relation}": "tested",
     "rest:route:POST /rest/v1/rpc/{function}": "tested",
     "rest:route:POST /rest/v1/{relation}": "tested",
-    "rest:route:PUT /rest/v1/{relation}": "tested"
+    "rest:route:PUT /rest/v1/{relation}": "tested",
+    "storage:route:GET /storage/v1/bucket": "tested",
+    "storage:route:GET /storage/v1/bucket/{bucketId}": "tested"
   }
 }

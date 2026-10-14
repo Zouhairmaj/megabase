@@ -61,7 +61,12 @@ omitted or JSON `null`. `data` and `app_metadata` are objects; a JSON
 `null` value deletes that key, and any other value replaces it.
 
 `GET /auth/v1/user/identities/authorize` reads `provider` from the query
-string. The name is lowercased.
+string. The name is lowercased. `GET /auth/v1/authorize`
+(`ExternalProviderRedirect`, `vendor/auth/internal/api/external.go:27`–`:51`)
+resolves `provider` with the same `API.Provider` lookup and the same
+rejections below, without a user and before `redirect_to` is read; an
+enabled provider stays 501 with unit `auth:route:GET /auth/v1/authorize`.
+That route is a Kong open route, so it needs no `apikey`.
 
 `DELETE /auth/v1/user/identities/{identity_id}` takes the identity UUID
 from the path.

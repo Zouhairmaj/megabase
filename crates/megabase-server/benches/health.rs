@@ -64,6 +64,7 @@ fn gateway(c: &mut Criterion) {
                     .oneshot(
                         Request::builder()
                             .uri("/rest/v1/todos")
+                            .header("apikey", "anon-key")
                             .body(Body::empty())
                             .expect("rest request"),
                     )

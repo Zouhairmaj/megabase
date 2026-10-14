@@ -37,8 +37,12 @@ Reference-stack flags come from `vendor/supabase/docker/.env.example` and
 
 ## Inputs
 
-Health and settings take no body. Signup, invite, recover, and resend read
-a JSON body of at most `1 << 20` bytes.
+Health and settings take no body. They are registered with chi's `r.Get`
+only (`vendor/auth/internal/api/api.go:202`, `:222`), so `HEAD` and every
+other method get chi's `methodNotAllowedHandler`: 405, `Allow: GET`, empty
+body. chi does not answer `HEAD` from a `GET` route. Without an `apikey`
+the gateway answers first (`specs/server/key-auth.md`). Signup, invite,
+recover, and resend read a JSON body of at most `1 << 20` bytes.
 
 Signup JSON: `email`, `phone`, `password`, `data` (object), `channel`,
 `code_challenge_method`, `code_challenge`. Audience is the `X-JWT-AUD`

@@ -2,17 +2,44 @@ use axum::{
     body::{to_bytes, Body},
     http::{Request, StatusCode},
 };
-use megabase_server::{create_router, GATEWAY_ROUTES, HEALTH_PATH};
+use megabase_server::{
+    create_router_from, key_auth_applies, GATEWAY_ROUTES, HEALTH_PATH, KEY_AUTH_ROUTES,
+};
 use serde_json::Value;
 use tower::ServiceExt;
 
+const SECRET: &str = "super-secret-jwt-token-with-at-least-32-characters-long";
+
+/// Gateway with a JWT secret, so `/pg/` can recognize the service-role key.
+fn router() -> axum::Router {
+    let config =
+        megabase_core::Config::from_lookup(|key| (key == "JWT_SECRET").then(|| SECRET.to_string()))
+            .unwrap();
+    create_router_from(&megabase_auth::AuthState::reference(), &config)
+}
+
+/// The service-role `apikey` a client sends through Kong. It passes
+/// `key-auth` and the `/pg/` admin ACL; `Authorization` stays unset.
+fn service_key() -> String {
+    megabase_core::Hs256::new(SECRET)
+        .unwrap()
+        .sign(&serde_json::json!({ "role": "service_role" }))
+        .unwrap()
+        .as_str()
+        .to_string()
+}
+
 async fn send(method: &str, path: &str) -> (StatusCode, Value) {
-    let request = Request::builder()
-        .method(method)
-        .uri(path)
-        .body(Body::empty())
-        .unwrap();
-    let response = create_router().oneshot(request).await.unwrap();
+    send_with_key(method, path, Some(&service_key())).await
+}
+
+async fn send_with_key(method: &str, path: &str, apikey: Option<&str>) -> (StatusCode, Value) {
+    let mut request = Request::builder().method(method).uri(path);
+    if let Some(apikey) = apikey {
+        request = request.header("apikey", apikey);
+    }
+    let request = request.body(Body::empty()).unwrap();
+    let response = router().oneshot(request).await.unwrap();
     let status = response.status();
     let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     let body = if bytes.is_empty() {
@@ -53,6 +80,26 @@ async fn every_method_on_every_route_is_501() {
             }
         }
     }
+}
+
+#[tokio::test]
+async fn key_auth_routes_reject_a_request_without_a_key() {
+    for prefix in KEY_AUTH_ROUTES {
+        for suffix in ["", "x", "/some/deep/path"] {
+            let path = format!("{prefix}{suffix}");
+            if !key_auth_applies(&path) {
+                continue;
+            }
+            let (status, body) = send_with_key("GET", &path, None).await;
+            assert_eq!(status, StatusCode::UNAUTHORIZED, "{path}");
+            assert_eq!(body["message"], "No API key found in request", "{path}");
+        }
+    }
+    // Storage has no key-auth, and the open Auth routes skip it.
+    let (status, _) = send_with_key("GET", "/storage/v1/x", None).await;
+    assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
+    let (status, _) = send_with_key("GET", "/auth/v1/callback", None).await;
+    assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
 }
 
 #[tokio::test]
@@ -100,9 +147,10 @@ async fn unit_keeps_full_path_without_query() {
     let request = Request::builder()
         .uri("/rest/v1/todos?id=eq.1")
         .header("range", "0-0")
+        .header("apikey", service_key())
         .body(Body::empty())
         .unwrap();
-    let response = create_router().oneshot(request).await.unwrap();
+    let response = router().oneshot(request).await.unwrap();
     let status = response.status();
     let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     let body: Value = serde_json::from_slice(&bytes).unwrap();
