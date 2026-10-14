@@ -682,7 +682,12 @@ fn negotiate_accept(
         // megabase:unit rest:media-type:text/xml
         let unknown = axum::http::HeaderValue::from_str(part)
             .is_ok_and(|entry| reject_accept(Some(&entry)) == Some(""));
-        if matches!(essence.as_str(), "text/plain" | "text/xml") || unknown {
+        // megabase:unit rest:media-type:application/vnd.pgrst.plan+{format}
+        if let Some(mime) = plan_mime(part) {
+            // `db-plan-enabled` is off (the default, and the Judge config):
+            // the plan type has no handler, so it is only named in the 406.
+            skipped.push(mime);
+        } else if matches!(essence.as_str(), "text/plain" | "text/xml") || unknown {
             skipped.push(essence);
         } else {
             kept.push(part);
@@ -720,6 +725,108 @@ fn negotiate_accept(
     match reject_accept(Some(&kept)) {
         Some(unit) => Err(Box::new(unimplemented_unit(method, path, unit))),
         None => Ok(None),
+    }
+}
+
+/// The `toMime` form of an `application/vnd.pgrst.plan[+json|+text]` entry, or
+/// `None` for any other media type.
+///
+/// Upstream `decodeMediaType` reads `for` (default `application/json`) and the
+/// `options` flags; `toMime` prints them back in a fixed order.
+fn plan_mime(part: &str) -> Option<String> {
+    let mut pieces = split_params(part).into_iter();
+    let essence = pieces.next()?.trim().to_ascii_lowercase();
+    let format = match essence.as_str() {
+        "application/vnd.pgrst.plan" | "application/vnd.pgrst.plan+text" => "text",
+        "application/vnd.pgrst.plan+json" => "json",
+        _ => return None,
+    };
+    let mut target = "application/json".to_owned();
+    let mut options = String::new();
+    for param in pieces {
+        let Some((key, value)) = param.split_once('=') else {
+            continue;
+        };
+        let value = value.trim().trim_matches('"');
+        match key.trim().to_ascii_lowercase().as_str() {
+            "for" => target = canonical_plan_for_target(value),
+            "options" => options = value.to_owned(),
+            _ => {}
+        }
+    }
+    let flags: Vec<&str> = ["analyze", "verbose", "settings", "buffers", "wal"]
+        .into_iter()
+        .filter(|flag| options.split('|').any(|given| given == *flag))
+        .collect();
+    let mut mime = format!("application/vnd.pgrst.plan+{format}; for=\"{target}\"");
+    if !flags.is_empty() {
+        mime.push_str("; options=");
+        mime.push_str(&flags.join("|"));
+    }
+    Some(mime)
+}
+
+/// Splits a media-type entry on `;`, keeping semicolons inside double quotes
+/// as part of the parameter value.
+fn split_params(part: &str) -> Vec<&str> {
+    let mut pieces = Vec::new();
+    let mut quoted = false;
+    let mut start = 0;
+    for (index, ch) in part.char_indices() {
+        match ch {
+            '"' => quoted = !quoted,
+            ';' if !quoted => {
+                pieces.push(&part[start..index]);
+                start = index + 1;
+            }
+            _ => {}
+        }
+    }
+    pieces.push(&part[start..]);
+    pieces
+}
+
+/// Upstream `decodeMediaType` then `toMime` for the plan `for` target.
+///
+/// Aliases like `application/vnd.pgrst.object` and bare `array` print as their
+/// canonical MIME (see PostgREST `MediaType.hs` `toMime` / `decodeMediaType`).
+fn canonical_plan_for_target(value: &str) -> String {
+    let lower = value.to_ascii_lowercase();
+    let mut pieces = lower.split(';');
+    let essence = pieces.next().unwrap_or("").trim();
+    let nulls_stripped = pieces.any(|param| {
+        let param = param.trim();
+        param == "nulls=stripped"
+            || param
+                .split_once('=')
+                .is_some_and(|(k, v)| k.trim() == "nulls" && v.trim() == "stripped")
+    });
+    match (essence, nulls_stripped) {
+        ("application/vnd.pgrst.array+json" | "application/vnd.pgrst.array", false) => {
+            "application/json".to_owned()
+        }
+        ("application/vnd.pgrst.array+json" | "application/vnd.pgrst.array", true) => {
+            "application/vnd.pgrst.array+json;nulls=stripped".to_owned()
+        }
+        ("application/vnd.pgrst.object+json" | "application/vnd.pgrst.object", false) => {
+            "application/vnd.pgrst.object+json".to_owned()
+        }
+        ("application/vnd.pgrst.object+json" | "application/vnd.pgrst.object", true) => {
+            "application/vnd.pgrst.object+json;nulls=stripped".to_owned()
+        }
+        (
+            "application/json"
+            | "application/geo+json"
+            | "text/csv"
+            | "text/plain"
+            | "text/xml"
+            | "application/openapi+json"
+            | "application/x-www-form-urlencoded"
+            | "application/octet-stream"
+            | "*/*",
+            _,
+        ) => essence.to_owned(),
+        (other, _) => other.to_owned(),
     }
 }
 
@@ -1935,6 +2042,54 @@ mod tests {
                 .unwrap();
             let (status, body, _) = send(app, request).await;
             assert_eq!(status, StatusCode::NOT_ACCEPTABLE);
+            assert_eq!(body["code"], "PGRST107");
+            assert_eq!(
+                body["message"],
+                format!("None of these media types are available: {listed}")
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn plan_accept_is_406_while_plans_are_disabled() {
+        for (accept, listed) in [
+            (
+                "application/vnd.pgrst.plan+json",
+                "application/vnd.pgrst.plan+json; for=\"application/json\"",
+            ),
+            (
+                "application/vnd.pgrst.plan",
+                "application/vnd.pgrst.plan+text; for=\"application/json\"",
+            ),
+            (
+                "application/vnd.pgrst.plan+json; for=\"application/vnd.pgrst.array+json\"",
+                "application/vnd.pgrst.plan+json; for=\"application/json\"",
+            ),
+            (
+                "application/vnd.pgrst.plan+json; for=\"application/vnd.pgrst.array\"",
+                "application/vnd.pgrst.plan+json; for=\"application/json\"",
+            ),
+            (
+                "application/vnd.pgrst.plan+json; for=\"application/vnd.pgrst.object\"",
+                "application/vnd.pgrst.plan+json; for=\"application/vnd.pgrst.object+json\"",
+            ),
+            (
+                "application/vnd.pgrst.plan+json; for=\"application/vnd.pgrst.object+json;nulls=stripped\"",
+                "application/vnd.pgrst.plan+json; for=\"application/vnd.pgrst.object+json;nulls=stripped\"",
+            ),
+            (
+                "application/vnd.pgrst.plan+text; for=\"text/csv\"; options=wal|analyze",
+                "application/vnd.pgrst.plan+text; for=\"text/csv\"; options=analyze|wal",
+            ),
+        ] {
+            let app = router(RestState::from_config(&Config::default()));
+            let request = Request::builder()
+                .uri("/rest/v1/todos")
+                .header(header::ACCEPT, accept)
+                .body(Body::empty())
+                .unwrap();
+            let (status, body, _) = send(app, request).await;
+            assert_eq!(status, StatusCode::NOT_ACCEPTABLE, "{accept}");
             assert_eq!(body["code"], "PGRST107");
             assert_eq!(
                 body["message"],

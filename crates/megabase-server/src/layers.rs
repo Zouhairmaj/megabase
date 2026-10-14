@@ -4,12 +4,14 @@
 //! Kong's functions `read_timeout` (150000 ms) and `FILE_SIZE_LIMIT`
 //! (52428800 bytes). Request ids, panic catching, and header redaction are
 //! Megabase controls; Kong does not set those in `volumes/api/kong.yml`.
+//! CORS is Kong's `cors` plugin from that file ([`crate::cors`]).
 //! The deadline uses the same 504 as `tower_http`'s timeout layer and arms
 //! its timer only while the handler is still pending.
 
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::cors::CorsLayer;
 use axum::{
     body::Body,
     extract::DefaultBodyLimit,
@@ -43,9 +45,13 @@ pub fn sensitive_request_headers() -> [axum::http::HeaderName; 3] {
 
 /// Apply the production layer stack. The last layer is the outermost.
 ///
-/// Request path, outer to inner: catch panic, assign `x-request-id`, mark
+/// Request path, outer to inner: assign `x-request-id`, mark
 /// `Authorization` / `apikey` / `Cookie` sensitive, trace, copy the request id
-/// onto the response, enforce the body limit, then the timeout. `Bytes` and
+/// onto the response, CORS, catch panic, enforce the body limit, then the
+/// timeout. CORS sits outside the panic catcher, the limit and the deadline so
+/// a 500, 413 or 504 carries `Access-Control-Allow-Origin` like Kong's own
+/// error pages, and inside the request id so a preflight answer still carries
+/// `x-request-id`. `Bytes` and
 /// `Json` use the same byte cap. Axum's extractor default is 2 MiB, which
 /// would reject a smaller body than `RequestBodyLimitLayer` allows.
 pub fn apply_http_layers(router: Router, config: &Config) -> Router {
@@ -57,6 +63,8 @@ pub fn apply_http_layers(router: Router, config: &Config) -> Router {
             config.http_timeout,
         ))
         .layer(RequestBodyLimitLayer::new(config.request_body_limit))
+        .layer(CatchPanicLayer::custom(|_| panic_response()))
+        .layer(CorsLayer)
         .layer(PropagateRequestIdLayer::x_request_id())
         .layer(
             TraceLayer::new_for_http()
@@ -87,7 +95,6 @@ pub fn apply_http_layers(router: Router, config: &Config) -> Router {
         )
         .layer(SetSensitiveRequestHeadersLayer::from_shared(sensitive))
         .layer(SetRequestIdLayer::x_request_id(MakeRequestUuid))
-        .layer(CatchPanicLayer::custom(|_| panic_response()))
 }
 
 /// Whole-request deadline with the same contract as `tower_http::timeout::TimeoutLayer`.
@@ -373,6 +380,61 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn gateway_errors_carry_the_cors_origin_like_kong() {
+        // Kong's `cors` plugin runs its header filter on Kong's own error
+        // pages too, so a timeout or an oversized body still gets the header.
+        let timed_out = limited(Duration::from_millis(50), 1024)
+            .oneshot(Request::builder().uri("/slow").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(timed_out.status(), axum::http::StatusCode::GATEWAY_TIMEOUT);
+        assert_eq!(
+            timed_out.headers()[axum::http::header::ACCESS_CONTROL_ALLOW_ORIGIN],
+            "*"
+        );
+
+        let too_large = limited(Duration::from_secs(2), 4)
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/echo")
+                    .body(Body::from("12345"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            too_large.status(),
+            axum::http::StatusCode::PAYLOAD_TOO_LARGE
+        );
+        assert_eq!(
+            too_large.headers()[axum::http::header::ACCESS_CONTROL_ALLOW_ORIGIN],
+            "*"
+        );
+    }
+
+    #[tokio::test]
+    async fn preflight_keeps_the_request_id() {
+        let response = limited(Duration::from_secs(2), 1024)
+            .oneshot(
+                Request::builder()
+                    .method("OPTIONS")
+                    .uri("/ok")
+                    .header("x-request-id", "req-preflight")
+                    .header("origin", "http://localhost:3000")
+                    .header("access-control-request-method", "GET")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        assert_eq!(response.headers()["x-request-id"], "req-preflight");
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        assert!(bytes.is_empty());
+    }
+
+    #[tokio::test]
     async fn panic_is_500_without_the_message() {
         let response = limited(Duration::from_secs(2), 1024)
             .oneshot(
@@ -391,5 +453,26 @@ mod tests {
         let body = std::str::from_utf8(&bytes).unwrap();
         assert!(body.contains("internal_error"), "{body}");
         assert!(!body.contains("secret boom"), "{body}");
+    }
+
+    #[tokio::test]
+    async fn panic_500_carries_the_cors_origin() {
+        let response = limited(Duration::from_secs(2), 1024)
+            .oneshot(
+                Request::builder()
+                    .uri("/panic")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            response.status(),
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR
+        );
+        assert_eq!(
+            response.headers()[axum::http::header::ACCESS_CONTROL_ALLOW_ORIGIN],
+            "*"
+        );
     }
 }
