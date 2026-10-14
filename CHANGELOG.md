@@ -4,6 +4,13 @@ All notable changes to Megabase are documented in this file.
 The format is produced by [release-please](https://github.com/googleapis/release-please).
 Sections: Features, Bug Fixes, Performance, Conformance/judge, Documentation.
 
+## [0.1.27](https://github.com/Zouhairmaj/megabase/compare/v0.1.26...v0.1.27) (2026-10-14)
+
+
+### Features
+
+* **auth:** add custom access token hook for pg-functions ([#345](https://github.com/Zouhairmaj/megabase/issues/345)) ([d35e1d3](https://github.com/Zouhairmaj/megabase/commit/d35e1d359f0284896bb41822e44fd82da3a00434))
+
 ## [0.1.26](https://github.com/Zouhairmaj/megabase/compare/v0.1.25...v0.1.26) (2026-10-14)
 
 
