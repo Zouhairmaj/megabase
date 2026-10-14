@@ -235,6 +235,13 @@ pub(crate) async fn mutate(
     } else {
         Vec::new()
     };
+    // Without a conflict target the statement has no `ON CONFLICT`, so there is
+    // no upsert to track (and a view has no `xmax` to read).
+    let tracked = if conflict.is_empty() {
+        None
+    } else {
+        prefer.resolution
+    };
     let options = WriteOptions {
         resolution: prefer.resolution,
         conflict: &conflict,
@@ -296,7 +303,7 @@ pub(crate) async fn mutate(
         &column_types,
         &ret,
         &kind,
-        prefer.resolution,
+        tracked,
     );
     let mut statement =
         sqlx::query_as::<sqlx::Postgres, (i64, i64, String, Option<String>)>(&built.sql);
@@ -347,7 +354,7 @@ pub(crate) async fn mutate(
         schema,
         relation,
         prefer.representation,
-        prefer.resolution,
+        tracked,
     );
     let applied = prefer.applied(Scope {
         resolution: matches!(kind, Kind::Create) && !conflict.is_empty(),
@@ -796,7 +803,13 @@ fn write_sql(
             }
             sql.push_str(&format!(
                 " RETURNING {})",
-                returning(relation, kind, options.resolution, column_types, ret)
+                returning(
+                    relation,
+                    kind,
+                    options.resolution.filter(|_| !options.conflict.is_empty()),
+                    column_types,
+                    ret
+                )
             ));
             sql
         }
@@ -1236,6 +1249,27 @@ mod tests {
         assert_eq!(status(Some(Resolution::Merge), 1), StatusCode::CREATED);
         assert_eq!(status(Some(Resolution::Ignore), 0), StatusCode::CREATED);
         assert_eq!(status(None, 0), StatusCode::CREATED);
+    }
+
+    #[test]
+    fn merge_duplicates_without_conflict_target_skips_insert_tracking() {
+        let types = [("id", "int8")];
+        let sql = |conflict: &[String]| {
+            let options = WriteOptions {
+                resolution: Some(Resolution::Merge),
+                conflict,
+                defaults: &[],
+            };
+            returning(
+                "v",
+                &Kind::Create,
+                options.resolution.filter(|_| !options.conflict.is_empty()),
+                &types,
+                &Ret::Full,
+            )
+        };
+        assert!(!sql(&[]).contains("xmax"));
+        assert!(sql(&["id".to_string()]).contains("xmax"));
     }
 
     #[test]
