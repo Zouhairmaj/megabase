@@ -128,13 +128,7 @@ async fn root(
     };
     // The gateway's `rest-v1-openapi` route only admits the admin ACL group.
     if session.role != "service_role" {
-        // Kong writes this body with an explicit charset.
-        return (
-            StatusCode::FORBIDDEN,
-            [(header::CONTENT_TYPE, "application/json;charset=utf-8")],
-            r#"{"message":"You cannot consume this service"}"#,
-        )
-            .into_response();
+        return gateway_forbidden();
     }
     session.timezone = prefer.timezone.clone();
     let schema = match negotiated_schema(method, headers) {
@@ -162,6 +156,23 @@ async fn root(
             None,
         ),
     }
+}
+
+/// Kong's ACL rejection for the admin-only `rest-v1-openapi` route.
+///
+/// Kong writes the body with an explicit charset and adds its per-request
+/// id: 32 lowercase hex digits, generated fresh for every request.
+fn gateway_forbidden() -> Response {
+    let body = serde_json::json!({
+        "message": "You cannot consume this service",
+        "request_id": uuid::Uuid::new_v4().simple().to_string(),
+    });
+    (
+        StatusCode::FORBIDDEN,
+        [(header::CONTENT_TYPE, "application/json;charset=utf-8")],
+        body.to_string(),
+    )
+        .into_response()
 }
 
 async fn serve_openapi(
@@ -2570,6 +2581,11 @@ mod tests {
         let (status, body, headers) = send(app, request).await;
         assert_eq!(status, StatusCode::FORBIDDEN);
         assert_eq!(body["message"], "You cannot consume this service");
+        let request_id = body["request_id"].as_str().unwrap();
+        assert_eq!(request_id.len(), 32);
+        assert!(request_id
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)));
         assert_eq!(
             headers[header::CONTENT_TYPE],
             "application/json;charset=utf-8"
