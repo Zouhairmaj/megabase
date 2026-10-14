@@ -1759,14 +1759,33 @@ pub(crate) fn build_read_sql(
     column_types: &[(&str, &str)],
     rels: &HashMap<String, Relationship>,
 ) -> Result<ReadSql, UnsafeType> {
-    build_read_sql_as(schema, relation, query, column_types, rels, false)
+    build_read_sql_as(
+        schema,
+        relation,
+        query,
+        column_types,
+        rels,
+        BodyHandler::Json,
+    )
 }
 
-/// [`build_read_sql`] with the body shaped as CSV when `csv` is set.
-///
-/// The CSV body is `asCsvF` from `SqlFragment.hs`: the key row of the first
-/// result row, a newline, then each row's record text without its
-/// parentheses, joined by newlines.
+/// The builtin media handler that turns the result rows into a body
+/// (`handlerF` in `SqlFragment.hs`, `initialMediaHandlers` in `SchemaCache.hs`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum BodyHandler {
+    /// `asJsonF`: a JSON array of row objects.
+    Json,
+    /// `asCsvF`: the key row of the first result row, a newline, then each
+    /// row's record text without its parentheses, joined by newlines.
+    Csv,
+    /// `asGeoJsonF`: a `FeatureCollection` whose features are
+    /// `ST_AsGeoJSON(row)`. The function comes from PostGIS; without it, or
+    /// without a geometry column, Postgres raises the error PostgREST
+    /// forwards.
+    GeoJson,
+}
+
+/// [`build_read_sql`] with the body built by `handler`.
 ///
 /// # Errors
 ///
@@ -1777,7 +1796,7 @@ pub(crate) fn build_read_sql_as(
     query: &ReadQuery,
     column_types: &[(&str, &str)],
     rels: &HashMap<String, Relationship>,
-    csv: bool,
+    handler: BodyHandler,
 ) -> Result<ReadSql, UnsafeType> {
     let mut params = Vec::new();
     let relation_ident = quote_ident(relation);
@@ -1851,8 +1870,8 @@ pub(crate) fn build_read_sql_as(
         // megabase:unit rest:query-param:offset
         push_page(&mut inner, &mut params, &query.page);
     }
-    let sql = if csv {
-        format!(
+    let sql = match handler {
+        BodyHandler::Csv => format!(
             "WITH _megabase_src AS MATERIALIZED ({inner}) \
              SELECT (SELECT pg_catalog.count(*) FROM _megabase_src), \
              (SELECT coalesce(string_agg(a.k, ','), '') FROM \
@@ -1862,15 +1881,25 @@ pub(crate) fn build_read_sql_as(
              coalesce((SELECT string_agg(x.line, E'\\n' ORDER BY x.rn) FROM \
              (SELECT substring(t::text, 2, length(t::text) - 2) AS line, \
              row_number() OVER () AS rn FROM _megabase_src AS t) x), '')"
-        )
-    } else {
-        format!(
+        ),
+        // `asGeoJsonF`. The row alias is a plain subquery record as upstream
+        // (`FROM ( SELECT * FROM pgrst_source ) _postgrest_t`), so an absent
+        // PostGIS raises the same `st_asgeojson(record)` error on both stacks.
+        BodyHandler::GeoJson => format!(
+            "WITH _megabase_src AS MATERIALIZED ({inner}) \
+             SELECT (SELECT pg_catalog.count(*) FROM _megabase_src), \
+             (SELECT json_build_object('type', 'FeatureCollection', 'features', \
+             coalesce(json_agg(x.feature ORDER BY x.rn), '[]'))::text FROM \
+             (SELECT ST_AsGeoJSON(_postgrest_t)::json AS feature, \
+             row_number() OVER () AS rn FROM _megabase_src AS _postgrest_t) x)"
+        ),
+        BodyHandler::Json => format!(
             "WITH _megabase_src AS MATERIALIZED ({inner}) \
              SELECT (SELECT pg_catalog.count(*) FROM _megabase_src), \
              coalesce((SELECT json_agg(t.row ORDER BY t.rn) FROM \
              (SELECT to_json(_megabase_src) AS row, row_number() OVER () AS rn \
              FROM _megabase_src) t), '[]'::json)::text"
-        )
+        ),
     };
     let offset = query.page.offset.parse::<i64>().unwrap_or(0);
     let _ = (&query.columns, &query.on_conflict);
@@ -2651,7 +2680,7 @@ mod tests {
             &query,
             &[("id", "integer")],
             &HashMap::new(),
-            true,
+            BodyHandler::Csv,
         )
         .unwrap();
         assert!(sql.sql.contains("json_object_keys(r)"));
@@ -2659,6 +2688,31 @@ mod tests {
             .sql
             .contains("substring(t::text, 2, length(t::text) - 2)"));
         assert!(!sql.sql.contains("json_agg"));
+        assert_eq!(sql.params, vec!["1"]);
+    }
+
+    #[test]
+    fn geo_json_read_wraps_st_asgeojson_in_a_feature_collection() {
+        let query = parse_get_query("id=eq.1&order=id").unwrap();
+        let sql = build_read_sql_as(
+            "public",
+            "todos",
+            &query,
+            &[("id", "integer")],
+            &HashMap::new(),
+            BodyHandler::GeoJson,
+        )
+        .unwrap();
+        assert!(sql
+            .sql
+            .contains("json_build_object('type', 'FeatureCollection', 'features'"));
+        assert!(sql
+            .sql
+            .contains("ST_AsGeoJSON(_postgrest_t)::json AS feature"));
+        assert!(sql
+            .sql
+            .contains("coalesce(json_agg(x.feature ORDER BY x.rn), '[]')"));
+        assert!(!sql.sql.contains("to_json(_megabase_src)"));
         assert_eq!(sql.params, vec!["1"]);
     }
 

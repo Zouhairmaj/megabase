@@ -1903,3 +1903,86 @@ units = ["rest:media-type:application/vnd.pgrst.object+json;nulls=stripped"]
 method = "GET"
 path = "/rest/v1/rankings?select=id,label,rank"
 headers = { Accept = "application/vnd.pgrst.object+json;nulls=stripped" }
+
+[[case]]
+id = "rest.media-type.geojson.get"
+description = "application/geo+json on a relation GET runs the builtin ST_AsGeoJSON handler"
+units = ["rest:media-type:application/geo+json"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?order=id"
+headers = { Accept = "application/geo+json" }
+
+[[case]]
+id = "rest.media-type.geojson.filtered"
+description = "application/geo+json with select and a filter still goes through the handler"
+units = ["rest:media-type:application/geo+json"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?select=id,title&id=eq.1"
+headers = { Accept = "application/geo+json" }
+
+[[case]]
+id = "rest.media-type.geojson.head"
+description = "application/geo+json on HEAD has the geo+json headers and no body"
+units = ["rest:media-type:application/geo+json"]
+[[case.step]]
+method = "HEAD"
+path = "/rest/v1/todos?order=id"
+headers = { Accept = "application/geo+json" }
+
+[[case]]
+id = "rest.media-type.geojson.mixed"
+description = "application/geo+json ranked below application/json serves JSON"
+units = ["rest:media-type:application/geo+json"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?select=id,title&order=id&limit=2"
+headers = { Accept = "application/json, application/geo+json;q=0.5" }
+
+[[case]]
+id = "rest.media-type.octet-stream.get"
+description = "application/octet-stream on a relation GET has no handler: 406 PGRST107"
+units = ["rest:media-type:application/octet-stream"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos"
+headers = { Accept = "application/octet-stream" }
+
+[[case]]
+id = "rest.media-type.octet-stream.head"
+description = "application/octet-stream on a relation HEAD is 406"
+units = ["rest:media-type:application/octet-stream"]
+[[case.step]]
+method = "HEAD"
+path = "/rest/v1/todos"
+headers = { Accept = "application/octet-stream" }
+
+[[case]]
+id = "rest.media-type.octet-stream.mixed"
+description = "application/octet-stream with a handled fallback picks the handled type"
+units = ["rest:media-type:application/octet-stream"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?select=id,title&order=id&limit=2"
+headers = { Accept = "application/octet-stream, application/json" }
+
+[[case]]
+id = "rest.media-type.octet-stream.rpc.bytea"
+description = "application/octet-stream POST body reaches a single unnamed bytea parameter"
+units = ["rest:media-type:application/octet-stream"]
+[[case.step]]
+method = "POST"
+path = "/rest/v1/rpc/byte_count"
+headers = { "Content-Type" = "application/octet-stream" }
+body = "raw bytes for the judge"
+
+[[case]]
+id = "rest.media-type.octet-stream.rpc.no-bytea-param"
+description = "application/octet-stream POST without a single unnamed bytea parameter is 404 PGRST202"
+units = ["rest:media-type:application/octet-stream"]
+[[case.step]]
+method = "POST"
+path = "/rest/v1/rpc/add_numbers"
+headers = { "Content-Type" = "application/octet-stream" }
+body = "raw bytes for the judge"

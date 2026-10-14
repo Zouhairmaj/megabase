@@ -11,9 +11,9 @@ Specs go in `specs/rest/<unit>.md` (GOAL.md section 5). Mark served code with `/
 | State | Unit id | Upstream source |
 |---|---|---|
 | 🟩 | `rest:media-type:*/*` | [src/library/PostgREST/MediaType.hs:89](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/MediaType.hs#L89) |
-| ⬜ | `rest:media-type:application/geo+json` | [src/library/PostgREST/MediaType.hs:80](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/MediaType.hs#L80) |
+| 🟩 | `rest:media-type:application/geo+json` | [src/library/PostgREST/MediaType.hs:80](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/MediaType.hs#L80) |
 | 🟩 | `rest:media-type:application/json` | [src/library/PostgREST/MediaType.hs:78](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/MediaType.hs#L78) |
-| ⬜ | `rest:media-type:application/octet-stream` | [src/library/PostgREST/MediaType.hs:88](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/MediaType.hs#L88) |
+| 🟩 | `rest:media-type:application/octet-stream` | [src/library/PostgREST/MediaType.hs:88](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/MediaType.hs#L88) |
 | 🟨 | `rest:media-type:application/openapi+json` | [src/library/PostgREST/MediaType.hs:84](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/MediaType.hs#L84) |
 | 🟩 | `rest:media-type:application/vnd.pgrst.array+json;nulls=stripped` | [src/library/PostgREST/MediaType.hs:79](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/MediaType.hs#L79) |
 | 🟩 | `rest:media-type:application/vnd.pgrst.object+json` | [src/library/PostgREST/MediaType.hs:86](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/MediaType.hs#L86) |

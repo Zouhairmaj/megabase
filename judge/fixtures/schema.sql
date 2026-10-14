@@ -66,6 +66,14 @@ create function public.add_numbers(a int, b int) returns int
 
 grant execute on function public.add_numbers(int, int) to anon, authenticated, service_role;
 
+-- Single unnamed bytea parameter: the only target of an
+-- `application/octet-stream` RPC body (`rest:media-type:application/octet-stream`).
+create function public.byte_count(bytea) returns int
+  language sql immutable
+  as $$ select octet_length($1) $$;
+
+grant execute on function public.byte_count(bytea) to anon, authenticated, service_role;
+
 -- RLS fixtures for adversarial cases. auth.uid() already exists on the
 -- reference database (the pinned Postgres image). The megabase database is
 -- created empty, and prepare loads this file before Megabase installs Auth

@@ -22,7 +22,9 @@ use crate::filter::{quote_ident, UnsafeType};
 use crate::hint::no_rel_between_hint;
 use crate::mutate::mutate;
 use crate::openapi::document;
-use crate::params::{build_read_sql_as, parse_get_query, where_clause, QueryFail, Relationship};
+use crate::params::{
+    build_read_sql_as, parse_get_query, where_clause, BodyHandler, QueryFail, Relationship,
+};
 use crate::prefer::{set_applied, Count, Prefer, Scope};
 use crate::query::path_decode;
 use crate::RestState;
@@ -622,7 +624,8 @@ fn jwt_failure(error: &JwtError) -> Response {
 /// Negotiate the body shape of a `GET`/`HEAD` relation read from `Accept`.
 ///
 /// Types with no handler on a table or view are skipped, as `negotiateContent`
-/// does: `text/plain` and `text/xml` (no custom aggregate is registered) and
+/// does: `text/plain`, `text/xml` and `application/octet-stream` (no custom
+/// aggregate is registered; `initialMediaHandlers` has none for them) and
 /// types PostgREST does not know. The rest go to [`ReadShape::from_accept`] and
 /// [`reject_accept`]. When nothing is left the answer is 406 `PGRST107`, also
 /// for a header whose every type has `q=0`. `Ok(None)` is plain JSON.
@@ -650,9 +653,14 @@ fn negotiate_read(
             .to_ascii_lowercase();
         // megabase:unit rest:media-type:text/plain
         // megabase:unit rest:media-type:text/xml
+        // megabase:unit rest:media-type:application/octet-stream
         let unknown = axum::http::HeaderValue::from_str(part)
             .is_ok_and(|entry| reject_accept(Some(&entry)) == Some(""));
-        if matches!(essence.as_str(), "text/plain" | "text/xml") || unknown {
+        if matches!(
+            essence.as_str(),
+            "text/plain" | "text/xml" | "application/octet-stream"
+        ) || unknown
+        {
             skipped.push(essence);
         } else {
             kept.push(part);
@@ -723,6 +731,8 @@ pub(crate) enum ReadShape {
     ArrayStripped,
     /// `text/csv`: the builtin `asCsvF` handler.
     Csv,
+    /// `application/geo+json`: the builtin `asGeoJsonF` handler.
+    GeoJson,
 }
 
 /// The preferred `Accept` entry: its lowercase essence and whether it carries
@@ -797,6 +807,8 @@ impl ReadShape {
             }
             // megabase:unit rest:media-type:text/csv
             ("text/csv", _) => Some(Self::Csv),
+            // megabase:unit rest:media-type:application/geo+json
+            ("application/geo+json", _) => Some(Self::GeoJson),
             _ => None,
         }
     }
@@ -809,6 +821,17 @@ impl ReadShape {
         matches!(self, Self::ObjectStripped | Self::ArrayStripped)
     }
 
+    /// The SQL handler that builds the body (`handlerF`). `HEAD` uses no
+    /// aggregate upstream (`NoAgg` in `negotiateContent`), so a headers-only
+    /// read never calls `ST_AsGeoJSON`. The JSON shapes are post-processed.
+    fn handler(self, headers_only: bool) -> BodyHandler {
+        match self {
+            Self::Csv => BodyHandler::Csv,
+            Self::GeoJson if !headers_only => BodyHandler::GeoJson,
+            _ => BodyHandler::Json,
+        }
+    }
+
     /// `MediaType.hs` `toContentType`: the mime plus `; charset=utf-8`.
     fn content_type(self) -> &'static str {
         match self {
@@ -818,6 +841,7 @@ impl ReadShape {
             }
             Self::ArrayStripped => "application/vnd.pgrst.array+json;nulls=stripped; charset=utf-8",
             Self::Csv => "text/csv; charset=utf-8",
+            Self::GeoJson => "application/geo+json; charset=utf-8",
         }
     }
 }
@@ -1110,7 +1134,7 @@ async fn read_rows(
         read,
         &column_types,
         &rels,
-        shape == Some(ReadShape::Csv),
+        shape.map_or(BodyHandler::Json, |shape| shape.handler(headers_only)),
     )
     .map_err(|error| Box::new(unsafe_type(&error)))?;
     let request_path = format!("/{relation}");
@@ -1138,8 +1162,10 @@ async fn read_rows(
         ),
         None => None,
     };
-    // CSV is built in SQL (`asCsvF`); only the JSON shapes are post-processed.
-    if let Some(shape) = shape.filter(|shape| *shape != ReadShape::Csv) {
+    // CSV and GeoJSON are built in SQL (`asCsvF`, `asGeoJsonF`); only the
+    // JSON shapes are post-processed.
+    if let Some(shape) = shape.filter(|shape| !matches!(shape, ReadShape::Csv | ReadShape::GeoJson))
+    {
         if shape.singular() {
             singular_check(row.0)?;
         }
@@ -1874,12 +1900,44 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn geo_json_accept_is_501() {
+    async fn geo_json_accept_reaches_the_pool_check() {
+        for accept in [
+            "application/geo+json",
+            "text/plain, application/geo+json",
+            "application/geo+json;q=0.9, application/octet-stream",
+        ] {
+            let app = router(RestState::from_config(&Config::default()));
+            let request = Request::builder()
+                .uri("/rest/v1/todos")
+                .header(header::ACCEPT, accept)
+                .body(Body::empty())
+                .unwrap();
+            let (status, _, _) = send(app, request).await;
+            assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{accept}");
+        }
+    }
+
+    #[test]
+    fn geo_json_shape_uses_the_sql_handler_except_on_head() {
+        assert_eq!(ReadShape::GeoJson.handler(false), BodyHandler::GeoJson);
+        assert_eq!(ReadShape::GeoJson.handler(true), BodyHandler::Json);
+        assert_eq!(ReadShape::Csv.handler(true), BodyHandler::Csv);
+        assert_eq!(ReadShape::Object.handler(false), BodyHandler::Json);
+        assert_eq!(
+            ReadShape::GeoJson.content_type(),
+            "application/geo+json; charset=utf-8"
+        );
+    }
+
+    #[tokio::test]
+    async fn geo_json_accept_on_a_write_stays_501() {
         let app = router(RestState::from_config(&Config::default()));
         let request = Request::builder()
+            .method(Method::POST)
             .uri("/rest/v1/todos")
             .header(header::ACCEPT, "application/geo+json")
-            .body(Body::empty())
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(r#"{"title":"x"}"#))
             .unwrap();
         let (status, body, _) = send(app, request).await;
         assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
@@ -1887,11 +1945,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn text_plain_and_xml_are_406_on_a_relation() {
+    async fn text_plain_xml_and_octet_stream_are_406_on_a_relation() {
         for (accept, listed) in [
             ("text/plain", "text/plain"),
             ("text/xml;q=0.5", "text/xml"),
             ("text/plain, text/xml", "text/plain, text/xml"),
+            ("application/octet-stream", "application/octet-stream"),
+            (
+                "application/octet-stream, text/plain",
+                "application/octet-stream, text/plain",
+            ),
         ] {
             let app = router(RestState::from_config(&Config::default()));
             let request = Request::builder()
@@ -1950,9 +2013,25 @@ mod tests {
             Ok(Some(ReadShape::Csv))
         ));
         assert!(matches!(pick("text/csv;q=0, application/json"), Ok(None)));
+        assert!(matches!(
+            pick("application/geo+json"),
+            Ok(Some(ReadShape::GeoJson))
+        ));
+        assert!(matches!(
+            pick("application/octet-stream, application/geo+json"),
+            Ok(Some(ReadShape::GeoJson))
+        ));
+        assert!(matches!(
+            pick("application/json, application/geo+json;q=0.5"),
+            Ok(None)
+        ));
+        assert!(matches!(
+            pick("application/octet-stream, application/json"),
+            Ok(None)
+        ));
         assert_eq!(
-            pick("application/geo+json").unwrap_err().status(),
-            StatusCode::NOT_IMPLEMENTED
+            pick("application/octet-stream").unwrap_err().status(),
+            StatusCode::NOT_ACCEPTABLE
         );
         assert_eq!(
             pick("text/csv;q=0").unwrap_err().status(),

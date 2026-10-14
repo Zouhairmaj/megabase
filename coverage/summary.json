@@ -2,17 +2,17 @@
   "schema": 1,
   "totals": {
     "units": 1024,
-    "implemented": 169,
-    "tested": 167,
+    "implemented": 171,
+    "tested": 169,
     "conformant": 0
   },
   "percent": {
-    "coverage": 16.5,
+    "coverage": 16.7,
     "conformance": 0.0,
     "done": 0.0
   },
   "judge": {
-    "cases": 336,
+    "cases": 345,
     "passing": 0
   },
   "components": {
@@ -316,8 +316,8 @@
     },
     "rest": {
       "units": 93,
-      "implemented": 90,
-      "tested": 88,
+      "implemented": 92,
+      "tested": 90,
       "conformant": 0,
       "groups": {
         "aggregates": {
@@ -346,8 +346,8 @@
         },
         "media-types": {
           "units": 13,
-          "implemented": 10,
-          "tested": 8,
+          "implemented": 12,
+          "tested": 10,
           "conformant": 0
         },
         "ordering": {
@@ -674,7 +674,9 @@
     "rest:logic-operator:not": "tested",
     "rest:logic-operator:or": "tested",
     "rest:media-type:*/*": "tested",
+    "rest:media-type:application/geo+json": "tested",
     "rest:media-type:application/json": "tested",
+    "rest:media-type:application/octet-stream": "tested",
     "rest:media-type:application/openapi+json": "implemented",
     "rest:media-type:application/vnd.pgrst.array+json;nulls=stripped": "tested",
     "rest:media-type:application/vnd.pgrst.object+json": "tested",
