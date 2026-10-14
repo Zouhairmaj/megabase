@@ -33,7 +33,10 @@ pub(crate) const JSON_UTF8: &str = "application/json; charset=utf-8";
 const EXPOSED_SCHEMAS: &[&str] = &["public", "graphql_public"];
 
 pub(crate) fn router(state: RestState) -> Router {
-    Router::new().fallback(dispatch).with_state(state)
+    Router::new()
+        .fallback(dispatch)
+        .with_state(state)
+        .layer(axum::middleware::from_fn(crate::cors::postgrest_cors))
 }
 
 enum Target {
@@ -53,16 +56,9 @@ async fn dispatch(
 ) -> Response {
     let path = uri.path();
     let prefer = Prefer::from_headers(&headers);
-    let target = classify(path);
-    if method == Method::OPTIONS
-        && is_preflight(&headers)
-        && matches!(target, Target::Root | Target::Relation(_) | Target::Rpc(_))
-    {
-        // The gateway's CORS plugin answers a preflight before authentication
-        // and before PostgREST, so no `Allow` header is set.
-        return preflight_response();
-    }
-    match target {
+    // A CORS preflight never arrives here: the gateway's Kong `cors` layer in
+    // `megabase-server` answers it before authentication (`specs/rest/cors.md`).
+    match classify(path) {
         Target::Outside => not_implemented(&method, path),
         Target::Rpc(function) => {
             let mut response =
@@ -469,17 +465,8 @@ async fn relation_options(state: &RestState, schema: &str, relation: &str, anon:
     options_response(&allow.join(","))
 }
 
-fn is_preflight(headers: &HeaderMap) -> bool {
-    headers.contains_key(header::ORIGIN)
-        && headers.contains_key(header::ACCESS_CONTROL_REQUEST_METHOD)
-}
-
-fn preflight_response() -> Response {
-    let mut response = options_response("");
-    response.headers_mut().remove(header::ALLOW);
-    response
-}
-
+/// `OPTIONS` reply: `Allow` and an empty body. `Access-Control-Allow-Origin`
+/// comes from the CORS layers (`crate::cors`, and Kong's at the gateway).
 pub(crate) fn options_response(allow: &str) -> Response {
     let mut response = Response::builder()
         .status(StatusCode::OK)
@@ -488,10 +475,6 @@ pub(crate) fn options_response(allow: &str) -> Response {
     if let Ok(value) = HeaderValue::from_str(allow) {
         response.headers_mut().insert(header::ALLOW, value);
     }
-    response.headers_mut().insert(
-        header::ACCESS_CONTROL_ALLOW_ORIGIN,
-        HeaderValue::from_static("*"),
-    );
     response
 }
 
@@ -2126,28 +2109,50 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn preflight_has_origin_and_no_allow() {
-        for path in ["/rest/v1/", "/rest/v1/todos", "/rest/v1/rpc/add"] {
+    async fn origin_adds_postgrest_cors_headers_to_every_route() {
+        for (method, path) in [
+            ("GET", "/rest/v1/todos"),
+            ("OPTIONS", "/rest/v1/"),
+            ("POST", "/rest/v1/rpc/add"),
+        ] {
             let app = router(RestState::from_config(&Config::default()));
             let request = Request::builder()
-                .method("OPTIONS")
+                .method(method)
                 .uri(path)
                 .header(header::ORIGIN, "http://localhost:3000")
-                .header(header::ACCESS_CONTROL_REQUEST_METHOD, "GET")
                 .body(Body::empty())
                 .unwrap();
             let response = app.oneshot(request).await.unwrap();
-            assert_eq!(response.status(), StatusCode::OK, "{path}");
-            assert!(response.headers().get(header::ALLOW).is_none(), "{path}");
             assert_eq!(
-                response
-                    .headers()
-                    .get(header::ACCESS_CONTROL_ALLOW_ORIGIN)
-                    .and_then(|value| value.to_str().ok()),
-                Some("*"),
-                "{path}"
+                response.headers()[header::ACCESS_CONTROL_ALLOW_ORIGIN],
+                "*",
+                "{method} {path}"
+            );
+            assert_eq!(
+                response.headers()[header::ACCESS_CONTROL_EXPOSE_HEADERS],
+                crate::cors::EXPOSED_HEADERS,
+                "{method} {path}"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn without_origin_postgrest_adds_no_cors_headers() {
+        let app = router(RestState::from_config(&Config::default()));
+        let request = Request::builder()
+            .method("OPTIONS")
+            .uri("/rest/v1/")
+            .body(Body::empty())
+            .unwrap();
+        let response = app.oneshot(request).await.unwrap();
+        assert!(response
+            .headers()
+            .get(header::ACCESS_CONTROL_ALLOW_ORIGIN)
+            .is_none());
+        assert!(response
+            .headers()
+            .get(header::ACCESS_CONTROL_EXPOSE_HEADERS)
+            .is_none());
     }
 
     fn admin_request(method: &str, uri: &str, body: Body) -> Request<Body> {

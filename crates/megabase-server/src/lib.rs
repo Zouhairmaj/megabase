@@ -6,6 +6,8 @@
 //! request path, and everything else goes to Studio, like Kong's catch-all
 //! `dashboard` route. Supavisor's management API is not routed through Kong
 //! upstream, so it has no prefix here; see `docs/adr/0002-gateway-layout.md`.
+//! Routes whose Kong service lists the `cors` plugin get the `cors` module's
+//! layer: it answers preflights and stamps `Access-Control-Allow-Origin: *`.
 
 use std::future::IntoFuture;
 use std::sync::Arc;
@@ -16,12 +18,14 @@ use axum::{
     routing::get,
     Json, Router,
 };
+mod cors;
 mod layers;
 
 use megabase_core::Config;
 use tower::ServiceExt;
 use tracing::info;
 
+pub use cors::{has_cors_plugin, ALLOW_METHODS as CORS_ALLOW_METHODS, CORS_ROUTES};
 use layers::apply_http_layers;
 
 /// Megabase's own liveness probe. The `/_megabase` prefix is not used by any
@@ -81,6 +85,22 @@ struct Gateway {
     fallback: Router,
 }
 
+/// Router for the Kong route `prefix`, wrapped in the `cors` plugin layer when
+/// `kong.yml` lists that plugin on the service.
+fn route_router(
+    prefix: &str,
+    component: &str,
+    auth: &megabase_auth::AuthState,
+    rest: &megabase_rest::RestState,
+) -> Router {
+    let router = component_router(component, auth, rest);
+    if has_cors_plugin(prefix) {
+        router.layer(axum::middleware::from_fn(cors::kong_cors))
+    } else {
+        router
+    }
+}
+
 fn component_router(
     component: &str,
     auth: &megabase_auth::AuthState,
@@ -132,7 +152,7 @@ fn assemble(auth: &megabase_auth::AuthState, rest: &megabase_rest::RestState) ->
         routes: Arc::new(
             GATEWAY_ROUTES
                 .iter()
-                .map(|(prefix, component)| (*prefix, component_router(component, auth, rest)))
+                .map(|(prefix, component)| (*prefix, route_router(prefix, component, auth, rest)))
                 .collect(),
         ),
         fallback: megabase_studio::router(),

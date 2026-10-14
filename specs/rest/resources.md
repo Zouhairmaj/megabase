@@ -73,8 +73,8 @@ types stay their own 501 unit. An unknown type is `PGRST102`.
 |---|---|---|---|
 | `GET /rest/v1/{relation}` | 200 | `Content-Type: application/json; charset=utf-8`, `Content-Range: 0-(n-1)/*` or `*/*` when empty, `Content-Profile` | JSON array of rows |
 | `HEAD /rest/v1/{relation}` | 200 | same as GET | empty |
-| `OPTIONS /rest/v1/{relation}` | 200 | `Allow`, `Access-Control-Allow-Origin: *` | empty |
-| `OPTIONS /rest/v1/` | 200 | `Allow: OPTIONS,GET,HEAD`, `Access-Control-Allow-Origin: *` | empty |
+| `OPTIONS /rest/v1/{relation}` | 200 | `Allow`; CORS headers per `cors.md` | empty |
+| `OPTIONS /rest/v1/` | 200 | `Allow: OPTIONS,GET,HEAD`; CORS headers per `cors.md` | empty |
 | `GET /rest/v1/` | 200 | `Content-Type: application/openapi+json; charset=utf-8` unless `Accept` is `application/json`, then `application/json; charset=utf-8`. `Content-Profile` | Swagger 2.0 document |
 | `HEAD /rest/v1/` | 200 | same as GET | empty |
 | `POST` default | 201 | `Content-Range: */*`, no `Content-Type` | empty |

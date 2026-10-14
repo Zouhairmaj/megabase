@@ -66,7 +66,7 @@ statement of the call transaction. The transaction then sets `role`,
 `request.jwt.claims`, `request.method`, `request.path` (`/rpc/{name}`), and
 `search_path`.
 
-`OPTIONS` is 200 with an empty body, `Access-Control-Allow-Origin: *`, and
+`OPTIONS` is 200 with an empty body, the CORS headers in `cors.md`, and
 `Allow: OPTIONS,POST` when the matched function is volatile. Otherwise
 `Allow` is `OPTIONS,GET,HEAD,POST`.
 
