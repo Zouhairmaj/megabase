@@ -35,8 +35,9 @@ required by AGENTS.md.
 ## Inputs
 
 The gateway matches the prefix `/rest/v1/` (the trailing slash is required).
-A request for `/rest/v1` never reaches this router and stays the Studio
-501. Inside the router, empty path segments are dropped, so a path that
+A request for `/rest/v1` never reaches this router. A qualifying CORS
+preflight is answered by the gateway (`cors.md`); any other request stays the
+Studio 501. Inside the router, empty path segments are dropped, so a path that
 does arrive as `/rest/v1` or `/rest/v1/` is the OpenAPI root. One remaining
 segment is `{relation}`. `rpc` plus one more segment stays the RPC unit
 (501). Any other shape is `PGRST125`.
@@ -73,8 +74,8 @@ types stay their own 501 unit. An unknown type is `PGRST102`.
 |---|---|---|---|
 | `GET /rest/v1/{relation}` | 200 | `Content-Type: application/json; charset=utf-8`, `Content-Range: 0-(n-1)/*` or `*/*` when empty, `Content-Profile` | JSON array of rows |
 | `HEAD /rest/v1/{relation}` | 200 | same as GET | empty |
-| `OPTIONS /rest/v1/{relation}` | 200 | `Allow`, `Access-Control-Allow-Origin: *` | empty |
-| `OPTIONS /rest/v1/` | 200 | `Allow: OPTIONS,GET,HEAD`, `Access-Control-Allow-Origin: *` | empty |
+| `OPTIONS /rest/v1/{relation}` | 200 | method discovery: `Allow`, `Access-Control-Allow-Origin` per `cors.md`. A CORS preflight (`Origin` + `Access-Control-Request-Method`) is answered by the gateway instead, without `Allow` | empty |
+| `OPTIONS /rest/v1/` | 200 | method discovery: `Allow: OPTIONS,GET,HEAD`. A CORS preflight is answered by the gateway without `Allow` (`cors.md`) | empty |
 | `GET /rest/v1/` | 200 | `Content-Type: application/openapi+json; charset=utf-8` unless `Accept` is `application/json`, then `application/json; charset=utf-8`. `Content-Profile` | Swagger 2.0 document |
 | `HEAD /rest/v1/` | 200 | same as GET | empty |
 | `POST` default | 201 | `Content-Range: */*`, no `Content-Type` | empty |
@@ -147,10 +148,10 @@ name is still `PGRST204`. `on_conflict` is ignored unless `Prefer`
 resolution is set, and that preference stays 501.
 
 `HEAD` keeps the success headers and drops the body. Error bodies stay JSON.
-`HEAD`, `POST`, `PUT`, `PATCH`, and `DELETE` use the same `Accept` check as
-`GET`. A known unimplemented type, such as `text/csv` or
-`application/vnd.pgrst.object+json`, is 501 before a write runs. `Range` on
-`GET` stays 501. `HEAD` ignores `Range`. `max-rows` is not applied.
+`HEAD`, `POST`, `PUT`, `PATCH`, and `DELETE` negotiate `Accept` like `GET`
+([media-types](media-types.md)): the JSON shapes are served, and `text/csv`
+is 501 before a write runs. `Range` on `GET` stays 501. `HEAD` ignores
+`Range`. `max-rows` is not applied.
 
 Existence uses `relkind` `r`, `p`, `v`, `m`, `f` and `NOT relispartition`.
 The OpenAPI list uses the same kinds and `has_table_privilege` after

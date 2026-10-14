@@ -11,6 +11,13 @@
 //! `Prefer` `resolution`, `missing`, `handling`, `max-affected` and
 //! `timezone` apply too (`specs/rest/prefer.md`); `tx` is ignored. Values are
 //! bound. Names are `quote_ident` after a catalog lookup.
+//!
+//! `Accept` picks the body shape (`specs/rest/media-types.md`). A singular
+//! shape (`application/vnd.pgrst.object+json`) needs exactly one affected row
+//! on `POST`, `PATCH` and `DELETE`; any other count is 406 `PGRST116` and the
+//! write rolls back (`MainTx.hs` `failNotSingular`). `PUT` keeps its own
+//! `PGRST115` check. The shape applies whatever `return=` says; only
+//! `return=representation` has a body to shape.
 
 use std::collections::BTreeSet;
 
@@ -23,7 +30,8 @@ use crate::params::{where_clause, ReadQuery};
 use crate::prefer::{set_applied, Count, Missing, Prefer, Representation, Resolution, Scope};
 use crate::read::{
     self, begin, content_range, load_columns, pgrst, query_failure, relation_exists,
-    set_request_context, table_not_found, unimplemented_unit, unsafe_type, Session,
+    set_request_context, singular_check, table_not_found, unimplemented_unit, unsafe_type,
+    ReadShape, Session,
 };
 
 const EMPTY_JSON: &str = "Empty or invalid json";
@@ -44,7 +52,8 @@ struct Payload {
     keys: Vec<String>,
 }
 
-/// Run one mutation. `query` is the already-parsed query string.
+/// Run one mutation. `query` is the already-parsed query string and `shape`
+/// the negotiated `Accept` shape (`None` is plain JSON).
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn mutate(
     pool: Option<&sqlx::PgPool>,
@@ -56,6 +65,7 @@ pub(crate) async fn mutate(
     prefer: &Prefer,
     body: &[u8],
     content_type: Option<&HeaderValue>,
+    shape: Option<ReadShape>,
 ) -> Response {
     let kind = match *method {
         Method::POST => Kind::Create,
@@ -304,6 +314,7 @@ pub(crate) async fn mutate(
         &ret,
         &kind,
         tracked,
+        shape,
     );
     let mut statement =
         sqlx::query_as::<sqlx::Postgres, (i64, i64, String, Option<String>)>(&built.sql);
@@ -322,6 +333,17 @@ pub(crate) async fn mutate(
             None,
             None,
         );
+    }
+    // megabase:unit rest:media-type:application/vnd.pgrst.object+json
+    // megabase:unit rest:media-type:application/vnd.pgrst.object+json;nulls=stripped
+    // `MainTx.hs` `failMutation`: a create, update or delete under a singular
+    // `Accept` must affect exactly one row. `failPut` is the only check on an
+    // upsert. Dropping the transaction rolls the write back.
+    if !matches!(kind, Kind::Upsert) && shape.is_some_and(ReadShape::singular) {
+        if let Err(response) = singular_check(count) {
+            drop(tx);
+            return *response;
+        }
     }
     // megabase:unit rest:prefer:max-affected=*
     // `MainTx.hs` `failExceedsMaxAffectedPref`: only under `handling=strict`.
@@ -355,6 +377,7 @@ pub(crate) async fn mutate(
         relation,
         prefer.representation,
         tracked,
+        shape,
     );
     let applied = prefer.applied(Scope {
         resolution: matches!(kind, Kind::Create) && !conflict.is_empty(),
@@ -507,7 +530,11 @@ fn returning(
 
 /// Append the final `SELECT` to the `WITH mutated AS (…)` head.
 ///
-/// Columns: affected rows, inserted rows, JSON body, `Location` pairs.
+/// Columns: affected rows, inserted rows, JSON body, `Location` pairs. The
+/// body follows `shape` like `SqlFragment.hs` `asJsonF` / `asJsonSingleF`:
+/// an object shape takes element `0` and defaults to `null`, and
+/// `nulls=stripped` wraps the aggregate in `json_strip_nulls`.
+#[allow(clippy::too_many_arguments)]
 fn finish_sql(
     built: &mut MutationSql,
     relation: &str,
@@ -516,6 +543,7 @@ fn finish_sql(
     ret: &Ret,
     kind: &Kind,
     resolution: Option<Resolution>,
+    shape: Option<ReadShape>,
 ) {
     let (src, inserted, body, location) = match ret {
         Ret::One => (
@@ -567,14 +595,14 @@ fn finish_sql(
             } else {
                 "0::bigint".to_string()
             };
+            let agg = format!(
+                "(SELECT json_agg(t.row ORDER BY t.rn) FROM \
+                 (SELECT to_json(s) AS row, row_number() OVER () AS rn FROM ({select}) s) t)"
+            );
             (
                 format!(", _megabase_src AS (SELECT {cols} FROM mutated)"),
                 inserted,
-                format!(
-                    "coalesce((SELECT json_agg(t.row ORDER BY t.rn) FROM \
-                     (SELECT to_json(s) AS row, row_number() OVER () AS rn FROM ({select}) s) t), \
-                     '[]'::json)::text"
-                ),
+                shaped_body(&agg, shape),
                 "NULL::text".to_string(),
             )
         }
@@ -585,6 +613,24 @@ fn finish_sql(
     );
 }
 
+/// The body column for `return=representation`: `agg` is the `json_agg` of
+/// the returned rows, shaped as `handlerF` would (`SqlFragment.hs:226-242`).
+fn shaped_body(agg: &str, shape: Option<ReadShape>) -> String {
+    let singular = shape.is_some_and(ReadShape::singular);
+    let picked = if singular {
+        format!("{agg}->0")
+    } else {
+        agg.to_string()
+    };
+    let stripped = if shape.is_some_and(ReadShape::stripped) {
+        format!("json_strip_nulls({picked})")
+    } else {
+        picked
+    };
+    let default = if singular { "'null'" } else { "'[]'" };
+    format!("coalesce({stripped}, {default}::json)::text")
+}
+
 fn mutation_response(
     kind: &Kind,
     outcome: &Outcome,
@@ -592,6 +638,7 @@ fn mutation_response(
     relation: &str,
     representation: Option<Representation>,
     resolution: Option<Resolution>,
+    shape: Option<ReadShape>,
 ) -> Response {
     let full = representation == Some(Representation::Full);
     let (status, range) = match kind {
@@ -620,9 +667,10 @@ fn mutation_response(
         .body(body)
         .unwrap_or_else(|_| Response::new(axum::body::Body::empty()));
     if full {
+        // `Response.hs` `contentTypeHeaders`: the negotiated type, only with a body.
         response.headers_mut().insert(
             header::CONTENT_TYPE,
-            HeaderValue::from_static(read::JSON_UTF8),
+            HeaderValue::from_static(shape.map_or(read::JSON_UTF8, ReadShape::content_type)),
         );
     }
     if let Some(range) = range {
@@ -1204,6 +1252,7 @@ mod tests {
                 "todos",
                 Some(Representation::Full),
                 None,
+                None,
             );
             assert_eq!(full.status(), status);
             assert_eq!(
@@ -1219,6 +1268,7 @@ mod tests {
             "todos",
             Some(Representation::Full),
             None,
+            None,
         );
         assert_eq!(upsert_new.status(), StatusCode::CREATED);
         let upsert_old = mutation_response(
@@ -1227,6 +1277,7 @@ mod tests {
             "public",
             "todos",
             Some(Representation::Full),
+            None,
             None,
         );
         assert_eq!(upsert_old.status(), StatusCode::OK);
@@ -1242,6 +1293,7 @@ mod tests {
                 "todos",
                 Some(Representation::Full),
                 resolution,
+                None,
             )
             .status()
         };
@@ -1279,16 +1331,30 @@ mod tests {
             Some(Representation::Minimal),
             Some(Representation::HeadersOnly),
         ] {
-            let update =
-                mutation_response(&Kind::Update, &outcome(2, 0), "public", "todos", rep, None);
+            let update = mutation_response(
+                &Kind::Update,
+                &outcome(2, 0),
+                "public",
+                "todos",
+                rep,
+                None,
+                None,
+            );
             assert_eq!(update.status(), StatusCode::NO_CONTENT);
             assert_eq!(
                 update.headers().get(header::CONTENT_RANGE),
                 Some(&HeaderValue::from_static("0-1/*"))
             );
             assert!(update.headers().get(header::CONTENT_TYPE).is_none());
-            let create =
-                mutation_response(&Kind::Create, &outcome(1, 1), "public", "todos", rep, None);
+            let create = mutation_response(
+                &Kind::Create,
+                &outcome(1, 1),
+                "public",
+                "todos",
+                rep,
+                None,
+                None,
+            );
             assert_eq!(create.status(), StatusCode::CREATED);
             assert!(create.headers().get(header::CONTENT_TYPE).is_none());
         }
@@ -1320,10 +1386,13 @@ mod tests {
             &Ret::Full,
             &Kind::Delete,
             None,
+            None,
         );
         assert!(built
             .sql
             .contains("FROM _megabase_src AS \"todos\" ORDER BY"));
+        assert!(built.sql.contains(", '[]'::json)::text"));
+        assert!(!built.sql.contains("->0"));
 
         let mut keyed = MutationSql {
             sql: "WITH mutated AS (INSERT INTO t DEFAULT VALUES RETURNING \"t\".\"id\")"
@@ -1337,6 +1406,7 @@ mod tests {
             &[("id", "bigint")],
             &Ret::Keys(vec!["id".to_string()]),
             &Kind::Create,
+            None,
             None,
         );
         assert!(keyed.sql.contains("ORDER BY k.ord"));
@@ -1393,8 +1463,82 @@ mod tests {
             &Ret::One,
             &Kind::Delete,
             None,
+            None,
         );
         assert!(!minimal.sql.contains("_megabase_src"));
+    }
+
+    #[test]
+    fn singular_shapes_take_the_first_row_and_strip_nulls() {
+        let agg = "(SELECT json_agg(t.row) FROM t)";
+        assert_eq!(
+            shaped_body(agg, None),
+            "coalesce((SELECT json_agg(t.row) FROM t), '[]'::json)::text"
+        );
+        assert_eq!(
+            shaped_body(agg, Some(ReadShape::Object)),
+            "coalesce((SELECT json_agg(t.row) FROM t)->0, 'null'::json)::text"
+        );
+        assert_eq!(
+            shaped_body(agg, Some(ReadShape::ObjectStripped)),
+            "coalesce(json_strip_nulls((SELECT json_agg(t.row) FROM t)->0), 'null'::json)::text"
+        );
+        assert_eq!(
+            shaped_body(agg, Some(ReadShape::ArrayStripped)),
+            "coalesce(json_strip_nulls((SELECT json_agg(t.row) FROM t)), '[]'::json)::text"
+        );
+
+        let query = parse_get_query("select=id").expect("query");
+        let mut built = MutationSql {
+            sql: "WITH mutated AS (DELETE FROM t RETURNING 1)".to_string(),
+            params: Vec::new(),
+        };
+        finish_sql(
+            &mut built,
+            "todos",
+            &query,
+            &[("id", "bigint")],
+            &Ret::Full,
+            &Kind::Delete,
+            None,
+            Some(ReadShape::Object),
+        );
+        assert!(built.sql.contains("->0, 'null'::json)::text"));
+    }
+
+    #[test]
+    fn singular_representation_uses_the_object_content_type() {
+        for shape in [ReadShape::Object, ReadShape::ObjectStripped] {
+            let response = mutation_response(
+                &Kind::Create,
+                &outcome(1, 1),
+                "public",
+                "todos",
+                Some(Representation::Full),
+                None,
+                Some(shape),
+            );
+            assert_eq!(response.status(), StatusCode::CREATED);
+            assert_eq!(
+                response
+                    .headers()
+                    .get(header::CONTENT_TYPE)
+                    .and_then(|value| value.to_str().ok()),
+                Some(shape.content_type())
+            );
+        }
+        // Without a body there is no `Content-Type` to shape.
+        let minimal = mutation_response(
+            &Kind::Delete,
+            &outcome(1, 0),
+            "public",
+            "todos",
+            None,
+            None,
+            Some(ReadShape::Object),
+        );
+        assert_eq!(minimal.status(), StatusCode::NO_CONTENT);
+        assert!(minimal.headers().get(header::CONTENT_TYPE).is_none());
     }
 
     fn create_sql(options: &WriteOptions<'_>, object: bool) -> String {
