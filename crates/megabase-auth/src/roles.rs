@@ -69,6 +69,8 @@ async fn install_roles_within(database_url: &str, deadline: Duration) -> Result<
 
 async fn install_roles_inner(database_url: &str) -> Result<(), RolesError> {
     let client = connect(database_url).await?;
+    // A failed batch leaves the session in an aborted transaction; the client
+    // is dropped on return, which rolls back. Do not reuse it after an error.
     client.batch_execute(ROLES).await?;
     Ok(())
 }
@@ -148,7 +150,7 @@ mod tests {
         assert!(ROLES.contains("ARRAY['anon', 'authenticated', 'service_role']"));
         assert!(ROLES.contains("IF NOT pg_has_role('authenticator', api_role, 'MEMBER')"));
         assert!(ROLES.contains("EXECUTE format('GRANT %I TO authenticator', api_role);"));
-        assert!(ROLES.contains("SELECT rolsuper INTO STRICT connect_is_super"));
+        assert!(ROLES.contains("SELECT rolsuper INTO connect_is_super"));
         assert!(ROLES.contains("IF NOT connect_is_super"));
         assert!(ROLES.contains("NOT pg_has_role(connect_role, api_role, 'MEMBER')"));
         assert!(ROLES.contains("EXECUTE format('GRANT %I TO %I', api_role, connect_role);"));

@@ -57,7 +57,10 @@ DECLARE
     connect_role text := current_user;
     connect_is_super boolean;
 BEGIN
-    SELECT rolsuper INTO STRICT connect_is_super FROM pg_roles WHERE rolname = connect_role;
+    SELECT rolsuper INTO connect_is_super FROM pg_roles WHERE rolname = connect_role;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'connecting role "%" has no pg_roles row', connect_role;
+    END IF;
 
     FOREACH api_role IN ARRAY ARRAY['anon', 'authenticated', 'service_role'] LOOP
         IF NOT pg_has_role('authenticator', api_role, 'MEMBER') THEN
