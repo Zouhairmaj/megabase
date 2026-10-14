@@ -695,12 +695,23 @@ jobs:
             echo "::error::Run SHA ${GITHUB_SHA} is not tag ${TAG} (${EXPECTED}). attest-build-provenance records the run SHA."
             exit 1
           fi
+      # A backfilled tag's tree can predate the local composite actions
+      # (v0.1.0 has no .github/actions/sccache). Load them from the run's
+      # own commit into a side path. HEAD stays the tag, so the guard above
+      # and provenance are unchanged. On a tag release github.sha is the
+      # tag commit, so the actions are the same as the tag's.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          path: .megabase-ci
+          sparse-checkout: .github/actions
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
         with:
           toolchain: stable
           targets: ${{ matrix.target }}
-      - uses: ./.github/actions/sccache
-      - uses: ./.github/actions/rust-cache
+      - uses: ./.megabase-ci/.github/actions/sccache
+      - uses: ./.megabase-ci/.github/actions/rust-cache
         with:
           key: release-${{ matrix.target }}
       - name: Install musl
@@ -736,8 +747,9 @@ jobs:
           path: dist/${{ env.ASSET }}
           if-no-files-found: error
           retention-days: 5
+      # Skipped when the job failed before the sccache action ran.
       - name: sccache stats
-        if: always()
+        if: always() && env.RUSTC_WRAPPER == 'sccache'
         run: sccache --show-stats
 
   sign-and-publish:
