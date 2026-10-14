@@ -1,0 +1,123 @@
+name: Mirror Postgres image
+
+# Copies the reference Postgres image that judge/compose.override.yml pins
+# from public.ecr.aws/supabase/postgres to ghcr.io/zouhairmaj/supabase-postgres
+# at the same tag and digest (issue #350). public.ecr.aws answers bursts with
+# "toomanyrequests", and this image is the largest one the Judge and the
+# Real app job pull. Consumers go through .github/actions/judge-db-image,
+# which falls back to ECR while the mirror is missing.
+#
+# Runs on dispatch and whenever the overlay (and so the pinned tag) changes
+# on main. The copy keeps every platform and refuses to change the digest.
+# The package must be public so pull requests and local `just judge-up` can
+# pull it without credentials.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - judge/compose.override.yml
+      - .github/workflows/mirror-postgres-image.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  mirror:
+    name: Mirror Postgres image
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+          sparse-checkout: judge/compose.override.yml
+          sparse-checkout-cone-mode: false
+      - name: Resolve references
+        id: ref
+        run: |
+          set -euo pipefail
+          # Same extraction as .github/actions/judge-db-image.
+          mirror=$(sed -n 's|^ *image: \${MEGABASE_JUDGE_DB_IMAGE:-\(ghcr\.io/[^}]*\)}$|\1|p' \
+            judge/compose.override.yml)
+          if [ "$(printf '%s\n' "$mirror" | grep -c .)" -ne 1 ]; then
+            echo "::error::judge/compose.override.yml must have exactly one \${MEGABASE_JUDGE_DB_IMAGE:-ghcr.io/...} image"
+            exit 1
+          fi
+          prefix=ghcr.io/zouhairmaj/supabase-postgres:
+          rest=${mirror#"$prefix"}
+          if [ "$rest" = "$mirror" ]; then
+            echo "::error::unexpected mirror reference ${mirror}"
+            exit 1
+          fi
+          tag=${rest%@sha256:*}
+          digest=${rest#"$tag"@}
+          if ! printf '%s' "$digest" | grep -Eq '^sha256:[0-9a-f]{64}$'; then
+            echo "::error::mirror reference ${mirror} has no sha256 digest"
+            exit 1
+          fi
+          {
+            echo "source=public.ecr.aws/supabase/postgres@${digest}"
+            echo "dest=${prefix}${tag}"
+            echo "digest=${digest}"
+          } >> "$GITHUB_OUTPUT"
+          echo "source: public.ecr.aws/supabase/postgres:${tag}@${digest}"
+          echo "dest:   ${prefix}${tag}"
+      - name: Log in to ghcr.io
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: skopeo login ghcr.io --username "$GITHUB_ACTOR" --password-stdin <<<"$GH_TOKEN"
+      - name: Copy every platform, keeping the digest
+        env:
+          SOURCE: ${{ steps.ref.outputs.source }}
+          DEST: ${{ steps.ref.outputs.dest }}
+          DIGEST: ${{ steps.ref.outputs.digest }}
+        run: |
+          set -euo pipefail
+          skopeo --version
+          if current=$(skopeo inspect --raw "docker://${DEST}" 2>/dev/null | sha256sum | cut -d' ' -f1) \
+            && [ "sha256:${current}" = "$DIGEST" ]; then
+            echo "${DEST} already has ${DIGEST}"
+            exit 0
+          fi
+          attempt=1
+          until skopeo copy --all --preserve-digests --retry-times 3 \
+            "docker://${SOURCE}" "docker://${DEST}"; do
+            if [ "$attempt" -ge 5 ]; then
+              echo "::error::failed to copy ${SOURCE}"
+              exit 1
+            fi
+            sleep $((attempt * 15))
+            attempt=$((attempt + 1))
+          done
+      - name: Verify the digest
+        env:
+          DEST: ${{ steps.ref.outputs.dest }}
+          DIGEST: ${{ steps.ref.outputs.digest }}
+        run: |
+          set -euo pipefail
+          got="sha256:$(skopeo inspect --raw "docker://${DEST}" | sha256sum | cut -d' ' -f1)"
+          if [ "$got" != "$DIGEST" ]; then
+            echo "::error::${DEST} has ${got}, expected ${DIGEST}"
+            exit 1
+          fi
+          # Anonymous pull, as pull requests and local runs do. Fails until
+          # the package is public (Package settings, Change visibility).
+          if skopeo inspect --raw --no-creds "docker://${DEST%:*}@${DIGEST}" >/dev/null; then
+            echo "${DEST}@${DIGEST} is public"
+          else
+            echo "::warning::${DEST} is not anonymously pullable. Make the package public; until then CI falls back to public.ecr.aws."
+          fi
+          echo "Mirrored ${DEST}@${DIGEST}" >> "$GITHUB_STEP_SUMMARY"
+      - name: Log out
+        if: always()
+        run: skopeo logout ghcr.io || true

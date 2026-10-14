@@ -101,24 +101,21 @@ jobs:
         run: cargo build --release --locked -p megabase --bin megabase
 
       # The Judge's reference database image (judge/compose.override.yml),
-      # digest-pinned on public ECR. Megabase bootstraps the API roles on a
-      # stock PostgreSQL too (decision 0037); this image keeps the job on
-      # the same Postgres the reference stack runs, and its initdb already
-      # has them, so the idempotent bootstrap must also succeed here.
+      # digest-pinned on the ghcr.io mirror with a public ECR fallback.
+      # Megabase bootstraps the API roles on a stock PostgreSQL too
+      # (decision 0037); this image keeps the job on the same Postgres the
+      # reference stack runs, and its initdb already has them, so the
+      # idempotent bootstrap must also succeed here.
+      - uses: ./.github/actions/judge-db-image
+        id: db-image
+        if: steps.run.outputs.run == 'true'
       - name: Start PostgreSQL
         if: steps.run.outputs.run == 'true'
+        env:
+          IMAGE: ${{ steps.db-image.outputs.image }}
         run: |
           set -euo pipefail
-          image='public.ecr.aws/supabase/postgres:17.6.1.136@sha256:f371b5f3f2ac0a05703f33d6e6134515fb2498cab708fb948a0aeb7481467c00'
-          attempt=1
-          until docker pull "$image"; do
-            if [ "$attempt" -ge 5 ]; then
-              echo "failed to pull $image" >&2
-              exit 1
-            fi
-            sleep $((attempt * 5))
-            attempt=$((attempt + 1))
-          done
+          image="$IMAGE"
           # Same environment and command as the `db` service in the official
           # compose file. Host 54322, like the Judge, so a runner-local
           # PostgreSQL on 5432 cannot collide.

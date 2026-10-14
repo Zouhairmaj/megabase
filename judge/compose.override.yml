@@ -81,7 +81,11 @@ services:
   functions:
     image: public.ecr.aws/supabase/edge-runtime:v1.77.4@sha256:ad45164b7548bf5820ed7be714789c17ac2865edce79a09cfb4c3756c3d365a8
   db:
-    image: public.ecr.aws/supabase/postgres:17.6.1.136@sha256:f371b5f3f2ac0a05703f33d6e6134515fb2498cab708fb948a0aeb7481467c00
+    # ghcr.io mirror of public.ecr.aws/supabase/postgres at the same tag and
+    # digest (.github/workflows/mirror-postgres-image.yml, issue #350). The
+    # largest image in the stack, so ECR rate limits hit it most. CI sets
+    # MEGABASE_JUDGE_DB_IMAGE to the ECR reference when ghcr cannot be pulled.
+    image: ${MEGABASE_JUDGE_DB_IMAGE:-ghcr.io/zouhairmaj/supabase-postgres:17.6.1.136@sha256:f371b5f3f2ac0a05703f33d6e6134515fb2498cab708fb948a0aeb7481467c00}
     # Official compose publishes 5432 on the pooler. The harness needs a
     # direct Postgres port for CREATE DATABASE and catalog snapshots.
     ports:
