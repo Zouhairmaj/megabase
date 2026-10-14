@@ -80,15 +80,15 @@ pub fn router(state: RestState) -> Router {
 
 /// Walk a PostgREST-style query string without interpreting operators.
 ///
-/// Splits on `&` and `=` and does not percent-decode. The `rest_query` fuzzer
-/// calls this together with [`interpret_query`].
+/// Splits pairs on `&` and `;` (as http-types `parseQuery` does), then on the
+/// first `=`, and does not percent-decode. The `rest_query` fuzzer calls this
+/// together with [`interpret_query`].
 #[must_use]
 pub fn walk_query_string(query: &str) -> Vec<(&str, Option<&str>)> {
     if query.is_empty() {
         return Vec::new();
     }
-    query
-        .split('&')
+    query::query_parts(query)
         .filter(|part| !part.is_empty())
         .map(|part| match part.split_once('=') {
             Some((key, value)) => (key, Some(value)),
@@ -110,5 +110,9 @@ mod tests {
         );
         assert_eq!(walk_query_string("or"), vec![("or", None)]);
         assert_eq!(walk_query_string("&&id=eq.1&"), vec![("id", Some("eq.1"))]);
+        assert_eq!(
+            walk_query_string("id=eq.1;drop"),
+            vec![("id", Some("eq.1")), ("drop", None)]
+        );
     }
 }
