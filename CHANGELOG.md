@@ -4,6 +4,22 @@ All notable changes to Megabase are documented in this file.
 The format is produced by [release-please](https://github.com/googleapis/release-please).
 Sections: Features, Bug Fixes, Performance, Conformance/judge, Documentation.
 
+## [0.1.24](https://github.com/Zouhairmaj/megabase/compare/v0.1.23...v0.1.24) (2026-10-14)
+
+
+### Features
+
+* create standard api roles at startup ([#324](https://github.com/Zouhairmaj/megabase/issues/324)) ([dbfc90d](https://github.com/Zouhairmaj/megabase/commit/dbfc90d10bc8ba1fab1a308de2dc010dfa6ba1a4))
+* **rest:** plan media type is 406 while plans are disabled ([#314](https://github.com/Zouhairmaj/megabase/issues/314)) ([c11e203](https://github.com/Zouhairmaj/megabase/commit/c11e2039e46fecb425ed77290e2a155d06086e09))
+
+
+### Bug Fixes
+
+* **auth:** answer kong cors preflights at the gateway ([#323](https://github.com/Zouhairmaj/megabase/issues/323)) ([e0677a8](https://github.com/Zouhairmaj/megabase/commit/e0677a86f694f2ab64292c22e957e241e093968f))
+* **auth:** read null request fields as absent, like go ([#322](https://github.com/Zouhairmaj/megabase/issues/322)) ([5657b64](https://github.com/Zouhairmaj/megabase/commit/5657b64419faf048d8e2c555fe52b9f3ae8836b9))
+* **rest:** complete cors headers on preflight and simple requests ([#325](https://github.com/Zouhairmaj/megabase/issues/325)) ([13d857a](https://github.com/Zouhairmaj/megabase/commit/13d857a52984516af8503919685224ef5abc4dd3))
+* **rest:** serve vnd.pgrst.object+json on writes and rpc ([#326](https://github.com/Zouhairmaj/megabase/issues/326)) ([b1dc2e9](https://github.com/Zouhairmaj/megabase/commit/b1dc2e967f13239e147a0d78e7e5b3ca35058006))
+
 ## [0.1.23](https://github.com/Zouhairmaj/megabase/compare/v0.1.22...v0.1.23) (2026-10-14)
 
 
