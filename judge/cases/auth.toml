@@ -1245,3 +1245,218 @@ method = "GET"
 path = "/auth/v1/authorize?provider=github&redirect_to=https%3A%2F%2Fevil.example%2Fphish"
 key = "none"
 
+# Issue #5 admin follow-up: the remaining implemented admin routes. Anon steps
+# prove the service-role gate; missing-id and disabled-feature steps reach
+# Auth state so a unit cannot become conformant on credential checks alone.
+
+[[case]]
+id = "auth.admin.users.get.anon"
+description = "Admin user get with the anon key is forbidden"
+units = ["auth:route:GET /auth/v1/admin/users/{user_id}"]
+[[case.step]]
+method = "GET"
+path = "/auth/v1/admin/users/00000000-0000-0000-0000-000000000001"
+
+[[case]]
+id = "auth.admin.users.get.missing"
+description = "Admin user get returns not found for a missing UUID"
+units = ["auth:route:GET /auth/v1/admin/users/{user_id}"]
+[[case.step]]
+method = "GET"
+path = "/auth/v1/admin/users/00000000-0000-0000-0000-000000000001"
+key = "service_role"
+
+[[case]]
+id = "auth.admin.users.put.anon"
+description = "Admin user update with the anon key is forbidden"
+units = ["auth:route:PUT /auth/v1/admin/users/{user_id}"]
+[[case.step]]
+method = "PUT"
+path = "/auth/v1/admin/users/00000000-0000-0000-0000-000000000001"
+json = {}
+
+[[case]]
+id = "auth.admin.users.put.missing"
+description = "Admin user update returns not found for a missing UUID"
+units = ["auth:route:PUT /auth/v1/admin/users/{user_id}"]
+[[case.step]]
+method = "PUT"
+path = "/auth/v1/admin/users/00000000-0000-0000-0000-000000000001"
+key = "service_role"
+json = {}
+
+[[case]]
+id = "auth.admin.users.create.anon"
+description = "Admin user create with the anon key is forbidden"
+units = ["auth:route:POST /auth/v1/admin/users"]
+[[case.step]]
+method = "POST"
+path = "/auth/v1/admin/users"
+json = { email = "judge-admin-anon-{{run}}@example.com" }
+
+[[case]]
+id = "auth.admin.generate-link.anon"
+description = "Admin generate_link with the anon key is forbidden"
+units = ["auth:route:POST /auth/v1/admin/generate_link"]
+[[case.step]]
+method = "POST"
+path = "/auth/v1/admin/generate_link"
+json = { type = "magiclink", email = "judge-link-anon-{{run}}@example.com" }
+
+[[case]]
+id = "auth.admin.users.factors.list.anon"
+description = "Admin factor list with the anon key is forbidden"
+units = ["auth:route:GET /auth/v1/admin/users/{user_id}/factors"]
+[[case.step]]
+method = "GET"
+path = "/auth/v1/admin/users/00000000-0000-0000-0000-000000000001/factors"
+
+[[case]]
+id = "auth.admin.users.factors.list.missing-user"
+description = "Admin factor list returns not found for a missing user"
+units = ["auth:route:GET /auth/v1/admin/users/{user_id}/factors"]
+[[case.step]]
+method = "GET"
+path = "/auth/v1/admin/users/00000000-0000-0000-0000-000000000001/factors"
+key = "service_role"
+
+[[case]]
+id = "auth.admin.users.factors.put.anon"
+description = "Admin factor update with the anon key is forbidden"
+units = ["auth:route:PUT /auth/v1/admin/users/{user_id}/factors/{factor_id}"]
+[[case.step]]
+method = "PUT"
+path = "/auth/v1/admin/users/00000000-0000-0000-0000-000000000001/factors/00000000-0000-0000-0000-000000000002"
+json = {}
+
+[[case]]
+id = "auth.admin.users.factors.put.missing-user"
+description = "Admin factor update returns not found for a missing user"
+units = ["auth:route:PUT /auth/v1/admin/users/{user_id}/factors/{factor_id}"]
+[[case.step]]
+method = "PUT"
+path = "/auth/v1/admin/users/00000000-0000-0000-0000-000000000001/factors/00000000-0000-0000-0000-000000000002"
+key = "service_role"
+json = {}
+
+[[case]]
+id = "auth.admin.users.passkeys.list.anon"
+description = "Admin passkey list with the anon key is forbidden"
+units = ["auth:route:GET /auth/v1/admin/users/{user_id}/passkeys"]
+[[case.step]]
+method = "GET"
+path = "/auth/v1/admin/users/00000000-0000-0000-0000-000000000001/passkeys"
+
+[[case]]
+id = "auth.admin.users.passkeys.list.missing-user"
+description = "Admin passkey list returns not found for a missing user"
+units = ["auth:route:GET /auth/v1/admin/users/{user_id}/passkeys"]
+[[case.step]]
+method = "GET"
+path = "/auth/v1/admin/users/00000000-0000-0000-0000-000000000001/passkeys"
+key = "service_role"
+
+[[case]]
+id = "auth.admin.sso.providers.list.anon"
+description = "Admin SSO provider list with the anon key is forbidden"
+units = ["auth:route:GET /auth/v1/admin/sso/providers"]
+[[case.step]]
+method = "GET"
+path = "/auth/v1/admin/sso/providers"
+
+[[case]]
+id = "auth.admin.sso.providers.get.anon"
+description = "Admin SSO provider get with the anon key is forbidden"
+units = ["auth:route:GET /auth/v1/admin/sso/providers/{idp_id}"]
+[[case.step]]
+method = "GET"
+path = "/auth/v1/admin/sso/providers/00000000-0000-0000-0000-000000000001"
+
+[[case]]
+id = "auth.admin.sso.providers.get.missing"
+description = "Admin SSO provider get returns not found for a missing UUID"
+units = ["auth:route:GET /auth/v1/admin/sso/providers/{idp_id}"]
+[[case.step]]
+method = "GET"
+path = "/auth/v1/admin/sso/providers/00000000-0000-0000-0000-000000000001"
+key = "service_role"
+
+[[case]]
+id = "auth.admin.sso.providers.create.anon"
+description = "Admin SSO provider create with the anon key is forbidden"
+units = ["auth:route:POST /auth/v1/admin/sso/providers"]
+[[case.step]]
+method = "POST"
+path = "/auth/v1/admin/sso/providers"
+json = {}
+
+[[case]]
+id = "auth.admin.sso.providers.put.anon"
+description = "Admin SSO provider update with the anon key is forbidden"
+units = ["auth:route:PUT /auth/v1/admin/sso/providers/{idp_id}"]
+[[case.step]]
+method = "PUT"
+path = "/auth/v1/admin/sso/providers/00000000-0000-0000-0000-000000000001"
+json = {}
+
+[[case]]
+id = "auth.admin.oauth.clients.get.anon"
+description = "Admin OAuth client get with the anon key is forbidden"
+units = ["auth:route:GET /auth/v1/admin/oauth/clients/{client_id}"]
+[[case.step]]
+method = "GET"
+path = "/auth/v1/admin/oauth/clients/00000000-0000-0000-0000-000000000001"
+
+[[case]]
+id = "auth.admin.oauth.clients.get.disabled"
+description = "Admin OAuth client get is feature-disabled on the self-hosted default"
+units = ["auth:route:GET /auth/v1/admin/oauth/clients/{client_id}"]
+[[case.step]]
+method = "GET"
+path = "/auth/v1/admin/oauth/clients/00000000-0000-0000-0000-000000000001"
+key = "service_role"
+
+[[case]]
+id = "auth.admin.oauth.clients.create.anon"
+description = "Admin OAuth client create with the anon key is forbidden"
+units = ["auth:route:POST /auth/v1/admin/oauth/clients"]
+[[case.step]]
+method = "POST"
+path = "/auth/v1/admin/oauth/clients"
+json = {}
+
+[[case]]
+id = "auth.admin.oauth.clients.put.anon"
+description = "Admin OAuth client update with the anon key is forbidden"
+units = ["auth:route:PUT /auth/v1/admin/oauth/clients/{client_id}"]
+[[case.step]]
+method = "PUT"
+path = "/auth/v1/admin/oauth/clients/00000000-0000-0000-0000-000000000001"
+json = {}
+
+[[case]]
+id = "auth.admin.oauth.clients.regenerate.anon"
+description = "Admin OAuth client secret regeneration with the anon key is forbidden"
+units = ["auth:route:POST /auth/v1/admin/oauth/clients/{client_id}/regenerate_secret"]
+[[case.step]]
+method = "POST"
+path = "/auth/v1/admin/oauth/clients/00000000-0000-0000-0000-000000000001/regenerate_secret"
+
+[[case]]
+id = "auth.admin.custom-providers.create.anon"
+description = "Admin custom provider create with the anon key is forbidden"
+units = ["auth:route:POST /auth/v1/admin/custom-providers"]
+[[case.step]]
+method = "POST"
+path = "/auth/v1/admin/custom-providers"
+json = {}
+
+[[case]]
+id = "auth.admin.custom-providers.put.anon"
+description = "Admin custom provider update with the anon key is forbidden"
+units = ["auth:route:PUT /auth/v1/admin/custom-providers/{identifier}"]
+[[case.step]]
+method = "PUT"
+path = "/auth/v1/admin/custom-providers/custom:missing"
+json = {}
+
