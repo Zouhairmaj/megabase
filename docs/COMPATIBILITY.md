@@ -94,7 +94,7 @@ Implemented and tested counts come from markers and `judge/cases/`. Live conform
 | REST | logic | 1 | 3 | 3 | 0 |
 | REST | media-types | 1 | 13 | 10 | 4 |
 | REST | ordering | 1 | 4 | 4 | 0 |
-| REST | prefer | 1 | 16 | 16 | 7 |
+| REST | prefer | 1 | 16 | 16 | 16 |
 | REST | query-params | 1 | 8 | 8 | 8 |
 | REST | resources | 1 | 10 | 10 | 10 |
 | REST | rpc | 1 | 4 | 4 | 4 |
