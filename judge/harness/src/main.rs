@@ -631,6 +631,20 @@ mod tests {
             };
             images += 1;
             let image = rest.trim().trim_matches('"').trim_matches('\'');
+            // `${VAR:-default}`: CI overrides the variable only with a
+            // fallback mirror, so the default must satisfy the same pins.
+            let image = match image.strip_prefix("${") {
+                Some(inner) => {
+                    let inner = inner
+                        .strip_suffix('}')
+                        .unwrap_or_else(|| panic!("line {} has an unclosed ${{", i + 1));
+                    let Some((_, default)) = inner.split_once(":-") else {
+                        panic!("line {} must give a default image, got {image}", i + 1);
+                    };
+                    default
+                }
+                None => image,
+            };
             assert!(
                 !image.contains("docker.io/"),
                 "line {} must not pull from Docker Hub, got {image}",

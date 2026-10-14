@@ -175,6 +175,9 @@ jobs:
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
+      # ghcr.io mirror first, ECR fallback (sets MEGABASE_JUDGE_DB_IMAGE).
+      - uses: ./.github/actions/judge-db-image
+        if: steps.run.outputs.run == 'true'
       - name: Pull reference images
         if: steps.run.outputs.run == 'true'
         run: |
@@ -188,6 +191,7 @@ jobs:
             config --images)
           for image in "${images[@]}"; do
             [ -n "$image" ] || continue
+            docker image inspect "$image" >/dev/null 2>&1 && continue
             attempt=1
             until docker pull "$image"; do
               if [ "$attempt" -ge 8 ]; then
