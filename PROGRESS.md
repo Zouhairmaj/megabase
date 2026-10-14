@@ -97,7 +97,7 @@ None.
 
 ### Blocked items
 
-None.
+- `auth.settings`, `auth.settings.accept-text` (#349): the reference and Megabase bodies of `GET /auth/v1/settings` differ after the first 300 characters, which is where `judge/harness/src/run.rs` `describe` cuts the diff. Megabase matches `vendor/auth/internal/api/settings.go` and the reference env (`docker-compose.yml`, `.env.example`, `judge/compose.override.yml`) key by key. Three source comparisons found no difference, so the published `gotrue:v2.197.0` image may differ from the tagged source. To unblock: get the full reference body (`curl -s -H "apikey: $ANON_KEY" localhost:8000/auth/v1/settings | jq -S .` on the reference stack), or make a `review/*` harness change that reports the first differing JSON pointer.
 
 ### Judge disputes
 
