@@ -23,6 +23,7 @@ mod params;
 mod prefer;
 mod query;
 mod read;
+mod relationship;
 mod rpc;
 
 use std::sync::Arc;
