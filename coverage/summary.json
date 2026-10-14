@@ -3,7 +3,7 @@
   "totals": {
     "units": 1024,
     "implemented": 169,
-    "tested": 128,
+    "tested": 130,
     "conformant": 0
   },
   "percent": {
@@ -12,7 +12,7 @@
     "done": 0.0
   },
   "judge": {
-    "cases": 259,
+    "cases": 265,
     "passing": 0
   },
   "components": {
@@ -317,7 +317,7 @@
     "rest": {
       "units": 93,
       "implemented": 90,
-      "tested": 66,
+      "tested": 68,
       "conformant": 0,
       "groups": {
         "aggregates": {
@@ -377,7 +377,7 @@
         "rpc": {
           "units": 4,
           "implemented": 4,
-          "tested": 2,
+          "tested": 4,
           "conformant": 0
         }
       }
@@ -716,10 +716,10 @@
     "rest:route:GET /rest/v1/rpc/{function}": "tested",
     "rest:route:GET /rest/v1/{relation}": "tested",
     "rest:route:HEAD /rest/v1/": "tested",
-    "rest:route:HEAD /rest/v1/rpc/{function}": "implemented",
+    "rest:route:HEAD /rest/v1/rpc/{function}": "tested",
     "rest:route:HEAD /rest/v1/{relation}": "tested",
     "rest:route:OPTIONS /rest/v1/": "tested",
-    "rest:route:OPTIONS /rest/v1/rpc/{function}": "implemented",
+    "rest:route:OPTIONS /rest/v1/rpc/{function}": "tested",
     "rest:route:OPTIONS /rest/v1/{relation}": "tested",
     "rest:route:PATCH /rest/v1/{relation}": "tested",
     "rest:route:POST /rest/v1/rpc/{function}": "tested",
