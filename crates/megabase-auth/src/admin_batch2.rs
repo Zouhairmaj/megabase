@@ -41,6 +41,7 @@ use crate::error::{go_quote, MAX_BODY_BYTES};
 use crate::http::{json_ok, json_status, AuthError};
 use crate::routes::request_aud;
 use crate::state::AuthState;
+use crate::token::null_as_default;
 
 /// Issue #8 admin writes. A child module, so it reuses this file's helpers.
 #[path = "admin_batch3.rs"]
@@ -1223,17 +1224,17 @@ fn encode_redirect(redirect: &str) -> String {
 
 #[derive(Debug, Deserialize)]
 struct LinkParams {
-    #[serde(rename = "type", default)]
+    #[serde(rename = "type", default, deserialize_with = "null_as_default")]
     link_type: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     email: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     new_email: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     password: String,
     #[serde(default)]
     data: Option<Value>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     redirect_to: String,
 }
 
@@ -1935,19 +1936,19 @@ struct DomainRow {
 
 #[derive(Debug, Deserialize)]
 struct OAuthRegister {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     redirect_uris: Vec<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     client_type: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     token_endpoint_auth_method: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     grant_types: Vec<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     client_name: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     client_uri: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     logo_uri: String,
 }
 
@@ -2125,15 +2126,15 @@ fn validate_redirect_uri(uri: &str) -> Result<(), String> {
 
 #[derive(Debug, Deserialize)]
 struct CustomParams {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     provider_type: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     identifier: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     name: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     client_id: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     client_secret: String,
     #[serde(default)]
     acceptable_client_ids: Option<Vec<String>>,
@@ -2148,15 +2149,15 @@ struct CustomParams {
     authorization_params: Option<Map<String, Value>>,
     enabled: Option<bool>,
     email_optional: Option<bool>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     issuer: String,
     discovery_url: Option<String>,
     skip_nonce_check: Option<bool>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     authorization_url: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     token_url: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     userinfo_url: String,
     jwks_uri: Option<String>,
 }
@@ -2663,6 +2664,35 @@ mod tests {
             err.message,
             "Bad Sort Parameters: bad field for sort 'email'"
         );
+    }
+
+    /// Go reads `null` as the zero value for strings and slices alike.
+    #[test]
+    fn admin_params_read_null_as_absent() {
+        let link: LinkParams = serde_json::from_str(
+            r#"{"type":null,"email":null,"new_email":null,"password":null,"data":null,"redirect_to":null}"#,
+        )
+        .unwrap();
+        assert_eq!(link.link_type, "");
+        assert_eq!(link.email, "");
+        assert!(link.data.is_none());
+
+        let register: OAuthRegister = serde_json::from_str(
+            r#"{"redirect_uris":null,"client_type":null,"token_endpoint_auth_method":null,"grant_types":null,"client_name":null,"client_uri":null,"logo_uri":null}"#,
+        )
+        .unwrap();
+        assert!(register.redirect_uris.is_empty());
+        assert!(register.grant_types.is_empty());
+        assert_eq!(register.client_name, "");
+
+        let custom: CustomParams = serde_json::from_str(
+            r#"{"provider_type":null,"identifier":null,"name":null,"client_id":null,"client_secret":null,"acceptable_client_ids":null,"scopes":null,"pkce_enabled":null,"attribute_mapping":null,"custom_claims_allowlist":null,"authorization_params":null,"enabled":null,"email_optional":null,"issuer":null,"discovery_url":null,"skip_nonce_check":null,"authorization_url":null,"token_url":null,"userinfo_url":null,"jwks_uri":null}"#,
+        )
+        .unwrap();
+        assert_eq!(custom.provider_type, "");
+        assert_eq!(custom.issuer, "");
+        assert!(custom.scopes.is_none());
+        assert!(custom.pkce_enabled.is_none());
     }
 
     #[test]

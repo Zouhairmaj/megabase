@@ -35,7 +35,7 @@ use crate::error::{
 use crate::jsonutil::{access_claims, session_json, unix_secs};
 use crate::state::AuthState;
 use crate::store::{LogoutScope, SignupCommand, SignupResult, StoreError};
-use crate::token::null_as_empty;
+use crate::token::null_as_default;
 use crate::COMPONENT;
 
 const UNIT_SIGNUP: &str = "auth:route:POST /auth/v1/signup";
@@ -178,11 +178,11 @@ async fn recover(State(state): State<AuthState>, body: Body) -> Response {
 
 #[derive(Deserialize)]
 struct RecoverBody {
-    #[serde(default, deserialize_with = "null_as_empty")]
+    #[serde(default, deserialize_with = "null_as_default")]
     email: String,
-    #[serde(default, deserialize_with = "null_as_empty")]
+    #[serde(default, deserialize_with = "null_as_default")]
     code_challenge: String,
-    #[serde(default, deserialize_with = "null_as_empty")]
+    #[serde(default, deserialize_with = "null_as_default")]
     code_challenge_method: String,
 }
 
@@ -210,7 +210,7 @@ impl<'de> Deserialize<'de> for ResendBody {
                 "code_challenge_method" => &mut body.code_challenge_method,
                 _ => continue,
             };
-            *slot = crate::token::null_as_empty(value).map_err(serde::de::Error::custom)?;
+            *slot = null_as_default(value).map_err(serde::de::Error::custom)?;
         }
         Ok(body)
     }
@@ -499,21 +499,23 @@ async fn logout(State(state): State<AuthState>, headers: HeaderMap, uri: Uri) ->
     StatusCode::NO_CONTENT.into_response()
 }
 
+/// `SignupParams`. Unknown keys such as supabase-js's `gotrue_meta_security`
+/// are ignored, and `null` reads as absent (`null_as_default`).
 #[derive(Deserialize)]
 struct SignupBody {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     email: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     phone: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     password: String,
     #[serde(default)]
     data: Option<Map<String, Value>>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     channel: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     code_challenge: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     code_challenge_method: String,
 }
 
@@ -1022,6 +1024,49 @@ mod tests {
         assert_eq!(status, StatusCode::BAD_REQUEST);
         assert_eq!(body["error_code"], "email_provider_disabled");
         assert_eq!(body["msg"], "Email logins are disabled");
+    }
+
+    /// supabase-js v2 `signUp` sends `null` PKCE fields and empty objects;
+    /// Go reads `null` as the zero value, so the sign-up must succeed.
+    #[tokio::test]
+    async fn signup_accepts_supabase_js_null_fields() {
+        let (app, _) = memory_app();
+        let supabase_js = r#"{"email":"x@example.com","password":"password123","data":{},"gotrue_meta_security":{},"code_challenge":null,"code_challenge_method":null}"#;
+        let (status, body) = call(
+            app.clone(),
+            "POST",
+            "/auth/v1/signup",
+            Some(supabase_js),
+            &[
+                ("content-type", "application/json;charset=UTF-8"),
+                ("x-client-info", "supabase-js-node/2.49.1"),
+            ],
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(body["user"]["email"], "x@example.com");
+        assert_eq!(body["user"]["user_metadata"]["email"], "x@example.com");
+        assert!(body["access_token"].is_string());
+
+        // Every optional field may be `null`, not only the PKCE pair.
+        let all_null = r#"{"email":"y@example.com","password":"password123","phone":null,"data":null,"channel":null,"code_challenge":null,"code_challenge_method":null}"#;
+        let (status, body) =
+            call(app.clone(), "POST", "/auth/v1/signup", Some(all_null), &[]).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(body["user"]["email"], "y@example.com");
+
+        // `null` is absent, not a value: a null password still fails validation.
+        let (status, body) = call(
+            app,
+            "POST",
+            "/auth/v1/signup",
+            Some(r#"{"email":"z@example.com","password":null}"#),
+            &[],
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(body["error_code"], "validation_failed");
+        assert_eq!(body["msg"], "Signup requires a valid password");
     }
 
     #[tokio::test]
