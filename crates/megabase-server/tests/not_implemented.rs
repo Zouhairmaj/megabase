@@ -57,9 +57,10 @@ async fn every_method_on_every_route_is_501() {
 
 #[tokio::test]
 async fn rest_resource_routes_leave_501() {
+    // The root is admin only at the gateway, so an anonymous request is 403.
     let (status, body) = send("GET", "/rest/v1/").await;
-    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
-    assert_eq!(body["code"], "PGRST000");
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(body["message"], "You cannot consume this service");
 
     let (status, body) = send("GET", "/rest/v1/x").await;
     assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
@@ -82,8 +83,8 @@ async fn rest_resource_routes_leave_501() {
     assert_eq!(body["code"], "PGRST000");
 
     let (status, body) = send("OPTIONS", "/rest/v1/").await;
-    assert_eq!(status, StatusCode::OK);
-    assert!(body.is_null());
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(body["message"], "You cannot consume this service");
 
     let (status, body) = send("GET", "/rest/v1/rpc/add_numbers").await;
     assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);

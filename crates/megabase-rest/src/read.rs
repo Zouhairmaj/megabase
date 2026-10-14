@@ -53,7 +53,16 @@ async fn dispatch(
 ) -> Response {
     let path = uri.path();
     let prefer = Prefer::from_headers(&headers);
-    match classify(path) {
+    let target = classify(path);
+    if method == Method::OPTIONS
+        && is_preflight(&headers)
+        && matches!(target, Target::Root | Target::Relation(_) | Target::Rpc(_))
+    {
+        // The gateway's CORS plugin answers a preflight before authentication
+        // and before PostgREST, so no `Allow` header is set.
+        return preflight_response();
+    }
+    match target {
         Target::Outside => not_implemented(&method, path),
         Target::Rpc(function) => {
             let mut response =
@@ -119,6 +128,16 @@ async fn root(
         Ok(session) => session,
         Err(response) => return *response,
     };
+    // The gateway's `rest-v1-openapi` route only admits the admin ACL group.
+    if session.role != "service_role" {
+        // Kong writes this body with an explicit charset.
+        return (
+            StatusCode::FORBIDDEN,
+            [(header::CONTENT_TYPE, "application/json;charset=utf-8")],
+            r#"{"message":"You cannot consume this service"}"#,
+        )
+            .into_response();
+    }
     session.timezone = prefer.timezone.clone();
     let schema = match negotiated_schema(method, headers) {
         Ok(schema) => schema,
@@ -448,6 +467,17 @@ async fn relation_options(state: &RestState, schema: &str, relation: &str, anon:
         allow.push("DELETE");
     }
     options_response(&allow.join(","))
+}
+
+fn is_preflight(headers: &HeaderMap) -> bool {
+    headers.contains_key(header::ORIGIN)
+        && headers.contains_key(header::ACCESS_CONTROL_REQUEST_METHOD)
+}
+
+fn preflight_response() -> Response {
+    let mut response = options_response("");
+    response.headers_mut().remove(header::ALLOW);
+    response
 }
 
 pub(crate) fn options_response(allow: &str) -> Response {
@@ -2059,13 +2089,11 @@ mod tests {
 
     #[tokio::test]
     async fn root_options_lists_read_methods() {
-        let app = router(RestState::from_config(&Config::default()));
-        let request = Request::builder()
-            .method("OPTIONS")
-            .uri("/rest/v1/")
-            .body(Body::empty())
+        let app = router(state_with_secret(SECRET));
+        let response = app
+            .oneshot(admin_request("OPTIONS", "/rest/v1/", Body::empty()))
+            .await
             .unwrap();
-        let response = app.oneshot(request).await.unwrap();
         assert_eq!(response.status(), StatusCode::OK);
         assert_eq!(
             response
@@ -2079,13 +2107,64 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn root_post_is_pgrst117() {
+    async fn root_is_forbidden_for_anon() {
         let app = router(RestState::from_config(&Config::default()));
         let request = Request::builder()
-            .method("POST")
+            .method("OPTIONS")
             .uri("/rest/v1/")
-            .body(Body::from("{}"))
+            .body(Body::empty())
             .unwrap();
+        let (status, body, headers) = send(app, request).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_eq!(body["message"], "You cannot consume this service");
+        assert_eq!(
+            headers[header::CONTENT_TYPE],
+            "application/json;charset=utf-8"
+        );
+    }
+
+    #[tokio::test]
+    async fn preflight_has_origin_and_no_allow() {
+        for path in ["/rest/v1/", "/rest/v1/todos", "/rest/v1/rpc/add"] {
+            let app = router(RestState::from_config(&Config::default()));
+            let request = Request::builder()
+                .method("OPTIONS")
+                .uri(path)
+                .header(header::ORIGIN, "http://localhost:3000")
+                .header(header::ACCESS_CONTROL_REQUEST_METHOD, "GET")
+                .body(Body::empty())
+                .unwrap();
+            let response = app.oneshot(request).await.unwrap();
+            assert_eq!(response.status(), StatusCode::OK, "{path}");
+            assert!(response.headers().get(header::ALLOW).is_none(), "{path}");
+            assert_eq!(
+                response
+                    .headers()
+                    .get(header::ACCESS_CONTROL_ALLOW_ORIGIN)
+                    .and_then(|value| value.to_str().ok()),
+                Some("*"),
+                "{path}"
+            );
+        }
+    }
+
+    fn admin_request(method: &str, uri: &str, body: Body) -> Request<Body> {
+        let token = sign(
+            SECRET,
+            &json!({"role": "service_role", "exp": 4_000_000_000_i64}),
+        );
+        Request::builder()
+            .method(method)
+            .uri(uri)
+            .header(header::AUTHORIZATION, format!("Bearer {token}"))
+            .body(body)
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn root_post_is_pgrst117() {
+        let app = router(state_with_secret(SECRET));
+        let request = admin_request("POST", "/rest/v1/", Body::from("{}"));
         let (status, body, _) = send(app, request).await;
         assert_eq!(status, StatusCode::METHOD_NOT_ALLOWED);
         assert_eq!(body["code"], "PGRST117");
@@ -2093,8 +2172,9 @@ mod tests {
 
     #[tokio::test]
     async fn root_get_without_pool_is_503() {
-        let app = router(RestState::from_config(&Config::default()));
-        let (status, body, _) = send(app, get("/rest/v1/")).await;
+        let app = router(state_with_secret(SECRET));
+        let request = admin_request("GET", "/rest/v1/", Body::empty());
+        let (status, body, _) = send(app, request).await;
         assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
         assert_eq!(body["code"], "PGRST000");
     }

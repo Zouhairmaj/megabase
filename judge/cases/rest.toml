@@ -637,6 +637,218 @@ units = ["rest:query-param:columns", "rest:query-param:order"]
 method = "GET"
 path = "/rest/v1/todos?columns=id,title&order=id"
 
+# Resource routes (issue #42). The root OpenAPI document uses service_role;
+# Step compare_headers adds Allow where the reference sets it.
+[[case]]
+id = "rest.root.get"
+description = "GET on the root returns the OpenAPI document"
+units = ["rest:route:GET /rest/v1/"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/"
+key = "service_role"
+
+[[case]]
+id = "rest.root.get-accept-openapi"
+description = "GET on the root with Accept application/openapi+json"
+units = ["rest:route:GET /rest/v1/"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/"
+key = "service_role"
+headers = { Accept = "application/openapi+json" }
+
+[[case]]
+id = "rest.root.get-accept-unsupported"
+description = "GET on the root with an unsupported Accept is rejected"
+units = ["rest:route:GET /rest/v1/"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/"
+key = "service_role"
+headers = { Accept = "text/csv" }
+
+[[case]]
+id = "rest.root.head"
+description = "HEAD on the root returns headers and no body"
+units = ["rest:route:HEAD /rest/v1/"]
+[[case.step]]
+method = "HEAD"
+path = "/rest/v1/"
+key = "service_role"
+
+[[case]]
+id = "rest.root.head-accept-openapi"
+description = "HEAD on the root with Accept application/openapi+json"
+units = ["rest:route:HEAD /rest/v1/"]
+[[case.step]]
+method = "HEAD"
+path = "/rest/v1/"
+key = "service_role"
+headers = { Accept = "application/openapi+json" }
+
+[[case]]
+id = "rest.root.head-accept-unsupported"
+description = "HEAD on the root with an unsupported Accept is rejected"
+units = ["rest:route:HEAD /rest/v1/"]
+[[case.step]]
+method = "HEAD"
+path = "/rest/v1/"
+key = "service_role"
+headers = { Accept = "text/csv" }
+
+[[case]]
+id = "rest.root.options"
+description = "OPTIONS on the root answers with an empty body"
+units = ["rest:route:OPTIONS /rest/v1/"]
+[[case.step]]
+compare_headers = ["allow"]
+method = "OPTIONS"
+path = "/rest/v1/"
+
+[[case]]
+id = "rest.root.options-service-role"
+description = "OPTIONS on the root with the service_role key"
+units = ["rest:route:OPTIONS /rest/v1/"]
+[[case.step]]
+compare_headers = ["allow"]
+method = "OPTIONS"
+path = "/rest/v1/"
+key = "service_role"
+
+[[case]]
+id = "rest.root.options-cors-preflight"
+description = "CORS preflight on the root"
+units = ["rest:route:OPTIONS /rest/v1/"]
+[[case.step]]
+compare_headers = ["allow", "access-control-allow-origin"]
+method = "OPTIONS"
+path = "/rest/v1/"
+headers = { Origin = "http://localhost:3000", "Access-Control-Request-Method" = "GET" }
+
+[[case]]
+id = "rest.head.relation"
+description = "HEAD on a table returns headers and no body"
+units = ["rest:route:HEAD /rest/v1/{relation}"]
+[[case.step]]
+method = "HEAD"
+path = "/rest/v1/todos"
+
+[[case]]
+id = "rest.head.relation-count"
+description = "HEAD with Prefer count=exact sets Content-Range with the total"
+units = ["rest:route:HEAD /rest/v1/{relation}"]
+[[case.step]]
+method = "HEAD"
+path = "/rest/v1/todos?done=eq.false"
+headers = { Prefer = "count=exact" }
+
+[[case]]
+id = "rest.head.relation-missing"
+description = "HEAD on an unknown relation is a 404"
+units = ["rest:route:HEAD /rest/v1/{relation}"]
+[[case.step]]
+method = "HEAD"
+path = "/rest/v1/does_not_exist"
+
+[[case]]
+id = "rest.head.relation-bad-filter"
+description = "HEAD with an unknown operator is a 400"
+units = ["rest:route:HEAD /rest/v1/{relation}"]
+[[case.step]]
+method = "HEAD"
+path = "/rest/v1/todos?id=nope.1"
+
+[[case]]
+id = "rest.options.relation"
+description = "OPTIONS on a table lists the allowed methods"
+units = ["rest:route:OPTIONS /rest/v1/{relation}"]
+[[case.step]]
+compare_headers = ["allow"]
+method = "OPTIONS"
+path = "/rest/v1/todos"
+
+[[case]]
+id = "rest.options.relation-service-role"
+description = "OPTIONS on a table with the service_role key"
+units = ["rest:route:OPTIONS /rest/v1/{relation}"]
+[[case.step]]
+compare_headers = ["allow"]
+method = "OPTIONS"
+path = "/rest/v1/todos"
+key = "service_role"
+
+[[case]]
+id = "rest.options.relation-cors-preflight"
+description = "CORS preflight on a table"
+units = ["rest:route:OPTIONS /rest/v1/{relation}"]
+[[case.step]]
+compare_headers = ["allow", "access-control-allow-origin"]
+method = "OPTIONS"
+path = "/rest/v1/todos"
+headers = { Origin = "http://localhost:3000", "Access-Control-Request-Method" = "POST" }
+
+[[case]]
+id = "rest.put.update"
+description = "PUT upserts by primary key and updates an existing row"
+units = ["rest:route:PUT /rest/v1/{relation}", "rest:filter-operator:eq"]
+[[case.step]]
+method = "PUT"
+path = "/rest/v1/todos?id=eq.1"
+key = "service_role"
+headers = { Prefer = "return=representation" }
+json = { id = 1, title = "put-updated", done = false, priority = 5 }
+
+[[case]]
+id = "rest.put.insert"
+description = "PUT upserts by primary key and inserts a missing row"
+units = ["rest:route:PUT /rest/v1/{relation}", "rest:filter-operator:eq"]
+[[case.step]]
+method = "PUT"
+path = "/rest/v1/todos?id=eq.100"
+key = "service_role"
+headers = { Prefer = "return=representation" }
+json = { id = 100, title = "put-inserted", done = false, priority = 1 }
+
+[[case]]
+id = "rest.put.no-filter"
+description = "PUT without a primary-key filter is PGRST105"
+units = ["rest:route:PUT /rest/v1/{relation}"]
+[[case.step]]
+method = "PUT"
+path = "/rest/v1/todos"
+key = "service_role"
+json = { id = 1, title = "no-filter", done = false, priority = 1 }
+
+[[case]]
+id = "rest.put.key-mismatch"
+description = "PUT whose body key differs from the filter is PGRST115"
+units = ["rest:route:PUT /rest/v1/{relation}", "rest:filter-operator:eq"]
+[[case.step]]
+method = "PUT"
+path = "/rest/v1/todos?id=eq.1"
+key = "service_role"
+json = { id = 2, title = "mismatch", done = false, priority = 1 }
+
+[[case]]
+id = "rest.put.limit"
+description = "PUT with limit is PGRST114"
+units = ["rest:route:PUT /rest/v1/{relation}", "rest:filter-operator:eq"]
+[[case.step]]
+method = "PUT"
+path = "/rest/v1/todos?id=eq.1&limit=1"
+key = "service_role"
+json = { id = 1, title = "limited", done = false, priority = 1 }
+
+[[case]]
+id = "rest.put.anon-denied"
+description = "PUT as anon is denied (no insert or update grant)"
+units = ["rest:route:PUT /rest/v1/{relation}", "rest:filter-operator:eq"]
+[[case.step]]
+method = "PUT"
+path = "/rest/v1/todos?id=eq.1"
+json = { id = 1, title = "anon-put", done = false, priority = 1 }
+
 [[case]]
 id = "rest.query.on-conflict"
 description = "on_conflict is accepted on a read and does not change the row"
