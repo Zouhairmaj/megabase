@@ -1483,7 +1483,7 @@ description = "order modifier: nullsfirst without a direction"
 units = ["rest:order-modifier:nullsfirst"]
 [[case.step]]
 method = "GET"
-path = "/rest/v1/todos?select=id,title,priority&order=priority.nullsfirst"
+path = "/rest/v1/rankings?select=id,label,rank&order=rank.nullsfirst"
 
 [[case]]
 id = "rest.order.nullslast"
@@ -1491,7 +1491,7 @@ description = "order modifier: nullslast without a direction"
 units = ["rest:order-modifier:nullslast"]
 [[case.step]]
 method = "GET"
-path = "/rest/v1/todos?select=id,title,priority&order=priority.nullslast"
+path = "/rest/v1/rankings?select=id,label,rank&order=rank.nullslast"
 
 [[case]]
 id = "rest.order.asc-nullsfirst"
@@ -1499,7 +1499,7 @@ description = "order modifier: asc with nullsfirst"
 units = ["rest:order-modifier:asc", "rest:order-modifier:nullsfirst"]
 [[case.step]]
 method = "GET"
-path = "/rest/v1/todos?select=id,title,priority&order=priority.asc.nullsfirst"
+path = "/rest/v1/rankings?select=id,label,rank&order=rank.asc.nullsfirst"
 
 [[case]]
 id = "rest.order.desc-nullslast"
@@ -1507,7 +1507,7 @@ description = "order modifier: desc with nullslast"
 units = ["rest:order-modifier:desc", "rest:order-modifier:nullslast"]
 [[case.step]]
 method = "GET"
-path = "/rest/v1/todos?select=id,title,priority&order=priority.desc.nullslast"
+path = "/rest/v1/rankings?select=id,label,rank&order=rank.desc.nullslast"
 
 [[case]]
 id = "rest.order.multi-term"
