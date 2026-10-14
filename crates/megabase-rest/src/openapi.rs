@@ -11,9 +11,7 @@ use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use serde_json::{json, Map, Value};
 
-use crate::read::{
-    self, begin, pgrst, query_failure, set_request_context, unimplemented_unit, Session, JSON_UTF8,
-};
+use crate::read::{self, begin, pgrst, query_failure, set_request_context, Session, JSON_UTF8};
 
 const OPENAPI_UTF8: &str = "application/openapi+json; charset=utf-8";
 const PRETTY_VERSION: &str = "16.4";
@@ -83,40 +81,49 @@ fn openapi_media(headers: &HeaderMap) -> Result<&'static str, Box<Response>> {
         return Ok(OPENAPI_UTF8);
     };
     let text = value.to_str().unwrap_or("");
-    let first = text.split(',').next().unwrap_or("").trim();
-    if first.is_empty() || first == "*/*" {
+    if text.trim().is_empty() {
         return Ok(OPENAPI_UTF8);
     }
+    // The root serves only the OpenAPI and JSON types. The request is
+    // acceptable when any entry with a non-zero quality names one of them.
+    let mut json = false;
+    for entry in text.split(',') {
+        let mut pieces = entry.split(';');
+        let essence = pieces.next().unwrap_or("").trim().to_ascii_lowercase();
+        let zero_quality = pieces.any(|param| {
+            let compact: String = param.split_whitespace().collect();
+            compact
+                .split_once('=')
+                .filter(|(name, _)| name.eq_ignore_ascii_case("q"))
+                .is_some_and(|(_, number)| number.parse::<f32>().is_ok_and(|q| q <= 0.0))
+        });
+        if zero_quality {
+            continue;
+        }
+        match essence.as_str() {
+            // megabase:unit rest:media-type:application/openapi+json
+            "application/openapi+json" | "*/*" | "" => return Ok(OPENAPI_UTF8),
+            "application/json" | "application/*" => json = true,
+            _ => {}
+        }
+    }
+    if json {
+        return Ok(JSON_UTF8);
+    }
+    let first = text.split(',').next().unwrap_or("");
     let essence = first
         .split(';')
         .next()
         .unwrap_or("")
         .trim()
         .to_ascii_lowercase();
-    if essence == "application/openapi+json" {
-        // megabase:unit rest:media-type:application/openapi+json
-        return Ok(OPENAPI_UTF8);
-    }
-    if let Some(unit) = read::reject_accept(Some(value)) {
-        if unit.is_empty() {
-            return Err(Box::new(pgrst(
-                StatusCode::NOT_ACCEPTABLE,
-                "PGRST107",
-                &format!("None of these media types are available: {essence}"),
-                None,
-                None,
-            )));
-        }
-        return Err(Box::new(unimplemented_unit(
-            &axum::http::Method::GET,
-            "/rest/v1/",
-            unit,
-        )));
-    }
-    if essence == "application/json" || essence == "application/*" {
-        return Ok(JSON_UTF8);
-    }
-    Ok(OPENAPI_UTF8)
+    Err(Box::new(pgrst(
+        StatusCode::NOT_ACCEPTABLE,
+        "PGRST107",
+        &format!("None of these media types are available: {essence}"),
+        None,
+        None,
+    )))
 }
 
 async fn schema_comment(
