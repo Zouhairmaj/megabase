@@ -35,8 +35,9 @@ required by AGENTS.md.
 ## Inputs
 
 The gateway matches the prefix `/rest/v1/` (the trailing slash is required).
-A request for `/rest/v1` never reaches this router and stays the Studio
-501. Inside the router, empty path segments are dropped, so a path that
+A request for `/rest/v1` never reaches this router. A qualifying CORS
+preflight is answered by the gateway (`cors.md`); any other request stays the
+Studio 501. Inside the router, empty path segments are dropped, so a path that
 does arrive as `/rest/v1` or `/rest/v1/` is the OpenAPI root. One remaining
 segment is `{relation}`. `rpc` plus one more segment stays the RPC unit
 (501). Any other shape is `PGRST125`.

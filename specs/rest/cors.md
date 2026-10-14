@@ -88,8 +88,11 @@ None. The layers add headers to whatever the route returns.
   too.
 - A non-`OPTIONS` request with both preflight headers is a normal request.
 - `/rest/v1` without the trailing slash and other unmatched paths fall to
-  Kong's `dashboard` catch-all, which lists the plugin, so they get the same
-  preflight and `Access-Control-Allow-Origin: *` as any CORS route.
+  Kong's `dashboard` catch-all, which lists the plugin. A qualifying
+  preflight is answered by the gateway (200, same headers as any CORS route),
+  and every other response carries `Access-Control-Allow-Origin: *`. A
+  non-preflight request is forwarded to Studio's 501 fallback (see
+  `resources.md`, Inputs), now with that header added.
 - `/pg/…`, the blocked routes above, and `/_megabase/health` are outside the
   plugin and carry no CORS header.
 - `Access-Control-Allow-Headers` echoes the request value byte for byte,
