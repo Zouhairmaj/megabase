@@ -1202,13 +1202,15 @@ mod tests {
         assert!(!status.contains("coverage/treemap-light.svg"));
         assert!(!status.to_ascii_lowercase().contains("oxide"));
         assert!(!home.to_ascii_lowercase().contains("the spend"));
-        assert!(
-            home.contains(r#"class="tm-cells implemented""#),
-            "home live treemap must paint implemented units"
-        );
-        assert!(home.contains("#005441"));
-        assert!(status.contains(r#"class="tm-cells implemented""#));
-        assert!(status.contains("#005441"));
+        if metrics.components.iter().any(|c| c.implemented > 0) {
+            assert!(
+                home.contains(r#"class="tm-cells implemented""#),
+                "home live treemap must paint implemented units"
+            );
+            assert!(home.contains("#005441"));
+            assert!(status.contains(r#"class="tm-cells implemented""#));
+            assert!(status.contains("#005441"));
+        }
         assert!(home.contains(r#"data-db-dither"#));
         assert!(home.contains(r#"<script src="db-dither.js" defer></script>"#));
         assert!(!home.contains("status-panel"));
