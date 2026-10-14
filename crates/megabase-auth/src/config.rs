@@ -9,6 +9,7 @@
 //! Auth HTTP configuration.
 
 use crate::error::ConfigError;
+use crate::hooks::AccessTokenHook;
 
 /// Published GoTrue image version (`Makefile` `VERSION=v$(RELEASE_VERSION)`).
 pub const AUTH_VERSION: &str = "v2.197.0";
@@ -47,6 +48,8 @@ pub struct AuthConfig {
     pub mailer_otp_exp_seconds: u64,
     /// `GOTRUE_MAILER_SECURE_EMAIL_CHANGE_ENABLED`.
     pub secure_email_change: bool,
+    /// `GOTRUE_HOOK_CUSTOM_ACCESS_TOKEN_*`. `None` when the hook is disabled.
+    pub(crate) custom_access_token_hook: Option<AccessTokenHook>,
 }
 
 /// `external` object on `GET /settings`. Email and phone are separate fields
@@ -104,6 +107,7 @@ impl AuthConfig {
             site_url: "http://localhost:3000".into(),
             mailer_otp_exp_seconds: 86_400,
             secure_email_change: true,
+            custom_access_token_hook: None,
         }
     }
 
@@ -192,6 +196,7 @@ impl AuthConfig {
                 "GOTRUE_MAILER_SECURE_EMAIL_CHANGE_ENABLED",
             )?
             .unwrap_or(defaults.secure_email_change),
+            custom_access_token_hook: AccessTokenHook::from_lookup(&lookup)?,
         })
     }
 }

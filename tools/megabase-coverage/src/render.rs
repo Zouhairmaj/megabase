@@ -291,7 +291,7 @@ fn readme_status(units: &UnitsFile) -> String {
         s,
         "<sup>**How the denominator is computed.** `coverage/units.json` lists {} units extracted from the pinned sources in `vendor/` \
 (see [`vendor.toml`](vendor.toml)) by `tools/megabase-coverage`: every gateway-reachable route, PostgREST query operator, \
-`Prefer` value and media type, Auth grant type, OAuth provider and verification type, Realtime message type, Storage and \
+`Prefer` value and media type, Auth grant type, OAuth provider and verification type, Auth hook, Realtime message type, Storage and \
 Postgres Meta endpoint, Edge Runtime op, Supavisor endpoint and pool mode, Studio project page and API route, and the \
 `auth`/`storage` SQL objects apps depend on. Each unit records its upstream file and line. {} upstream items are excluded \
 with a recorded reason (blocked or unexposed by the gateway, hosted-platform pages, documentation UIs); see \

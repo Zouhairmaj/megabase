@@ -19,7 +19,8 @@ use serde::Deserialize;
 use serde_json::json;
 
 use crate::error::{bad_json, unexpected, validation, GoTrueError};
-use crate::jsonutil::{access_claims, session_json, unix_secs};
+use crate::hooks::TokenHookCall;
+use crate::jsonutil::{session_claims, session_json, unix_secs};
 use crate::routes::{insert_header, query_param, read_body, request_aud, validate_email, JsonOk};
 use crate::state::AuthState;
 use crate::store::StoreError;
@@ -124,7 +125,9 @@ pub(crate) async fn verify_get(
             &error.message,
         ));
     }
-    match state.backend.verify(&request).await {
+    let now = unix_secs(SystemTime::now());
+    let hook = otp_hook(&state, &headers, now);
+    match state.backend.verify(&request, hook.as_ref()).await {
         Ok(VerifyOutcome::Rejected {
             status,
             error_code,
@@ -133,7 +136,13 @@ pub(crate) async fn verify_get(
         Ok(VerifyOutcome::SingleConfirmation) => {
             see_other(&message_redirect(&redirect, SINGLE_CONFIRMATION))
         }
-        Ok(VerifyOutcome::Session(issued)) => match sign_session(&state, &issued) {
+        Err(StoreError::Hook(error)) => match error.redirect_parts() {
+            Some((status, error_code, message)) => {
+                see_other(&error_redirect(&redirect, status, error_code, &message))
+            }
+            None => (*error).into_response(),
+        },
+        Ok(VerifyOutcome::Session(issued)) => match sign_session(&state, &issued, now) {
             Ok(signed) => see_other(&success_redirect(&redirect, &params.kind, &signed)),
             Err(error) => see_other(&error_redirect(
                 &redirect,
@@ -211,7 +220,9 @@ pub(crate) async fn verify_post(
     if state.jwt.is_none() {
         return unexpected("Server lacks JWT secret").into_response();
     }
-    match state.backend.verify(&request).await {
+    let now = unix_secs(SystemTime::now());
+    let hook = otp_hook(&state, &headers, now);
+    match state.backend.verify(&request, hook.as_ref()).await {
         Ok(VerifyOutcome::Rejected {
             status,
             error_code,
@@ -227,12 +238,25 @@ pub(crate) async fn verify_post(
             "code": "200",
         }))
         .into_response(),
-        Ok(VerifyOutcome::Session(issued)) => match sign_session(&state, &issued) {
+        Ok(VerifyOutcome::Session(issued)) => match sign_session(&state, &issued, now) {
             Ok(signed) => signed.response,
             Err(error) => error.into_response(),
         },
+        Err(StoreError::Hook(error)) => (*error).into_response(),
         Err(error) => store_failure(prepared.hash_path, &error).into_response(),
     }
+}
+
+/// Verify issues its session with `models.OTP`.
+fn otp_hook<'a>(state: &'a AuthState, headers: &HeaderMap, now: i64) -> Option<TokenHookCall<'a>> {
+    TokenHookCall::new(
+        state.config.custom_access_token_hook.as_ref(),
+        headers,
+        "otp",
+        &state.config.jwt_issuer,
+        now,
+        state.config.jwt_exp_seconds,
+    )
 }
 
 struct Prepared {
@@ -334,21 +358,13 @@ struct SignedSession {
 fn sign_session(
     state: &AuthState,
     issued: &crate::store::IssuedSession,
+    now: i64,
 ) -> Result<SignedSession, GoTrueError> {
     let Some(jwt) = state.jwt.clone() else {
         return Err(unexpected("Server lacks JWT secret"));
     };
-    let now = unix_secs(SystemTime::now());
     let expires_in = state.config.jwt_exp_seconds;
-    let claims = access_claims(
-        &issued.user,
-        issued.session_id,
-        issued.amr_at,
-        &issued.amr_method,
-        &state.config.jwt_issuer,
-        now,
-        expires_in,
-    );
+    let claims = session_claims(issued, &state.config.jwt_issuer, now, expires_in);
     let access_token = jwt.sign(&claims).map_err(|error| {
         tracing::error!(%error, "signing verify access token failed");
         unexpected("error generating jwt token")

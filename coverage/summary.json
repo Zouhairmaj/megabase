@@ -1,8 +1,8 @@
 {
   "schema": 1,
   "totals": {
-    "units": 1024,
-    "implemented": 172,
+    "units": 1031,
+    "implemented": 173,
     "tested": 172,
     "conformant": 0
   },
@@ -17,8 +17,8 @@
   },
   "components": {
     "auth": {
-      "units": 152,
-      "implemented": 79,
+      "units": 159,
+      "implemented": 80,
       "tested": 79,
       "conformant": 0,
       "groups": {
@@ -43,6 +43,12 @@
         "factors": {
           "units": 9,
           "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "hooks": {
+          "units": 7,
+          "implemented": 1,
           "tested": 0,
           "conformant": 0
         },
@@ -558,6 +564,7 @@
   "units": {
     "auth:grant-type:password": "tested",
     "auth:grant-type:refresh_token": "tested",
+    "auth:hook:custom_access_token": "implemented",
     "auth:route:DELETE /auth/v1/admin/custom-providers/{identifier}": "tested",
     "auth:route:DELETE /auth/v1/admin/oauth/clients/{client_id}": "tested",
     "auth:route:DELETE /auth/v1/admin/sso/providers/{idp_id}": "tested",

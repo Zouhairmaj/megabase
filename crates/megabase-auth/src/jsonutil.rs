@@ -121,6 +121,23 @@ struct IdentityJson<'a> {
     email: Option<&'a str>,
 }
 
+/// Claims to sign for `issued`: the custom access token hook output when the
+/// hook ran (`jwt.MapClaims(output.Claims)`), else [`access_claims`].
+pub fn session_claims(issued: &IssuedSession, issuer: &str, now: i64, expires_in: i64) -> Value {
+    match &issued.hook_claims {
+        Some(claims) => claims.clone(),
+        None => access_claims(
+            &issued.user,
+            issued.session_id,
+            issued.amr_at,
+            &issued.amr_method,
+            issuer,
+            now,
+            expires_in,
+        ),
+    }
+}
+
 pub fn access_claims(
     user: &UserRecord,
     session_id: Uuid,

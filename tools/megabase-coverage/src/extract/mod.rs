@@ -562,6 +562,15 @@ func (a *API) Verify(w http.ResponseWriter, r *http.Request) {
             r#"Invite = "invite""#,
         );
         tree.write(
+            "vendor/auth/internal/conf/configuration.go",
+            r#"
+type HookConfiguration struct {
+	CustomAccessToken ExtensibilityPointConfiguration `json:"custom_access_token" split_words:"true"`
+	SendEmail         ExtensibilityPointConfiguration `json:"send_email" split_words:"true"`
+}
+"#,
+        );
+        tree.write(
             "vendor/auth/migrations/00.up.sql",
             r#"
 CREATE OR REPLACE FUNCTION {{ db }}.uid() RETURNS uuid AS $$ SELECT 'x'::uuid $$ LANGUAGE sql;
@@ -734,6 +743,10 @@ switch (req.method) {
         assert!(units.units.iter().any(|u| u.kind == "prefer"));
         assert!(units.units.iter().any(|u| u.kind == "media-type"));
         assert!(units.units.iter().any(|u| u.kind == "grant-type"));
+        assert!(units
+            .units
+            .iter()
+            .any(|u| u.kind == "hook" && u.name == "custom_access_token" && u.level == 1));
         assert!(units.units.iter().any(|u| u.kind == "provider"));
         assert!(units.units.iter().any(|u| u.kind == "op"));
         assert!(units.units.iter().any(|u| u.kind == "pool-mode"));

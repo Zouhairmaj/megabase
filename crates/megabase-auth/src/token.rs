@@ -19,7 +19,8 @@ use serde::Deserialize;
 
 use crate::error::{unexpected, validation, GoTrueError};
 use crate::gojson::{self, GoStruct, PASSWORD_GRANT_PARAMS, REFRESH_TOKEN_GRANT_PARAMS};
-use crate::jsonutil::{access_claims, session_json, unix_secs};
+use crate::hooks::TokenHookCall;
+use crate::jsonutil::{session_claims, session_json, unix_secs};
 use crate::ratelimit::limit_by_header;
 use crate::routes::{insert_header, query_param, read_body, request_aud, JsonOk};
 use crate::state::AuthState;
@@ -54,7 +55,7 @@ pub(crate) async fn token(
             }
             match grant_type.as_str() {
                 "password" => password_grant(state, headers, body).await,
-                "refresh_token" => refresh_grant(state, body).await,
+                "refresh_token" => refresh_grant(state, headers, body).await,
                 "id_token" => MegabaseNotImplemented::new(COMPONENT, UNIT_ID_TOKEN).into_response(),
                 _ => MegabaseNotImplemented::new(COMPONENT, UNIT_PKCE).into_response(),
             }
@@ -109,7 +110,7 @@ async fn password_grant(state: AuthState, headers: HeaderMap, body: Body) -> Res
         .await
     {
         Ok(user) => user,
-        Err(error) => return store_failure(&error),
+        Err(error) => return store_failure(error),
     };
     let Some(user) = user else {
         return invalid_login();
@@ -153,20 +154,29 @@ async fn password_grant(state: AuthState, headers: HeaderMap, body: Body) -> Res
         )
         .into_response();
     }
+    let now = unix_secs(SystemTime::now());
+    let hook = TokenHookCall::new(
+        state.config.custom_access_token_hook.as_ref(),
+        &headers,
+        "password",
+        &state.config.jwt_issuer,
+        now,
+        state.config.jwt_exp_seconds,
+    );
     let issued = match state
         .backend
-        .issue_login_session(user.id, provider, None)
+        .issue_login_session(user.id, provider, None, hook.as_ref())
         .await
     {
         Ok(Some(issued)) => issued,
         Ok(None) => return invalid_login(),
-        Err(error) => return store_failure(&error),
+        Err(error) => return store_failure(error),
     };
-    session_response(&state, &issued, false, weak, true)
+    session_response(&state, &issued, now, false, weak, true)
 }
 
 // megabase:unit auth:grant-type:refresh_token
-async fn refresh_grant(state: AuthState, body: Body) -> Response {
+async fn refresh_grant(state: AuthState, headers: HeaderMap, body: Body) -> Response {
     let params = match grant_json::<RefreshBody>(body, &REFRESH_TOKEN_GRANT_PARAMS).await {
         Ok(params) => params,
         Err(error) => return error.into_response(),
@@ -174,9 +184,22 @@ async fn refresh_grant(state: AuthState, body: Body) -> Response {
     if let Err(error) = validate_refresh_token(&params.refresh_token) {
         return error.into_response();
     }
-    let status = match state.backend.refresh_login(&params.refresh_token).await {
+    let now = unix_secs(SystemTime::now());
+    let hook = TokenHookCall::new(
+        state.config.custom_access_token_hook.as_ref(),
+        &headers,
+        "token_refresh",
+        &state.config.jwt_issuer,
+        now,
+        state.config.jwt_exp_seconds,
+    );
+    let status = match state
+        .backend
+        .refresh_login(&params.refresh_token, hook.as_ref())
+        .await
+    {
         Ok(status) => status,
-        Err(error) => return store_failure(&error),
+        Err(error) => return store_failure(error),
     };
     let (issued, rotated) = match status {
         RefreshStatus::Issued { session, rotated } => (session, rotated),
@@ -213,7 +236,7 @@ async fn refresh_grant(state: AuthState, body: Body) -> Response {
             .into_response();
         }
     };
-    session_response(&state, &issued, rotated, None, false)
+    session_response(&state, &issued, now, rotated, None, false)
 }
 
 #[derive(Deserialize)]
@@ -266,7 +289,10 @@ fn invalid_login() -> Response {
     .into_response()
 }
 
-fn store_failure(error: &StoreError) -> Response {
+fn store_failure(error: StoreError) -> Response {
+    if let StoreError::Hook(error) = error {
+        return (*error).into_response();
+    }
     tracing::error!(%error, "token grant failed");
     unexpected("Database error querying schema").into_response()
 }
@@ -384,6 +410,7 @@ fn bcrypt_password(password: &str) -> String {
 fn session_response(
     state: &AuthState,
     issued: &crate::store::IssuedSession,
+    now: i64,
     rotated: bool,
     weak: Option<WeakPassword>,
     // Password grant assigns a nil `*WeakPasswordError` into an `interface{}`,
@@ -394,17 +421,8 @@ fn session_response(
     let Some(jwt) = state.jwt.clone() else {
         return unexpected("Server lacks JWT secret").into_response();
     };
-    let now = unix_secs(SystemTime::now());
     let expires_in = state.config.jwt_exp_seconds;
-    let claims = access_claims(
-        &issued.user,
-        issued.session_id,
-        issued.amr_at,
-        &issued.amr_method,
-        &state.config.jwt_issuer,
-        now,
-        expires_in,
-    );
+    let claims = session_claims(issued, &state.config.jwt_issuer, now, expires_in);
     let access_token = match jwt.sign(&claims) {
         Ok(token) => token,
         Err(error) => {
@@ -960,13 +978,16 @@ mod tests {
         let app = state(AuthConfig::reference_defaults(), false, backend.clone());
         let secret = fixture_secret();
         backend
-            .signup_email(SignupCommand {
-                email: "ada@example.com".into(),
-                password: secret.clone(),
-                aud: "authenticated".into(),
-                role: "authenticated".into(),
-                data: serde_json::Map::new(),
-            })
+            .signup_email(
+                SignupCommand {
+                    email: "ada@example.com".into(),
+                    password: secret.clone(),
+                    aud: "authenticated".into(),
+                    role: "authenticated".into(),
+                    data: serde_json::Map::new(),
+                },
+                None,
+            )
             .await
             .unwrap();
         let (status, body, _) = call(
