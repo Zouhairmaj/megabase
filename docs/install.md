@@ -87,7 +87,8 @@ cosign verify \
 docker run --rm -p 8000:8000 ghcr.io/zouhairmaj/megabase:vX.Y.Z
 ```
 
-Pass `-e DATABASE_URL=...` if the process should install Auth SQL objects.
+Pass `-e DATABASE_URL=...` if the process should create the standard API
+roles and install the Auth SQL objects.
 The image includes `megabase-healthcheck`, which probes
 `/_megabase/health`.
 
@@ -112,9 +113,13 @@ cargo build --release --locked -p megabase
 Environment variables are in [Configuration](configuration.md). `just` lists
 every recipe that works today.
 
-When `DATABASE_URL` is set, startup creates the Auth schema objects Megabase
-currently implements. The install is idempotent. Without `DATABASE_URL` the
-process still serves HTTP.
+When `DATABASE_URL` is set, startup creates the standard API roles
+(`anon`, `authenticated`, `service_role`, `authenticator`) when the cluster
+lacks them, then the Auth schema objects Megabase currently implements. Both
+installs are idempotent, so an existing Supabase migration runs unchanged on
+an empty database. The connecting role needs `CREATEROLE` (or superuser) on
+a stock cluster; see [Configuration](configuration.md). Without
+`DATABASE_URL` the process still serves HTTP.
 
 The public site generator is separate:
 

@@ -135,10 +135,23 @@ served. RPC still returns 501 when the query string is non-empty.
 
 ## Not yet served (501 with the unit id)
 
-`application/vnd.pgrst.plan+{format}`, the singular/stripped/CSV/GeoJSON
-shapes on writes and RPC, `application/octet-stream` as an RPC `Accept`
-(406 upstream without a custom handler), and `text/plain` / `text/xml`
-request bodies on RPC.
+The singular/stripped/CSV/GeoJSON shapes on writes and RPC,
+`application/octet-stream` as an RPC `Accept` (406 upstream without a
+custom handler), and `text/plain` / `text/xml` request bodies on RPC.
+
+## Query plans (`application/vnd.pgrst.plan+{format}`)
+
+Upstream: `MediaType.hs:91-96` (`toMime`), `Plan/Negotiate.hs:72-78`.
+
+`+json`, `+text` and the bare `application/vnd.pgrst.plan` (text) are served
+only when `db-plan-enabled` is on. It is off by default and in the Judge
+config, and Megabase has no switch for it, so the entry has no handler: it is
+skipped like `text/plain`, and if nothing else is acceptable the answer is 406
+`PGRST107`. The message names the type as upstream `toMime` prints it:
+`application/vnd.pgrst.plan+<json|text>; for="<mime>"` (`for` defaults to
+`application/json`) plus `; options=` with the recognised flags of
+`analyze|verbose|settings|buffers|wal` in that order. Returning the EXPLAIN
+output when enabled is not implemented.
 
 ## Judge cases
 
