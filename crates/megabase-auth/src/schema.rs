@@ -85,6 +85,7 @@ const SCIM_USERS: &str = include_str!("../sql/scim_users.sql");
 const SCIM_TOKENS: &str = include_str!("../sql/scim_tokens.sql");
 const WEBAUTHN_CREDENTIALS: &str = include_str!("../sql/webauthn_credentials.sql");
 const WEBAUTHN_CHALLENGES: &str = include_str!("../sql/webauthn_challenges.sql");
+const TABLE_GRANTS: &str = include_str!("../sql/table_grants.sql");
 
 const OBJECTS: &[&str] = &[
     SCHEMA,
@@ -120,6 +121,7 @@ const OBJECTS: &[&str] = &[
     SCIM_TOKENS,
     WEBAUTHN_CREDENTIALS,
     WEBAUTHN_CHALLENGES,
+    TABLE_GRANTS,
 ];
 
 /// SQL applied in one transaction when `DATABASE_URL` is set.
@@ -605,6 +607,56 @@ mod tests {
             credentials < challenges,
             "upstream creates credentials before challenges"
         );
+    }
+
+    #[test]
+    fn users_phone_defaults_keep_varchar_expressions() {
+        let phone = USERS
+            .find("ALTER COLUMN phone SET DEFAULT NULL::character varying;")
+            .expect("phone default");
+        let phone_change = USERS
+            .find("ALTER COLUMN phone_change SET DEFAULT ''::character varying;")
+            .expect("phone_change default");
+        let retype = USERS
+            .find("ALTER COLUMN phone TYPE text")
+            .expect("phone retype");
+        assert!(
+            retype < phone && retype < phone_change,
+            "defaults follow the text retype, as in 20230116124310"
+        );
+    }
+
+    #[test]
+    fn table_grants_cover_every_auth_table_but_schema_migrations() {
+        let sql = install_sql();
+        let grants = sql.find(TABLE_GRANTS).expect("grants installed");
+        for part in OBJECTS.iter().filter(|part| **part != TABLE_GRANTS) {
+            let at = sql.find(part).expect("object installed");
+            assert!(at < grants, "grants run after every table exists");
+        }
+        assert!(TABLE_GRANTS.contains("ARRAY['postgres', 'dashboard_user']"));
+        // Exact statement: the reference ALL grants carry no grant option.
+        assert!(TABLE_GRANTS
+            .contains("EXECUTE format('GRANT ALL ON TABLE auth.%I TO %I', tbl, grantee);"));
+        let mut tables: Vec<&str> = Vec::new();
+        for line in sql.lines() {
+            let Some(rest) = line.trim().strip_prefix("CREATE TABLE IF NOT EXISTS auth.") else {
+                continue;
+            };
+            let name = rest.split([' ', '(']).next().expect("table name");
+            if !tables.contains(&name) {
+                tables.push(name);
+            }
+        }
+        for name in tables {
+            let listed = TABLE_GRANTS.contains(&format!("'{name}'"));
+            match name {
+                "schema_migrations" | "sso_sessions" => {
+                    assert!(!listed, "{name} must not get the ALL grants");
+                }
+                _ => assert!(listed, "auth.{name} is missing from table_grants.sql"),
+            }
+        }
     }
 
     #[test]
