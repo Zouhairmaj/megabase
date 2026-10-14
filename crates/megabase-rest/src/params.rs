@@ -69,6 +69,13 @@ impl ReadQuery {
     }
 
     /// `true` when `select` applies an aggregate function.
+    /// `hasDefaultSelect` in `Plan.hs`: the select is a lone `*` (or absent)
+    /// with no embed, so a relation-targeted custom media handler applies.
+    #[must_use]
+    pub(crate) fn is_default_select(&self) -> bool {
+        matches!(self.select, SelectList::Star)
+    }
+
     #[must_use]
     pub(crate) fn has_aggregate(&self) -> bool {
         match &self.select {
@@ -1783,6 +1790,10 @@ pub(crate) enum BodyHandler {
     /// without a geometry column, Postgres raises the error PostgREST
     /// forwards.
     GeoJson,
+    /// `NoAgg`: the constant `''::text`. `HEAD` runs no handler upstream
+    /// (`negotiateContent`, `handlerF`), so the source query is still run
+    /// and counted but no body is built, whatever the negotiated type.
+    NoAgg,
 }
 
 /// [`build_read_sql`] with the body built by `handler`.
@@ -1899,6 +1910,12 @@ pub(crate) fn build_read_sql_as(
              coalesce((SELECT json_agg(t.row ORDER BY t.rn) FROM \
              (SELECT to_json(_megabase_src) AS row, row_number() OVER () AS rn \
              FROM _megabase_src) t), '[]'::json)::text"
+        ),
+        // `mainRead` with `NoAgg`: the source CTE still runs (so `select`,
+        // filters and paging are validated and counted); the body is constant.
+        BodyHandler::NoAgg => format!(
+            "WITH _megabase_src AS MATERIALIZED ({inner}) \
+             SELECT (SELECT pg_catalog.count(*) FROM _megabase_src), ''::text"
         ),
     };
     let offset = query.page.offset.parse::<i64>().unwrap_or(0);
@@ -2714,6 +2731,43 @@ mod tests {
             .contains("coalesce(json_agg(x.feature ORDER BY x.rn), '[]')"));
         assert!(!sql.sql.contains("to_json(_megabase_src)"));
         assert_eq!(sql.params, vec!["1"]);
+    }
+
+    #[test]
+    fn head_read_counts_the_source_without_a_body_aggregate() {
+        let query = parse_get_query("select=id&id=eq.1&limit=5").unwrap();
+        let sql = build_read_sql_as(
+            "public",
+            "todos",
+            &query,
+            &[("id", "integer")],
+            &HashMap::new(),
+            BodyHandler::NoAgg,
+        )
+        .unwrap();
+        assert!(sql.sql.ends_with("''::text"), "{}", sql.sql);
+        assert!(sql.sql.contains("pg_catalog.count(*) FROM _megabase_src"));
+        assert!(sql.sql.contains("LIMIT"));
+        assert!(!sql.sql.contains("json_agg"));
+        assert!(!sql.sql.contains("ST_AsGeoJSON"));
+        assert!(!sql.sql.contains("string_agg"));
+        // The filter value, then the page's limit and offset, are bound.
+        assert_eq!(sql.params, vec!["1", "5", "0"]);
+    }
+
+    #[test]
+    fn default_select_is_a_lone_star_without_embeds() {
+        assert!(parse_get_query("").unwrap().is_default_select());
+        assert!(parse_get_query("select=*&id=eq.1")
+            .unwrap()
+            .is_default_select());
+        assert!(!parse_get_query("select=id").unwrap().is_default_select());
+        assert!(!parse_get_query("select=*,todos(*)")
+            .unwrap()
+            .is_default_select());
+        assert!(!parse_get_query("select=count()")
+            .unwrap()
+            .is_default_select());
     }
 
     #[test]

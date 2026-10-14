@@ -80,6 +80,28 @@ Upstream: `MediaType.hs:80-88` (`toMime`), `Plan/Negotiate.hs`
   remaining entries rank as in the table above. Writes and RPC run the same
   negotiation (`Plan.hs:229,253`), so `text/plain` on a `POST` is the same
   406; `text/csv` and `application/geo+json` are 501 there.
+- **Custom handlers.** `SchemaCache.hs:1092` (`mediaHandlers`) collects
+  domains named after a media type (or `*/*`) that a one-argument aggregate
+  in an exposed schema returns, keyed by the aggregate's argument type: a
+  relation's row type or `anyelement`. They override the builtin handlers
+  (`HM.union mHdlers initialMediaHandlers`) and are looked up per accepted
+  type (`lookupHandler`): the relation's `*/*` and the type itself when the
+  select is the default lone `*` (`hasDefaultSelect`), then `anyelement`
+  with the type. Megabase runs the same lookup (`CUSTOM_MEDIA_HANDLER_SQL`
+  in `read.rs`) on every `GET`/`HEAD` relation read and answers 501 when it
+  finds one, with the media type's unit id when there is one, so a schema
+  that defines a handler for `application/octet-stream` (or any other type)
+  never gets a plausible builtin body or a `PGRST107`. The judge fixtures
+  define no custom handler. Custom handlers on writes and RPC are not
+  probed (both routes are 501 for every non-JSON `Accept`).
+- **`HEAD`.** `negotiateContent` answers `NoAgg` for every `HEAD`
+  (`Plan/Negotiate.hs:63`): the source query still runs and is counted, so
+  bad filters, a missing relation and `Content-Range` behave as on `GET`,
+  but no aggregate is called (`handlerF NoAgg` is `''::text`). Megabase
+  builds the same statement (`BodyHandler::NoAgg`), so `HEAD` never runs
+  `json_agg`, the CSV build or `ST_AsGeoJSON`. The negotiated
+  `Content-Type` is still sent, and a singular type still checks the row
+  count (`failNotSingular`).
 - **`text/csv`.** 200, `Content-Type: text/csv; charset=utf-8`, the usual
   `Content-Range`. Body: the column names of the first result row joined by
   `,`, `\n`, then each row as record text (`row::text` without its outer
