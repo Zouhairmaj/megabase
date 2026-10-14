@@ -4,6 +4,13 @@ All notable changes to Megabase are documented in this file.
 The format is produced by [release-please](https://github.com/googleapis/release-please).
 Sections: Features, Bug Fixes, Performance, Conformance/judge, Documentation.
 
+## [0.1.26](https://github.com/Zouhairmaj/megabase/compare/v0.1.25...v0.1.26) (2026-10-14)
+
+
+### Bug Fixes
+
+* **auth:** match go bad_json messages and add token rate limit ([#332](https://github.com/Zouhairmaj/megabase/issues/332)) ([97fb097](https://github.com/Zouhairmaj/megabase/commit/97fb0979a658c7c1abefe3e6fc6b8d6e1f298f0e))
+
 ## [0.1.25](https://github.com/Zouhairmaj/megabase/compare/v0.1.24...v0.1.25) (2026-10-14)
 
 
