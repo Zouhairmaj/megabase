@@ -155,7 +155,8 @@ fn assemble(auth: &megabase_auth::AuthState, rest: &megabase_rest::RestState) ->
                 .map(|(prefix, component)| (*prefix, route_router(prefix, component, auth, rest)))
                 .collect(),
         ),
-        fallback: megabase_studio::router(),
+        // Kong's `dashboard` catch-all service lists the `cors` plugin.
+        fallback: megabase_studio::router().layer(axum::middleware::from_fn(cors::kong_cors)),
     };
     Router::new()
         .route(HEALTH_PATH, get(health))

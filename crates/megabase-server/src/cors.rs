@@ -1,8 +1,7 @@
 //! Kong's `cors` plugin as the self-hosted gateway enables it.
 //!
 //! `vendor/supabase/docker/volumes/api/kong.yml` lists `- name: cors` with no
-//! `config` on every service except `meta` (`/pg/`) and the Studio catch-all,
-//! so the plugin defaults of Kong 3.9.3 (`docker-compose.yml`) apply:
+//! `config` on every service except `meta` (`/pg/`), so the plugin defaults of Kong 3.9.3 (`docker-compose.yml`) apply:
 //!
 //! - A preflight (`OPTIONS` with `Origin` and `Access-Control-Request-Method`)
 //!   is answered in Kong's access phase, before key-auth, ACL, and the
@@ -32,8 +31,8 @@ pub const ALLOW_METHODS: &str = "GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS,TRACE,CO
 
 /// Kong route prefixes whose service lists the `cors` plugin in `kong.yml`.
 ///
-/// `/pg/` (`meta`) and the Studio catch-all do not, so they get no CORS
-/// headers at all.
+/// `/pg/` (`meta`) does not, so it gets no CORS headers. The Studio catch-all
+/// (`dashboard`) lists the plugin and is layered separately.
 pub const CORS_ROUTES: &[&str] = &[
     "/auth/v1/",
     "/.well-known/oauth-authorization-server",
@@ -43,6 +42,22 @@ pub const CORS_ROUTES: &[&str] = &[
     "/storage/v1/",
     "/functions/v1/",
 ];
+
+/// Kong routes more specific than a CORS prefix that terminate with 403 through
+/// `request-termination` alone, so they carry no CORS headers.
+const BLOCKED_ROUTES: &[&str] = &[
+    "/realtime/v1/api/openapi",
+    "/realtime/v1/api/tenants",
+    "/api/mcp",
+    "/mcp",
+];
+
+fn is_blocked_route(path: &str) -> bool {
+    BLOCKED_ROUTES.iter().any(|blocked| {
+        path.strip_prefix(blocked)
+            .is_some_and(|rest| rest.is_empty() || rest.starts_with('/'))
+    })
+}
 
 /// Whether the Kong service behind `prefix` runs the `cors` plugin.
 #[must_use]
@@ -61,6 +76,9 @@ fn is_preflight(request: &Request) -> bool {
 /// Answer a preflight, or forward the request and stamp
 /// `Access-Control-Allow-Origin: *` on the response.
 pub async fn kong_cors(request: Request, next: Next) -> Response {
+    if is_blocked_route(request.uri().path()) {
+        return next.run(request).await;
+    }
     if is_preflight(&request) {
         return preflight_response(
             request
@@ -111,6 +129,26 @@ mod tests {
         }
         assert!(!has_cors_plugin("/"));
         assert!(!has_cors_plugin(crate::HEALTH_PATH));
+    }
+
+    #[test]
+    fn blocked_routes_match_on_path_segments() {
+        for path in [
+            "/realtime/v1/api/openapi",
+            "/realtime/v1/api/openapi/x",
+            "/realtime/v1/api/tenants",
+            "/api/mcp",
+            "/mcp/x",
+        ] {
+            assert!(is_blocked_route(path), "{path}");
+        }
+        for path in [
+            "/realtime/v1/api/openapix",
+            "/realtime/v1/api/other",
+            "/mcpx",
+        ] {
+            assert!(!is_blocked_route(path), "{path}");
+        }
     }
 
     #[test]

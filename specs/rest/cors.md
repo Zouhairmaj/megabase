@@ -20,7 +20,7 @@ PostgREST's `wai-cors` middleware behind it. Megabase keeps the same split:
 | Behavior | File:line (pin) |
 |---|---|
 | `cors` plugin with no `config` on `rest-v1-openapi`, `rest-v1`, `graphql-v1` | [`vendor/supabase/docker/volumes/api/kong.yml:139`](https://github.com/supabase/supabase/blob/86854671e95be31e24fa0785cded0579fe692fcb/docker/volumes/api/kong.yml#L139), [`:167`](https://github.com/supabase/supabase/blob/86854671e95be31e24fa0785cded0579fe692fcb/docker/volumes/api/kong.yml#L167), [`:196`](https://github.com/supabase/supabase/blob/86854671e95be31e24fa0785cded0579fe692fcb/docker/volumes/api/kong.yml#L196) |
-| Same plugin on the Auth, Realtime, Storage, Functions, and OAuth discovery services; absent on `meta` (`/pg/`) and `dashboard` | [`kong.yml:49`](https://github.com/supabase/supabase/blob/86854671e95be31e24fa0785cded0579fe692fcb/docker/volumes/api/kong.yml#L49)–[`:366`](https://github.com/supabase/supabase/blob/86854671e95be31e24fa0785cded0579fe692fcb/docker/volumes/api/kong.yml#L366), [`:394`](https://github.com/supabase/supabase/blob/86854671e95be31e24fa0785cded0579fe692fcb/docker/volumes/api/kong.yml#L394), [`:455`](https://github.com/supabase/supabase/blob/86854671e95be31e24fa0785cded0579fe692fcb/docker/volumes/api/kong.yml#L455) |
+| Same plugin on the Auth, Realtime, Storage, Functions, and OAuth discovery services; absent on `meta` (`/pg/`) and on the 403 `request-termination` routes `/realtime/v1/api/openapi`, `/realtime/v1/api/tenants`, `/api/mcp`, `/mcp`. The `dashboard` catch-all lists it too | [`kong.yml:49`](https://github.com/supabase/supabase/blob/86854671e95be31e24fa0785cded0579fe692fcb/docker/volumes/api/kong.yml#L49)–[`:366`](https://github.com/supabase/supabase/blob/86854671e95be31e24fa0785cded0579fe692fcb/docker/volumes/api/kong.yml#L366), [`:394`](https://github.com/supabase/supabase/blob/86854671e95be31e24fa0785cded0579fe692fcb/docker/volumes/api/kong.yml#L394), [`:455`](https://github.com/supabase/supabase/blob/86854671e95be31e24fa0785cded0579fe692fcb/docker/volumes/api/kong.yml#L455) |
 | Gateway image `kong/kong:3.9.3`; the plugin defaults are that version's `kong/plugins/cors/schema.lua` and `handler.lua` (Kong is not vendored) | [`vendor/supabase/docker/docker-compose.yml:70`](https://github.com/supabase/supabase/blob/86854671e95be31e24fa0785cded0579fe692fcb/docker/docker-compose.yml#L70) |
 | PostgREST policy: only when `Origin` is present; all origins; exposed headers; `corsVaryOrigin = False` | [`vendor/postgrest/src/library/PostgREST/Cors.hs:25`](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/Cors.hs#L25) |
 | Expected header values | [`vendor/postgrest/test/spec/Feature/CorsSpec.hs:14`](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/test/spec/Feature/CorsSpec.hs#L14) |
@@ -87,8 +87,11 @@ None. The layers add headers to whatever the route returns.
 - `OPTIONS` with `Access-Control-Request-Method` but no `Origin` is forwarded
   too.
 - A non-`OPTIONS` request with both preflight headers is a normal request.
-- `/rest/v1` without the trailing slash, `/pg/…`, Studio paths, and
-  `/_megabase/health` are outside the plugin and carry no CORS header.
+- `/rest/v1` without the trailing slash and other unmatched paths fall to
+  Kong's `dashboard` catch-all, which lists the plugin, so they get the same
+  preflight and `Access-Control-Allow-Origin: *` as any CORS route.
+- `/pg/…`, the blocked routes above, and `/_megabase/health` are outside the
+  plugin and carry no CORS header.
 - `Access-Control-Allow-Headers` echoes the request value byte for byte,
   including case and spacing.
 

@@ -155,7 +155,7 @@ async fn every_cors_route_response_allows_any_origin_without_origin_header() {
 
 #[tokio::test]
 async fn routes_without_the_plugin_get_no_cors_headers() {
-    for path in ["/pg/x", "/", "/_megabase/health", "/rest/v1", "/auth/v1"] {
+    for path in ["/pg/x", "/_megabase/health"] {
         let response = create_router()
             .oneshot(
                 Request::builder()
@@ -184,6 +184,45 @@ async fn routes_without_the_plugin_get_no_cors_headers() {
         .headers()
         .get(header::ACCESS_CONTROL_ALLOW_METHODS)
         .is_none());
+}
+
+#[tokio::test]
+async fn studio_fallback_and_unprefixed_paths_get_the_plugin() {
+    for path in ["/", "/rest/v1", "/auth/v1"] {
+        let response = create_router()
+            .oneshot(preflight(path, "GET", Some("apikey")))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK, "{path}");
+        assert_eq!(
+            response.headers()[header::ACCESS_CONTROL_ALLOW_METHODS],
+            CORS_ALLOW_METHODS,
+            "{path}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn blocked_routes_get_no_cors_preflight() {
+    for path in [
+        "/realtime/v1/api/openapi",
+        "/realtime/v1/api/tenants/x",
+        "/mcp",
+        "/api/mcp",
+    ] {
+        let response = create_router()
+            .oneshot(preflight(path, "GET", Some("apikey")))
+            .await
+            .unwrap();
+        assert_ne!(response.status(), StatusCode::OK, "{path}");
+        assert!(
+            response
+                .headers()
+                .get(header::ACCESS_CONTROL_ALLOW_ORIGIN)
+                .is_none(),
+            "{path}"
+        );
+    }
 }
 
 #[test]
