@@ -175,6 +175,10 @@ pub async fn run(config: Config) -> std::io::Result<()> {
     let mut auth = megabase_auth::AuthState::try_from_env().map_err(std::io::Error::other)?;
     auth.database_url = config.database_url.clone();
     if let Some(url) = auth.database_url.clone() {
+        info!("installing standard roles");
+        megabase_auth::install_roles(&url)
+            .await
+            .map_err(std::io::Error::other)?;
         info!("installing auth schema");
         megabase_auth::install_schema(&url)
             .await
@@ -183,7 +187,7 @@ pub async fn run(config: Config) -> std::io::Result<()> {
             .await
             .map_err(std::io::Error::other)?;
     } else {
-        info!("DATABASE_URL unset; skipping auth schema install");
+        info!("DATABASE_URL unset; skipping role and auth schema install");
     }
     let mut rest = megabase_rest::RestState::from_config(&config);
     if let Some(url) = config.database_url.as_deref() {
