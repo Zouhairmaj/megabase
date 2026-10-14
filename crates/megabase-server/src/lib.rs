@@ -16,12 +16,14 @@ use axum::{
     routing::get,
     Json, Router,
 };
+mod cors;
 mod layers;
 
 use megabase_core::Config;
 use tower::ServiceExt;
 use tracing::info;
 
+pub use cors::{cors_applies, CORS_ALLOW_METHODS, ROUTES_WITHOUT_CORS};
 use layers::apply_http_layers;
 
 /// Megabase's own liveness probe. The `/_megabase` prefix is not used by any
