@@ -1,201 +1,137 @@
-//! CORS through the gateway: Kong's `cors` plugin answers preflights and adds
-//! `Access-Control-Allow-Origin: *` on every route that lists the plugin;
-//! PostgREST adds `Access-Control-Expose-Headers` when `Origin` is present.
-//! `specs/rest/cors.md`.
+//! Kong's `cors` plugin at the gateway (`specs/server/cors.md`, issue 317).
+//!
+//! The pinned `kong.yml` attaches the plugin with its defaults to every
+//! service except Postgres Meta, the blocked Realtime admin routes, and MCP.
+//! A browser preflight on `/auth/v1/*` therefore gets Kong's `200`, not the
+//! upstream service and not a 501.
 
 use axum::{
     body::{to_bytes, Body},
-    http::{header, Request, StatusCode},
+    http::{header, HeaderMap, Request, StatusCode},
 };
-use megabase_server::{create_router, CORS_ALLOW_METHODS, CORS_ROUTES, GATEWAY_ROUTES};
+use megabase_server::{create_router, CORS_ALLOW_METHODS, HEALTH_PATH, ROUTES_WITHOUT_CORS};
 use tower::ServiceExt;
 
-const ORIGIN: &str = "http://localhost:3000";
-const REQUESTED_HEADERS: &str =
-    "apikey,authorization,content-type,prefer,x-client-info,accept-profile,content-profile";
-
-fn preflight(path: &str, requested_method: &str, requested_headers: Option<&str>) -> Request<Body> {
-    let mut builder = Request::builder()
-        .method("OPTIONS")
-        .uri(path)
-        .header(header::ORIGIN, ORIGIN)
-        .header(header::ACCESS_CONTROL_REQUEST_METHOD, requested_method);
-    if let Some(requested) = requested_headers {
-        builder = builder.header(header::ACCESS_CONTROL_REQUEST_HEADERS, requested);
+async fn send(
+    method: &str,
+    path: &str,
+    headers: &[(&str, &str)],
+) -> (StatusCode, HeaderMap, Vec<u8>) {
+    let mut builder = Request::builder().method(method).uri(path);
+    for (name, value) in headers {
+        builder = builder.header(*name, *value);
     }
-    builder.body(Body::empty()).unwrap()
+    let response = create_router()
+        .oneshot(builder.body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    let status = response.status();
+    let headers = response.headers().clone();
+    let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    (status, headers, bytes.to_vec())
+}
+
+const BROWSER_PREFLIGHT: &[(&str, &str)] = &[
+    ("origin", "http://localhost:3000"),
+    ("access-control-request-method", "POST"),
+    (
+        "access-control-request-headers",
+        "apikey,authorization,content-type,x-client-info,x-supabase-api-version",
+    ),
+];
+
+#[tokio::test]
+async fn auth_preflight_is_kong_200_with_default_plugin_headers() {
+    for path in [
+        "/auth/v1/signup",
+        "/auth/v1/token?grant_type=password",
+        "/auth/v1/user",
+        "/auth/v1/logout",
+        "/auth/v1/verify",
+        "/auth/v1/some/unported/path",
+        "/.well-known/oauth-authorization-server",
+    ] {
+        let (status, headers, body) = send("OPTIONS", path, BROWSER_PREFLIGHT).await;
+        assert_eq!(status, StatusCode::OK, "{path}");
+        assert!(
+            body.is_empty(),
+            "{path}: {}",
+            String::from_utf8_lossy(&body)
+        );
+        assert_eq!(headers[header::ACCESS_CONTROL_ALLOW_ORIGIN], "*", "{path}");
+        assert_eq!(
+            headers[header::ACCESS_CONTROL_ALLOW_HEADERS],
+            "apikey,authorization,content-type,x-client-info,x-supabase-api-version",
+            "{path}"
+        );
+        assert_eq!(
+            headers[header::ACCESS_CONTROL_ALLOW_METHODS],
+            CORS_ALLOW_METHODS,
+            "{path}"
+        );
+        assert_eq!(
+            headers[header::ACCESS_CONTROL_ALLOW_METHODS],
+            "GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS,TRACE,CONNECT",
+            "{path}"
+        );
+        // Defaults: `credentials: false`, no `max_age`, no `Vary`, no upstream.
+        for absent in [
+            header::ACCESS_CONTROL_ALLOW_CREDENTIALS,
+            header::ACCESS_CONTROL_MAX_AGE,
+            header::ACCESS_CONTROL_EXPOSE_HEADERS,
+            header::VARY,
+            header::ALLOW,
+            header::CONTENT_TYPE,
+        ] {
+            assert!(headers.get(&absent).is_none(), "{path}: {absent}");
+        }
+        assert!(headers.get("x-request-id").is_some(), "{path}");
+    }
 }
 
 #[tokio::test]
-async fn rest_preflight_allows_methods_and_echoes_headers() {
-    let response = create_router()
-        .oneshot(preflight(
-            "/rest/v1/todos?select=*",
-            "PATCH",
-            Some(REQUESTED_HEADERS),
-        ))
-        .await
-        .unwrap();
-    assert_eq!(response.status(), StatusCode::OK);
-    let headers = response.headers().clone();
+async fn preflight_without_requested_headers_sets_no_allow_headers() {
+    let (status, headers, _) = send(
+        "OPTIONS",
+        "/auth/v1/signup",
+        &[
+            ("origin", "http://localhost:3000"),
+            ("access-control-request-method", "POST"),
+        ],
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(headers.get(header::ACCESS_CONTROL_ALLOW_HEADERS).is_none());
     assert_eq!(headers[header::ACCESS_CONTROL_ALLOW_ORIGIN], "*");
     assert_eq!(
         headers[header::ACCESS_CONTROL_ALLOW_METHODS],
         CORS_ALLOW_METHODS
     );
-    assert_eq!(
-        headers[header::ACCESS_CONTROL_ALLOW_HEADERS],
-        REQUESTED_HEADERS
-    );
-    // Kong's plugin defaults leave credentials and max_age off, and the
-    // preflight is answered before PostgREST, so there is no `Allow`.
-    assert!(headers
-        .get(header::ACCESS_CONTROL_ALLOW_CREDENTIALS)
-        .is_none());
-    assert!(headers.get(header::ACCESS_CONTROL_MAX_AGE).is_none());
-    assert!(headers.get(header::ALLOW).is_none());
-    assert!(headers.get(header::ACCESS_CONTROL_EXPOSE_HEADERS).is_none());
-    let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    assert!(bytes.is_empty());
 }
 
 #[tokio::test]
-async fn preflight_is_answered_before_authentication_on_every_cors_route() {
-    for prefix in CORS_ROUTES {
-        for suffix in ["", "todos", "rpc/add"] {
-            let path = format!("{prefix}{suffix}");
-            let response = create_router()
-                .oneshot(preflight(&path, "DELETE", None))
-                .await
-                .unwrap();
-            assert_eq!(response.status(), StatusCode::OK, "{path}");
-            assert_eq!(
-                response.headers()[header::ACCESS_CONTROL_ALLOW_ORIGIN],
-                "*",
-                "{path}"
-            );
-            assert_eq!(
-                response.headers()[header::ACCESS_CONTROL_ALLOW_METHODS],
-                CORS_ALLOW_METHODS,
-                "{path}"
-            );
-            assert!(
-                response
-                    .headers()
-                    .get(header::ACCESS_CONTROL_ALLOW_HEADERS)
-                    .is_none(),
-                "{path}: no Access-Control-Request-Headers to echo"
-            );
-        }
-    }
-}
-
-#[tokio::test]
-async fn options_without_requested_method_is_not_a_preflight() {
-    // Kong forwards it upstream; the route is still 501 here.
-    let request = Request::builder()
-        .method("OPTIONS")
-        .uri("/auth/v1/token")
-        .header(header::ORIGIN, ORIGIN)
-        .body(Body::empty())
-        .unwrap();
-    let response = create_router().oneshot(request).await.unwrap();
-    assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
-    assert_eq!(response.headers()[header::ACCESS_CONTROL_ALLOW_ORIGIN], "*");
-    assert!(response
-        .headers()
-        .get(header::ACCESS_CONTROL_ALLOW_METHODS)
-        .is_none());
-}
-
-#[tokio::test]
-async fn rest_simple_request_with_origin_exposes_postgrest_headers() {
-    let request = Request::builder()
-        .uri("/rest/v1/todos")
-        .header(header::ORIGIN, ORIGIN)
-        .body(Body::empty())
-        .unwrap();
-    let response = create_router().oneshot(request).await.unwrap();
-    // No pool in this router, so PostgREST's PGRST000; the CORS headers still apply.
-    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
-    let allow_origin: Vec<_> = response
-        .headers()
-        .get_all(header::ACCESS_CONTROL_ALLOW_ORIGIN)
-        .iter()
-        .collect();
-    assert_eq!(allow_origin, ["*"], "Kong replaces PostgREST's value");
-    assert_eq!(
-        response.headers()[header::ACCESS_CONTROL_EXPOSE_HEADERS],
-        "Content-Encoding, Content-Location, Content-Range, Content-Type, Date, \
-         Location, Server, Transfer-Encoding, Range-Unit"
-    );
-}
-
-#[tokio::test]
-async fn every_cors_route_response_allows_any_origin_without_origin_header() {
-    for prefix in CORS_ROUTES {
-        let response = create_router()
-            .oneshot(Request::builder().uri(*prefix).body(Body::empty()).unwrap())
-            .await
-            .unwrap();
+async fn preflight_needs_no_apikey_on_any_cors_service() {
+    // Kong runs `cors` (priority 2000) before `key-auth` and `basic-auth`,
+    // so the Studio catch-all and REST answer the preflight too.
+    for path in [
+        "/rest/v1/",
+        "/rest/v1/todos",
+        "/rest/v1/rpc/add",
+        "/graphql/v1",
+        "/realtime/v1/api/broadcast",
+        "/storage/v1/object/bucket/key",
+        "/functions/v1/hello",
+        "/",
+        "/auth/v1",
+        "/api/platform/profile",
+        HEALTH_PATH,
+    ] {
+        let (status, headers, body) = send("OPTIONS", path, BROWSER_PREFLIGHT).await;
+        assert_eq!(status, StatusCode::OK, "{path}");
+        assert!(body.is_empty(), "{path}");
+        assert_eq!(headers[header::ACCESS_CONTROL_ALLOW_ORIGIN], "*", "{path}");
         assert_eq!(
-            response.headers()[header::ACCESS_CONTROL_ALLOW_ORIGIN],
-            "*",
-            "{prefix}"
-        );
-        assert!(
-            response
-                .headers()
-                .get(header::ACCESS_CONTROL_EXPOSE_HEADERS)
-                .is_none(),
-            "{prefix}: PostgREST exposes headers only for a request with Origin"
-        );
-    }
-}
-
-#[tokio::test]
-async fn routes_without_the_plugin_get_no_cors_headers() {
-    for path in ["/pg/x", "/_megabase/health"] {
-        let response = create_router()
-            .oneshot(
-                Request::builder()
-                    .uri(path)
-                    .header(header::ORIGIN, ORIGIN)
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert!(
-            response
-                .headers()
-                .get(header::ACCESS_CONTROL_ALLOW_ORIGIN)
-                .is_none(),
-            "{path}"
-        );
-    }
-    // A preflight on `/pg/` reaches Postgres Meta instead of Kong's plugin.
-    let response = create_router()
-        .oneshot(preflight("/pg/tables", "GET", Some("apikey")))
-        .await
-        .unwrap();
-    assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
-    assert!(response
-        .headers()
-        .get(header::ACCESS_CONTROL_ALLOW_METHODS)
-        .is_none());
-}
-
-#[tokio::test]
-async fn studio_fallback_and_unprefixed_paths_get_the_plugin() {
-    for path in ["/", "/rest/v1", "/auth/v1"] {
-        let response = create_router()
-            .oneshot(preflight(path, "GET", Some("apikey")))
-            .await
-            .unwrap();
-        assert_eq!(response.status(), StatusCode::OK, "{path}");
-        assert_eq!(
-            response.headers()[header::ACCESS_CONTROL_ALLOW_METHODS],
+            headers[header::ACCESS_CONTROL_ALLOW_METHODS],
             CORS_ALLOW_METHODS,
             "{path}"
         );
@@ -203,34 +139,105 @@ async fn studio_fallback_and_unprefixed_paths_get_the_plugin() {
 }
 
 #[tokio::test]
-async fn blocked_routes_get_no_cors_preflight() {
-    for path in [
-        "/realtime/v1/api/openapi",
-        "/realtime/v1/api/tenants/x",
-        "/mcp",
-        "/api/mcp",
+async fn options_without_a_full_preflight_reaches_the_component() {
+    // Kong only intercepts when both `Origin` and
+    // `Access-Control-Request-Method` are present.
+    for headers in [
+        &[][..],
+        &[("origin", "http://localhost:3000")][..],
+        &[("access-control-request-method", "POST")][..],
     ] {
-        let response = create_router()
-            .oneshot(preflight(path, "GET", Some("apikey")))
-            .await
-            .unwrap();
-        assert_ne!(response.status(), StatusCode::OK, "{path}");
+        let (status, response_headers, body) = send("OPTIONS", "/auth/v1/signup", headers).await;
+        assert_eq!(status, StatusCode::NOT_IMPLEMENTED, "{headers:?}");
+        let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(body["code"], "MEGABASE_NOT_IMPLEMENTED", "{headers:?}");
+        // The header filter still stamps the upstream answer.
+        assert_eq!(
+            response_headers[header::ACCESS_CONTROL_ALLOW_ORIGIN],
+            "*",
+            "{headers:?}"
+        );
         assert!(
-            response
-                .headers()
-                .get(header::ACCESS_CONTROL_ALLOW_ORIGIN)
+            response_headers
+                .get(header::ACCESS_CONTROL_ALLOW_METHODS)
                 .is_none(),
-            "{path}"
+            "{headers:?}"
         );
     }
 }
 
-#[test]
-fn cors_routes_are_gateway_routes() {
-    for prefix in CORS_ROUTES {
+#[tokio::test]
+async fn every_non_preflight_response_carries_allow_origin_star() {
+    // Kong sets the header with or without `Origin` on the request, on
+    // served routes and on 501s alike.
+    for (method, path, expected) in [
+        ("GET", "/auth/v1/health", StatusCode::OK),
+        ("GET", "/auth/v1/settings", StatusCode::OK),
+        (
+            "GET",
+            "/auth/v1/reauthenticate",
+            StatusCode::NOT_IMPLEMENTED,
+        ),
+        // An empty JSON body is GoTrue's 400 bad request.
+        ("POST", "/auth/v1/signup", StatusCode::BAD_REQUEST),
+        ("GET", "/storage/v1/object/b/k", StatusCode::NOT_IMPLEMENTED),
+        ("GET", "/", StatusCode::NOT_IMPLEMENTED),
+        ("GET", HEALTH_PATH, StatusCode::OK),
+    ] {
+        for origin in [None, Some("http://localhost:3000")] {
+            let request_headers: Vec<(&str, &str)> = origin
+                .map(|origin| ("origin", origin))
+                .into_iter()
+                .chain(std::iter::once(("content-type", "application/json")))
+                .collect();
+            let (status, headers, _) = send(method, path, &request_headers).await;
+            assert_eq!(status, expected, "{method} {path} origin={origin:?}");
+            assert_eq!(
+                headers[header::ACCESS_CONTROL_ALLOW_ORIGIN],
+                "*",
+                "{method} {path} origin={origin:?}"
+            );
+            assert_eq!(
+                headers
+                    .get_all(header::ACCESS_CONTROL_ALLOW_ORIGIN)
+                    .iter()
+                    .count(),
+                1,
+                "{method} {path} origin={origin:?}"
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn kong_services_without_the_plugin_get_no_cors_answer() {
+    assert_eq!(
+        ROUTES_WITHOUT_CORS,
+        [
+            "/pg/",
+            "/realtime/v1/api/openapi",
+            "/realtime/v1/api/tenants",
+            "/api/mcp",
+            "/mcp",
+        ]
+    );
+    for path in [
+        "/pg/tables",
+        "/realtime/v1/api/openapi",
+        "/realtime/v1/api/tenants/realtime-dev",
+        "/api/mcp",
+        "/mcp",
+    ] {
+        let (status, headers, _) = send("OPTIONS", path, BROWSER_PREFLIGHT).await;
+        assert_eq!(status, StatusCode::NOT_IMPLEMENTED, "{path}");
         assert!(
-            GATEWAY_ROUTES.iter().any(|(route, _)| route == prefix),
-            "{prefix}"
+            headers.get(header::ACCESS_CONTROL_ALLOW_ORIGIN).is_none(),
+            "{path}"
+        );
+        let (_, headers, _) = send("GET", path, &[("origin", "http://localhost:3000")]).await;
+        assert!(
+            headers.get(header::ACCESS_CONTROL_ALLOW_ORIGIN).is_none(),
+            "{path}"
         );
     }
 }

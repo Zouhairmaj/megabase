@@ -6,8 +6,6 @@
 //! request path, and everything else goes to Studio, like Kong's catch-all
 //! `dashboard` route. Supavisor's management API is not routed through Kong
 //! upstream, so it has no prefix here; see `docs/adr/0002-gateway-layout.md`.
-//! Routes whose Kong service lists the `cors` plugin get the `cors` module's
-//! layer: it answers preflights and stamps `Access-Control-Allow-Origin: *`.
 
 use std::future::IntoFuture;
 use std::sync::Arc;
@@ -25,7 +23,7 @@ use megabase_core::Config;
 use tower::ServiceExt;
 use tracing::info;
 
-pub use cors::{has_cors_plugin, ALLOW_METHODS as CORS_ALLOW_METHODS, CORS_ROUTES};
+pub use cors::{cors_applies, CORS_ALLOW_METHODS, ROUTES_WITHOUT_CORS};
 use layers::apply_http_layers;
 
 /// Megabase's own liveness probe. The `/_megabase` prefix is not used by any
@@ -85,22 +83,6 @@ struct Gateway {
     fallback: Router,
 }
 
-/// Router for the Kong route `prefix`, wrapped in the `cors` plugin layer when
-/// `kong.yml` lists that plugin on the service.
-fn route_router(
-    prefix: &str,
-    component: &str,
-    auth: &megabase_auth::AuthState,
-    rest: &megabase_rest::RestState,
-) -> Router {
-    let router = component_router(component, auth, rest);
-    if has_cors_plugin(prefix) {
-        router.layer(axum::middleware::from_fn(cors::kong_cors))
-    } else {
-        router
-    }
-}
-
 fn component_router(
     component: &str,
     auth: &megabase_auth::AuthState,
@@ -152,11 +134,10 @@ fn assemble(auth: &megabase_auth::AuthState, rest: &megabase_rest::RestState) ->
         routes: Arc::new(
             GATEWAY_ROUTES
                 .iter()
-                .map(|(prefix, component)| (*prefix, route_router(prefix, component, auth, rest)))
+                .map(|(prefix, component)| (*prefix, component_router(component, auth, rest)))
                 .collect(),
         ),
-        // Kong's `dashboard` catch-all service lists the `cors` plugin.
-        fallback: megabase_studio::router().layer(axum::middleware::from_fn(cors::kong_cors)),
+        fallback: megabase_studio::router(),
     };
     Router::new()
         .route(HEALTH_PATH, get(health))
@@ -194,6 +175,10 @@ pub async fn run(config: Config) -> std::io::Result<()> {
     let mut auth = megabase_auth::AuthState::try_from_env().map_err(std::io::Error::other)?;
     auth.database_url = config.database_url.clone();
     if let Some(url) = auth.database_url.clone() {
+        info!("installing standard roles");
+        megabase_auth::install_roles(&url)
+            .await
+            .map_err(std::io::Error::other)?;
         info!("installing auth schema");
         megabase_auth::install_schema(&url)
             .await
@@ -202,7 +187,7 @@ pub async fn run(config: Config) -> std::io::Result<()> {
             .await
             .map_err(std::io::Error::other)?;
     } else {
-        info!("DATABASE_URL unset; skipping auth schema install");
+        info!("DATABASE_URL unset; skipping role and auth schema install");
     }
     let mut rest = megabase_rest::RestState::from_config(&config);
     if let Some(url) = config.database_url.as_deref() {

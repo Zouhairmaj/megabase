@@ -38,7 +38,3 @@ Supabase service uses.
 
 A request to `/auth/v1` (no slash) is Studio's, not Auth's. Tests encode
 this. Pooler work is a separate listener, not a gateway route.
-
-Kong plugins attach per service, so `megabase-server` wraps each prefix
-with the layers its `kong.yml` service lists. Today that is the `cors`
-plugin on every prefix except `/pg/` and Studio (`specs/rest/cors.md`).

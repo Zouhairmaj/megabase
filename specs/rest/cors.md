@@ -11,9 +11,9 @@ only read response headers named in `Access-Control-Expose-Headers`
 (`supabase-js` reads `Content-Range` for counts). In the pinned stack two
 layers produce these headers: Kong's `cors` plugin at the gateway and
 PostgREST's `wai-cors` middleware behind it. Megabase keeps the same split:
-`megabase-server` serves the Kong part for every route that lists the plugin
-(Auth, REST, GraphQL, Realtime, Storage, Functions, OAuth discovery) and
-`megabase-rest` serves the PostgREST part.
+`megabase-server` serves the Kong part (specified in `specs/server/cors.md`)
+and `megabase-rest` serves the PostgREST part. The gateway sections below
+restate the Kong behavior this layer depends on.
 
 ## Upstream
 

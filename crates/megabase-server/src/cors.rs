@@ -1,71 +1,64 @@
-//! Kong's `cors` plugin as the self-hosted gateway enables it.
+//! Kong's `cors` plugin as the pinned self-hosted stack attaches it.
 //!
-//! `vendor/supabase/docker/volumes/api/kong.yml` lists `- name: cors` with no
-//! `config` on every service except `meta` (`/pg/`), so the plugin defaults of Kong 3.9.3 (`docker-compose.yml`) apply:
+//! Every service in `vendor/supabase/docker/volumes/api/kong.yml`
+//! (Apache-2.0) except Postgres Meta (`/pg/`), the blocked Realtime admin
+//! routes, and the MCP routes lists `- name: cors` with no `config`, so the
+//! Kong `3.9.3` image from `vendor/supabase/docker/docker-compose.yml` runs
+//! the plugin with its defaults: no configured origins, headers, exposed
+//! headers, or max age; `credentials: false`; `preflight_continue: false`;
+//! the full default method list. The plugin's `access` phase runs before
+//! `key-auth`, `acl`, and `basic-auth`, so a preflight needs no `apikey`.
 //!
-//! - A preflight (`OPTIONS` with `Origin` and `Access-Control-Request-Method`)
-//!   is answered in Kong's access phase, before key-auth, ACL, and the
-//!   upstream: 200, empty body, `Access-Control-Allow-Origin: *`,
-//!   `Access-Control-Allow-Methods` listing every method, and
-//!   `Access-Control-Allow-Headers` echoing `Access-Control-Request-Headers`
-//!   when the request carries it. `credentials` and `max_age` are off, so
-//!   `Access-Control-Allow-Credentials` and `Access-Control-Max-Age` are absent.
-//! - Every other response gets `Access-Control-Allow-Origin: *`, whether or not
-//!   the request has an `Origin`. Kong sets the header, so an upstream value
-//!   (PostgREST's own `*`) is replaced, never duplicated.
-//! - `exposed_headers` is not configured, so `Access-Control-Expose-Headers`
-//!   comes from the upstream alone (see `megabase-rest`'s PostgREST layer).
+//! With those defaults the plugin does two things:
 //!
-//! Specified in `specs/rest/cors.md`.
+//! - On `OPTIONS` carrying both `Origin` and `Access-Control-Request-Method`
+//!   it answers `200` with an empty body before the upstream service:
+//!   `Access-Control-Allow-Origin: *`, `Access-Control-Allow-Headers` echoing
+//!   `Access-Control-Request-Headers` when the request sent one, and
+//!   `Access-Control-Allow-Methods` with the default list. It sets no
+//!   `Access-Control-Allow-Credentials`, `Access-Control-Max-Age`, or `Vary`.
+//! - On every other response it sets `Access-Control-Allow-Origin: *`,
+//!   replacing any value the upstream service set, whether or not the request
+//!   carried `Origin`.
+//!
+//! Kong's route table picks the longest matching path prefix, so the
+//! exclusions below are plain prefix tests as in [`crate::match_gateway_route`].
+//! Spec: `specs/server/cors.md`.
 
-use axum::{
-    extract::Request,
-    http::{header, HeaderValue, Method, StatusCode},
-    middleware::Next,
-    response::{IntoResponse, Response},
-};
+use std::future::Future;
+use std::pin::Pin;
+use std::task::{ready, Context, Poll};
 
-/// `Access-Control-Allow-Methods` on a preflight: Kong's `methods` default,
-/// joined with `,` and no space.
-pub const ALLOW_METHODS: &str = "GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS,TRACE,CONNECT";
+use axum::http::{header, HeaderValue, Method, Request, Response, StatusCode};
+use pin_project_lite::pin_project;
+use tower::{Layer, Service};
 
-/// Kong route prefixes whose service lists the `cors` plugin in `kong.yml`.
-///
-/// `/pg/` (`meta`) does not, so it gets no CORS headers. The Studio catch-all
-/// (`dashboard`) lists the plugin and is layered separately.
-pub const CORS_ROUTES: &[&str] = &[
-    "/auth/v1/",
-    "/.well-known/oauth-authorization-server",
-    "/rest/v1/",
-    "/graphql/v1",
-    "/realtime/v1/",
-    "/storage/v1/",
-    "/functions/v1/",
-];
+/// `Access-Control-Allow-Methods` of a preflight: the plugin's default
+/// `methods` list, joined with commas as Kong emits it.
+pub const CORS_ALLOW_METHODS: &str = "GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS,TRACE,CONNECT";
 
-/// Kong routes more specific than a CORS prefix that terminate with 403 through
-/// `request-termination` alone, so they carry no CORS headers.
-const BLOCKED_ROUTES: &[&str] = &[
+/// Kong route path prefixes whose service has no `cors` plugin in the pinned
+/// `kong.yml`: Postgres Meta, the two blocked Realtime admin routes, and
+/// both MCP routes. Every other path, including the Studio catch-all, has it.
+pub const ROUTES_WITHOUT_CORS: &[&str] = &[
+    "/pg/",
     "/realtime/v1/api/openapi",
     "/realtime/v1/api/tenants",
     "/api/mcp",
     "/mcp",
 ];
 
-fn is_blocked_route(path: &str) -> bool {
-    BLOCKED_ROUTES.iter().any(|blocked| {
-        path.strip_prefix(blocked)
-            .is_some_and(|rest| rest.is_empty() || rest.starts_with('/'))
-    })
-}
-
-/// Whether the Kong service behind `prefix` runs the `cors` plugin.
+/// Whether the pinned gateway runs the `cors` plugin for `path`.
 #[must_use]
-pub fn has_cors_plugin(prefix: &str) -> bool {
-    CORS_ROUTES.contains(&prefix)
+pub fn cors_applies(path: &str) -> bool {
+    !ROUTES_WITHOUT_CORS
+        .iter()
+        .any(|prefix| path.starts_with(prefix))
 }
 
-fn is_preflight(request: &Request) -> bool {
+/// Kong's preflight test: `OPTIONS` with `Origin` and
+/// `Access-Control-Request-Method`, any values.
+fn is_preflight<B>(request: &Request<B>) -> bool {
     request.method() == Method::OPTIONS
         && request.headers().contains_key(header::ORIGIN)
         && request
@@ -73,138 +66,248 @@ fn is_preflight(request: &Request) -> bool {
             .contains_key(header::ACCESS_CONTROL_REQUEST_METHOD)
 }
 
-/// Answer a preflight, or forward the request and stamp
-/// `Access-Control-Allow-Origin: *` on the response.
-pub async fn kong_cors(request: Request, next: Next) -> Response {
-    if is_blocked_route(request.uri().path()) {
-        return next.run(request).await;
-    }
-    if is_preflight(&request) {
-        return preflight_response(
-            request
-                .headers()
-                .get(header::ACCESS_CONTROL_REQUEST_HEADERS)
-                .cloned(),
-        );
-    }
-    let mut response = next.run(request).await;
-    allow_any_origin(&mut response);
-    response
-}
-
-fn allow_any_origin(response: &mut Response) {
-    response.headers_mut().insert(
+/// The response Kong's `access` phase sends for a preflight. The request is
+/// consumed: Kong never forwards a preflight upstream with these defaults.
+fn preflight_response<ReqBody, ResBody: Default>(
+    mut request: Request<ReqBody>,
+) -> Response<ResBody> {
+    let mut response = Response::new(ResBody::default());
+    *response.status_mut() = StatusCode::OK;
+    let headers = response.headers_mut();
+    headers.insert(
         header::ACCESS_CONTROL_ALLOW_ORIGIN,
         HeaderValue::from_static("*"),
     );
-}
-
-fn preflight_response(requested_headers: Option<HeaderValue>) -> Response {
-    let mut response = StatusCode::OK.into_response();
-    allow_any_origin(&mut response);
-    let headers = response.headers_mut();
-    if let Some(requested) = requested_headers {
+    // `kong.request.get_header` returns the first value of a repeated header.
+    if let Some(requested) = request
+        .headers_mut()
+        .remove(header::ACCESS_CONTROL_REQUEST_HEADERS)
+    {
         headers.insert(header::ACCESS_CONTROL_ALLOW_HEADERS, requested);
     }
     headers.insert(
         header::ACCESS_CONTROL_ALLOW_METHODS,
-        HeaderValue::from_static(ALLOW_METHODS),
+        HeaderValue::from_static(CORS_ALLOW_METHODS),
     );
     response
+}
+
+/// Tower layer for [`Cors`].
+#[derive(Clone, Copy, Debug, Default)]
+pub struct CorsLayer;
+
+impl<S> Layer<S> for CorsLayer {
+    type Service = Cors<S>;
+
+    fn layer(&self, inner: S) -> Self::Service {
+        Cors { inner }
+    }
+}
+
+/// Service that answers preflights and stamps `Access-Control-Allow-Origin`
+/// on every other response for paths where [`cors_applies`].
+#[derive(Clone, Copy, Debug)]
+pub struct Cors<S> {
+    inner: S,
+}
+
+impl<S, ReqBody, ResBody> Service<Request<ReqBody>> for Cors<S>
+where
+    S: Service<Request<ReqBody>, Response = Response<ResBody>>,
+    ResBody: Default,
+{
+    type Response = S::Response;
+    type Error = S::Error;
+    type Future = CorsFuture<S::Future, ResBody>;
+
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.inner.poll_ready(cx)
+    }
+
+    fn call(&mut self, request: Request<ReqBody>) -> Self::Future {
+        if !cors_applies(request.uri().path()) {
+            return CorsFuture::Inner {
+                inner: self.inner.call(request),
+                allow_origin: false,
+            };
+        }
+        if is_preflight(&request) {
+            return CorsFuture::Preflight {
+                response: Some(preflight_response(request)),
+            };
+        }
+        CorsFuture::Inner {
+            inner: self.inner.call(request),
+            allow_origin: true,
+        }
+    }
+}
+
+pin_project! {
+    /// Response future of [`Cors`].
+    #[project = CorsFutureProj]
+    pub enum CorsFuture<F, B> {
+        /// A preflight answered by the gateway; `None` once yielded.
+        Preflight { response: Option<Response<B>> },
+        /// The inner service's response, stamped when `allow_origin`.
+        Inner { #[pin] inner: F, allow_origin: bool },
+    }
+}
+
+impl<F, B, E> Future for CorsFuture<F, B>
+where
+    F: Future<Output = Result<Response<B>, E>>,
+{
+    type Output = Result<Response<B>, E>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        match self.project() {
+            CorsFutureProj::Preflight { response } => {
+                // Polling a completed future breaks the `Future` contract.
+                let response = response.take().expect("CorsFuture polled after completion");
+                Poll::Ready(Ok(response))
+            }
+            CorsFutureProj::Inner {
+                inner,
+                allow_origin,
+            } => {
+                let result = ready!(inner.poll(cx));
+                Poll::Ready(result.map(|mut response| {
+                    if *allow_origin {
+                        response.headers_mut().insert(
+                            header::ACCESS_CONTROL_ALLOW_ORIGIN,
+                            HeaderValue::from_static("*"),
+                        );
+                    }
+                    response
+                }))
+            }
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::GATEWAY_ROUTES;
+    use axum::body::Body;
 
     #[test]
-    fn every_gateway_route_is_classified() {
-        for (prefix, component) in GATEWAY_ROUTES {
-            assert_eq!(
-                has_cors_plugin(prefix),
-                *component != megabase_meta::COMPONENT,
-                "{prefix}"
-            );
-        }
-        assert!(!has_cors_plugin("/"));
-        assert!(!has_cors_plugin(crate::HEALTH_PATH));
-    }
-
-    #[test]
-    fn blocked_routes_match_on_path_segments() {
+    fn cors_applies_everywhere_but_the_kong_routes_without_the_plugin() {
         for path in [
+            "/auth/v1/signup",
+            "/auth/v1/token",
+            "/.well-known/oauth-authorization-server",
+            "/rest/v1/",
+            "/rest/v1/todos",
+            "/graphql/v1",
+            "/realtime/v1/websocket",
+            "/realtime/v1/api/broadcast",
+            "/storage/v1/object/b/k",
+            "/functions/v1/hello",
+            "/",
+            "/auth/v1",
+            "/pg",
+            "/_megabase/health",
+        ] {
+            assert!(cors_applies(path), "{path}");
+        }
+        for path in [
+            "/pg/",
+            "/pg/tables",
             "/realtime/v1/api/openapi",
             "/realtime/v1/api/openapi/x",
             "/realtime/v1/api/tenants",
+            "/realtime/v1/api/tenants/realtime-dev",
             "/api/mcp",
-            "/mcp/x",
+            "/mcp",
+            "/mcp/anything",
         ] {
-            assert!(is_blocked_route(path), "{path}");
-        }
-        for path in [
-            "/realtime/v1/api/openapix",
-            "/realtime/v1/api/other",
-            "/mcpx",
-        ] {
-            assert!(!is_blocked_route(path), "{path}");
+            assert!(!cors_applies(path), "{path}");
         }
     }
 
     #[test]
-    fn preflight_needs_origin_and_requested_method() {
-        let options = |headers: &[(header::HeaderName, &str)]| {
-            let mut builder = Request::builder().method(Method::OPTIONS).uri("/rest/v1/x");
+    fn preflight_needs_options_origin_and_request_method() {
+        let request = |method: &str, headers: &[(&str, &str)]| {
+            let mut builder = Request::builder().method(method).uri("/auth/v1/signup");
             for (name, value) in headers {
-                builder = builder.header(name, *value);
+                builder = builder.header(*name, *value);
             }
-            builder.body(axum::body::Body::empty()).unwrap()
+            builder.body(Body::empty()).unwrap()
         };
-        assert!(is_preflight(&options(&[
-            (header::ORIGIN, "http://localhost:3000"),
-            (header::ACCESS_CONTROL_REQUEST_METHOD, "GET"),
-        ])));
-        assert!(!is_preflight(&options(&[(
-            header::ORIGIN,
-            "http://localhost:3000"
-        )])));
-        assert!(!is_preflight(&options(&[(
-            header::ACCESS_CONTROL_REQUEST_METHOD,
-            "GET"
-        )])));
-        let get = Request::builder()
-            .method(Method::GET)
-            .uri("/rest/v1/x")
-            .header(header::ORIGIN, "http://localhost:3000")
-            .header(header::ACCESS_CONTROL_REQUEST_METHOD, "GET")
-            .body(axum::body::Body::empty())
-            .unwrap();
-        assert!(!is_preflight(&get));
+        assert!(is_preflight(&request(
+            "OPTIONS",
+            &[
+                ("origin", "http://localhost:3000"),
+                ("access-control-request-method", "POST"),
+            ],
+        )));
+        assert!(is_preflight(&request(
+            "OPTIONS",
+            &[("origin", ""), ("access-control-request-method", "")],
+        )));
+        assert!(!is_preflight(&request(
+            "OPTIONS",
+            &[("origin", "http://localhost:3000")],
+        )));
+        assert!(!is_preflight(&request(
+            "OPTIONS",
+            &[("access-control-request-method", "POST")],
+        )));
+        assert!(!is_preflight(&request(
+            "POST",
+            &[
+                ("origin", "http://localhost:3000"),
+                ("access-control-request-method", "POST"),
+            ],
+        )));
     }
 
     #[test]
-    fn preflight_echoes_requested_headers_only_when_present() {
-        let with = preflight_response(Some(HeaderValue::from_static("apikey,prefer")));
-        assert_eq!(with.status(), StatusCode::OK);
+    fn preflight_response_echoes_the_first_requested_headers_value() {
+        let request = Request::builder()
+            .method("OPTIONS")
+            .uri("/auth/v1/signup")
+            .header("origin", "http://localhost:3000")
+            .header("access-control-request-method", "POST")
+            .header("access-control-request-headers", "apikey,content-type")
+            .header("access-control-request-headers", "x-client-info")
+            .body(Body::empty())
+            .unwrap();
+        let response: Response<Body> = preflight_response(request);
+        assert_eq!(response.status(), StatusCode::OK);
         assert_eq!(
-            with.headers()[header::ACCESS_CONTROL_ALLOW_HEADERS],
-            "apikey,prefer"
+            response.headers()[header::ACCESS_CONTROL_ALLOW_HEADERS],
+            "apikey,content-type"
         );
         assert_eq!(
-            with.headers()[header::ACCESS_CONTROL_ALLOW_METHODS],
-            ALLOW_METHODS
+            response
+                .headers()
+                .get_all(header::ACCESS_CONTROL_ALLOW_HEADERS)
+                .iter()
+                .count(),
+            1
         );
-        assert_eq!(with.headers()[header::ACCESS_CONTROL_ALLOW_ORIGIN], "*");
-        assert!(with
-            .headers()
-            .get(header::ACCESS_CONTROL_ALLOW_CREDENTIALS)
-            .is_none());
-        assert!(with.headers().get(header::ACCESS_CONTROL_MAX_AGE).is_none());
+    }
 
-        let without = preflight_response(None);
-        assert!(without
+    #[test]
+    fn preflight_response_without_requested_headers_has_no_allow_headers() {
+        let request = Request::builder()
+            .method("OPTIONS")
+            .uri("/auth/v1/signup")
+            .header("origin", "http://localhost:3000")
+            .header("access-control-request-method", "POST")
+            .body(Body::empty())
+            .unwrap();
+        let response: Response<Body> = preflight_response(request);
+        assert!(response
             .headers()
             .get(header::ACCESS_CONTROL_ALLOW_HEADERS)
             .is_none());
+        assert_eq!(
+            response.headers()[header::ACCESS_CONTROL_ALLOW_METHODS],
+            CORS_ALLOW_METHODS
+        );
+        assert_eq!(response.headers()[header::ACCESS_CONTROL_ALLOW_ORIGIN], "*");
     }
 }
