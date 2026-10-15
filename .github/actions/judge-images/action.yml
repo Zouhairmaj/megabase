@@ -112,14 +112,17 @@ runs:
           exit 1
         fi
 
-        # Pass 2: the upstream of each mirror that failed. Each fallback
-        # leaves one minute per fallback still queued after it.
+        # Pass 2: the upstream of each mirror that failed. The remaining
+        # budget is split evenly: each fallback keeps 1/(queued + 1) of it,
+        # so the current pull always has time even if every mirror failed.
         left=${#fallbacks[@]}
         for entry in ${fallbacks[@]+"${fallbacks[@]}"}; do
           var=${entry%% *}
           upstream=${entry#* }
+          remaining=$((retry_deadline - SECONDS))
+          [ "$remaining" -lt 0 ] && remaining=0
+          reserve=$((remaining * (left - 1) / left))
           left=$((left - 1))
-          reserve=$((left * 60))
           # The official library images also exist on Docker Hub at the same
           # tag and digest. The Judge jobs log in to Docker Hub first, so keep
           # part of the budget for it when ECR answers with 429s.
@@ -137,7 +140,7 @@ runs:
             echo "${var}=${upstream}" >> "$GITHUB_ENV"
             continue
           fi
-          if pull "$upstream" 4 $((reserve + 240)) 0; then
+          if pull "$upstream" 4 $((reserve + (remaining - reserve) / 2)) 0; then
             echo "${var}=${upstream}" >> "$GITHUB_ENV"
             continue
           fi
