@@ -26,10 +26,13 @@ use crate::config::BCRYPT_COST;
 use crate::hooks::{self, HookError, MemoryHook, TokenHookCall};
 use crate::schema::SchemaError;
 
+mod custom_provider;
 mod mfa;
+mod pkce;
 mod recovery;
 
 pub use mfa::FactorRow;
+pub use pkce::PkceRedemption;
 
 const EMAIL_PROVIDER: &str = "email";
 
@@ -124,18 +127,79 @@ pub struct IdentityRecord {
     pub updated_at: SystemTime,
 }
 
-/// One `auth.flow_state` row, as far as the OAuth callback reads it
-/// (`FindFlowStateByID`, `internal/models/flow_state.go`).
+/// One `auth.flow_state` row, as far as the OAuth callback and the PKCE
+/// grant read it (`internal/models/flow_state.go`).
 #[derive(Clone, Debug)]
 pub struct FlowStateRecord {
     pub provider_type: String,
+    pub auth_code: Option<String>,
     pub code_challenge: Option<String>,
+    pub code_challenge_method: Option<String>,
     pub user_id: Option<Uuid>,
     pub authentication_method: String,
+    pub provider_access_token: String,
+    pub provider_refresh_token: String,
     pub created_at: Option<SystemTime>,
     pub auth_code_issued_at: Option<SystemTime>,
     pub referrer: Option<String>,
     pub linking_target_id: Option<Uuid>,
+}
+
+/// `auth.flow_state` columns [`flow_state_from_row`] reads.
+const FLOW_STATE_COLUMNS: &str = "id, provider_type, auth_code, code_challenge,
+    code_challenge_method::text AS code_challenge_method, user_id, authentication_method,
+    provider_access_token, provider_refresh_token, created_at, auth_code_issued_at,
+    referrer, linking_target_id";
+
+/// Map a [`FLOW_STATE_COLUMNS`] row. NULL provider tokens read as `""`, as
+/// the Go `string` fields do.
+fn flow_state_from_row(row: &sqlx::postgres::PgRow) -> Result<FlowStateRecord, StoreError> {
+    use sqlx::Row;
+    let time = |name: &str| -> Result<Option<SystemTime>, sqlx::Error> {
+        Ok(row
+            .try_get::<Option<chrono::DateTime<chrono::Utc>>, _>(name)?
+            .map(from_ts))
+    };
+    let text = |name: &str| -> Result<String, sqlx::Error> {
+        Ok(row.try_get::<Option<String>, _>(name)?.unwrap_or_default())
+    };
+    Ok(FlowStateRecord {
+        provider_type: row.try_get("provider_type")?,
+        auth_code: row.try_get("auth_code")?,
+        code_challenge: row.try_get("code_challenge")?,
+        code_challenge_method: row.try_get("code_challenge_method")?,
+        user_id: row.try_get("user_id")?,
+        authentication_method: row.try_get("authentication_method")?,
+        provider_access_token: text("provider_access_token")?,
+        provider_refresh_token: text("provider_refresh_token")?,
+        created_at: time("created_at")?,
+        auth_code_issued_at: time("auth_code_issued_at")?,
+        referrer: row.try_get("referrer")?,
+        linking_target_id: row.try_get("linking_target_id")?,
+    })
+}
+
+/// `defaultFlowStateExpiryDuration`; GoTrue raises any lower setting to it.
+pub(crate) const FLOW_STATE_EXPIRY: Duration = Duration::from_secs(300);
+
+impl FlowStateRecord {
+    /// `FlowState.IsExpired`: a magic-link flow ages from
+    /// `auth_code_issued_at`, every other flow from `created_at`. A NULL
+    /// timestamp is Go's zero time, which is always expired.
+    pub(crate) fn is_expired(&self, now: SystemTime) -> bool {
+        let issued = match self.auth_code_issued_at {
+            Some(issued) if self.authentication_method == "magiclink" => Some(issued),
+            _ => self.created_at,
+        };
+        issued.is_none_or(|issued| now > issued + FLOW_STATE_EXPIRY)
+    }
+
+    /// `FlowState.IsPKCE`: a non-empty code challenge.
+    pub(crate) fn is_pkce(&self) -> bool {
+        self.code_challenge
+            .as_deref()
+            .is_some_and(|challenge| !challenge.is_empty())
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -671,33 +735,14 @@ impl Backend {
             BackendKind::Memory(db) => Ok(db.lock().await.flow_states.get(&id).cloned()),
             BackendKind::Postgres(pg) => {
                 timed(async {
-                    use sqlx::Row;
-                    let row = sqlx::query(
-                        "SELECT provider_type, code_challenge, user_id, authentication_method,
-                                created_at, auth_code_issued_at, referrer, linking_target_id
-                         FROM auth.flow_state WHERE id = $1::uuid LIMIT 1",
-                    )
+                    let row = sqlx::query(&format!(
+                        "SELECT {FLOW_STATE_COLUMNS} FROM auth.flow_state
+                         WHERE id = $1::uuid LIMIT 1"
+                    ))
                     .bind(id)
                     .fetch_optional(&pg.pool)
                     .await?;
-                    let Some(row) = row else {
-                        return Ok(None);
-                    };
-                    let time = |name: &str| -> Result<Option<SystemTime>, sqlx::Error> {
-                        Ok(row
-                            .try_get::<Option<chrono::DateTime<chrono::Utc>>, _>(name)?
-                            .map(from_ts))
-                    };
-                    Ok(Some(FlowStateRecord {
-                        provider_type: row.try_get("provider_type")?,
-                        code_challenge: row.try_get("code_challenge")?,
-                        user_id: row.try_get("user_id")?,
-                        authentication_method: row.try_get("authentication_method")?,
-                        created_at: time("created_at")?,
-                        auth_code_issued_at: time("auth_code_issued_at")?,
-                        referrer: row.try_get("referrer")?,
-                        linking_target_id: row.try_get("linking_target_id")?,
-                    }))
+                    row.as_ref().map(flow_state_from_row).transpose()
                 })
                 .await
             }

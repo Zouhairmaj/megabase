@@ -12,7 +12,7 @@
 //! callback redirect URL with the error in the query and in the fragment.
 //! Exchanging the code with an enabled provider is not ported and stays 501.
 
-use std::time::{Duration, SystemTime};
+use std::time::SystemTime;
 
 use axum::body::Body;
 use axum::extract::State;
@@ -32,9 +32,6 @@ use crate::COMPONENT;
 
 const UNIT_CALLBACK_GET: &str = "auth:route:GET /auth/v1/callback";
 const UNIT_CALLBACK_POST: &str = "auth:route:POST /auth/v1/callback";
-
-/// `defaultFlowStateExpiryDuration`; GoTrue raises any lower setting to it.
-const FLOW_STATE_EXPIRY: Duration = Duration::from_secs(300);
 
 /// Go `url.Values` in insertion order.
 type Values = Vec<(String, String)>;
@@ -179,20 +176,10 @@ async fn load_flow_state(state: &AuthState, form: &Values) -> Result<FlowStateRe
         Ok(None) => return Err(bad_state("OAuth state not found or expired")),
         Err(_) => return Err(crate::error::unexpected("Error loading flow state")),
     };
-    let issued = match flow.auth_code_issued_at {
-        Some(issued) if flow.authentication_method == "magiclink" => Some(issued),
-        _ => flow.created_at,
-    };
-    // A NULL `created_at` is Go's zero time, which is always expired.
-    let expired = issued.is_none_or(|issued| SystemTime::now() > issued + FLOW_STATE_EXPIRY);
-    if expired {
+    if flow.is_expired(SystemTime::now()) {
         return Err(bad_state("OAuth state has expired"));
     }
-    let pkce = flow
-        .code_challenge
-        .as_deref()
-        .is_some_and(|c| !c.is_empty());
-    if pkce && flow.user_id.is_some() {
+    if flow.is_pkce() && flow.user_id.is_some() {
         return Err(GoTrueError::new(
             StatusCode::BAD_REQUEST,
             "flow_state_already_used",
@@ -388,6 +375,7 @@ mod tests {
     use axum::body::to_bytes;
     use axum::http::Request;
     use axum::Router;
+    use std::time::Duration;
     use tower::ServiceExt;
 
     fn app(config: AuthConfig, backend: Backend) -> Router {
@@ -409,9 +397,13 @@ mod tests {
     fn flow(provider: &str) -> FlowStateRecord {
         FlowStateRecord {
             provider_type: provider.into(),
+            auth_code: None,
             code_challenge: None,
+            code_challenge_method: None,
             user_id: None,
             authentication_method: "oauth".into(),
+            provider_access_token: String::new(),
+            provider_refresh_token: String::new(),
             created_at: Some(SystemTime::now()),
             auth_code_issued_at: None,
             referrer: Some("http://localhost:3000/after".into()),
