@@ -20,6 +20,8 @@ use tokio::process::{Child, Command};
 use tokio::time::Instant;
 use tracing::info;
 
+use crate::bootstrap;
+
 /// Entrypoint names edge-runtime tries, in order
 /// (`crates/base/src/runtime/mod.rs` `POTENTIAL_EXTS`, edge-runtime v1.77.4).
 pub const ENTRYPOINTS: &[&str] = &[
@@ -122,18 +124,31 @@ pub trait Runtime: Send + Sync + 'static {
     fn start<'a>(&'a self, spec: WorkerSpec<'a>) -> StartFuture<'a>;
 }
 
-/// Runs each function as `deno run --allow-all --no-prompt <entrypoint>`.
+/// Runs each function as
+/// `deno run --allow-all --no-prompt --preload <bootstrap> <entrypoint>`.
 ///
 /// The function's own `Deno.serve(...)` call binds the loopback port chosen
 /// here through `DENO_SERVE_ADDRESS` (`tcp:127.0.0.1:<port>`), which
-/// overrides the address of every `Deno.serve` in the process. The child
-/// inherits Megabase's environment plus [`DenoRuntime::new`]'s `env`, like
-/// upstream `main` passes `Deno.env.toObject()` to the user worker.
+/// overrides the address of every `Deno.serve` in the process. The
+/// preloaded [`crate::bootstrap`] sends servers built on TCP `Deno.listen`
+/// (std `serve()`) to that same port. `--preload` needs Deno 2.4 or later.
+/// The child inherits Megabase's environment plus [`DenoRuntime::new`]'s
+/// `env`, like upstream `main` passes `Deno.env.toObject()` to the user
+/// worker.
 #[derive(Debug)]
 pub struct DenoRuntime {
     binary: PathBuf,
     env: Vec<(String, String)>,
     boot_timeout: Duration,
+    bootstrap: tokio::sync::OnceCell<PathBuf>,
+}
+
+impl Drop for DenoRuntime {
+    fn drop(&mut self) {
+        if let Some(dir) = self.bootstrap.get().and_then(|path| path.parent()) {
+            let _ = std::fs::remove_dir_all(dir);
+        }
+    }
 }
 
 impl DenoRuntime {
@@ -145,6 +160,7 @@ impl DenoRuntime {
             binary: binary.into(),
             env,
             boot_timeout: DEFAULT_BOOT_TIMEOUT,
+            bootstrap: tokio::sync::OnceCell::new(),
         }
     }
 
@@ -160,11 +176,17 @@ impl DenoRuntime {
         // moment later. Another process could take it in between, which
         // shows up as a boot timeout or a worker that exits.
         let addr = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))?.local_addr()?;
+        let preload = self
+            .bootstrap
+            .get_or_try_init(|| async { bootstrap::install(&std::env::temp_dir()) })
+            .await?;
         let mut command = Command::new(&self.binary);
         command
             .arg("run")
             .arg("--allow-all")
             .arg("--no-prompt")
+            .arg("--preload")
+            .arg(preload)
             .arg(spec.entrypoint)
             .envs(self.env.iter().map(|(key, value)| (key, value)))
             .env("DENO_SERVE_ADDRESS", format!("tcp:{addr}"))
@@ -363,5 +385,48 @@ mod tests {
             .await
             .unwrap_err();
         assert!(matches!(error, BootError::Exited(_)), "{error}");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn the_worker_preloads_the_bootstrap_before_the_entrypoint() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let dir = temp_dir("preload");
+        std::fs::write(dir.join("index.ts"), "").unwrap();
+        // A stand-in `deno` that records its arguments and exits.
+        let fake = dir.join("fake-deno");
+        std::fs::write(&fake, "#!/bin/sh\nprintf '%s\\n' \"$@\" > args\n").unwrap();
+        std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let runtime = DenoRuntime::new(&fake, Vec::new());
+        let error = runtime
+            .start(WorkerSpec {
+                name: "preload",
+                entrypoint: &dir.join("index.ts"),
+            })
+            .await
+            .unwrap_err();
+        assert!(matches!(error, BootError::Exited(_)), "{error}");
+
+        let preload = runtime.bootstrap.get().unwrap().clone();
+        let entry = dir.join("index.ts");
+        let args = std::fs::read_to_string(dir.join("args")).unwrap();
+        assert_eq!(
+            args.lines().collect::<Vec<_>>(),
+            [
+                "run",
+                "--allow-all",
+                "--no-prompt",
+                "--preload",
+                preload.to_str().unwrap(),
+                entry.to_str().unwrap(),
+            ]
+        );
+        assert_eq!(
+            std::fs::read_to_string(&preload).unwrap(),
+            bootstrap::SOURCE
+        );
+        drop(runtime);
+        assert!(!preload.parent().unwrap().exists());
     }
 }
