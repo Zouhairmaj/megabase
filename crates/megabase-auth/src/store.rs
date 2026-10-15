@@ -4297,22 +4297,23 @@ async fn locate_phone_postgres(
     if request.phone.is_empty() {
         return Ok(Located::Reject(token_invalid()));
     }
-    let column = if request.kind == VerifyKind::PhoneChange {
-        "phone_change"
-    } else {
-        "phone"
-    };
-    let row = sqlx::query(&format!(
+    let sql = if request.kind == VerifyKind::PhoneChange {
         "SELECT id FROM auth.users
-         WHERE instance_id = $1::uuid AND {column} = $2 AND aud = $3
+         WHERE instance_id = $1::uuid AND phone_change = $2 AND aud = $3
            AND is_sso_user = false
          LIMIT 1"
-    ))
-    .bind(Uuid::nil())
-    .bind(&request.phone)
-    .bind(&request.aud)
-    .fetch_optional(&mut **tx)
-    .await?;
+    } else {
+        "SELECT id FROM auth.users
+         WHERE instance_id = $1::uuid AND phone = $2 AND aud = $3
+           AND is_sso_user = false
+         LIMIT 1"
+    };
+    let row = sqlx::query(sql)
+        .bind(Uuid::nil())
+        .bind(&request.phone)
+        .bind(&request.aud)
+        .fetch_optional(&mut **tx)
+        .await?;
     let Some(row) = row else {
         return Ok(Located::Reject(token_invalid()));
     };
