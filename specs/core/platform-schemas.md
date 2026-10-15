@@ -60,8 +60,11 @@ One transaction under
 2. For each of `uuid-ossp`, `pgcrypto`, `pg_stat_statements`, `pg_net`:
    when `pg_available_extensions` lists it and `pg_extension` does not,
    `CREATE EXTENSION <name> WITH SCHEMA extensions`. Then
-   `CREATE EXTENSION supabase_vault` under the same condition (the
-   extension creates and owns `vault`). A failure of any of these is
+   `CREATE SCHEMA IF NOT EXISTS vault` and
+   `CREATE EXTENSION supabase_vault WITH SCHEMA vault` under the same
+   condition (the schema is created first, so the install does not depend
+   on the extension creating it; the extension creates the tables and
+   view). A failure rolls the schema back with the extension. A failure of any of these is
    raised as a PostgreSQL `WARNING` (`megabase: extension <name> not
    created: <message>`) inside a subtransaction and the install continues.
 3. When the database has no database-level `search_path`
@@ -108,7 +111,7 @@ create trigger t after insert on public.posts for each row
   extension is created, but its background worker serves the database in
   `pg_net.database_name` (default `postgres`), so queued requests in
   another database are not sent.
-- **No `supabase_vault`.** `vault` is not created; that is the "when
+- **No `supabase_vault`.** `vault` is not created (the schema is only created together with the extension); that is the "when
   available" case of the issue.
 - **Extension already installed elsewhere** (for example `pgcrypto` in
   `public`): left there, not moved.

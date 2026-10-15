@@ -122,14 +122,13 @@ mod tests {
         let guard = PLATFORM
             .find("SELECT 1 FROM pg_available_extensions WHERE name = 'supabase_vault'")
             .expect("availability guard");
+        let schema = PLATFORM
+            .find("CREATE SCHEMA IF NOT EXISTS vault;")
+            .expect("vault schema is created first");
         let create = PLATFORM
-            .find("CREATE EXTENSION supabase_vault;")
+            .find("CREATE EXTENSION supabase_vault WITH SCHEMA vault;")
             .expect("create");
-        assert!(guard < create);
-        assert!(
-            !PLATFORM.contains("CREATE SCHEMA vault"),
-            "the extension owns vault"
-        );
+        assert!(guard < schema && schema < create);
     }
 
     #[test]

@@ -46,12 +46,15 @@ BEGIN
         END IF;
     END LOOP;
 
-    -- supabase_vault creates and owns the vault schema, vault.secrets and
-    -- vault.decrypted_secrets itself.
+    -- supabase_vault is installed into the vault schema, which is created
+    -- first so that installing it never depends on the extension creating
+    -- it. The extension creates vault.secrets and vault.decrypted_secrets.
+    -- A failure rolls the schema back with the extension.
     IF EXISTS (SELECT 1 FROM pg_available_extensions WHERE name = 'supabase_vault')
        AND NOT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'supabase_vault') THEN
         BEGIN
-            CREATE EXTENSION supabase_vault;
+            CREATE SCHEMA IF NOT EXISTS vault;
+            CREATE EXTENSION supabase_vault WITH SCHEMA vault;
         EXCEPTION WHEN OTHERS THEN
             RAISE WARNING 'megabase: extension supabase_vault not created: %', SQLERRM;
         END;
