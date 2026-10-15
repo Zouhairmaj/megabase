@@ -19,6 +19,11 @@ pub struct AuthState {
     pub jwt: Option<Hs256>,
     pub database_url: Option<String>,
     pub oauth_server_enabled: bool,
+    /// `GOTRUE_OAUTH_SERVER_ALLOW_DYNAMIC_REGISTRATION`. GoTrue default is false.
+    pub oauth_dynamic_registration: bool,
+    /// `GOTRUE_JWT_KEYS` is a non-empty value other than `[]`. Megabase signs
+    /// with `JWT_SECRET` only, so it cannot publish those keys.
+    pub jwt_keys_configured: bool,
     pub custom_oauth_enabled: bool,
     /// `GOTRUE_SECURITY_MANUAL_LINKING_ENABLED`. GoTrue default is false.
     pub manual_linking_enabled: bool,
@@ -82,6 +87,11 @@ impl AuthState {
             jwt,
             database_url: lookup("DATABASE_URL").filter(|url| !url.is_empty()),
             oauth_server_enabled: env_bool(lookup("GOTRUE_OAUTH_SERVER_ENABLED").as_deref(), false),
+            oauth_dynamic_registration: env_bool(
+                lookup("GOTRUE_OAUTH_SERVER_ALLOW_DYNAMIC_REGISTRATION").as_deref(),
+                false,
+            ),
+            jwt_keys_configured: jwt_keys_configured(lookup("GOTRUE_JWT_KEYS").as_deref()),
             custom_oauth_enabled: env_bool(lookup("GOTRUE_CUSTOM_OAUTH_ENABLED").as_deref(), true),
             manual_linking_enabled: security_flag(
                 &lookup,
@@ -145,6 +155,8 @@ impl AuthState {
             jwt,
             database_url: None,
             oauth_server_enabled: defaults.oauth_server_enabled,
+            oauth_dynamic_registration: defaults.oauth_dynamic_registration,
+            jwt_keys_configured: defaults.jwt_keys_configured,
             custom_oauth_enabled: defaults.custom_oauth_enabled,
             manual_linking_enabled: defaults.manual_linking_enabled,
             password_require_reauthentication: defaults.password_require_reauthentication,
@@ -351,6 +363,19 @@ fn otp_length(raw: Option<&str>) -> usize {
         Some(length) if (6..=10).contains(&length) => length,
         _ => 6,
     }
+}
+
+/// `JwtKeysDecoder.Decode` (`internal/conf/jwk.go`) reads a JSON array. An
+/// empty array leaves `JWT.Keys` empty, so `ApplyDefaults` turns
+/// `JWT_SECRET` into the only (HMAC) key, as when the variable is unset.
+fn jwt_keys_configured(raw: Option<&str>) -> bool {
+    let Some(raw) = raw.map(str::trim).filter(|raw| !raw.is_empty()) else {
+        return false;
+    };
+    !matches!(
+        serde_json::from_str::<Vec<serde_json::Value>>(raw),
+        Ok(keys) if keys.is_empty()
+    )
 }
 
 fn env_bool(raw: Option<&str>, default: bool) -> bool {

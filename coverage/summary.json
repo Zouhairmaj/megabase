@@ -2,12 +2,12 @@
   "schema": 1,
   "totals": {
     "units": 1031,
-    "implemented": 228,
+    "implemented": 231,
     "tested": 186,
     "conformant": 0
   },
   "percent": {
-    "coverage": 22.1,
+    "coverage": 22.4,
     "conformance": 0.0,
     "done": 0.0
   },
@@ -18,7 +18,7 @@
   "components": {
     "auth": {
       "units": 159,
-      "implemented": 89,
+      "implemented": 92,
       "tested": 80,
       "conformant": 0,
       "groups": {
@@ -102,7 +102,7 @@
         },
         "well-known": {
           "units": 3,
-          "implemented": 0,
+          "implemented": 3,
           "tested": 0,
           "conformant": 0
         }
@@ -576,6 +576,9 @@
     "auth:route:DELETE /auth/v1/factors/{factor_id}": "implemented",
     "auth:route:DELETE /auth/v1/user/identities/{identity_id}": "tested",
     "auth:route:DELETE /auth/v1/user/oauth/grants": "tested",
+    "auth:route:GET /.well-known/oauth-authorization-server": "implemented",
+    "auth:route:GET /auth/v1/.well-known/jwks.json": "implemented",
+    "auth:route:GET /auth/v1/.well-known/openid-configuration": "implemented",
     "auth:route:GET /auth/v1/admin/audit": "tested",
     "auth:route:GET /auth/v1/admin/custom-providers": "tested",
     "auth:route:GET /auth/v1/admin/custom-providers/{identifier}": "tested",
