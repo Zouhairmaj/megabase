@@ -13,7 +13,7 @@ Specs go in `specs/auth/<unit>.md` (GOAL.md section 5). Mark served code with `/
 | 🟩 | `auth:route:GET /auth/v1/health` | [internal/api/api.go:202](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/api.go#L202) |
 | ⬜ | `auth:route:GET /auth/v1/reauthenticate` | [internal/api/api.go:278](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/api.go#L278) |
 | 🟩 | `auth:route:GET /auth/v1/settings` | [internal/api/api.go:222](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/api.go#L222) |
-| 🟨 | `auth:route:POST /auth/v1/invite` | [internal/api/api.go:228](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/api.go#L228) |
+| 🟩 | `auth:route:POST /auth/v1/invite` | [internal/api/api.go:228](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/api.go#L228) |
 | 🟩 | `auth:route:POST /auth/v1/logout` | [internal/api/api.go:275](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/api.go#L275) |
 | 🟨 | `auth:route:POST /auth/v1/recover` | [internal/api/api.go:256](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/api.go#L256) |
 | ⬜ | `auth:route:POST /auth/v1/resend` | [internal/api/api.go:259](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/api.go#L259) |
