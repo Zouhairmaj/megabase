@@ -3,13 +3,16 @@
 //! Target behavior: Supabase Storage, vendor/storage (Apache-2.0), pinned in `vendor/`.
 //! The bucket routes (list, get, create, update, and the lifecycle get and
 //! put) are served for the service role (`specs/storage/buckets.md`,
-//! `specs/storage/bucket.md`). Other roles, a missing or invalid JWT, and
-//! every other route return the structured `MEGABASE_NOT_IMPLEMENTED` 501.
+//! `specs/storage/bucket.md`), and `GET /health` for any valid JWT
+//! (`specs/storage/health.md`). A missing or invalid JWT, other roles on the
+//! bucket routes, and every other route return the structured
+//! `MEGABASE_NOT_IMPLEMENTED` 501.
 
 // Ported from supabase/storage src/http/routes/bucket/getAllBuckets.ts,
-// src/http/routes/bucket/getBucket.ts, src/storage/database/pg.ts,
-// src/storage/schemas/bucket.ts, src/http/error-handler.ts and
-// src/internal/errors/codes.ts (Apache-2.0), pin v1.80.2.
+// src/http/routes/bucket/getBucket.ts, src/http/routes/health/healthcheck.ts,
+// src/storage/database/pg.ts, src/storage/schemas/bucket.ts,
+// src/http/error-handler.ts and src/internal/errors/codes.ts (Apache-2.0),
+// pin v1.80.2.
 
 use std::{borrow::Cow, sync::Arc};
 
@@ -83,6 +86,8 @@ pub fn router_with_state(state: StorageState) -> Router {
             "/storage/v1/bucket/:bucket_id/lifecycle",
             get(bucket::get_bucket_lifecycle).put(bucket::put_bucket_lifecycle),
         )
+        .route("/storage/v1/health", get(healthcheck))
+        .route("/storage/v1/health/", get(healthcheck))
         .with_state(state)
         .merge(megabase_core::not_implemented_router(COMPONENT))
         .method_not_allowed_fallback(megabase_core::not_implemented_handler(COMPONENT))
@@ -127,21 +132,56 @@ fn iso(at: Option<DateTime<Utc>>) -> String {
         .unwrap_or_default()
 }
 
-/// Requests Megabase serves: a valid service-role JWT and a pool.
-fn service_role<'a>(
-    state: &'a StorageState,
-    headers: &HeaderMap,
-) -> Option<(&'a sqlx::PgPool, JwtClaims)> {
+/// The claims of a valid bearer JWT; `None` when the header is missing or
+/// the token does not verify.
+fn verified_claims(state: &StorageState, headers: &HeaderMap) -> Option<JwtClaims> {
     let jwt = state.jwt.as_deref()?;
     let token = headers
         .get(header::AUTHORIZATION)
         .and_then(|value| value.to_str().ok())
         .and_then(bearer_token)?;
-    let claims = jwt.verify(token).ok()?;
+    jwt.verify(token).ok()
+}
+
+/// Requests Megabase serves: a valid service-role JWT and a pool.
+fn service_role<'a>(
+    state: &'a StorageState,
+    headers: &HeaderMap,
+) -> Option<(&'a sqlx::PgPool, JwtClaims)> {
+    let claims = verified_claims(state, headers)?;
     if claims.role.as_deref() != Some("service_role") {
         return None;
     }
     Some((state.pool.as_ref()?, claims))
+}
+
+/// Query `pg.ts` `healthcheck()` runs as the superuser.
+const HEALTHCHECK_SQL: &str = "SELECT id from storage.buckets limit 1";
+
+/// `GET /health`: any valid JWT; `{"healthy":true}` when the probe query
+/// succeeds and `{"healthy":false}` (still 200) when it fails.
+// megabase:unit storage:route:GET /storage/v1/health
+async fn healthcheck(
+    State(state): State<StorageState>,
+    method: Method,
+    OriginalUri(uri): OriginalUri,
+    headers: HeaderMap,
+) -> Response {
+    // storage-api's `AccessDenied` body for a missing or invalid JWT is not ported.
+    if verified_claims(&state, &headers).is_none() {
+        return not_implemented(&method, &uri);
+    }
+    let Some(pool) = state.pool.as_ref() else {
+        return not_implemented(&method, &uri);
+    };
+    let healthy = match sqlx::query(HEALTHCHECK_SQL).fetch_optional(pool).await {
+        Ok(_) => true,
+        Err(error) => {
+            tracing::error!(%error, "storage healthcheck failed");
+            false
+        }
+    };
+    fastify_json(StatusCode::OK, &json!({ "healthy": healthy }))
 }
 
 fn not_implemented(method: &Method, uri: &axum::http::Uri) -> Response {
@@ -398,6 +438,52 @@ mod tests {
             status("/storage/v1/bucket", Some(&token("service_role"))).await,
             StatusCode::NOT_IMPLEMENTED
         );
+    }
+
+    #[tokio::test]
+    async fn health_needs_a_valid_jwt_and_a_database() {
+        for bearer in [Some("bad".to_string()), None] {
+            assert_eq!(
+                status("/storage/v1/health", bearer.as_deref()).await,
+                StatusCode::NOT_IMPLEMENTED
+            );
+        }
+        assert_eq!(
+            status("/storage/v1/health", Some(&token("anon"))).await,
+            StatusCode::NOT_IMPLEMENTED
+        );
+    }
+
+    #[tokio::test]
+    async fn health_reports_a_failed_probe_as_unhealthy() {
+        // Nothing listens on port 1, so the probe query fails.
+        let pool = sqlx::postgres::PgPoolOptions::new()
+            .acquire_timeout(std::time::Duration::from_millis(500))
+            .connect_lazy("postgres://postgres@127.0.0.1:1/postgres")
+            .unwrap();
+        let app = router_with_state(StorageState::new(
+            Some(pool),
+            Some(Hs256::new(SECRET).unwrap()),
+        ));
+        for role in ["anon", "authenticated", "service_role"] {
+            let response = app
+                .clone()
+                .oneshot(
+                    axum::http::Request::get("/storage/v1/health")
+                        .header(header::AUTHORIZATION, format!("Bearer {}", token(role)))
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+            assert_eq!(
+                response.headers()[header::CONTENT_TYPE],
+                "application/json; charset=utf-8"
+            );
+            let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+            assert_eq!(&body[..], br#"{"healthy":false}"#);
+        }
     }
 
     #[test]
