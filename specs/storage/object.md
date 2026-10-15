@@ -54,8 +54,10 @@ Pins: storage `v1.80.2`, supabase `v1.26.08` (`vendor.toml`).
 ## Configuration
 
 Object bytes live under `FILE_STORAGE_BACKEND_PATH` (the self-hosted
-compose sets `/var/lib/storage`). Without it, or without `DATABASE_URL`,
-every object route is a 501. Without `JWT_SECRET`, the routes that need a
+compose sets `/var/lib/storage`). Without `DATABASE_URL`, every object
+route is a 501, and without the file root so is every route that reads or
+writes object bytes. `POST /object/sign/:bucket` reads no bytes, so it needs
+only `DATABASE_URL` and `JWT_SECRET`. Without `JWT_SECRET`, the routes that need a
 verified JWT (upload, authenticated download and info, sign, signed
 download, delete) are a 501; public downloads and info, and
 `GET /object/:bucket/*` and `GET /object/info/:bucket/*` on a public bucket
@@ -150,7 +152,8 @@ per path in request order, keys `error, path, signedURL`: a found path has
 `error: null` and `signedURL: "/object/sign/<bucket>/<path>?token=<jwt>"`
 (same payload as single sign); any other has `error: "Either the object
 does not exist or you do not have access to it"` and `signedURL: null`. A
-missing bucket finds nothing, so every entry is the error.
+missing bucket finds nothing, so every entry is the error. A path with `?`,
+`#` or `%` is a 501: upstream does not escape the key in `signedURL`.
 
 ## Signed upload URL — `POST /object/upload/sign/:bucket/*`
 

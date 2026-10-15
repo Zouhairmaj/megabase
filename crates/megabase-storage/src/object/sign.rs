@@ -53,7 +53,8 @@ const NOT_FOUND_OR_DENIED: &str =
 
 /// A `getSignedURLsBodySchema` body Megabase serves: `expiresIn` an integer
 /// in `1..=10 years` and `paths` 1 to 1000 strings. Other properties,
-/// Fastify coercion and validation messages are not ported: `None`.
+/// Fastify coercion and validation messages are not ported, nor are paths
+/// containing `?`, `#` or `%`: `None`.
 fn sign_many_body(body: &[u8]) -> Option<(i64, Vec<String>)> {
     let body: Value = serde_json::from_slice(body).ok()?;
     let body = body.as_object()?;
@@ -72,6 +73,11 @@ fn sign_many_body(body: &[u8]) -> Option<(i64, Vec<String>)> {
         .iter()
         .map(|path| path.as_str().map(str::to_string))
         .collect::<Option<Vec<_>>>()?;
+    // Upstream builds `signedURL` without escaping the key, so a `?`, `#` or
+    // `%` would corrupt the URL; what a client does with it is not verified.
+    if paths.iter().any(|path| path.contains(['?', '#', '%'])) {
+        return None;
+    }
     Some((expires_in, paths))
 }
 
@@ -301,6 +307,9 @@ mod tests {
             br#"{"expiresIn":60,"paths":[1]}"#,
             br#"{"expiresIn":60,"paths":["a"],"extra":1}"#,
             too_many.as_bytes(),
+            br#"{"expiresIn":60,"paths":["a?b"]}"#,
+            br#"{"expiresIn":60,"paths":["a#b"]}"#,
+            br#"{"expiresIn":60,"paths":["a%20b"]}"#,
             b"not json",
         ] {
             assert_eq!(
