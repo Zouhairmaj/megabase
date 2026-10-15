@@ -6,8 +6,8 @@
 //! Health, settings, autoconfirm email signup, logout,
 //! `POST /token` (password and refresh-token grants),
 //! `GET`/`POST /verify` (signup, invite, recovery, email change), and the
-//! user routes are implemented; `POST /recover` lives in `crate::recover`.
-//! Invite, resend, reauthenticate, phone signup, anonymous signup, the other
+//! user routes are implemented; `POST /recover` lives in `crate::recover` and
+//! `POST /invite` in `crate::invite`. Resend, reauthenticate, phone signup, anonymous signup, the other
 //! verify types, and mailer confirmation stay HTTP 501. `POST /resend`
 //! validates its JSON request, then stays 501 because it needs the mailer
 //! (it does no user lookup).
@@ -44,7 +44,6 @@ use crate::COMPONENT;
 
 const UNIT_SIGNUP: &str = "auth:route:POST /auth/v1/signup";
 const UNIT_REAUTHENTICATE: &str = "auth:route:GET /auth/v1/reauthenticate";
-const UNIT_INVITE: &str = "auth:route:POST /auth/v1/invite";
 const UNIT_RESEND: &str = "auth:route:POST /auth/v1/resend";
 const UNIT_AUTHORIZE: &str = "auth:route:GET /auth/v1/authorize";
 
@@ -58,7 +57,7 @@ pub(crate) fn router(state: AuthState) -> Router {
         .route("/auth/v1/reauthenticate", get(reauthenticate))
         .route("/auth/v1/signup", post(signup))
         .route("/auth/v1/token", post(crate::token::token))
-        .route("/auth/v1/invite", post(invite))
+        .route("/auth/v1/invite", post(crate::invite::invite))
         .route("/auth/v1/logout", post(logout))
         .route("/auth/v1/recover", post(crate::recover::recover))
         .route("/auth/v1/resend", post(resend))
@@ -179,10 +178,6 @@ async fn settings(State(state): State<AuthState>) -> Response {
 
 async fn reauthenticate() -> MegabaseNotImplemented {
     MegabaseNotImplemented::new(COMPONENT, UNIT_REAUTHENTICATE)
-}
-
-async fn invite() -> MegabaseNotImplemented {
-    MegabaseNotImplemented::new(COMPONENT, UNIT_INVITE)
 }
 
 #[derive(Default)]
@@ -918,10 +913,7 @@ mod tests {
     #[tokio::test]
     async fn scoped_routes_without_behavior_are_501() {
         let app = router(AuthState::reference());
-        for (method, path, unit) in [
-            ("GET", "/auth/v1/reauthenticate", UNIT_REAUTHENTICATE),
-            ("POST", "/auth/v1/invite", UNIT_INVITE),
-        ] {
+        for (method, path, unit) in [("GET", "/auth/v1/reauthenticate", UNIT_REAUTHENTICATE)] {
             let (status, body) = call(app.clone(), method, path, Some("{}"), &[]).await;
             assert_eq!(status, StatusCode::NOT_IMPLEMENTED, "{path}");
             assert_eq!(body["code"], "MEGABASE_NOT_IMPLEMENTED");

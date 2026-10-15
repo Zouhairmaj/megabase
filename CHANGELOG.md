@@ -4,6 +4,13 @@ All notable changes to Megabase are documented in this file.
 The format is produced by [release-please](https://github.com/googleapis/release-please).
 Sections: Features, Bug Fixes, Performance, Conformance/judge, Documentation.
 
+## [0.1.35](https://github.com/Zouhairmaj/megabase/compare/v0.1.34...v0.1.35) (2026-10-15)
+
+
+### Features
+
+* create vault schema without supabase_vault and document standalone env ([#410](https://github.com/Zouhairmaj/megabase/issues/410)) ([d1ade32](https://github.com/Zouhairmaj/megabase/commit/d1ade3274605babdcd8e4b1a2503edfec270db76))
+
 ## [0.1.34](https://github.com/Zouhairmaj/megabase/compare/v0.1.33...v0.1.34) (2026-10-15)
 
 

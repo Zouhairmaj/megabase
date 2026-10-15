@@ -15,7 +15,7 @@
 //! Issue #46 serves `GET`/`POST /callback` up to the provider code exchange
 //! and `POST /magiclink` and `POST /otp` up to mail and SMS delivery.
 //! Issue #382 serves `POST /recover` through GoTrue's no-op mail client and
-//! an unreachable SMTP host.
+//! an unreachable SMTP host. Issue #401 serves `POST /invite` the same way.
 //! Every other Auth path returns `MEGABASE_NOT_IMPLEMENTED`. Database objects
 //! listed in `specs/auth/database.md` are installed when `DATABASE_URL` is
 //! set, after the standard API roles in `specs/core/roles.md` and the
@@ -30,6 +30,7 @@ mod factors;
 mod gojson;
 mod hooks;
 mod http;
+mod invite;
 mod jsonutil;
 mod otp;
 mod platform;

@@ -94,7 +94,7 @@ impl RecoverBody {
     }
 }
 
-/// Why a recovery request stopped after the user lookup.
+/// Why a mail-sending request stopped after the user lookup.
 pub(crate) enum Stop {
     Error(GoTrueError),
     NotPorted,
@@ -284,7 +284,7 @@ fn over_email_limit(message: impl Into<String>) -> GoTrueError {
 
 /// The checks `sendEmail` runs before it hands the message to the client:
 /// the authorized-address list and the email-send limiter.
-fn check_send_allowed(state: &AuthState, recipient: &str) -> Result<(), GoTrueError> {
+pub(crate) fn check_send_allowed(state: &AuthState, recipient: &str) -> Result<(), GoTrueError> {
     let mail = &state.mail;
     if !recipient.is_empty() && !address_authorized(&mail.authorized_addresses, recipient) {
         return Err(GoTrueError::new(
@@ -338,13 +338,13 @@ fn strip_labels(email: &str) -> String {
     out
 }
 
-/// Hand the recovery email to the configured mail client.
+/// Hand an email to the configured mail client.
 ///
 /// No SMTP host is GoTrue's `noopclient`, which succeeds. Otherwise the
 /// first step of gomail's `DialAndSend` is a TCP dial with a ten-second
-/// timeout; a failed dial is GoTrue's 500. A host that answers would need the
-/// SMTP exchange, which is not ported.
-async fn deliver(mail: &MailConfig, failed: &'static str) -> Result<(), Stop> {
+/// timeout; a failed dial is GoTrue's 500 with `failure` as the message. A
+/// host that answers would need the SMTP exchange, which is not ported.
+pub(crate) async fn deliver(mail: &MailConfig, failure: &str) -> Result<(), Stop> {
     if mail.smtp_host.is_empty() {
         tracing::info!("no SMTP host configured; email not sent (no-op mail client)");
         return Ok(());
@@ -354,11 +354,11 @@ async fn deliver(mail: &MailConfig, failed: &'static str) -> Result<(), Stop> {
         Ok(Ok(_stream)) => Err(Stop::NotPorted),
         Ok(Err(error)) => {
             tracing::error!(%error, host = %mail.smtp_host, "SMTP dial failed");
-            Err(unexpected(failed).into())
+            Err(unexpected(failure).into())
         }
         Err(_) => {
             tracing::error!(host = %mail.smtp_host, "SMTP dial timed out");
-            Err(unexpected(failed).into())
+            Err(unexpected(failure).into())
         }
     }
 }
