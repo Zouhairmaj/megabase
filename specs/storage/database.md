@@ -139,7 +139,10 @@ segment, then the text after its last `.`.
 
 Final shape: none of these functions exist, so calling one fails with
 `42883` (`function ... does not exist`) on the reference stack.
-`sql/dropped_prefix_functions.sql` runs the upstream `DROP FUNCTION IF
+`sql/dropped_prefix_functions.sql` first drops the triggers that depend on
+them (`objects_*_prefix` on `storage.objects`, `0050:803-806`;
+`prefixes_*_hierarchy` on `storage.prefixes`, `0052:5-6`; each guarded on the
+table existing), then runs the upstream `DROP FUNCTION IF
 EXISTS` statements (the `0052` ones inside `EXCEPTION WHEN OTHERS THEN
 NULL` blocks, as upstream) so a database an older storage-api migrated
 matches the pin too. This follows the `auth.sso_sessions` precedent in
