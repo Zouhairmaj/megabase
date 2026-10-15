@@ -635,12 +635,13 @@ fn update_store_error(error: &StoreError) -> Response {
     unexpected("Error updating user").into_response()
 }
 
-enum ProviderDecision {
+/// `API.Provider` outcome shared by `/authorize` and identity linking.
+pub(crate) enum ProviderDecision {
     Reject(String),
     RedirectNotPorted,
 }
 
-fn provider_decision(state: &AuthState, name: &str) -> ProviderDecision {
+pub(crate) fn provider_decision(state: &AuthState, name: &str) -> ProviderDecision {
     let name = name.to_ascii_lowercase();
     if name.starts_with("custom:") {
         if !state.custom_oauth_enabled {

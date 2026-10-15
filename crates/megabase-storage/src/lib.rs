@@ -1,14 +1,306 @@
 //! Supabase Storage-compatible API (`/storage/v1`) for Megabase.
 //!
 //! Target behavior: Supabase Storage, vendor/storage (Apache-2.0), pinned in `vendor/`.
-//! No unit is implemented yet; every request returns the structured
-//! `MEGABASE_NOT_IMPLEMENTED` 501. When logic is ported, each file gets a
-//! header naming the upstream repository, path and license.
+//! `GET /bucket` and `GET /bucket/{bucketId}` are served for the service
+//! role (`specs/storage/buckets.md`). Other roles, a missing or invalid JWT,
+//! and every other route return the structured `MEGABASE_NOT_IMPLEMENTED` 501.
 
-use axum::Router;
+// Ported from supabase/storage src/http/routes/bucket/getAllBuckets.ts,
+// src/http/routes/bucket/getBucket.ts, src/storage/database/pg.ts,
+// src/storage/schemas/bucket.ts, src/http/error-handler.ts and
+// src/internal/errors/codes.ts (Apache-2.0), pin v1.80.2.
+
+use std::sync::Arc;
+
+use axum::{
+    extract::{OriginalUri, Path, State},
+    http::{header, HeaderMap, Method, StatusCode},
+    response::{IntoResponse, Response},
+    routing::get,
+    Router,
+};
+use chrono::{DateTime, Utc};
+use megabase_core::{bearer_token, Hs256, MegabaseNotImplemented};
+use serde_json::{json, Map, Value};
+
+mod schema;
+
+pub use schema::{install_schema, SchemaError};
 
 pub const COMPONENT: &str = "storage";
 
+/// Columns `getAllBuckets.ts` selects (client supports `type`).
+const LIST_COLUMNS: &str = "id, name, public, owner::text AS owner, created_at, updated_at, \
+     file_size_limit, allowed_mime_types, type::text AS type";
+
+/// Columns `getBucket.ts` selects.
+const GET_COLUMNS: &str = "id, name, owner::text AS owner, public, created_at, updated_at, \
+     file_size_limit, allowed_mime_types";
+
+/// Database pool and JWT verifier for `/storage/v1`.
+#[derive(Clone, Default)]
+pub struct StorageState {
+    pool: Option<sqlx::PgPool>,
+    jwt: Option<Arc<Hs256>>,
+}
+
+impl StorageState {
+    /// State with an optional pool and the `JWT_SECRET` verifier.
+    #[must_use]
+    pub fn new(pool: Option<sqlx::PgPool>, jwt: Option<Hs256>) -> Self {
+        Self {
+            pool,
+            jwt: jwt.map(Arc::new),
+        }
+    }
+}
+
+/// `/storage/v1` routes without a database or JWT secret.
 pub fn router() -> Router {
-    megabase_core::not_implemented_router(COMPONENT)
+    router_with_state(StorageState::default())
+}
+
+/// `/storage/v1` routes sharing `state`.
+pub fn router_with_state(state: StorageState) -> Router {
+    Router::new()
+        .route("/storage/v1/bucket", get(list_buckets))
+        .route("/storage/v1/bucket/", get(list_buckets))
+        .route("/storage/v1/bucket/:bucket_id", get(get_bucket))
+        .with_state(state)
+        .merge(megabase_core::not_implemented_router(COMPONENT))
+        .method_not_allowed_fallback(megabase_core::not_implemented_handler(COMPONENT))
+}
+
+#[derive(sqlx::FromRow)]
+struct BucketRow {
+    id: String,
+    name: String,
+    owner: Option<String>,
+    public: Option<bool>,
+    created_at: Option<DateTime<Utc>>,
+    updated_at: Option<DateTime<Utc>>,
+    file_size_limit: Option<i64>,
+    allowed_mime_types: Option<Vec<String>>,
+    #[sqlx(default)]
+    r#type: Option<String>,
+}
+
+impl BucketRow {
+    /// `bucketSchema` through fast-json-stringify: a `null` string is `""`,
+    /// a `null` boolean is `false`, dates are `toISOString()`.
+    fn to_json(&self, with_type: bool) -> Value {
+        let mut out = Map::new();
+        out.insert("id".into(), json!(self.id));
+        out.insert("name".into(), json!(self.name));
+        out.insert("owner".into(), json!(self.owner.as_deref().unwrap_or("")));
+        out.insert("public".into(), json!(self.public.unwrap_or(false)));
+        if with_type {
+            out.insert("type".into(), json!(self.r#type.as_deref().unwrap_or("")));
+        }
+        out.insert("file_size_limit".into(), json!(self.file_size_limit));
+        out.insert("allowed_mime_types".into(), json!(self.allowed_mime_types));
+        out.insert("created_at".into(), json!(iso(self.created_at)));
+        out.insert("updated_at".into(), json!(iso(self.updated_at)));
+        Value::Object(out)
+    }
+}
+
+fn iso(at: Option<DateTime<Utc>>) -> String {
+    at.map(|at| at.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string())
+        .unwrap_or_default()
+}
+
+/// Requests Megabase serves: a valid service-role JWT and a pool.
+fn service_role_pool<'a>(state: &'a StorageState, headers: &HeaderMap) -> Option<&'a sqlx::PgPool> {
+    let jwt = state.jwt.as_deref()?;
+    let token = headers
+        .get(header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .and_then(bearer_token)?;
+    let claims = jwt.verify(token).ok()?;
+    if claims.role.as_deref() != Some("service_role") {
+        return None;
+    }
+    state.pool.as_ref()
+}
+
+fn not_implemented(method: &Method, uri: &axum::http::Uri) -> Response {
+    MegabaseNotImplemented::new(COMPONENT, format!("{method} {}", uri.path())).into_response()
+}
+
+/// Run `sql` as the request role, as storage-api does for every query.
+async fn fetch_as_service_role(
+    pool: &sqlx::PgPool,
+    sql: &str,
+    bucket_id: Option<&str>,
+) -> Result<Vec<BucketRow>, sqlx::Error> {
+    let mut tx = pool.begin().await?;
+    sqlx::query("SET LOCAL ROLE service_role")
+        .execute(&mut *tx)
+        .await?;
+    let mut query = sqlx::query_as::<_, BucketRow>(sql);
+    if let Some(bucket_id) = bucket_id {
+        query = query.bind(bucket_id);
+    }
+    let rows = query.fetch_all(&mut *tx).await?;
+    tx.commit().await?;
+    Ok(rows)
+}
+
+/// `GET /bucket` without query options: every row, in table order.
+// megabase:unit storage:route:GET /storage/v1/bucket
+async fn list_buckets(
+    State(state): State<StorageState>,
+    method: Method,
+    OriginalUri(uri): OriginalUri,
+    headers: HeaderMap,
+) -> Response {
+    let Some(pool) = service_role_pool(&state, &headers) else {
+        return not_implemented(&method, &uri);
+    };
+    // `limit`, `offset`, `sortColumn`, `sortOrder` and `search` are not ported.
+    if uri.query().is_some_and(|query| !query.is_empty()) {
+        return not_implemented(&method, &uri);
+    }
+    let sql = format!("SELECT {LIST_COLUMNS} FROM storage.buckets");
+    match fetch_as_service_role(pool, &sql, None).await {
+        Ok(rows) => fastify_json(
+            StatusCode::OK,
+            &Value::Array(rows.iter().map(|row| row.to_json(true)).collect()),
+        ),
+        Err(error) => database_error(&error),
+    }
+}
+
+/// `GET /bucket/:bucketId`: the row, or `NoSuchBucket` rendered with
+/// status 400 by the global error handler.
+// megabase:unit storage:route:GET /storage/v1/bucket/{bucketId}
+async fn get_bucket(
+    State(state): State<StorageState>,
+    Path(bucket_id): Path<String>,
+    method: Method,
+    OriginalUri(uri): OriginalUri,
+    headers: HeaderMap,
+) -> Response {
+    let Some(pool) = service_role_pool(&state, &headers) else {
+        return not_implemented(&method, &uri);
+    };
+    let sql = format!("SELECT {GET_COLUMNS} FROM storage.buckets WHERE id = $1 LIMIT 1");
+    match fetch_as_service_role(pool, &sql, Some(&bucket_id)).await {
+        Ok(rows) => match rows.first() {
+            Some(row) => fastify_json(StatusCode::OK, &row.to_json(false)),
+            None => fastify_json(
+                StatusCode::BAD_REQUEST,
+                &json!({
+                    "statusCode": "404",
+                    "code": "NoSuchBucket",
+                    "error": "Bucket not found",
+                    "message": "Bucket not found",
+                }),
+            ),
+        },
+        Err(error) => database_error(&error),
+    }
+}
+
+/// A failed query is outside the ported surface: log it and answer 501
+/// rather than invent storage-api's database error mapping.
+fn database_error(error: &sqlx::Error) -> Response {
+    tracing::error!(%error, "storage bucket query failed");
+    MegabaseNotImplemented::new(COMPONENT, "storage database error mapping").into_response()
+}
+
+fn fastify_json(status: StatusCode, body: &Value) -> Response {
+    (
+        status,
+        [(header::CONTENT_TYPE, "application/json; charset=utf-8")],
+        body.to_string(),
+    )
+        .into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use axum::body::{to_bytes, Body};
+    use tower::ServiceExt;
+
+    use super::*;
+
+    const SECRET: &str = "super-secret-jwt-token-with-at-least-32-characters-long";
+
+    fn token(role: &str) -> String {
+        Hs256::new(SECRET)
+            .unwrap()
+            .sign(&json!({ "role": role }))
+            .unwrap()
+            .as_str()
+            .to_string()
+    }
+
+    async fn status(path: &str, bearer: Option<&str>) -> StatusCode {
+        let app = router_with_state(StorageState::new(None, Some(Hs256::new(SECRET).unwrap())));
+        let mut request = axum::http::Request::get(path);
+        if let Some(bearer) = bearer {
+            request = request.header(header::AUTHORIZATION, format!("Bearer {bearer}"));
+        }
+        let response = app
+            .oneshot(request.body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        let status = response.status();
+        let _ = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        status
+    }
+
+    #[tokio::test]
+    async fn roles_other_than_service_role_stay_501() {
+        for bearer in [Some(token("anon")), Some("bad".to_string()), None] {
+            assert_eq!(
+                status("/storage/v1/bucket", bearer.as_deref()).await,
+                StatusCode::NOT_IMPLEMENTED
+            );
+            assert_eq!(
+                status("/storage/v1/bucket/avatars", bearer.as_deref()).await,
+                StatusCode::NOT_IMPLEMENTED
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn without_a_database_the_routes_stay_501() {
+        assert_eq!(
+            status("/storage/v1/bucket", Some(&token("service_role"))).await,
+            StatusCode::NOT_IMPLEMENTED
+        );
+    }
+
+    #[test]
+    fn bucket_json_follows_the_response_schema() {
+        let row = BucketRow {
+            id: "avatars".into(),
+            name: "avatars".into(),
+            owner: None,
+            public: None,
+            created_at: DateTime::from_timestamp(1_613_537_012, 770_206_000),
+            updated_at: None,
+            file_size_limit: Some(1_000_000),
+            allowed_mime_types: None,
+            r#type: Some("STANDARD".into()),
+        };
+        assert_eq!(
+            row.to_json(true),
+            json!({
+                "id": "avatars",
+                "name": "avatars",
+                "owner": "",
+                "public": false,
+                "type": "STANDARD",
+                "file_size_limit": 1_000_000,
+                "allowed_mime_types": null,
+                "created_at": "2021-02-17T04:43:32.770Z",
+                "updated_at": "",
+            })
+        );
+        assert!(row.to_json(false).get("type").is_none());
+    }
 }

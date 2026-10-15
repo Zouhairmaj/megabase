@@ -18,9 +18,12 @@ use std::time::SystemTime;
 
 use axum::body::{to_bytes, Body};
 use axum::extract::State;
-use axum::http::{header::AUTHORIZATION, HeaderMap, StatusCode, Uri};
+use axum::http::{
+    header::{ALLOW, AUTHORIZATION},
+    HeaderMap, StatusCode, Uri,
+};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{delete, get, post};
+use axum::routing::{delete, get, post, MethodRouter};
 use axum::Router;
 use megabase_core::{bearer_token, GoTrueJwtError, JwtClaims, MegabaseNotImplemented};
 use regex::Regex;
@@ -45,13 +48,15 @@ const UNIT_REAUTHENTICATE: &str = "auth:route:GET /auth/v1/reauthenticate";
 const UNIT_INVITE: &str = "auth:route:POST /auth/v1/invite";
 const UNIT_RECOVER: &str = "auth:route:POST /auth/v1/recover";
 const UNIT_RESEND: &str = "auth:route:POST /auth/v1/resend";
+const UNIT_AUTHORIZE: &str = "auth:route:GET /auth/v1/authorize";
 
 pub(crate) const INVALID_CHANNEL: &str = "Invalid channel, supported values are 'sms' or 'whatsapp'. 'whatsapp' is only supported if Twilio or Twilio Verify is used as the provider.";
 
 pub(crate) fn router(state: AuthState) -> Router {
     Router::new()
-        .route("/auth/v1/health", get(health))
-        .route("/auth/v1/settings", get(settings))
+        .route("/auth/v1/health", get_only(get(health)))
+        .route("/auth/v1/settings", get_only(get(settings)))
+        .route("/auth/v1/authorize", get(authorize))
         .route("/auth/v1/reauthenticate", get(reauthenticate))
         .route("/auth/v1/signup", post(signup))
         .route("/auth/v1/token", post(crate::token::token))
@@ -80,6 +85,38 @@ pub(crate) fn router(state: AuthState) -> Router {
             get(crate::user::list_grants).delete(crate::user::revoke_grant),
         )
         .with_state(state)
+}
+
+/// A chi route registered with `r.Get` only. chi does not answer `HEAD` from a
+/// `GET` handler, and every method without a handler gets chi's
+/// `methodNotAllowedHandler`: 405, `Allow: GET`, empty body.
+fn get_only(route: MethodRouter<AuthState>) -> MethodRouter<AuthState> {
+    route
+        .head(chi_method_not_allowed)
+        .fallback(chi_method_not_allowed)
+}
+
+async fn chi_method_not_allowed() -> Response {
+    (StatusCode::METHOD_NOT_ALLOWED, [(ALLOW, "GET")]).into_response()
+}
+
+/// `GET /authorize` (`ExternalProviderRedirect`) up to the provider lookup.
+///
+/// An unknown, disabled, or (with custom OAuth off) `custom:` provider is
+/// GoTrue's 400 `validation_failed`, before `redirect_to` is read, so no
+/// redirect is ever sent. An enabled provider needs the OAuth redirect flow,
+/// which is not ported, and stays 501. The route carries no `megabase:unit`
+/// marker for that reason.
+async fn authorize(State(state): State<AuthState>, uri: Uri) -> Response {
+    let provider = query_param(uri.query(), "provider").unwrap_or_default();
+    match crate::user::provider_decision(&state, &provider) {
+        crate::user::ProviderDecision::Reject(detail) => {
+            validation(format!("Unsupported provider: {detail}")).into_response()
+        }
+        crate::user::ProviderDecision::RedirectNotPorted => {
+            MegabaseNotImplemented::new(COMPONENT, UNIT_AUTHORIZE).into_response()
+        }
+    }
 }
 
 // megabase:unit auth:route:GET /auth/v1/health
@@ -811,6 +848,80 @@ mod tests {
     fn memory_app() -> (Router, Backend) {
         let backend = Backend::memory();
         (router(state(true, true, backend.clone())), backend)
+    }
+
+    #[tokio::test]
+    async fn health_and_settings_answer_other_methods_with_chi_405() {
+        let app = router(AuthState::reference());
+        for path in ["/auth/v1/health", "/auth/v1/settings"] {
+            for method in ["HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"] {
+                let request = Request::builder()
+                    .method(method)
+                    .uri(path)
+                    .body(Body::from("{}"))
+                    .unwrap();
+                let response = app.clone().oneshot(request).await.unwrap();
+                assert_eq!(
+                    response.status(),
+                    StatusCode::METHOD_NOT_ALLOWED,
+                    "{method} {path}"
+                );
+                assert_eq!(response.headers()[ALLOW], "GET", "{method} {path}");
+                assert!(response.headers().get("content-type").is_none());
+                let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+                assert!(bytes.is_empty(), "{method} {path}");
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn authorize_rejects_unknown_and_disabled_providers_without_redirecting() {
+        let app = router(AuthState::reference());
+        let (status, body) = call(
+            app.clone(),
+            "GET",
+            "/auth/v1/authorize?provider=github&redirect_to=https%3A%2F%2Fevil.example%2Fphish",
+            None,
+            &[],
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(body["error_code"], "validation_failed");
+        assert_eq!(body["msg"], "Unsupported provider: provider is not enabled");
+
+        let (status, body) = call(
+            app.clone(),
+            "GET",
+            "/auth/v1/authorize?provider=Nope",
+            None,
+            &[],
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(
+            body["msg"],
+            "Unsupported provider: Provider nope could not be found"
+        );
+
+        let (status, body) = call(app, "GET", "/auth/v1/authorize", None, &[]).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(
+            body["msg"],
+            "Unsupported provider: Provider  could not be found"
+        );
+
+        let mut enabled = AuthState::reference();
+        enabled.config.external.github = true;
+        let (status, body) = call(
+            router(enabled),
+            "GET",
+            "/auth/v1/authorize?provider=github",
+            None,
+            &[],
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
+        assert_eq!(body["unit"], UNIT_AUTHORIZE);
     }
 
     #[tokio::test]

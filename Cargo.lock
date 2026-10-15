@@ -1263,6 +1263,7 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "thiserror",
+ "uuid",
 ]
 
 [[package]]
@@ -1317,7 +1318,13 @@ name = "megabase-meta"
 version = "0.1.28"
 dependencies = [
  "axum",
+ "chrono",
  "megabase-core",
+ "serde_json",
+ "sqlx",
+ "tokio",
+ "tower",
+ "tracing",
 ]
 
 [[package]]
@@ -1343,6 +1350,8 @@ version = "0.1.28"
 dependencies = [
  "axum",
  "megabase-core",
+ "tokio",
+ "tower",
 ]
 
 [[package]]
@@ -1358,7 +1367,6 @@ dependencies = [
  "tokio-postgres",
  "tower",
  "tracing",
- "uuid",
 ]
 
 [[package]]
@@ -1389,7 +1397,14 @@ name = "megabase-storage"
 version = "0.1.28"
 dependencies = [
  "axum",
+ "chrono",
  "megabase-core",
+ "serde_json",
+ "sqlx",
+ "thiserror",
+ "tokio",
+ "tower",
+ "tracing",
 ]
 
 [[package]]

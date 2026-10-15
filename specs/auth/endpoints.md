@@ -37,8 +37,12 @@ Reference-stack flags come from `vendor/supabase/docker/.env.example` and
 
 ## Inputs
 
-Health and settings take no body. Signup, invite, recover, and resend read
-a JSON body of at most `1 << 20` bytes.
+Health and settings take no body. They are registered with chi's `r.Get`
+only (`vendor/auth/internal/api/api.go:202`, `:222`), so `HEAD` and every
+other method get chi's `methodNotAllowedHandler`: 405, `Allow: GET`, empty
+body. chi does not answer `HEAD` from a `GET` route. Without an `apikey`
+the gateway answers first (`specs/server/key-auth.md`). Signup, invite,
+recover, and resend read a JSON body of at most `1 << 20` bytes.
 
 Signup JSON: `email`, `phone`, `password`, `data` (object), `channel`,
 `code_challenge_method`, `code_challenge`. Audience is the `X-JWT-AUD`
@@ -53,7 +57,7 @@ Logout reads `Authorization: Bearer <access token>` and optional query
 | Route | Served | Success |
 |---|---|---|
 | `GET /auth/v1/health` | yes | 200 `{"version":"v2.197.0","name":"GoTrue","description":"GoTrue is a user registration and authentication API"}` |
-| `GET /auth/v1/settings` | yes | 200 provider booleans plus `disable_signup`, `mailer_autoconfirm`, `phone_autoconfirm`, `sms_provider`, `saml_enabled`, `saml_private_key_next_configured`, `passkeys_enabled` |
+| `GET /auth/v1/settings` | yes | 200 provider booleans plus `disable_signup`, `mailer_autoconfirm`, `phone_autoconfirm`, `sms_provider`, `saml_enabled`, `saml_private_key_next_configured`, `passkeys_enabled`. `saml_private_key_next_configured` is `true` while SAML is disabled: envconfig allocates `SAML.CertificateNext`, and only `PopulateFields` (called by `ApplyDefaults` when SAML is enabled) resets it to nil (`internal/conf/configuration.go:1094`, `internal/conf/saml.go:115`) |
 | `POST /auth/v1/signup` | email autoconfirm | 200 access-token response: `access_token`, `token_type` `bearer`, `expires_in` (JWT expiry, 3600 by default), `expires_at`, `refresh_token`, `user` |
 | `POST /auth/v1/logout` | yes | 204 empty body |
 | `GET /auth/v1/reauthenticate`, `POST /auth/v1/invite`, `POST /auth/v1/recover`, `POST /auth/v1/resend` | no | 501 `MEGABASE_NOT_IMPLEMENTED` with that unit id |

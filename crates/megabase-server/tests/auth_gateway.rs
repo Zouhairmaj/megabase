@@ -7,7 +7,11 @@ use serde_json::Value;
 use tower::ServiceExt;
 
 async fn send(method: &str, path: &str, body: Option<&str>) -> (StatusCode, Value) {
-    let mut builder = Request::builder().method(method).uri(path);
+    // Kong's key-auth on `/auth/v1/` only checks that a key is present.
+    let mut builder = Request::builder()
+        .method(method)
+        .uri(path)
+        .header("apikey", "anon-key");
     if body.is_some() {
         builder = builder.header("content-type", "application/json");
     }

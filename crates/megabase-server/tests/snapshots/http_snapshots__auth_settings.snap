@@ -37,7 +37,7 @@ expression: "observe(\"GET\", \"/auth/v1/settings\", None).await"
     "passkeys_enabled": false,
     "phone_autoconfirm": true,
     "saml_enabled": false,
-    "saml_private_key_next_configured": false,
+    "saml_private_key_next_configured": true,
     "sms_provider": ""
   },
   "content_type": "application/json",

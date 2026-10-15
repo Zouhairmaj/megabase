@@ -6,8 +6,14 @@ pub mod error;
 pub mod gotrue_jwt;
 pub mod ids;
 pub mod jwt;
+pub mod kong;
 
-use axum::{extract::OriginalUri, http::Method, Router};
+use axum::{
+    extract::OriginalUri,
+    http::Method,
+    routing::{any, MethodRouter},
+    Router,
+};
 
 pub use config::{Config, DEFAULT_HTTP_TIMEOUT, DEFAULT_REQUEST_BODY_LIMIT};
 pub use error::{Error, MegabaseNotImplemented, Result};
@@ -21,7 +27,13 @@ pub use jwt::{bearer_token, Hs256, JwtClaims, JwtError};
 /// it (including the gateway prefix), so it can be matched against
 /// `coverage/units.json`.
 pub fn not_implemented_router(component: &'static str) -> Router {
-    Router::new().fallback(
+    Router::new().fallback(not_implemented_handler(component))
+}
+
+/// The same 501 as a handler, for `method_not_allowed_fallback` on a router
+/// that serves some methods of a path.
+pub fn not_implemented_handler(component: &'static str) -> MethodRouter {
+    any(
         move |method: Method, OriginalUri(uri): OriginalUri| async move {
             MegabaseNotImplemented::new(component, format!("{method} {}", uri.path()))
         },

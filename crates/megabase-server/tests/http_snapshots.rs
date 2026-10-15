@@ -20,7 +20,9 @@ use tower::ServiceExt;
 
 async fn observe(method: &str, path: &str, body: Option<&str>) -> Value {
     let mut builder = Request::builder().method(method).uri(path);
-    builder = builder.header("x-request-id", "snapshot");
+    builder = builder
+        .header("x-request-id", "snapshot")
+        .header("apikey", "anon-key");
     if body.is_some() {
         builder = builder.header("content-type", "application/json");
     }
