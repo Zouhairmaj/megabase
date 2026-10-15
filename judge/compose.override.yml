@@ -10,8 +10,14 @@
 # Relative paths below resolve against vendor/supabase/docker (the directory
 # of the first compose file). This overlay only:
 #   1. pins each service image to the tag of the source pinned in vendor.toml,
-#      pulled from public.ecr.aws or ghcr.io (digest-pinned) so CI does not
-#      hit Docker Hub anonymous 429s,
+#      pulled from ghcr.io (digest-pinned) so CI does not hit Docker Hub
+#      anonymous 429s or the public.ecr.aws data quota. Images published
+#      on public.ecr.aws are written as
+#      ${MEGABASE_JUDGE_<NAME>_IMAGE:-ghcr.io/zouhairmaj/<repo>:<tag>@<digest>},
+#      a mirror at the same tag and digest (.github/image-mirrors.txt,
+#      .github/workflows/mirror-images.yml; issues #350, #358, #371). CI
+#      sets the variable to the ECR reference when the mirror cannot be
+#      pulled (.github/actions/judge-images),
 #   2. keeps all runtime data in named volumes so nothing is written into
 #      vendor/,
 #   3. loads the judge fixtures into the reference database,
@@ -38,14 +44,10 @@
 
 services:
   studio:
-    image: public.ecr.aws/supabase/studio:2026.08.03-sha-022b374@sha256:606aca9fdaa753b60968d5c304e2ada83869b76c9043684e63d5885aca9550e8
+    image: ${MEGABASE_JUDGE_STUDIO_IMAGE:-ghcr.io/zouhairmaj/supabase-studio:2026.08.03-sha-022b374@sha256:606aca9fdaa753b60968d5c304e2ada83869b76c9043684e63d5885aca9550e8}
     volumes:
       - judge-snippets:/app/snippets
   kong:
-    # ghcr.io mirror of public.ecr.aws/docker/library/kong at the same tag
-    # and digest (.github/workflows/mirror-images.yml, issue #358). CI sets
-    # MEGABASE_JUDGE_KONG_IMAGE to the ECR reference when ghcr cannot be
-    # pulled.
     image: ${MEGABASE_JUDGE_KONG_IMAGE:-ghcr.io/zouhairmaj/kong:3.9.3@sha256:92035d16d7ff86b7bc12fb1d0090d29357d924238b1880f78735f3f2fea6b631}
     entrypoint: !override
       - /bin/sh
@@ -55,7 +57,7 @@ services:
         sed 's#/entrypoint.sh#/docker-entrypoint.sh#' /home/kong/kong-entrypoint.sh > /tmp/kong-entrypoint.sh
         exec /bin/sh /tmp/kong-entrypoint.sh
   auth:
-    image: public.ecr.aws/supabase/gotrue:v2.197.0@sha256:1736a63078f5922b198c4cbe50f80ab9a2d3b54fe8b7b6cfb2e9dc5dbbc12c6b
+    image: ${MEGABASE_JUDGE_AUTH_IMAGE:-ghcr.io/zouhairmaj/supabase-gotrue:v2.197.0@sha256:1736a63078f5922b198c4cbe50f80ab9a2d3b54fe8b7b6cfb2e9dc5dbbc12c6b}
     environment:
       GOTRUE_MAILER_AUTOCONFIRM: "true"
       # GoTrue applies the token/signup limiters only when this header is
@@ -71,9 +73,9 @@ services:
     environment:
       PGRST_DB_AGGREGATES_ENABLED: "true"
   realtime:
-    image: public.ecr.aws/supabase/realtime:v2.143.3@sha256:768b559241dd234c4e8852c5c0f504e598b80f1df2ad4dd78d5486fbed2f17a2
+    image: ${MEGABASE_JUDGE_REALTIME_IMAGE:-ghcr.io/zouhairmaj/supabase-realtime:v2.143.3@sha256:768b559241dd234c4e8852c5c0f504e598b80f1df2ad4dd78d5486fbed2f17a2}
   storage:
-    image: public.ecr.aws/supabase/storage-api:v1.80.2@sha256:95b217a9c59e0ac06c6dcb539df3189a1668a2445fb43dbf29660d6968ffd7d2
+    image: ${MEGABASE_JUDGE_STORAGE_IMAGE:-ghcr.io/zouhairmaj/supabase-storage-api:v1.80.2@sha256:95b217a9c59e0ac06c6dcb539df3189a1668a2445fb43dbf29660d6968ffd7d2}
     volumes:
       - judge-storage:/var/lib/storage
   imgproxy:
@@ -81,14 +83,10 @@ services:
     volumes:
       - judge-storage:/var/lib/storage
   meta:
-    image: public.ecr.aws/supabase/postgres-meta:v0.100.0@sha256:145325b7e39f8ef4931d6e8cfd3f6f4d655de09d72a2ccc96d9513542c2202bd
+    image: ${MEGABASE_JUDGE_META_IMAGE:-ghcr.io/zouhairmaj/supabase-postgres-meta:v0.100.0@sha256:145325b7e39f8ef4931d6e8cfd3f6f4d655de09d72a2ccc96d9513542c2202bd}
   functions:
-    image: public.ecr.aws/supabase/edge-runtime:v1.77.4@sha256:ad45164b7548bf5820ed7be714789c17ac2865edce79a09cfb4c3756c3d365a8
+    image: ${MEGABASE_JUDGE_FUNCTIONS_IMAGE:-ghcr.io/zouhairmaj/supabase-edge-runtime:v1.77.4@sha256:ad45164b7548bf5820ed7be714789c17ac2865edce79a09cfb4c3756c3d365a8}
   db:
-    # ghcr.io mirror of public.ecr.aws/supabase/postgres at the same tag and
-    # digest (.github/workflows/mirror-images.yml, issue #350). The
-    # largest image in the stack, so ECR rate limits hit it most. CI sets
-    # MEGABASE_JUDGE_DB_IMAGE to the ECR reference when ghcr cannot be pulled.
     image: ${MEGABASE_JUDGE_DB_IMAGE:-ghcr.io/zouhairmaj/supabase-postgres:17.6.1.136@sha256:f371b5f3f2ac0a05703f33d6e6134515fb2498cab708fb948a0aeb7481467c00}
     # Official compose publishes 5432 on the pooler. The harness needs a
     # direct Postgres port for CREATE DATABASE and catalog snapshots.
@@ -98,7 +96,7 @@ services:
       - judge-db-data:/var/lib/postgresql/data
       - ../../../judge/fixtures/schema.sql:/docker-entrypoint-initdb.d/migrations/99-zz-judge-fixtures.sql:ro
   supavisor:
-    image: public.ecr.aws/supabase/supavisor:2.9.13@sha256:07f1a6098ffc04b80263bca4eb5c3e7bd2e03dfd1fc465aa108d7329000a1a4e
+    image: ${MEGABASE_JUDGE_SUPAVISOR_IMAGE:-ghcr.io/zouhairmaj/supabase-supavisor:2.9.13@sha256:07f1a6098ffc04b80263bca4eb5c3e7bd2e03dfd1fc465aa108d7329000a1a4e}
     # Image ENV is RLIMIT_NOFILE=100000. limits.sh runs `ulimit -n` under
     # `set -e`, so raising the limit on GitHub Actions (not permitted)
     # exits the container before migrate. Same workaround as upstream

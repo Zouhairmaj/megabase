@@ -22,8 +22,11 @@ judge/
   NORMALIZATION.md       rules applied to both responses
 ```
 
-The overlay retags images to the pins on `public.ecr.aws` or `ghcr.io`
-(digest-pinned, so CI does not pull from Docker Hub), uses named volumes
+The overlay retags images to digest-pinned `ghcr.io` references, so CI
+pulls neither from Docker Hub nor from the `public.ecr.aws` data quota.
+Images published on `public.ecr.aws` come from `ghcr.io/zouhairmaj`
+mirrors at the same tag and digest, with ECR as the CI fallback
+([decision 0041](../docs/decisions/0041-ghcr-supabase-image-mirrors.md)). It uses named volumes
 so nothing is written into `vendor/`, turns on Auth autoconfirm (the
 stack has no mail server), and can start Megabase on host port 8100
 against a dedicated `megabase` database. Kong's entrypoint is

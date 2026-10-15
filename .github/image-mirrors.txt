@@ -1,4 +1,4 @@
-# ghcr.io mirrors of public.ecr.aws images (decisions 0039 and 0040).
+# ghcr.io mirrors of public.ecr.aws images (decisions 0039, 0040 and 0041).
 #
 # One line per mirrored repository: the ghcr.io repository, then the
 # upstream repository it copies. Tags and digests are not written here.
@@ -11,6 +11,13 @@
 # when the mirror cannot be pulled), and the megabase-judge harness test
 # that checks every mirror reference is listed.
 ghcr.io/zouhairmaj/supabase-postgres public.ecr.aws/supabase/postgres
+ghcr.io/zouhairmaj/supabase-studio public.ecr.aws/supabase/studio
+ghcr.io/zouhairmaj/supabase-gotrue public.ecr.aws/supabase/gotrue
+ghcr.io/zouhairmaj/supabase-realtime public.ecr.aws/supabase/realtime
+ghcr.io/zouhairmaj/supabase-storage-api public.ecr.aws/supabase/storage-api
+ghcr.io/zouhairmaj/supabase-postgres-meta public.ecr.aws/supabase/postgres-meta
+ghcr.io/zouhairmaj/supabase-edge-runtime public.ecr.aws/supabase/edge-runtime
+ghcr.io/zouhairmaj/supabase-supavisor public.ecr.aws/supabase/supavisor
 ghcr.io/zouhairmaj/kong public.ecr.aws/docker/library/kong
 ghcr.io/zouhairmaj/rust public.ecr.aws/docker/library/rust
 ghcr.io/zouhairmaj/debian public.ecr.aws/docker/library/debian

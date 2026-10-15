@@ -26,15 +26,17 @@ bootstrap exception. Architecture and commands are in
   documented in `NORMALIZATION.md` in the same PR.
 - Harness tests: `cargo test -p megabase-judge`.
 - `compose.override.yml` must pin every reference-stack `image:` to
-  `public.ecr.aws/…@sha256:…` or `ghcr.io/…@sha256:…`. Do not pull
-  from Docker Hub (anonymous 429s fail CI). The `db` and `kong` images
-  are `${MEGABASE_JUDGE_<NAME>_IMAGE:-ghcr.io/zouhairmaj/<repo>:…}`,
-  mirrors of the ECR images at the same digest, listed in
+  `ghcr.io/…@sha256:…`. Do not pull from Docker Hub (anonymous 429s
+  fail CI) or from `public.ecr.aws` (its data quota fails CI) except as
+  the fallback. Every image published on ECR is
+  `${MEGABASE_JUDGE_<NAME>_IMAGE:-ghcr.io/zouhairmaj/<repo>:…}`, a
+  mirror of the ECR image at the same digest, listed in
   `.github/image-mirrors.txt`
-  ([decisions 0039](../docs/decisions/0039-ghcr-postgres-mirror.md) and
-  [0040](../docs/decisions/0040-ghcr-library-image-mirrors.md)).
-  The tag and digest live in `judge/compose.override.yml` (`db`,
-  `kong`) and in the `Dockerfile` `FROM` lines; the table holds only
+  ([decisions 0039](../docs/decisions/0039-ghcr-postgres-mirror.md),
+  [0040](../docs/decisions/0040-ghcr-library-image-mirrors.md) and
+  [0041](../docs/decisions/0041-ghcr-supabase-image-mirrors.md)).
+  The tag and digest live in `judge/compose.override.yml` and in the
+  `Dockerfile` `FROM` lines; the table holds only
   the repository mappings. To bump one, change the tag and digest in
   those files, then let the mirror workflow run on `main`. The Kong service uses
   `entrypoint: !override` so Compose replaces the vendor script
