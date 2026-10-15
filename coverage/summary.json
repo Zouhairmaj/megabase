@@ -2,12 +2,12 @@
   "schema": 1,
   "totals": {
     "units": 1031,
-    "implemented": 216,
+    "implemented": 219,
     "tested": 185,
     "conformant": 0
   },
   "percent": {
-    "coverage": 21.0,
+    "coverage": 21.2,
     "conformance": 0.0,
     "done": 0.0
   },
@@ -390,7 +390,7 @@
     },
     "storage": {
       "units": 149,
-      "implemented": 34,
+      "implemented": 37,
       "tested": 9,
       "conformant": 0,
       "groups": {
@@ -408,7 +408,7 @@
         },
         "database": {
           "units": 46,
-          "implemented": 13,
+          "implemented": 15,
           "tested": 0,
           "conformant": 0
         },
@@ -426,7 +426,7 @@
         },
         "object": {
           "units": 22,
-          "implemented": 8,
+          "implemented": 9,
           "tested": 0,
           "conformant": 0
         },
@@ -760,6 +760,7 @@
     "storage:route:GET /storage/v1/render/image/public/{bucketName}/{*}": "tested",
     "storage:route:GET /storage/v1/render/image/sign/{bucketName}/{*}": "tested",
     "storage:route:POST /storage/v1/bucket": "tested",
+    "storage:route:POST /storage/v1/object/list/{bucketName}": "implemented",
     "storage:route:POST /storage/v1/object/sign/{bucketName}/{*}": "implemented",
     "storage:route:POST /storage/v1/object/{bucketName}/{*}": "implemented",
     "storage:route:PUT /storage/v1/bucket/{bucketId}": "tested",
@@ -776,7 +777,9 @@
     "storage:sql-function:storage.extension()": "implemented",
     "storage:sql-function:storage.filename()": "implemented",
     "storage:sql-function:storage.foldername()": "implemented",
+    "storage:sql-function:storage.get_common_prefix()": "implemented",
     "storage:sql-function:storage.protect_delete()": "implemented",
+    "storage:sql-function:storage.search()": "implemented",
     "storage:sql-table:storage.objects": "implemented"
   }
 }
