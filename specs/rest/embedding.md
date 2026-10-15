@@ -68,8 +68,29 @@ of:
 - One-to-many: the embed is a JSON array, `[]` when empty. Many-to-one and
   one-to-one: a JSON object, or `null` when no row matches.
 - `!left` (the default) keeps every parent row.
-- `!inner` keeps only parent rows with at least one matching embedded row
-  (`EXISTS`). The embedded rows are not otherwise filtered.
+- `!inner` keeps only parent rows with at least one embedded row left after
+  the embed's own filters, order and page (`INNER JOIN LATERAL … ON agg IS
+  NOT NULL`, `QueryBuilder.hs:107-128`; served as `EXISTS` over the same
+  subquery).
+- Embedded parameters (`Plan.hs:907-1110`, `addFilters`, `addOrders`,
+  `addRanges`, `addLogicTrees`, `updateNode`): a key prefixed with the embed
+  path targets that embed instead of the root. `books.published=eq.true`
+  filters the embedded rows, `books.or=(…)` / `books.not.and=(…)` add a logic
+  tree, `books.order=title.desc` orders them, and `books.limit=1` /
+  `books.offset=1` page them. The first segment matches the embed's name or
+  alias (`url-use-legacy-target-names`, default `true`); naming the relation
+  of an aliased embed adds a deprecation `Warning` header upstream
+  (`App.hs:230-290`) and stays 501 here. Filter values are
+  typed with the embedded table's columns. A left embed still keeps every
+  parent row; its array or object is filtered.
+- Null embed filter (`addNullEmbedFilters`, `Plan.hs:1027-1043`): a root
+  filter or logic-tree leaf named after an embed (its alias, else its name)
+  with `is.null` keeps the parents whose filtered embed is empty (an
+  anti-join, `NOT EXISTS`); `not.is.null` keeps the others. Any other
+  operator on that name stays an ordinary column filter.
+- `Prefer: count` (`readPlanToCountQuery`, `QueryBuilder.hs:260-296`) counts
+  parents behind the root filters, each `!inner` embed and each null embed
+  filter, using the embed's filters but not its order or page.
 - The embedded query runs as the request role, so grants and row-level
   security apply. A missing grant is the database error (`42501`).
 - The output key is the alias, else `<name>` as written (`user_id` for
@@ -94,13 +115,21 @@ of:
   '<other>!<constraint>', .... Find the desired relationship in the
   'details' key.`
 
+- An embedded parameter whose first segment is not an embed in `select`,
+  or that names a nested embed (`books.tags.limit=1`): `PGRST108` (400),
+  `'<name>' is not an embedded resource in this request`, hint
+  `Verify that '<name>' is included in the 'select' query parameter.`
+  Filters are checked first, then orders, ranges and logic trees; within
+  one kind the rightmost parameter fails first (`foldr`).
+
 ## Out of scope (still 501)
 
-Spread (`...name(...)`), nested
-embeds, empty embeds (`notes()`, filter-only upstream), filters/order/limit on embedded resources (`notes.order=body` is 501, not
-`PGRST108`), embedding to or from a foreign table, self-references,
-several view relationships matched by a table name, and embeds in write
-responses. Many-to-many through a junction table is 501 too: whenever a
+Spread (`...name(...)`), nested embeds, empty embeds (`notes()`,
+filter-only upstream), related orders (`order=clients(id)` on an embed, or
+inside one), JSON-path filter keys (`books.data->>a=eq.1`), embedding to or
+from a foreign table, self-references, several view relationships matched by
+a table name, and embeds in write responses. Many-to-many through a junction
+table is 501 too: whenever a
 junction exists (a table with two distinct many-to-one keys, one to each
 side, both inside its primary key, as `addM2MRels` builds), an unhinted
 table target or a hint naming that junction is 501, since upstream would
@@ -115,3 +144,5 @@ list the many-to-many candidate.
 `rest.embed.column-hint-alias`, `rest.embed.column-hint-key`,
 `rest.embed.column-hint-inner`, `rest.embed.constraint-target`,
 `rest.embed.column-hint-ambiguous`, `rest.embed.column-hint-not-a-key`.
+Embedded filters (left and `!inner`), embedded order and limit, and the
+`is.null` anti-join need cases in a `review/issue-377-cases` PR.

@@ -423,6 +423,7 @@ pub(crate) fn find_relationship<'a>(
             to_many: rel.cardinality == Cardinality::OneToMany,
             root_columns: rel.columns.iter().map(|(r, _)| (*r).to_string()).collect(),
             target_columns: rel.columns.iter().map(|(_, t)| (*t).to_string()).collect(),
+            column_types: Vec::new(),
         }),
         // Several view relationships are not listed in upstream's order or
         // wording here, so they stay a 501 rather than a guessed `PGRST201`.
@@ -542,6 +543,7 @@ mod tests {
                 to_many: false,
                 root_columns: vec!["author_id".to_string()],
                 target_columns: vec!["id".to_string()],
+                column_types: Vec::new(),
             }
         );
     }
@@ -557,6 +559,7 @@ mod tests {
                 to_many: true,
                 root_columns: vec!["id".to_string()],
                 target_columns: vec!["author_id".to_string()],
+                column_types: Vec::new(),
             }
         );
         let rel = find_relationship("public", "books", "authors_view", &keys).unwrap();
@@ -675,6 +678,7 @@ mod tests {
                 to_many: false,
                 root_columns: vec!["user_id".to_string()],
                 target_columns: vec!["id".to_string()],
+                column_types: Vec::new(),
             }
         );
         let rel = find_relationship("public", "messages", "channel_id", &keys).unwrap();
@@ -868,6 +872,7 @@ mod tests {
                 to_many: false,
                 root_columns: vec!["author_id".to_string()],
                 target_columns: vec!["id".to_string()],
+                column_types: Vec::new(),
             }
         );
         let by_column = hinted("posts", "users", Some("editor_id"), &keys, &[]).unwrap();

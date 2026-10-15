@@ -11,7 +11,7 @@ use std::collections::HashMap;
 
 use crate::filter::{
     append_predicate, parse_filter_value, quote_ident, BoundFilter, FilterBody, FilterParseError,
-    ParsedFilter, ServedOp, UnsafeType,
+    IsVal, ParsedFilter, ServedOp, UnsafeType,
 };
 use crate::query::{percent_decode, query_parts};
 
@@ -56,16 +56,27 @@ impl ReadQuery {
     /// Names of the embedded resources the select list asks for.
     #[must_use]
     pub(crate) fn embed_names(&self) -> Vec<&str> {
-        match &self.select {
-            SelectList::Mixed(entries) => entries
-                .iter()
-                .filter_map(|entry| match entry {
-                    SelectEntry::Embed(embed) => Some(embed.name.as_str()),
-                    SelectEntry::Field(_) => None,
-                })
-                .collect(),
-            _ => Vec::new(),
-        }
+        self.embeds().map(|embed| embed.name.as_str()).collect()
+    }
+
+    fn embeds(&self) -> impl Iterator<Item = &Embed> {
+        let entries = match &self.select {
+            SelectList::Mixed(entries) => entries.as_slice(),
+            SelectList::Star | SelectList::Fields(_) => &[],
+        };
+        entries.iter().filter_map(|entry| match entry {
+            SelectEntry::Embed(embed) => Some(embed),
+            SelectEntry::Field(_) => None,
+        })
+    }
+
+    /// `true` when a root filter or logic tree is `<key>=is.null` (or
+    /// `not.is.null`) on the embed called `key`.
+    fn has_null_embed_filter(&self, key: &str) -> bool {
+        self.filters
+            .iter()
+            .any(|(column, parsed)| column == key && is_null_filter(parsed))
+            || self.logic.iter().any(|node| logic_names_null(node, key))
     }
 
     /// The embeds the select list asks for: `(target, hint, relationship key)`.
@@ -209,6 +220,45 @@ struct Embed {
     hint: Option<String>,
     inner: bool,
     select: SelectList,
+    params: EmbedParams,
+}
+
+impl Embed {
+    /// `updateNode` with legacy target names (the default): the name or the alias.
+    fn targeted_by(&self, target: &str) -> bool {
+        self.name == target || self.alias.as_deref() == Some(target)
+    }
+
+    /// The key a null embed filter (`books=is.null`) names: the alias, else the name.
+    fn output_key(&self) -> &str {
+        self.alias.as_deref().unwrap_or(&self.name)
+    }
+}
+
+/// Filters, logic trees, order and page of one embedded resource
+/// (`books.published=eq.true`, `books.order=title.desc`, `books.limit=1`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct EmbedParams {
+    filters: Vec<(String, ParsedFilter)>,
+    logic: Vec<LogicNode>,
+    orders: Vec<OrderTerm>,
+    page: Page,
+    /// A parameter named the relation of an aliased embed (`books.x` for
+    /// `b:books(...)`). Upstream answers with a deprecation `Warning`
+    /// header (`App.hs` `legacyWarnings`), which is not served.
+    legacy_target: bool,
+}
+
+impl EmbedParams {
+    fn none() -> Self {
+        Self {
+            filters: Vec::new(),
+            logic: Vec::new(),
+            orders: Vec::new(),
+            page: Page::inactive(),
+            legacy_target: false,
+        }
+    }
 }
 
 impl Embed {
@@ -432,17 +482,16 @@ pub(crate) fn parse_get_query(query: &str) -> Result<ReadQuery, QueryFail> {
     let select_raw = collected.select.as_deref().unwrap_or("*");
     let select = parse_select_value(select_raw)?;
     let mut filters = Vec::new();
-    let mut embed_filter = logic_json;
+    let mut embed_filters = Vec::new();
+    let mut route = logic_json;
     for (key, value) in &collected.filters {
-        if let Err(error) = parse_filter_value(value) {
-            return Err(filter_fail(error));
-        }
-        if key.is_empty() || key.contains('.') || key.contains("->") {
-            embed_filter = true;
-            continue;
-        }
         let parsed = parse_filter_value(value).map_err(filter_fail)?;
-        filters.push((key.clone(), parsed));
+        match filter_path(key) {
+            Some((path, column)) if path.is_empty() => filters.push((column, parsed)),
+            Some((path, column)) => embed_filters.push((path, (column, parsed))),
+            // An empty key, a JSON path or a quoted name: the route unit stays 501.
+            None => route = true,
+        }
     }
     let on_conflict = match &collected.on_conflict {
         Some(value) => Some(parse_on_conflict_names(value)?),
@@ -451,42 +500,128 @@ pub(crate) fn parse_get_query(query: &str) -> Result<ReadQuery, QueryFail> {
     if let ParsedSelect::Deferred(fail) = select {
         return Err(fail);
     }
-    if embed_filter {
+    if route {
         return Err(QueryFail::Route);
     }
-    let ParsedSelect::Ready(select) = select else {
+    let ParsedSelect::Ready(mut select) = select else {
         return Err(QueryFail::Route);
     };
-    let (orders, order_embed) = first_root(orders);
-    let orders = orders.unwrap_or_default();
-    let page = page_from(&collected.limits, &collected.offsets);
-    let (logic, logic_embed) = all_roots(logic);
+    // `readPlan` adds filters, then orders, ranges and logic trees. Each kind
+    // is a `foldr`, so the rightmost parameter is placed (and fails) first.
+    for (path, filter) in embed_filters.into_iter().rev() {
+        embed_mut(&mut select, &path)?
+            .params
+            .filters
+            .insert(0, filter);
+    }
+    let mut root_orders = None;
+    for (path, terms) in orders.into_iter().rev() {
+        // Placed right to left, so the leftmost list for one target wins.
+        if path.is_empty() {
+            root_orders = Some(terms);
+        } else {
+            embed_mut(&mut select, &path)?.params.orders = terms;
+        }
+    }
+    let orders = root_orders.unwrap_or_default();
+    let (page, embed_pages) = pages_from(&collected.limits, &collected.offsets);
+    for (path, embed_page) in embed_pages.into_iter().rev() {
+        embed_mut(&mut select, &path)?.params.page = embed_page;
+    }
+    let mut root_logic = Vec::new();
+    for (path, node) in logic.into_iter().rev() {
+        if path.is_empty() {
+            root_logic.insert(0, node);
+        } else {
+            embed_mut(&mut select, &path)?.params.logic.insert(0, node);
+        }
+    }
     let related = orders.iter().find_map(|term| match term {
         OrderTerm::Related { relation } => Some(relation.clone()),
         OrderTerm::Column { .. } => None,
     });
-    let resource = order_embed.or(page.embed).or(logic_embed).or(related);
-    if let Some(resource) = resource {
-        // An embedded resource's own order/limit/logic is not served: 501.
+    if let Some(resource) = related {
+        // A related order on an embedded resource is not served: 501.
         let embedded = matches!(&select, SelectList::Mixed(entries) if entries.iter().any(|entry|
-            matches!(entry, SelectEntry::Embed(embed)
-                if embed.name == resource || embed.alias.as_deref() == Some(resource.as_str()))));
+            matches!(entry, SelectEntry::Embed(embed) if embed.targeted_by(&resource))));
         return Err(if embedded {
             QueryFail::Route
         } else {
             QueryFail::NotEmbedded { resource }
         });
     }
+    // Nested embeds are not served, so a related order inside an embed is
+    // `PGRST108` upstream only after the relationship lookup, and a legacy
+    // target name adds a `Warning` header: keep both 501.
+    if let SelectList::Mixed(entries) = &select {
+        let unserved = entries.iter().any(|entry| {
+            matches!(entry, SelectEntry::Embed(embed) if embed.params.legacy_target
+                || embed.params.orders.iter().any(|term|
+                    matches!(term, OrderTerm::Related { .. })))
+        });
+        if unserved {
+            return Err(QueryFail::Route);
+        }
+    }
     Ok(ReadQuery {
         select,
         orders,
-        page: page.page,
-        logic,
+        page,
+        logic: root_logic,
         filters,
         columns,
         on_conflict,
         handled: true,
     })
+}
+
+/// `pTreePath` for a filter key: the embed path and the column.
+///
+/// `None` for a key this crate does not split: empty, an empty segment, a
+/// JSON path (`->`), or a quoted name.
+fn filter_path(key: &str) -> Option<(Vec<String>, String)> {
+    if key.contains("->") || key.contains('"') {
+        return None;
+    }
+    let mut parts: Vec<String> = key.split('.').map(str::to_string).collect();
+    if parts.iter().any(String::is_empty) {
+        return None;
+    }
+    let column = parts.pop()?;
+    Some((parts, column))
+}
+
+/// The embed a non-root parameter targets (`updateNode` in `Plan.hs`, with
+/// the default legacy target names: the embed's name or its alias).
+///
+/// # Errors
+///
+/// `PGRST108` when no embed in `select` matches. Nested embeds are not
+/// served, so a second path segment is never an embedded resource.
+fn embed_mut<'s>(select: &'s mut SelectList, path: &[String]) -> Result<&'s mut Embed, QueryFail> {
+    let Some((first, rest)) = path.split_first() else {
+        return Err(QueryFail::Route);
+    };
+    let not_embedded = |resource: &String| QueryFail::NotEmbedded {
+        resource: resource.clone(),
+    };
+    let SelectList::Mixed(entries) = select else {
+        return Err(not_embedded(first));
+    };
+    let embed = entries
+        .iter_mut()
+        .find_map(|entry| match entry {
+            SelectEntry::Embed(embed) if embed.targeted_by(first) => Some(embed),
+            SelectEntry::Embed(_) | SelectEntry::Field(_) => None,
+        })
+        .ok_or_else(|| not_embedded(first))?;
+    if embed.name == *first && embed.alias.as_ref().is_some_and(|alias| alias != first) {
+        embed.params.legacy_target = true;
+    }
+    match rest.first() {
+        Some(next) => Err(not_embedded(next)),
+        None => Ok(embed),
+    }
 }
 
 fn filter_fail(error: FilterParseError) -> QueryFail {
@@ -502,11 +637,6 @@ fn logic_has_json(node: &LogicNode) -> bool {
         LogicNode::Filter { .. } => false,
         LogicNode::Expr { children, .. } => children.iter().any(logic_has_json),
     }
-}
-
-struct Paged {
-    page: Page,
-    embed: Option<String>,
 }
 
 fn collect(query: &str) -> Collected {
@@ -590,63 +720,69 @@ fn logic_call(key: &str, value: &str) -> (Vec<String>, String) {
     (path, expr)
 }
 
-/// Last non-root parameter wins, matching `foldr` in `Plan.hs`.
-/// Root `order` keeps the first list. Later root orders are overwritten.
-fn first_root<T>(items: Vec<(Vec<String>, T)>) -> (Option<T>, Option<String>) {
-    if let Some((path, _)) = items.iter().rev().find(|(path, _)| !path.is_empty()) {
-        return (None, Some(path[0].clone()));
-    }
-    (items.into_iter().next().map(|(_, value)| value), None)
+/// `limit` / `offset` pairs, keyed by the path before `.limit` / `.offset`.
+#[derive(Default)]
+struct PageSlot {
+    limit: Option<String>,
+    offset: Option<String>,
 }
 
-/// Every root logic tree is kept. A non-root tree is `PGRST108`.
-fn all_roots<T>(items: Vec<(Vec<String>, T)>) -> (Vec<T>, Option<String>) {
-    if let Some((path, _)) = items.iter().rev().find(|(path, _)| !path.is_empty()) {
-        return (Vec::new(), Some(path[0].clone()));
+impl PageSlot {
+    fn page(self) -> Page {
+        match (self.limit, self.offset) {
+            (None, None) => Page::inactive(),
+            (None, Some(offset)) if offset == "0" => Page::inactive(),
+            (limit, offset) => Page {
+                limit,
+                offset: offset.unwrap_or_else(|| "0".to_string()),
+                active: true,
+            },
+        }
     }
-    (items.into_iter().map(|(_, value)| value).collect(), None)
 }
 
-fn page_from(limits: &[(String, String)], offsets: &[(String, String)]) -> Paged {
-    let mut root_limit: Option<Option<String>> = None;
-    let mut root_offset: Option<Option<String>> = None;
-    let mut embed = None;
-    for (key, value) in limits {
+/// The root page and one page per embed path (`qsRanges`).
+///
+/// A repeated key keeps its last value (`HM.fromList`). Embed paths are in
+/// the order limits then offsets were last seen, so the caller places them
+/// right to left and reports the rightmost unknown embed, as `foldr` does.
+fn pages_from(
+    limits: &[(String, String)],
+    offsets: &[(String, String)],
+) -> (Page, Vec<(Vec<String>, Page)>) {
+    let mut root = PageSlot::default();
+    let mut slots: Vec<(Vec<String>, PageSlot)> = Vec::new();
+    let keyed = limits
+        .iter()
+        .map(|(key, value)| (key, value, true))
+        .chain(offsets.iter().map(|(key, value)| (key, value, false)));
+    for (key, value, is_limit) in keyed {
         let path = embed_path(key);
-        if path.is_empty() {
-            root_limit = Some(read_integer(value));
+        let slot = if path.is_empty() {
+            &mut root
         } else {
-            embed = Some(path[0].clone());
+            let entry = match slots.iter().position(|(seen, _)| *seen == path) {
+                Some(at) => slots.remove(at),
+                None => (path, PageSlot::default()),
+            };
+            slots.push(entry);
+            match slots.last_mut() {
+                Some((_, slot)) => slot,
+                None => continue,
+            }
+        };
+        let parsed = read_integer(value);
+        if is_limit {
+            slot.limit = parsed;
+        } else {
+            slot.offset = parsed;
         }
     }
-    for (key, value) in offsets {
-        let path = embed_path(&replace_last_limit(key));
-        if path.is_empty() {
-            root_offset = Some(read_integer(value));
-        } else {
-            embed = Some(path[0].clone());
-        }
-    }
-    // `foldr` reports the rightmost embed. Scan limits then offsets, keeping the last.
-    let limit = root_limit.flatten();
-    let offset = root_offset.flatten();
-    let page = match (limit, offset) {
-        (None, None) => Page::inactive(),
-        (None, Some(offset)) if offset == "0" => Page::inactive(),
-        (limit, offset) => Page {
-            limit,
-            offset: offset.unwrap_or_else(|| "0".to_string()),
-            active: true,
-        },
-    };
-    Paged { page, embed }
-}
-
-fn replace_last_limit(key: &str) -> String {
-    match key.rsplit_once('.') {
-        Some((head, _)) => format!("{head}.limit"),
-        None => "limit".to_string(),
-    }
+    let embeds = slots
+        .into_iter()
+        .map(|(path, slot)| (path, slot.page()))
+        .collect();
+    (root.page(), embeds)
 }
 
 /// Haskell `readMaybe` for `Integer`: leading whitespace, optional sign, digits, nothing left.
@@ -893,6 +1029,7 @@ fn try_relation<'a>(at: &mut At<'a>) -> Result<Option<SelectItem>, PErr> {
         hint,
         inner: matches!(join, Some(JoinKind::Inner)),
         select,
+        params: EmbedParams::none(),
     })))
 }
 
@@ -1851,6 +1988,7 @@ pub(crate) fn build_read_sql_as(
     push_select(&mut select_sql, &mut params, &relation_ident, &select);
     let mut inner = format!("SELECT {select_sql} FROM {schema_ident}.{relation_ident}");
     let mut exists = Vec::new();
+    let mut null_embeds = Vec::new();
     if let SelectList::Mixed(entries) = &query.select {
         let mut select_sql = String::new();
         for (index, entry) in entries.iter().enumerate() {
@@ -1865,21 +2003,21 @@ pub(crate) fn build_read_sql_as(
                     let Some(rel) = rels.get(&embed.key()) else {
                         continue;
                     };
-                    let target = quote_ident(&rel.table);
-                    let cond = join_condition(rel, &relation_ident, &target);
-                    push_embed(
-                        &mut select_sql,
+                    let rows = embed_rows(
                         &mut params,
                         &schema_ident,
+                        &relation_ident,
                         embed,
                         rel,
-                        &cond,
-                    );
+                        true,
+                    )?;
+                    push_embed(&mut select_sql, &rows, embed, rel);
+                    // `INNER JOIN LATERAL … ON agg IS NOT NULL`: the parent
+                    // needs a row in the filtered, ordered and limited embed.
                     if embed.inner {
-                        exists.push(format!(
-                            "EXISTS (SELECT 1 FROM {schema_ident}.{target} WHERE {cond})"
-                        ));
+                        exists.push(format!("EXISTS ({rows})"));
                     }
+                    null_embeds.push((embed.output_key().to_string(), rows));
                 }
             }
         }
@@ -1894,6 +2032,7 @@ pub(crate) fn build_read_sql_as(
             &query.filters,
             &query.logic,
             column_types,
+            &null_embeds,
         )?;
         if !exists.is_empty() {
             if !query.filters.is_empty() || !query.logic.is_empty() {
@@ -1971,6 +2110,9 @@ pub(crate) struct Relationship {
     pub root_columns: Vec<String>,
     /// Columns on the embedded table, in key order.
     pub target_columns: Vec<String>,
+    /// Column names and types of the embedded table, for its filters. The
+    /// relationship lookup leaves it empty; the caller loads the catalog.
+    pub column_types: Vec<(String, String)>,
 }
 
 fn join_condition(rel: &Relationship, root: &str, target: &str) -> String {
@@ -1982,28 +2124,191 @@ fn join_condition(rel: &Relationship, root: &str, target: &str) -> String {
         .join(" AND ")
 }
 
-/// Correlated subquery for one embed: an array for a to-many link, an object or `null` otherwise.
-fn push_embed(
-    sql: &mut String,
+/// The embedded rows of one parent row: the join condition, then the embed's
+/// own filters and logic trees (`readPlanToQuery` for a child node).
+///
+/// `full` adds the select list, order and page. Without it the query is
+/// `SELECT 1 …` as `readPlanToCountQuery` builds it, which ignores the
+/// embed's order and range.
+///
+/// # Errors
+///
+/// Returns [`UnsafeType`] when a filter's catalog type cannot be spliced.
+fn embed_rows(
     params: &mut Vec<String>,
     schema: &str,
+    root: &str,
     embed: &Embed,
     rel: &Relationship,
-    cond: &str,
-) {
+    full: bool,
+) -> Result<String, UnsafeType> {
     let target = quote_ident(&rel.table);
-    let mut cols = String::new();
-    push_select(&mut cols, params, &target, &embed.select);
-    let sub = format!("SELECT {cols} FROM {schema}.{target} WHERE {cond}");
+    let mut sql = String::from("SELECT ");
+    if full {
+        push_select(&mut sql, params, &target, &embed.select);
+    } else {
+        sql.push('1');
+    }
+    sql.push_str(&format!(
+        " FROM {schema}.{target} WHERE {}",
+        join_condition(rel, root, &target)
+    ));
+    let own = &embed.params;
+    if !own.filters.is_empty() || !own.logic.is_empty() {
+        let column_types: Vec<(&str, &str)> = rel
+            .column_types
+            .iter()
+            .map(|(name, pg_type)| (name.as_str(), pg_type.as_str()))
+            .collect();
+        sql.push_str(" AND ");
+        push_where(
+            &mut sql,
+            params,
+            &rel.table,
+            &own.filters,
+            &own.logic,
+            &column_types,
+            &[],
+        )?;
+    }
+    if full && !own.orders.is_empty() {
+        sql.push(' ');
+        push_order(&mut sql, params, &target, &own.orders);
+    }
+    if full && own.page.active {
+        sql.push(' ');
+        push_page(&mut sql, params, &own.page);
+    }
+    Ok(sql)
+}
+
+/// Correlated subquery for one embed: an array for a to-many link, an object or `null` otherwise.
+fn push_embed(sql: &mut String, rows: &str, embed: &Embed, rel: &Relationship) {
     if rel.to_many {
         sql.push_str(&format!(
-            "COALESCE((SELECT json_agg(_t) FROM ({sub}) _t), '[]'::json)"
+            "COALESCE((SELECT json_agg(_t) FROM ({rows}) _t), '[]'::json)"
         ));
     } else {
-        sql.push_str(&format!("(SELECT to_json(_t) FROM ({sub}) _t)"));
+        sql.push_str(&format!("(SELECT to_json(_t) FROM ({rows}) _t)"));
     }
     sql.push_str(" AS ");
-    sql.push_str(&quote_ident(embed.alias.as_deref().unwrap_or(&embed.name)));
+    sql.push_str(&quote_ident(embed.output_key()));
+}
+
+/// `WHERE` fragment for `Prefer: count`, without the `WHERE` keyword
+/// (`readPlanToCountQuery`): the root filters, with a null embed filter as
+/// `[NOT] EXISTS`, and an `EXISTS` per `!inner` embed. Embedded order and
+/// range do not apply. `None` when nothing restricts the parent rows.
+///
+/// # Errors
+///
+/// Returns [`UnsafeType`] when a filter's catalog type cannot be spliced.
+pub(crate) fn count_where(
+    schema: &str,
+    relation: &str,
+    query: &ReadQuery,
+    column_types: &[(&str, &str)],
+    rels: &HashMap<String, Relationship>,
+) -> Result<Option<ReadSql>, UnsafeType> {
+    let schema_ident = quote_ident(schema);
+    let relation_ident = quote_ident(relation);
+    let mut params = Vec::new();
+    let mut exists = Vec::new();
+    let mut null_embeds = Vec::new();
+    for embed in query.embeds() {
+        let Some(rel) = rels.get(&embed.key()) else {
+            continue;
+        };
+        let named = query.has_null_embed_filter(embed.output_key());
+        if !embed.inner && !named {
+            continue;
+        }
+        let rows = embed_rows(
+            &mut params,
+            &schema_ident,
+            &relation_ident,
+            embed,
+            rel,
+            false,
+        )?;
+        if embed.inner {
+            exists.push(format!("EXISTS ({rows})"));
+        }
+        if named {
+            null_embeds.push((embed.output_key().to_string(), rows));
+        }
+    }
+    let filtered = !query.filters.is_empty() || !query.logic.is_empty();
+    if !filtered && exists.is_empty() {
+        return Ok(None);
+    }
+    let mut sql = String::new();
+    if filtered {
+        push_where(
+            &mut sql,
+            &mut params,
+            relation,
+            &query.filters,
+            &query.logic,
+            column_types,
+            &null_embeds,
+        )?;
+    }
+    if !exists.is_empty() {
+        if filtered {
+            sql.push_str(" AND ");
+        }
+        sql.push_str(&exists.join(" AND "));
+    }
+    Ok(Some(ReadSql {
+        sql,
+        params,
+        offset: 0,
+    }))
+}
+
+fn is_null_filter(parsed: &ParsedFilter) -> bool {
+    matches!(
+        parsed,
+        ParsedFilter::Is {
+            value: IsVal::Null,
+            ..
+        }
+    )
+}
+
+fn logic_names_null(node: &LogicNode, key: &str) -> bool {
+    match node {
+        LogicNode::Expr { children, .. } => {
+            children.iter().any(|child| logic_names_null(child, key))
+        }
+        LogicNode::Filter { column, parsed } => column == key && is_null_filter(parsed),
+        LogicNode::Json => false,
+    }
+}
+
+/// `CoercibleFilterNullEmbed` (`addNullEmbedFilters` in `Plan.hs`):
+/// `<embed>=is.null` keeps the parent rows with no embedded row (an
+/// anti-join); `<embed>=not.is.null` keeps the others. `rows` is the
+/// embed's subquery; `None` when the filter is an ordinary column filter.
+fn null_embed_predicate(
+    null_embeds: &[(String, String)],
+    column: &str,
+    parsed: &ParsedFilter,
+) -> Option<String> {
+    let ParsedFilter::Is {
+        negated,
+        value: IsVal::Null,
+    } = parsed
+    else {
+        return None;
+    };
+    let (_, rows) = null_embeds.iter().find(|(key, _)| key == column)?;
+    Some(if *negated {
+        format!("EXISTS ({rows})")
+    } else {
+        format!("NOT EXISTS ({rows})")
+    })
 }
 
 /// `*` next to an aggregate becomes the table's columns, so `GROUP BY` can
@@ -2185,6 +2490,7 @@ pub(crate) fn where_clause(
         &query.filters,
         &query.logic,
         column_types,
+        &[],
     )?;
     Ok(Some(ReadSql {
         sql,
@@ -2193,6 +2499,8 @@ pub(crate) fn where_clause(
     }))
 }
 
+/// `null_embeds` pairs an embed key with its rows subquery, for
+/// [`null_embed_predicate`].
 fn push_where(
     sql: &mut String,
     params: &mut Vec<String>,
@@ -2200,14 +2508,19 @@ fn push_where(
     filters: &[(String, ParsedFilter)],
     logic: &[LogicNode],
     column_types: &[(&str, &str)],
+    null_embeds: &[(String, String)],
 ) -> Result<(), UnsafeType> {
     let mut wrote = false;
     for (column, parsed) in filters {
         if wrote {
             sql.push_str(" AND ");
         }
-        let bound = bound_filter(column, parsed, lookup_type(column_types, column));
-        append_predicate(sql, params, relation, &bound)?;
+        if let Some(predicate) = null_embed_predicate(null_embeds, column, parsed) {
+            sql.push_str(&predicate);
+        } else {
+            let bound = bound_filter(column, parsed, lookup_type(column_types, column));
+            append_predicate(sql, params, relation, &bound)?;
+        }
         wrote = true;
     }
     for node in logic {
@@ -2216,7 +2529,7 @@ fn push_where(
         }
         // megabase:unit rest:query-param:and
         // megabase:unit rest:query-param:or
-        push_logic(sql, params, relation, node, column_types)?;
+        push_logic(sql, params, relation, node, column_types, null_embeds)?;
         wrote = true;
     }
     let _ = wrote;
@@ -2229,6 +2542,7 @@ fn push_logic(
     relation: &str,
     node: &LogicNode,
     column_types: &[(&str, &str)],
+    null_embeds: &[(String, String)],
 ) -> Result<(), UnsafeType> {
     match node {
         LogicNode::Expr {
@@ -2247,12 +2561,16 @@ fn push_logic(
                         LogicOp::Or => " OR ",
                     });
                 }
-                push_logic(sql, params, relation, child, column_types)?;
+                push_logic(sql, params, relation, child, column_types, null_embeds)?;
             }
             sql.push(')');
             Ok(())
         }
         LogicNode::Filter { column, parsed } => {
+            if let Some(predicate) = null_embed_predicate(null_embeds, column, parsed) {
+                sql.push_str(&predicate);
+                return Ok(());
+            }
             let bound = bound_filter(column, parsed, lookup_type(column_types, column));
             append_predicate(sql, params, relation, &bound)
         }
@@ -2527,6 +2845,7 @@ mod tests {
                 to_many: true,
                 root_columns: vec!["id".into()],
                 target_columns: vec!["user_id".into()],
+                column_types: Vec::new(),
             },
         )]);
         let sql = build_read_sql("public", "profiles", &query, &[], &rels)
@@ -2585,6 +2904,7 @@ mod tests {
             to_many: false,
             root_columns: vec![column.into()],
             target_columns: vec!["id".into()],
+            column_types: Vec::new(),
         };
         let rels = HashMap::from([
             ("users!author_id".to_string(), rel("author_id")),
@@ -2614,6 +2934,7 @@ mod tests {
                 to_many: false,
                 root_columns: vec!["user_id".into()],
                 target_columns: vec!["id".into()],
+                column_types: Vec::new(),
             },
         )]);
         let sql = build_read_sql("public", "messages", &query, &[], &rels)
@@ -2627,7 +2948,7 @@ mod tests {
             "{sql}"
         );
         assert!(
-            sql.contains("EXISTS (SELECT 1 FROM \"public\".\"users\" WHERE"),
+            sql.contains("WHERE EXISTS (SELECT \"users\".\"name\" FROM \"public\".\"users\" WHERE"),
             "{sql}"
         );
         assert!(!sql.contains("\"user_id\" AS"), "{sql}");
@@ -2635,25 +2956,43 @@ mod tests {
 
     #[test]
     fn limit_offset_pairing_and_last_wins() {
-        let page = page_from(
+        let (page, _) = pages_from(
             &[
                 ("limit".into(), "1".into()),
                 ("limit".into(), "nope".into()),
             ],
             &[],
         );
-        assert!(!page.page.active);
-        let page = page_from(
+        assert!(!page.active);
+        let (page, _) = pages_from(
             &[("limit".into(), "1".into())],
             &[("offset".into(), "2".into())],
         );
-        assert!(page.page.active);
-        assert_eq!(page.page.limit.as_deref(), Some("1"));
-        assert_eq!(page.page.offset, "2");
-        let page = page_from(&[], &[("offset".into(), "0".into())]);
-        assert!(!page.page.active);
-        let page = page_from(&[("items.limit".into(), "1".into())], &[]);
-        assert_eq!(page.embed.as_deref(), Some("items"));
+        assert!(page.active);
+        assert_eq!(page.limit.as_deref(), Some("1"));
+        assert_eq!(page.offset, "2");
+        let (page, _) = pages_from(&[], &[("offset".into(), "0".into())]);
+        assert!(!page.active);
+        let (page, embeds) = pages_from(
+            &[
+                ("items.limit".into(), "1".into()),
+                ("tags.limit".into(), "3".into()),
+            ],
+            &[("items.offset".into(), "2".into())],
+        );
+        assert!(!page.active);
+        // `items` was seen last, so it is placed (and fails) first.
+        let paths: Vec<_> = embeds.iter().map(|(path, _)| path.join(".")).collect();
+        assert_eq!(paths, ["tags", "items"]);
+        assert_eq!(embeds[1].1.limit.as_deref(), Some("1"));
+        assert_eq!(embeds[1].1.offset, "2");
+        let err = parse_get_query("select=id&items.limit=1&tags.limit=2").unwrap_err();
+        assert_eq!(
+            err,
+            QueryFail::NotEmbedded {
+                resource: "tags".into()
+            }
+        );
         let err = parse_get_query("select=id&items.order=id").unwrap_err();
         assert_eq!(
             err,
@@ -2941,9 +3280,186 @@ mod tests {
     }
 
     #[test]
-    fn embedded_resource_order_is_deferred() {
-        let err = parse_get_query("select=id,notes(body)&notes.order=body").unwrap_err();
+    fn embedded_related_order_is_deferred() {
+        let err = parse_get_query("select=id,notes(body)&notes.order=users(id)").unwrap_err();
         assert_eq!(err, QueryFail::Route);
+    }
+
+    fn books_rel() -> HashMap<String, Relationship> {
+        HashMap::from([(
+            "books".to_string(),
+            Relationship {
+                table: "books".into(),
+                to_many: true,
+                root_columns: vec!["id".into()],
+                target_columns: vec!["author_id".into()],
+                column_types: vec![
+                    ("title".into(), "text".into()),
+                    ("published".into(), "boolean".into()),
+                ],
+            },
+        )])
+    }
+
+    #[test]
+    fn embedded_filters_order_and_page_render_in_the_subquery() {
+        let query = parse_get_query(
+            "select=name,books(title)&books.published=eq.true&books.order=title.desc\
+             &books.limit=1&books.offset=2&books.or=(title.eq.a,title.eq.b)&order=name",
+        )
+        .unwrap();
+        let sql = build_read_sql("public", "authors", &query, &[], &books_rel()).unwrap();
+        assert!(
+            sql.sql.contains(
+                "COALESCE((SELECT json_agg(_t) FROM (SELECT \"books\".\"title\" \
+                 FROM \"public\".\"books\" WHERE \"books\".\"author_id\" = \"authors\".\"id\" \
+                 AND \"books\".\"published\" = ($1::text)::boolean \
+                 AND (\"books\".\"title\" = ($2::text)::text \
+                 OR \"books\".\"title\" = ($3::text)::text) \
+                 ORDER BY \"books\".\"title\" DESC LIMIT ($4::bigint) OFFSET ($5::bigint)) _t), \
+                 '[]'::json) AS \"books\""
+            ),
+            "{}",
+            sql.sql
+        );
+        // A left embed keeps every parent: no `WHERE` on `authors`.
+        assert!(
+            sql.sql.contains("FROM \"public\".\"authors\" ORDER BY"),
+            "{}",
+            sql.sql
+        );
+        assert_eq!(sql.params, ["true", "a", "b", "1", "2"]);
+        // An embedded page is not the root page.
+        assert!(!query.limits_rows());
+    }
+
+    #[test]
+    fn inner_embed_filters_parents_with_the_same_subquery() {
+        let query =
+            parse_get_query("select=name,books!inner(title)&books.published=eq.true").unwrap();
+        let sql = build_read_sql("public", "authors", &query, &[], &books_rel()).unwrap();
+        let rows = "SELECT \"books\".\"title\" FROM \"public\".\"books\" \
+                    WHERE \"books\".\"author_id\" = \"authors\".\"id\" \
+                    AND \"books\".\"published\" = ($1::text)::boolean";
+        assert!(
+            sql.sql.contains(&format!("WHERE EXISTS ({rows})")),
+            "{}",
+            sql.sql
+        );
+        assert_eq!(sql.params, ["true"]);
+        let count = count_where("public", "authors", &query, &[], &books_rel())
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            count.sql,
+            "EXISTS (SELECT 1 FROM \"public\".\"books\" \
+             WHERE \"books\".\"author_id\" = \"authors\".\"id\" \
+             AND \"books\".\"published\" = ($1::text)::boolean)"
+        );
+        assert_eq!(count.params, ["true"]);
+    }
+
+    #[test]
+    fn null_embed_filter_is_an_anti_join() {
+        let query = parse_get_query("select=name,books(title)&books=is.null&name=eq.x").unwrap();
+        let sql = build_read_sql("public", "authors", &query, &[], &books_rel()).unwrap();
+        assert!(
+            sql.sql.contains(
+                "WHERE NOT EXISTS (SELECT \"books\".\"title\" FROM \"public\".\"books\" \
+                 WHERE \"books\".\"author_id\" = \"authors\".\"id\") AND \"authors\".\"name\" = $1"
+            ),
+            "{}",
+            sql.sql
+        );
+        let query =
+            parse_get_query("select=name,b:books(title)&or=(b.not.is.null,name.eq.x)").unwrap();
+        let rels = HashMap::from([("books".to_string(), books_rel().remove("books").unwrap())]);
+        let sql = build_read_sql("public", "authors", &query, &[], &rels).unwrap();
+        assert!(
+            sql.sql
+                .contains("WHERE (EXISTS (SELECT \"books\".\"title\""),
+            "{}",
+            sql.sql
+        );
+        let count = count_where("public", "authors", &query, &[], &rels)
+            .unwrap()
+            .unwrap();
+        assert!(
+            count
+                .sql
+                .starts_with("(EXISTS (SELECT 1 FROM \"public\".\"books\""),
+            "{}",
+            count.sql
+        );
+        // `is.null` on a column that is not an embed stays a column filter.
+        let query = parse_get_query("select=name,books(title)&name=is.null").unwrap();
+        let count = count_where("public", "authors", &query, &[], &books_rel())
+            .unwrap()
+            .unwrap();
+        assert_eq!(count.sql, "\"authors\".\"name\" IS NULL");
+    }
+
+    fn hinted_books_rel() -> HashMap<String, Relationship> {
+        HashMap::from([(
+            "books!author_id".to_string(),
+            books_rel().remove("books").unwrap(),
+        )])
+    }
+
+    #[test]
+    fn count_finds_a_hinted_inner_embed() {
+        let query = parse_get_query("select=name,books!author_id!inner(title)").unwrap();
+        let count = count_where("public", "authors", &query, &[], &hinted_books_rel())
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            count.sql,
+            "EXISTS (SELECT 1 FROM \"public\".\"books\" \
+             WHERE \"books\".\"author_id\" = \"authors\".\"id\")"
+        );
+    }
+
+    #[test]
+    fn count_finds_a_null_filter_on_a_hinted_embed() {
+        let query = parse_get_query("select=name,books!author_id(title)&books=is.null").unwrap();
+        let count = count_where("public", "authors", &query, &[], &hinted_books_rel())
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            count.sql,
+            "NOT EXISTS (SELECT 1 FROM \"public\".\"books\" \
+             WHERE \"books\".\"author_id\" = \"authors\".\"id\")"
+        );
+    }
+
+    #[test]
+    fn embedded_parameters_target_the_name_or_alias() {
+        for query in [
+            "select=b:books(title)&b.title=eq.x",
+            "select=books:books(title)&books.title=eq.x",
+        ] {
+            assert!(parse_get_query(query).is_ok(), "{query}");
+        }
+        // The relation name of an aliased embed draws a `Warning` header upstream.
+        assert_eq!(
+            parse_get_query("select=b:books(title)&books.title=eq.x").unwrap_err(),
+            QueryFail::Route
+        );
+        for (query, resource) in [
+            ("select=id&books.title=eq.x", "books"),
+            ("select=id,books(title)&books.tags.limit=1", "tags"),
+            ("select=id,books(title)&authors.or=(id.eq.1)", "authors"),
+            // Filters are placed before orders, right to left.
+            ("select=id,books(title)&x.order=id&y.a=eq.1&z.a=eq.1", "z"),
+        ] {
+            assert_eq!(
+                parse_get_query(query).unwrap_err(),
+                QueryFail::NotEmbedded {
+                    resource: resource.into()
+                },
+                "{query}"
+            );
+        }
     }
 
     #[test]
