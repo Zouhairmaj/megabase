@@ -143,9 +143,10 @@ fn valid_render_query(pairs: &[(String, String)]) -> bool {
         && (gravity != Some("fp") || (focal(x) && focal(y)))
 }
 
-/// Whether `findObject` finds a row. `as_service_role` runs it as the
-/// request role (`service_role` bypasses RLS); otherwise it runs as the
-/// pool user, like storage-api's superuser connection.
+/// Whether `findObject` finds a row. `as_service_role` runs it as
+/// `service_role`, which bypasses RLS like storage-api's superuser
+/// connection (`public` and `sign`) and the service-role request scope
+/// (`authenticated`); otherwise it runs as the pool user.
 async fn find_object(
     pool: &sqlx::PgPool,
     bucket_id: &str,
@@ -248,7 +249,7 @@ pub(super) async fn render_public_image(
     };
     let version = single(&pairs, "versionId").flatten();
     let bucket = find_public_bucket(pool, &bucket_name).await;
-    let object = find_object(pool, &bucket_name, &object_name, version, false).await;
+    let object = find_object(pool, &bucket_name, &object_name, version, true).await;
     match (bucket, object) {
         (Ok(true), object) => object_outcome(object, &method, &uri),
         (Ok(false), Ok(true)) => StorageError::no_such_bucket().into_response(),
@@ -308,7 +309,7 @@ pub(super) async fn render_signed_image(
     let Some(pool) = state.pool.as_ref() else {
         return not_implemented(&method, &uri);
     };
-    let found = find_object(pool, token_bucket, token_object, version, false).await;
+    let found = find_object(pool, token_bucket, token_object, version, true).await;
     object_outcome(found, &method, &uri)
 }
 
