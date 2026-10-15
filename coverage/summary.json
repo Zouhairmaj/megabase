@@ -2,12 +2,12 @@
   "schema": 1,
   "totals": {
     "units": 1031,
-    "implemented": 228,
+    "implemented": 230,
     "tested": 186,
     "conformant": 0
   },
   "percent": {
-    "coverage": 22.1,
+    "coverage": 22.3,
     "conformance": 0.0,
     "done": 0.0
   },
@@ -18,7 +18,7 @@
   "components": {
     "auth": {
       "units": 159,
-      "implemented": 89,
+      "implemented": 91,
       "tested": 80,
       "conformant": 0,
       "groups": {
@@ -96,7 +96,7 @@
         },
         "verify": {
           "units": 10,
-          "implemented": 8,
+          "implemented": 10,
           "tested": 6,
           "conformant": 0
         },
@@ -649,8 +649,10 @@
     "auth:verify-type:email_change": "tested",
     "auth:verify-type:invite": "tested",
     "auth:verify-type:magiclink": "implemented",
+    "auth:verify-type:phone_change": "implemented",
     "auth:verify-type:recovery": "tested",
     "auth:verify-type:signup": "tested",
+    "auth:verify-type:sms": "implemented",
     "functions:route:* /functions/v1/{function_name}": "tested",
     "meta:route:GET /pg/config/version": "tested",
     "meta:route:GET /pg/health": "tested",
