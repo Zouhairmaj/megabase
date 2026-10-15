@@ -22,8 +22,18 @@ pub(crate) enum QueryFail {
     Parse { message: String, details: String },
     /// `PGRST108` for an `order`, `limit`, `offset`, `and`, or `or` on a resource that is not embedded.
     NotEmbedded { resource: String },
-    /// An embed, spread, or JSON-path filter. The route unit stays 501.
+    /// An embed or spread shape, or a filter key, this crate does not serve.
+    /// The route unit stays 501.
     Route,
+}
+
+/// One `key=op.value` filter (`Filter` in `ApiRequest/Types.hs`): the
+/// column, its JSON path (`payload->user->>name`), and the operator.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct FieldFilter {
+    column: String,
+    json: Vec<JsonStep>,
+    parsed: ParsedFilter,
 }
 
 /// One successful `GET` query string.
@@ -33,7 +43,7 @@ pub(crate) struct ReadQuery {
     orders: Vec<OrderTerm>,
     page: Page,
     logic: Vec<LogicNode>,
-    filters: Vec<(String, ParsedFilter)>,
+    filters: Vec<FieldFilter>,
     columns: Option<Vec<String>>,
     on_conflict: Option<Vec<String>>,
     handled: bool,
@@ -138,15 +148,15 @@ impl ReadQuery {
             return None;
         }
         let mut out = Vec::new();
-        for (column, parsed) in &self.filters {
-            match parsed {
+        for filter in &self.filters {
+            match &filter.parsed {
                 ParsedFilter::Served {
                     negated: false,
                     op: ServedOp::Eq,
                     quant: None,
                     language: None,
                     value,
-                } => out.push((column.clone(), value.clone())),
+                } if filter.json.is_empty() => out.push((filter.column.clone(), value.clone())),
                 _ => return None,
             }
         }
@@ -221,11 +231,10 @@ fn path_key(parent: Option<&str>, embed: &Embed) -> String {
 
 /// `true` when a filter or logic tree is `<key>=is.null` (or `not.is.null`)
 /// on the embed called `key`.
-fn names_null(filters: &[(String, ParsedFilter)], logic: &[LogicNode], key: &str) -> bool {
-    filters
-        .iter()
-        .any(|(column, parsed)| column == key && is_null_filter(parsed))
-        || logic.iter().any(|node| logic_names_null(node, key))
+fn names_null(filters: &[FieldFilter], logic: &[LogicNode], key: &str) -> bool {
+    filters.iter().any(|filter| {
+        filter.json.is_empty() && filter.column == key && is_null_filter(&filter.parsed)
+    }) || logic.iter().any(|node| logic_names_null(node, key))
 }
 
 /// SQL for one read, plus the `Content-Range` offset.
@@ -278,7 +287,7 @@ impl Embed {
 /// (`books.published=eq.true`, `books.order=title.desc`, `books.limit=1`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct EmbedParams {
-    filters: Vec<(String, ParsedFilter)>,
+    filters: Vec<FieldFilter>,
     logic: Vec<LogicNode>,
     orders: Vec<OrderTerm>,
     page: Page,
@@ -343,14 +352,16 @@ impl Aggregate {
     }
 }
 
+/// One `->` or `->>` step of a JSON path (`JsonOperation` in `ApiRequest/Types.hs`).
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum JsonStep {
+pub(crate) enum JsonStep {
     Arrow(JsonOperand),
     TwoArrow(JsonOperand),
 }
 
+/// The key or array index after a JSON arrow.
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum JsonOperand {
+pub(crate) enum JsonOperand {
     Key(String),
     /// Canonical `+N` or `-N`, bound and cast to `int`.
     Index(String),
@@ -405,12 +416,7 @@ enum LogicNode {
         op: LogicOp,
         children: Vec<LogicNode>,
     },
-    Filter {
-        column: String,
-        parsed: ParsedFilter,
-    },
-    /// JSON path inside a logic filter. The read is the route unit.
-    Json,
+    Filter(FieldFilter),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -506,13 +512,8 @@ pub(crate) fn parse_get_query(query: &str) -> Result<ReadQuery, QueryFail> {
         orders.push((path.clone(), terms));
     }
     let mut logic = Vec::new();
-    let mut logic_json = false;
     for (path, expr) in &collected.logics {
-        let node = parse_logic_tree(expr)?;
-        if logic_has_json(&node) {
-            logic_json = true;
-        }
-        logic.push((path.clone(), node));
+        logic.push((path.clone(), parse_logic_tree(expr)?));
     }
     let columns = match &collected.columns {
         Some(value) => Some(parse_name_list("columns parameter", value)?),
@@ -522,13 +523,23 @@ pub(crate) fn parse_get_query(query: &str) -> Result<ReadQuery, QueryFail> {
     let select = parse_select_value(select_raw)?;
     let mut filters = Vec::new();
     let mut embed_filters = Vec::new();
-    let mut route = logic_json;
+    let mut route = false;
     for (key, value) in &collected.filters {
         let parsed = parse_filter_value(value).map_err(filter_fail)?;
         match filter_path(key) {
-            Some((path, column)) if path.is_empty() => filters.push((column, parsed)),
-            Some((path, column)) => embed_filters.push((path, (column, parsed))),
-            // An empty key, a JSON path or a quoted name: the route unit stays 501.
+            Some((path, column, json)) => {
+                let filter = FieldFilter {
+                    column,
+                    json,
+                    parsed,
+                };
+                if path.is_empty() {
+                    filters.push(filter);
+                } else {
+                    embed_filters.push((path, filter));
+                }
+            }
+            // An empty key or segment, or a quoted name: the route unit stays 501.
             None => route = true,
         }
     }
@@ -607,20 +618,44 @@ pub(crate) fn parse_get_query(query: &str) -> Result<ReadQuery, QueryFail> {
     })
 }
 
-/// `pTreePath` for a filter key: the embed path and the column.
+/// `pTreePath` for a filter key: the embed path, the column, and its JSON path.
 ///
 /// `None` for a key this crate does not split: empty, an empty segment, a
-/// JSON path (`->`), or a quoted name.
-fn filter_path(key: &str) -> Option<(Vec<String>, String)> {
-    if key.contains("->") || key.contains('"') {
+/// quoted name, or a JSON path with text after it.
+fn filter_path(key: &str) -> Option<(Vec<String>, String, Vec<JsonStep>)> {
+    if key.contains('"') {
         return None;
+    }
+    if key.contains("->") {
+        return json_filter_path(key);
     }
     let mut parts: Vec<String> = key.split('.').map(str::to_string).collect();
     if parts.iter().any(String::is_empty) {
         return None;
     }
     let column = parts.pop()?;
-    Some((parts, column))
+    Some((parts, column, Vec::new()))
+}
+
+/// `pFieldName `sepBy1` pDelimiter` then `pJsonPath`, for a key with `->`.
+fn json_filter_path(key: &str) -> Option<(Vec<String>, String, Vec<JsonStep>)> {
+    let mut at = At::start(key);
+    let mut names = Vec::new();
+    loop {
+        let (name, next) = parse_field_name(&at).ok()?;
+        names.push(name);
+        at = next;
+        if at.peek() != Some('.') {
+            break;
+        }
+        at = at.bump('.');
+    }
+    let json = parse_json_path(&mut at).ok()?;
+    if json.is_empty() || !at.eof() {
+        return None;
+    }
+    let column = names.pop()?;
+    Some((names, column, json))
 }
 
 /// The embed a non-root parameter targets (`updateNode` in `Plan.hs`, with
@@ -674,14 +709,6 @@ fn filter_fail(error: FilterParseError) -> QueryFail {
     QueryFail::Parse {
         message: error.message,
         details: error.details,
-    }
-}
-
-fn logic_has_json(node: &LogicNode) -> bool {
-    match node {
-        LogicNode::Json => true,
-        LogicNode::Filter { .. } => false,
-        LogicNode::Expr { children, .. } => children.iter().any(logic_has_json),
     }
 }
 
@@ -1509,16 +1536,7 @@ fn logic_expr<'a>(at: &mut At<'a>) -> Result<LogicNode, PErr> {
 fn logic_filter<'a>(at: &mut At<'a>) -> Result<LogicNode, PErr> {
     let (name, next) = parse_field_name(at)?;
     *at = next;
-    let mut json = false;
-    while at.starts_with("->") {
-        json = true;
-        if at.starts_with("->>") {
-            *at = bump_str(at, "->>");
-        } else {
-            *at = bump_str(at, "->");
-        }
-        let _ = parse_json_operand(at)?;
-    }
+    let json = parse_json_path(at)?;
     if at.peek() != Some('.') {
         return Err(delimiter_err(at));
     }
@@ -1532,13 +1550,11 @@ fn logic_filter<'a>(at: &mut At<'a>) -> Result<LogicNode, PErr> {
         expects: expects_from_details(&error.details),
     })?;
     *at = bump_str(&op_at, expr);
-    if json {
-        return Ok(LogicNode::Json);
-    }
-    Ok(LogicNode::Filter {
+    Ok(LogicNode::Filter(FieldFilter {
         column: name,
+        json,
         parsed,
-    })
+    }))
 }
 
 fn unexpected_from_details(details: &str) -> String {
@@ -2425,8 +2441,9 @@ fn logic_names_null(node: &LogicNode, key: &str) -> bool {
         LogicNode::Expr { children, .. } => {
             children.iter().any(|child| logic_names_null(child, key))
         }
-        LogicNode::Filter { column, parsed } => column == key && is_null_filter(parsed),
-        LogicNode::Json => false,
+        LogicNode::Filter(filter) => {
+            filter.json.is_empty() && filter.column == key && is_null_filter(&filter.parsed)
+        }
     }
 }
 
@@ -2434,19 +2451,18 @@ fn logic_names_null(node: &LogicNode, key: &str) -> bool {
 /// `<embed>=is.null` keeps the parent rows with no embedded row (an
 /// anti-join); `<embed>=not.is.null` keeps the others. `rows` is the
 /// embed's subquery; `None` when the filter is an ordinary column filter.
-fn null_embed_predicate(
-    null_embeds: &[(String, String)],
-    column: &str,
-    parsed: &ParsedFilter,
-) -> Option<String> {
+fn null_embed_predicate(null_embeds: &[(String, String)], filter: &FieldFilter) -> Option<String> {
     let ParsedFilter::Is {
         negated,
         value: IsVal::Null,
-    } = parsed
+    } = &filter.parsed
     else {
         return None;
     };
-    let (_, rows) = null_embeds.iter().find(|(key, _)| key == column)?;
+    if !filter.json.is_empty() {
+        return None;
+    }
+    let (_, rows) = null_embeds.iter().find(|(key, _)| *key == filter.column)?;
     Some(if *negated {
         format!("EXISTS ({rows})")
     } else {
@@ -2592,7 +2608,8 @@ fn json_operand(step: &JsonStep) -> &JsonOperand {
     }
 }
 
-fn push_json(sql: &mut String, params: &mut Vec<String>, steps: &[JsonStep]) {
+/// `pgFmtJsonPath`: each key and index is a bound parameter.
+pub(crate) fn push_json(sql: &mut String, params: &mut Vec<String>, steps: &[JsonStep]) {
     for step in steps {
         let (arrow, operand) = match step {
             JsonStep::Arrow(operand) => ("->", operand),
@@ -2648,20 +2665,20 @@ fn push_where(
     sql: &mut String,
     params: &mut Vec<String>,
     relation: &str,
-    filters: &[(String, ParsedFilter)],
+    filters: &[FieldFilter],
     logic: &[LogicNode],
     column_types: &[(&str, &str)],
     null_embeds: &[(String, String)],
 ) -> Result<(), UnsafeType> {
     let mut wrote = false;
-    for (column, parsed) in filters {
+    for filter in filters {
         if wrote {
             sql.push_str(" AND ");
         }
-        if let Some(predicate) = null_embed_predicate(null_embeds, column, parsed) {
+        if let Some(predicate) = null_embed_predicate(null_embeds, filter) {
             sql.push_str(&predicate);
         } else {
-            let bound = bound_filter(column, parsed, lookup_type(column_types, column));
+            let bound = bound_filter(filter, column_types);
             append_predicate(sql, params, relation, &bound)?;
         }
         wrote = true;
@@ -2709,15 +2726,14 @@ fn push_logic(
             sql.push(')');
             Ok(())
         }
-        LogicNode::Filter { column, parsed } => {
-            if let Some(predicate) = null_embed_predicate(null_embeds, column, parsed) {
+        LogicNode::Filter(filter) => {
+            if let Some(predicate) = null_embed_predicate(null_embeds, filter) {
                 sql.push_str(&predicate);
                 return Ok(());
             }
-            let bound = bound_filter(column, parsed, lookup_type(column_types, column));
+            let bound = bound_filter(filter, column_types);
             append_predicate(sql, params, relation, &bound)
         }
-        LogicNode::Json => Ok(()),
     }
 }
 
@@ -2793,8 +2809,24 @@ fn lookup_type(column_types: &[(&str, &str)], column: &str) -> Option<String> {
         .map(|(_, pg_type)| (*pg_type).to_string())
 }
 
-fn bound_filter(column: &str, parsed: &ParsedFilter, pg_type: Option<String>) -> BoundFilter {
-    let (negated, body) = match parsed {
+/// The filter with its catalog type (`resolveQueryInputField` in `Plan.hs`).
+///
+/// A JSON path applies to the column as is when it is `json` or `jsonb`, and
+/// to `to_jsonb(column)` otherwise, even when the column is missing. The
+/// value then takes the type of the path: `text` after `->>`, the column's
+/// `json` or `jsonb` after `->`.
+fn bound_filter(filter: &FieldFilter, column_types: &[(&str, &str)]) -> BoundFilter {
+    let column_type = lookup_type(column_types, &filter.column);
+    let is_json = matches!(column_type.as_deref(), Some("json" | "jsonb"));
+    let pg_type = match filter.json.last() {
+        None => column_type,
+        Some(JsonStep::TwoArrow(_)) => Some("text".to_string()),
+        Some(JsonStep::Arrow(_)) if column_type.as_deref() == Some("json") => {
+            Some("json".to_string())
+        }
+        Some(JsonStep::Arrow(_)) => Some("jsonb".to_string()),
+    };
+    let (negated, body) = match &filter.parsed {
         ParsedFilter::Served {
             negated,
             op,
@@ -2817,7 +2849,9 @@ fn bound_filter(column: &str, parsed: &ParsedFilter, pg_type: Option<String>) ->
         }
     };
     BoundFilter {
-        column: column.to_string(),
+        column: filter.column.clone(),
+        json: filter.json.clone(),
+        to_json: !filter.json.is_empty() && !is_json,
         negated,
         body,
         pg_type,
@@ -3857,5 +3891,77 @@ mod tests {
             .sql
             .contains("\"todos\".\"data\"->$4::int->$5->>$6::int AS \"mycol\""));
         assert_eq!(sql.params, vec!["a", "b", "+1", "+1", "mycol", "+2"]);
+    }
+
+    #[test]
+    fn json_filter_casts_the_value_to_the_path_type() {
+        let query = parse_get_query(
+            "select=id&payload->user->>name=eq.a&payload->user=eq.{}&title->>k=like.*x*\
+             &or=(payload->tags->0.eq.1,meta->>n.is.null)",
+        )
+        .unwrap();
+        let types = [
+            ("id", "bigint"),
+            ("payload", "jsonb"),
+            ("title", "text"),
+            ("meta", "json"),
+        ];
+        let sql = build_read_sql("public", "events", &query, &types, &HashMap::new()).unwrap();
+        assert!(
+            sql.sql.contains(
+                "WHERE \"events\".\"payload\"->$1->>$2 = ($3::text)::text \
+                 AND \"events\".\"payload\"->$4 = ($5::text)::jsonb \
+                 AND to_jsonb(\"events\".\"title\")->>$6 like ($7::text)::text \
+                 AND (\"events\".\"payload\"->$8->$9::int = ($10::text)::jsonb \
+                 OR \"events\".\"meta\"->>$11 IS NULL)"
+            ),
+            "{}",
+            sql.sql
+        );
+        assert_eq!(
+            sql.params,
+            vec!["user", "name", "a", "user", "{}", "k", "%x%", "tags", "+0", "1", "n"]
+        );
+    }
+
+    #[test]
+    fn json_filter_on_a_json_column_compares_json() {
+        let query = parse_get_query("meta->k=eq.1&ghost->k=eq.1").unwrap();
+        let types = [("meta", "json")];
+        let sql = build_read_sql("public", "events", &query, &types, &HashMap::new()).unwrap();
+        // A missing column is still wrapped, so PostgreSQL reports `42703`.
+        assert!(
+            sql.sql.contains(
+                "\"events\".\"meta\"->$1 = ($2::text)::json \
+                 AND to_jsonb(\"events\".\"ghost\")->$3 = ($4::text)::jsonb"
+            ),
+            "{}",
+            sql.sql
+        );
+    }
+
+    #[test]
+    fn json_filter_keys_split_the_embed_path_first() {
+        assert_eq!(
+            filter_path("books.data->a->>0"),
+            Some((
+                vec!["books".to_string()],
+                "data".to_string(),
+                vec![
+                    JsonStep::Arrow(JsonOperand::Key("a".to_string())),
+                    JsonStep::TwoArrow(JsonOperand::Index("+0".to_string())),
+                ],
+            ))
+        );
+        // Text after the path, or an empty operand, is not split.
+        assert_eq!(filter_path("data->a)"), None);
+        assert_eq!(filter_path("data->"), None);
+        assert_eq!(filter_path("->a"), None);
+        // A JSON path never names an embed with `is.null`.
+        let query = parse_get_query("data->a=is.null").unwrap();
+        assert!(!names_null(&query.filters, &query.logic, "data"));
+        // `PUT` needs plain column `eq` filters.
+        let query = parse_get_query("data->a=eq.1").unwrap();
+        assert_eq!(query.eq_column_filters(), None);
     }
 }

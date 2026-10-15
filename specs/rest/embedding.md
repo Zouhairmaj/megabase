@@ -147,7 +147,7 @@ of:
 
 Spread (`...name(...)`), empty embeds (`notes()`,
 filter-only upstream), related orders (`order=clients(id)` on an embed, or
-inside one), JSON-path filter keys (`books.data->>a=eq.1`), embedding to or
+inside one), embedding to or
 from a foreign table, several view relationships matched by
 a table name, and embeds in write responses. Many-to-many through a junction
 table is 501 too: whenever a

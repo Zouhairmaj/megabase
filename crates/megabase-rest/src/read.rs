@@ -2439,10 +2439,14 @@ mod tests {
             body["message"],
             "'a' is not an embedded resource in this request"
         );
-        // A JSON-path filter key is still the route unit.
+        // The embed path comes before a JSON path in the key.
+        let (status, body, _) = send(app.clone(), get("/rest/v1/todos?a.b-%3Ec=eq.1")).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(body["code"], "PGRST108");
+        // A JSON-path filter key is served: it reaches the database.
         let (status, body, _) = send(app, get("/rest/v1/todos?a-%3Eb=eq.1")).await;
-        assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
-        assert_eq!(body["unit"], "GET /rest/v1/todos");
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(body["code"], "PGRST000");
     }
 
     #[tokio::test]
