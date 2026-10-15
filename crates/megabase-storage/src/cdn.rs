@@ -13,7 +13,7 @@ use axum::{
 };
 use serde_json::{json, Value};
 
-use super::{fastify_json, not_implemented, verified_role, StorageState};
+use super::{fastify_json, not_implemented, verified_claims, StorageState};
 
 /// The only role `enforceJwtRoles` admits (`dbServiceRole`).
 const SERVICE_ROLE: &str = "service_role";
@@ -51,10 +51,10 @@ pub(super) async fn purge_cache(
     }
     // A missing header fails `authSchema` validation and an invalid JWT is
     // `AccessDenied` with the verifier's message; neither is ported.
-    let Some(role) = verified_role(&state, &headers) else {
+    let Some(claims) = verified_claims(&state, &headers) else {
         return not_implemented(&method, &uri);
     };
-    if role.as_deref() != Some(SERVICE_ROLE) {
+    if claims.role.as_deref() != Some(SERVICE_ROLE) {
         return fastify_json(StatusCode::FORBIDDEN, &invalid_role());
     }
     fastify_json(StatusCode::BAD_REQUEST, &missing_endpoint())
