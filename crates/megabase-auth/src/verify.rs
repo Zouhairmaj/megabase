@@ -3,13 +3,14 @@
 // and internal/crypto/crypto.go (MIT), pin v2.197.0.
 
 //! `GET` and `POST /auth/v1/verify` for signup, invite, recovery, magic
-//! link, email change, and the `email` OTP type.
+//! link, email change, the `email` OTP type, and the phone OTP types `sms`
+//! and `phone_change`.
 //!
 //! GET validation failures stay JSON. Later GET failures are 303 redirects
 //! whose fragment matches GoTrue. POST failures stay JSON. A GET `pkce_`
 //! token is the PKCE flow: success redirects with `?code=<auth_code>`
-//! instead of a session, and errors also go in the query. SMS and phone
-//! change stay HTTP 501.
+//! instead of a session, and errors also go in the query. Phone OTP with
+//! `GOTRUE_SMS_TEST_OTP` or the `twilio_verify` provider stays HTTP 501.
 
 use std::time::SystemTime;
 
@@ -29,10 +30,8 @@ use crate::state::AuthState;
 use crate::store::StoreError;
 use crate::store::{email_otp_hash, VerifyKind, VerifyOutcome, VerifyRequest, SINGLE_CONFIRMATION};
 use crate::token::{authentication_method, null_as_default, unhandled};
+use crate::user::validate_phone;
 use crate::COMPONENT;
-
-const UNIT_SMS: &str = "auth:verify-type:sms";
-const UNIT_PHONE_CHANGE: &str = "auth:verify-type:phone_change";
 
 #[derive(Debug, Deserialize)]
 struct VerifyBody {
@@ -102,15 +101,14 @@ pub(crate) async fn verify_get(
         None
     };
     let pkce = pkce_method.is_some();
-    if let Some(unit) = out_of_scope(&params.kind) {
-        return MegabaseNotImplemented::new(COMPONENT, unit).into_response();
-    }
     let fail = |status: u16, error_code: &str, message: &str| {
         see_other(&error_redirect(
             &redirect, pkce, status, error_code, message,
         ))
     };
-    let Some(kind) = known_kind(&params.kind) else {
+    // `verifyTokenHash` knows only the email types: `sms` and
+    // `phone_change` get the same 400 as an unknown type.
+    let Some(kind) = known_kind(&params.kind).filter(|kind| !kind.is_phone()) else {
         return fail(400, "validation_failed", "Invalid email verification type");
     };
     let request = VerifyRequest {
@@ -118,10 +116,12 @@ pub(crate) async fn verify_get(
         token_hash: params.token,
         hash_path: true,
         email: String::new(),
+        phone: String::new(),
         aud: request_aud(&headers, &state.config),
         autoconfirm: state.config.mailer_autoconfirm,
         secure_email_change: state.config.secure_email_change,
         otp_exp_seconds: state.config.mailer_otp_exp_seconds,
+        sms_otp_exp_seconds: state.config.sms_otp_exp_seconds,
         pkce_method,
     };
     // Signing happens after the one-time token is cleared. GoTrue rolls that
@@ -190,36 +190,38 @@ pub(crate) async fn verify_post(
         redirect_to: body.redirect_to,
     };
     let prepared = match prepare_post(&params) {
-        Ok(PostPrep::Phone) => {
-            let unit = if params.kind == "phone_change" {
-                UNIT_PHONE_CHANGE
-            } else {
-                UNIT_SMS
-            };
-            return MegabaseNotImplemented::new(COMPONENT, unit).into_response();
-        }
-        Ok(PostPrep::Ready(prepared)) => prepared,
+        Ok(prepared) => prepared,
         Err(error) => return error.into_response(),
     };
-    if let Some(unit) = out_of_scope(&params.kind) {
-        return MegabaseNotImplemented::new(COMPONENT, unit).into_response();
-    }
-    let kind = if let Some(kind) = known_kind(&params.kind) {
-        kind
-    } else if prepared.hash_path {
-        return validation("Invalid email verification type").into_response();
-    } else {
-        VerifyKind::Other
+    let kind = match known_kind(&params.kind) {
+        Some(kind) if !(prepared.hash_path && kind.is_phone()) => kind,
+        _ if prepared.hash_path => {
+            return validation("Invalid email verification type").into_response();
+        }
+        _ => VerifyKind::Other,
     };
+    // `verifyUserAndToken` accepts the test OTP map and asks Twilio Verify
+    // before the stored token. Neither is ported.
+    if kind.is_phone() && !prepared.phone.is_empty() {
+        if state.config.sms_test_otp_configured {
+            return MegabaseNotImplemented::new(COMPONENT, "GOTRUE_SMS_TEST_OTP").into_response();
+        }
+        if state.config.sms_provider == "twilio_verify" {
+            return MegabaseNotImplemented::new(COMPONENT, "GOTRUE_SMS_PROVIDER=twilio_verify")
+                .into_response();
+        }
+    }
     let request = VerifyRequest {
         kind,
         token_hash: prepared.token_hash,
         hash_path: prepared.hash_path,
         email: prepared.email,
+        phone: prepared.phone,
         aud: request_aud(&headers, &state.config),
         autoconfirm: state.config.mailer_autoconfirm,
         secure_email_change: state.config.secure_email_change,
         otp_exp_seconds: state.config.mailer_otp_exp_seconds,
+        sms_otp_exp_seconds: state.config.sms_otp_exp_seconds,
         // `verifyPost` always issues a session, whatever the token prefix.
         pkce_method: None,
     };
@@ -271,11 +273,7 @@ struct Prepared {
     token_hash: String,
     hash_path: bool,
     email: String,
-}
-
-enum PostPrep {
-    Ready(Prepared),
-    Phone,
+    phone: String,
 }
 
 fn validate_get(params: &Params) -> Result<(), GoTrueError> {
@@ -288,7 +286,7 @@ fn validate_get(params: &Params) -> Result<(), GoTrueError> {
     Ok(())
 }
 
-fn prepare_post(params: &Params) -> Result<PostPrep, GoTrueError> {
+fn prepare_post(params: &Params) -> Result<Prepared, GoTrueError> {
     if params.kind.is_empty() {
         return Err(validation("Verify requires a verification type"));
     }
@@ -299,7 +297,13 @@ fn prepare_post(params: &Params) -> Result<PostPrep, GoTrueError> {
     }
     if has_token {
         if !params.phone.is_empty() && params.email.is_empty() {
-            return Ok(PostPrep::Phone);
+            let phone = validate_phone(&params.phone)?;
+            return Ok(Prepared {
+                token_hash: email_otp_hash(&phone, &params.token),
+                hash_path: false,
+                email: String::new(),
+                phone,
+            });
         }
         if params.phone.is_empty() && !params.email.is_empty() {
             let email = validate_email(&params.email).map_err(|_| {
@@ -309,11 +313,12 @@ fn prepare_post(params: &Params) -> Result<PostPrep, GoTrueError> {
                     "Invalid email format",
                 )
             })?;
-            return Ok(PostPrep::Ready(Prepared {
+            return Ok(Prepared {
                 token_hash: email_otp_hash(&email, &params.token),
                 hash_path: false,
                 email,
-            }));
+                phone: String::new(),
+            });
         }
         return Err(validation(
             "Only an email address or phone number should be provided on verify",
@@ -324,11 +329,12 @@ fn prepare_post(params: &Params) -> Result<PostPrep, GoTrueError> {
             "Only the token_hash and type should be provided",
         ));
     }
-    Ok(PostPrep::Ready(Prepared {
+    Ok(Prepared {
         token_hash: params.token_hash.clone(),
         hash_path: true,
         email: String::new(),
-    }))
+        phone: String::new(),
+    })
 }
 
 fn known_kind(kind: &str) -> Option<VerifyKind> {
@@ -350,14 +356,14 @@ fn known_kind(kind: &str) -> Option<VerifyKind> {
         // token; the verify continues as `signup` or `magiclink`.
         // megabase:unit auth:verify-type:email
         "email" => Some(VerifyKind::Email),
-        _ => None,
-    }
-}
-
-fn out_of_scope(kind: &str) -> Option<&'static str> {
-    match kind {
-        "sms" => Some(UNIT_SMS),
-        "phone_change" => Some(UNIT_PHONE_CHANGE),
+        // Phone plus OTP only (`POST`): the confirmation token, then
+        // `ConfirmPhone`.
+        // megabase:unit auth:verify-type:sms
+        "sms" => Some(VerifyKind::Sms),
+        // Phone plus OTP only (`POST`): the phone change token, then
+        // `ConfirmPhoneChange` and the phone identity.
+        // megabase:unit auth:verify-type:phone_change
+        "phone_change" => Some(VerifyKind::PhoneChange),
         _ => None,
     }
 }
@@ -1372,6 +1378,241 @@ mod tests {
         .await;
         assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
         assert_eq!(body["msg"], "Database error finding user from email link");
+    }
+
+    fn phone_call(kind: &str, phone: &str, token: &str) -> String {
+        format!(r#"{{"type":"{kind}","token":"{token}","phone":"{phone}"}}"#)
+    }
+
+    #[tokio::test]
+    async fn sms_otp_confirms_the_phone_once() {
+        let backend = Backend::memory();
+        let phone = "15550001111";
+        backend
+            .plant_phone_verification_for_test(
+                phone,
+                "",
+                &email_otp_hash(phone, "123456"),
+                SystemTime::now(),
+            )
+            .await;
+        let router = app(true, backend);
+        let (status, body, _, _) = call(
+            router.clone(),
+            "POST",
+            "/auth/v1/verify",
+            Some(&phone_call("sms", phone, "000000")),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_eq!(body["error_code"], "otp_expired");
+        assert_eq!(body["msg"], "Token has expired or is invalid");
+
+        // `validatePhone` strips `+` and spaces before hashing.
+        let (status, body, headers, _) = call(
+            router.clone(),
+            "POST",
+            "/auth/v1/verify",
+            Some(&phone_call("sms", "+1 555 000 1111", "123456")),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(body["user"]["phone"], phone);
+        assert!(body["user"]["phone_confirmed_at"].is_string());
+        assert!(headers.contains_key("sb-auth-session-id"));
+        let access = body["access_token"].as_str().unwrap();
+        let claims = Hs256::new(SECRET.as_bytes())
+            .unwrap()
+            .verify(access)
+            .unwrap();
+        assert_eq!(claims.raw["amr"][0]["method"], "otp");
+
+        let (status, body, _, _) = call(
+            router,
+            "POST",
+            "/auth/v1/verify",
+            Some(&phone_call("sms", phone, "123456")),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_eq!(body["msg"], "Token has expired or is invalid");
+    }
+
+    #[tokio::test]
+    async fn sms_otp_expires_after_the_sms_window() {
+        let backend = Backend::memory();
+        let phone = "15550003333";
+        backend
+            .plant_phone_verification_for_test(
+                phone,
+                "",
+                &email_otp_hash(phone, "123456"),
+                SystemTime::now() - std::time::Duration::from_secs(120),
+            )
+            .await;
+        // `GOTRUE_SMS_OTP_EXP` defaults to 60 seconds; the mailer window
+        // (one day) does not apply.
+        let (status, body, _, _) = call(
+            app(true, backend),
+            "POST",
+            "/auth/v1/verify",
+            Some(&phone_call("sms", phone, "123456")),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_eq!(body["msg"], "Token has expired or is invalid");
+    }
+
+    #[tokio::test]
+    async fn phone_change_moves_the_number_and_links_a_phone_identity() {
+        let backend = Backend::memory();
+        let new_phone = "15550002222";
+        backend
+            .plant_phone_verification_for_test(
+                "15550001111",
+                new_phone,
+                &email_otp_hash(new_phone, "654321"),
+                SystemTime::now(),
+            )
+            .await;
+        let router = app(true, backend);
+        // The lookup is by `phone_change`, so the current number finds nobody.
+        let (status, body, _, _) = call(
+            router.clone(),
+            "POST",
+            "/auth/v1/verify",
+            Some(&phone_call("phone_change", "15550001111", "654321")),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_eq!(body["msg"], "Token has expired or is invalid");
+
+        let (status, body, _, _) = call(
+            router.clone(),
+            "POST",
+            "/auth/v1/verify",
+            Some(&phone_call("phone_change", new_phone, "654321")),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(body["user"]["phone"], new_phone);
+        assert!(body["user"]["phone_confirmed_at"].is_string());
+        let identities = body["user"]["identities"].as_array().unwrap();
+        let phone_identity = identities
+            .iter()
+            .find(|identity| identity["provider"] == "phone")
+            .expect("phone identity");
+        assert_eq!(phone_identity["identity_data"]["phone"], new_phone);
+        assert_eq!(phone_identity["identity_data"]["phone_verified"], true);
+        assert_eq!(
+            body["user"]["app_metadata"]["providers"],
+            json!(["email", "phone"])
+        );
+
+        let (status, _, _, _) = call(
+            router,
+            "POST",
+            "/auth/v1/verify",
+            Some(&phone_call("phone_change", new_phone, "654321")),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn phone_types_reject_the_hash_and_email_paths() {
+        let backend = Backend::memory();
+        let phone = "15550004444";
+        backend
+            .plant_phone_verification_for_test(
+                phone,
+                "",
+                &email_otp_hash(phone, "123456"),
+                SystemTime::now(),
+            )
+            .await;
+        let router = app(true, backend);
+        let invalid_type = "http://localhost:3000#error=invalid_request&error_code=validation_failed&error_description=Invalid+email+verification+type&sb=";
+        for kind in ["sms", "phone_change"] {
+            let (status, _, headers, _) = call(
+                router.clone(),
+                "GET",
+                &format!("/auth/v1/verify?type={kind}&token=abc"),
+                None,
+            )
+            .await;
+            assert_eq!(status, StatusCode::SEE_OTHER, "{kind}");
+            assert_eq!(headers[header::LOCATION], invalid_type);
+
+            let (status, body, _, _) = call(
+                router.clone(),
+                "POST",
+                "/auth/v1/verify",
+                Some(&format!(r#"{{"type":"{kind}","token_hash":"abc"}}"#)),
+            )
+            .await;
+            assert_eq!(status, StatusCode::BAD_REQUEST, "{kind}");
+            assert_eq!(body["error_code"], "validation_failed");
+            assert_eq!(body["msg"], "Invalid email verification type");
+
+            // Email plus OTP looks up an empty phone and finds nobody.
+            let (status, body, _, _) = call(
+                router.clone(),
+                "POST",
+                "/auth/v1/verify",
+                Some(&format!(
+                    r#"{{"type":"{kind}","token":"123456","email":"a@example.com"}}"#
+                )),
+            )
+            .await;
+            assert_eq!(status, StatusCode::FORBIDDEN, "{kind}");
+            assert_eq!(body["msg"], "Token has expired or is invalid");
+        }
+
+        // Phone plus OTP on an email type looks up an empty email.
+        let (status, body, _, _) = call(
+            router.clone(),
+            "POST",
+            "/auth/v1/verify",
+            Some(&phone_call("signup", phone, "123456")),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_eq!(body["msg"], "Token has expired or is invalid");
+
+        let (status, body, _, _) = call(
+            router,
+            "POST",
+            "/auth/v1/verify",
+            Some(&phone_call("sms", "0123", "123456")),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(body["error_code"], "validation_failed");
+        assert_eq!(body["msg"], "Invalid phone number format (E.164 required)");
+    }
+
+    #[tokio::test]
+    async fn unported_sms_settings_are_not_implemented() {
+        for (key, value) in [
+            ("GOTRUE_SMS_TEST_OTP", "15550001111:123456"),
+            ("GOTRUE_SMS_PROVIDER", "twilio_verify"),
+        ] {
+            let config =
+                AuthConfig::from_lookup(|name| (name == key).then(|| value.to_string())).unwrap();
+            let jwt = Hs256::new(SECRET.as_bytes()).unwrap();
+            let router =
+                crate::routes::router(AuthState::new(config, Some(jwt), Backend::memory()));
+            let (status, body, _, _) = call(
+                router,
+                "POST",
+                "/auth/v1/verify",
+                Some(&phone_call("sms", "15550001111", "123456")),
+            )
+            .await;
+            assert_eq!(status, StatusCode::NOT_IMPLEMENTED, "{key}");
+            assert_eq!(body["code"], "MEGABASE_NOT_IMPLEMENTED");
+        }
     }
 
     #[tokio::test]

@@ -4,6 +4,18 @@ All notable changes to Megabase are documented in this file.
 The format is produced by [release-please](https://github.com/googleapis/release-please).
 Sections: Features, Bug Fixes, Performance, Conformance/judge, Documentation.
 
+## [0.1.38](https://github.com/Zouhairmaj/megabase/compare/v0.1.37...v0.1.38) (2026-10-15)
+
+
+### Features
+
+* **auth:** serve sms and phone_change verify ([#421](https://github.com/Zouhairmaj/megabase/issues/421)) ([040afa0](https://github.com/Zouhairmaj/megabase/commit/040afa010a71c64c222c78308b8de2eac73a77c9))
+
+
+### Documentation
+
+* **storage:** spec resumable uploads and record tus-server blocker ([#419](https://github.com/Zouhairmaj/megabase/issues/419)) ([0287e32](https://github.com/Zouhairmaj/megabase/commit/0287e32a2818fd293bd2ef7d391dc16d4e687ceb))
+
 ## [0.1.37](https://github.com/Zouhairmaj/megabase/compare/v0.1.36...v0.1.37) (2026-10-15)
 
 

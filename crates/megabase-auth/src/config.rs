@@ -32,6 +32,12 @@ pub struct AuthConfig {
     pub phone_enabled: bool,
     pub external: ExternalProviders,
     pub sms_provider: String,
+    /// `GOTRUE_SMS_OTP_EXP` in seconds. `0` is raised to 60, matching
+    /// GoTrue's startup default.
+    pub sms_otp_exp_seconds: u64,
+    /// `GOTRUE_SMS_TEST_OTP` is set. Phone verify does not port the test
+    /// OTP map, so it answers 501 instead.
+    pub sms_test_otp_configured: bool,
     pub saml_enabled: bool,
     pub saml_private_key_next_configured: bool,
     pub passkeys_enabled: bool,
@@ -208,6 +214,8 @@ impl AuthConfig {
             phone_enabled: true,
             external: ExternalProviders::default(),
             sms_provider: String::new(),
+            sms_otp_exp_seconds: 60,
+            sms_test_otp_configured: false,
             saml_enabled: false,
             // With SAML off, GoTrue reports `true`: see `from_lookup`.
             saml_private_key_next_configured: true,
@@ -243,6 +251,10 @@ impl AuthConfig {
         };
         let otp_exp = match optional_u64(&lookup, "GOTRUE_MAILER_OTP_EXP")? {
             Some(0) | None => defaults.mailer_otp_exp_seconds,
+            Some(value) => value,
+        };
+        let sms_otp_exp = match optional_u64(&lookup, "GOTRUE_SMS_OTP_EXP")? {
+            Some(0) | None => defaults.sms_otp_exp_seconds,
             Some(value) => value,
         };
         let jwt_exp = match optional_i64(&lookup, "GOTRUE_JWT_EXP")? {
@@ -304,6 +316,9 @@ impl AuthConfig {
                 zoom: flag(&lookup, "GOTRUE_EXTERNAL_ZOOM_ENABLED")?,
             },
             sms_provider: lookup("GOTRUE_SMS_PROVIDER").unwrap_or(defaults.sms_provider),
+            sms_otp_exp_seconds: sms_otp_exp,
+            sms_test_otp_configured: lookup("GOTRUE_SMS_TEST_OTP")
+                .is_some_and(|value| !value.is_empty()),
             saml_enabled,
             saml_private_key_next_configured,
             passkeys_enabled: optional_bool(&lookup, "GOTRUE_PASSKEY_ENABLED")?
@@ -420,6 +435,8 @@ mod tests {
         assert!(config.phone_enabled);
         assert!(!config.external.github);
         assert_eq!(config.sms_provider, "");
+        assert_eq!(config.sms_otp_exp_seconds, 60);
+        assert!(!config.sms_test_otp_configured);
         assert!(!config.saml_enabled);
         assert!(config.saml_private_key_next_configured);
         assert!(!config.passkeys_enabled);
@@ -443,6 +460,8 @@ mod tests {
             "GOTRUE_PASSWORD_MIN_LENGTH" => Some("4".into()),
             "GOTRUE_JWT_EXP" => Some("120".into()),
             "GOTRUE_SMS_PROVIDER" => Some("twilio".into()),
+            "GOTRUE_SMS_OTP_EXP" => Some("300".into()),
+            "GOTRUE_SMS_TEST_OTP" => Some("15550001111:123456".into()),
             _ => None,
         })
         .unwrap();
@@ -453,6 +472,8 @@ mod tests {
         assert_eq!(config.password_min_length, 6);
         assert_eq!(config.jwt_exp_seconds, 120);
         assert_eq!(config.sms_provider, "twilio");
+        assert_eq!(config.sms_otp_exp_seconds, 300);
+        assert!(config.sms_test_otp_configured);
         assert!(config.saml_private_key_next_configured);
     }
 
