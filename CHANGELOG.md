@@ -4,6 +4,13 @@ All notable changes to Megabase are documented in this file.
 The format is produced by [release-please](https://github.com/googleapis/release-please).
 Sections: Features, Bug Fixes, Performance, Conformance/judge, Documentation.
 
+## [0.1.36](https://github.com/Zouhairmaj/megabase/compare/v0.1.35...v0.1.36) (2026-10-15)
+
+
+### Features
+
+* **auth:** port pkce, id_token and web3 token grant handling ([#406](https://github.com/Zouhairmaj/megabase/issues/406)) ([4f19358](https://github.com/Zouhairmaj/megabase/commit/4f19358b6c0a77f8cdaa354b9e79083a373a98dc))
+
 ## [0.1.35](https://github.com/Zouhairmaj/megabase/compare/v0.1.34...v0.1.35) (2026-10-15)
 
 
