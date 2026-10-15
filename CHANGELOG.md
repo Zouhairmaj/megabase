@@ -4,6 +4,13 @@ All notable changes to Megabase are documented in this file.
 The format is produced by [release-please](https://github.com/googleapis/release-please).
 Sections: Features, Bug Fixes, Performance, Conformance/judge, Documentation.
 
+## [0.1.37](https://github.com/Zouhairmaj/megabase/compare/v0.1.36...v0.1.37) (2026-10-15)
+
+
+### Features
+
+* **storage:** serve single object delete, object info and authenticated head ([#416](https://github.com/Zouhairmaj/megabase/issues/416)) ([5cd7737](https://github.com/Zouhairmaj/megabase/commit/5cd7737a453ad8e1a5388ee340d8e4680ab519f2))
+
 ## [0.1.36](https://github.com/Zouhairmaj/megabase/compare/v0.1.35...v0.1.36) (2026-10-15)
 
 
