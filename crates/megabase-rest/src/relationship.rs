@@ -5,7 +5,9 @@
 //!
 //! The target is a table or view name, a foreign key constraint name, or the
 //! single column of a foreign key on the requested table (a column hint, for
-//! example `messages?select=author:user_id(*)`). Candidates are the foreign
+//! example `messages?select=author:user_id(*)`). A `!hint` after a table
+//! target picks among its keys by constraint name, key column, or referenced
+//! column (`posts?select=users!editor_id(*)`). Candidates are the foreign
 //! keys between relations of one schema, in both directions, as
 //! `allM2OandO2ORels` and `addInverseRels` in `SchemaCache.hs` list them,
 //! plus the keys a view inherits from the tables it selects
@@ -271,6 +273,13 @@ impl Candidate<'_> {
             _ => None,
         }
     }
+
+    fn single_referenced_column(&self) -> Option<&str> {
+        match self.columns.as_slice() {
+            [(_, referenced)] => Some(referenced),
+            _ => None,
+        }
+    }
 }
 
 /// Why no single relationship was chosen.
@@ -338,8 +347,13 @@ fn candidates<'a>(schema: &str, relation: &str, keys: &'a [ForeignKey]) -> Vec<C
     out
 }
 
-/// `findRel` with no `!hint`: the relationships `target` names from
+/// `findRel`: the relationship `target` (and its optional `!hint`) names from
 /// `schema.relation`. A constraint or column target never names a view.
+///
+/// `junctions` lists the tables that would give a many-to-many link between
+/// `relation` and `target` (`addM2MRels`: a key to each, both inside the
+/// junction's primary key). This lookup does not build those links, so a
+/// request one of them could match is [`FindError::Unsupported`].
 ///
 /// # Errors
 ///
@@ -350,22 +364,53 @@ pub(crate) fn find_relationship<'a>(
     schema: &str,
     relation: &str,
     target: &str,
+    hint: Option<&str>,
     keys: &'a [ForeignKey],
+    junctions: &[String],
 ) -> Result<Relationship, FindError<'a>> {
+    // A many-to-many link matches by table name with no hint, or by
+    // junction name with one.
+    let many_to_many = match hint {
+        None => !junctions.is_empty(),
+        Some(hint) => junctions.iter().any(|junction| junction == hint),
+    };
+    if many_to_many {
+        return Err(FindError::Unsupported);
+    }
     let mut by_table = false;
     let mut matched: Vec<Candidate<'a>> = candidates(schema, relation, keys)
         .into_iter()
-        .filter(|rel| {
-            let column = rel.single_column() == Some(target);
-            if rel.is_self {
-                // `family_tree?select=children:family_tree(*)` (one-to-many) or
-                // `family_tree?select=parent(*)` (many-to-one by column).
-                (rel.foreign_table == target && rel.cardinality == Cardinality::OneToMany)
-                    || (column && rel.cardinality == Cardinality::ManyToOne)
-            } else {
-                let table = rel.foreign_table == target;
-                by_table |= table;
-                table || ((rel.constraint == target || column) && !rel.foreign_is_view)
+        .filter(|rel| match hint {
+            None => {
+                let column = rel.single_column() == Some(target);
+                if rel.is_self {
+                    // `family_tree?select=children:family_tree(*)` (one-to-many) or
+                    // `family_tree?select=parent(*)` (many-to-one by column).
+                    (rel.foreign_table == target && rel.cardinality == Cardinality::OneToMany)
+                        || (column && rel.cardinality == Cardinality::ManyToOne)
+                } else {
+                    let table = rel.foreign_table == target;
+                    by_table |= table;
+                    table || ((rel.constraint == target || column) && !rel.foreign_is_view)
+                }
+            }
+            Some(hint) => {
+                let referenced = rel.single_referenced_column() == Some(hint);
+                if rel.is_self {
+                    // `organizations?select=auditees:organizations!auditor(*)`.
+                    rel.foreign_table == target
+                        && rel.cardinality == Cardinality::OneToMany
+                        && referenced
+                } else {
+                    // `projects?select=clients!projects_client_id_fkey(*)`,
+                    // `clients!client_id(*)` or `clients!id(*)`.
+                    let table = rel.foreign_table == target;
+                    by_table |= table;
+                    table
+                        && (rel.constraint == hint
+                            || (rel.single_column() == Some(hint) && !rel.foreign_is_view)
+                            || referenced)
+                }
             }
         })
         .collect();
@@ -379,9 +424,11 @@ pub(crate) fn find_relationship<'a>(
             root_columns: rel.columns.iter().map(|(r, _)| (*r).to_string()).collect(),
             target_columns: rel.columns.iter().map(|(_, t)| (*t).to_string()).collect(),
         }),
-        // A table-name target may also match a many-to-many link through a
-        // junction table, which this lookup does not list.
-        _ if by_table => Err(FindError::Unsupported),
+        // Several view relationships are not listed in upstream's order or
+        // wording here, so they stay a 501 rather than a guessed `PGRST201`.
+        _ if by_table && matched.iter().any(|r| r.table_is_view || r.foreign_is_view) => {
+            Err(FindError::Unsupported)
+        }
         _ => Err(FindError::Ambiguous(matched)),
     }
 }
@@ -401,6 +448,16 @@ pub(crate) fn ambiguous_hint(target: &str, rels: &[Candidate<'_>]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `findRel` with no hint and no many-to-many junction.
+    fn find_relationship<'a>(
+        schema: &str,
+        relation: &str,
+        target: &str,
+        keys: &'a [ForeignKey],
+    ) -> Result<Relationship, FindError<'a>> {
+        super::find_relationship(schema, relation, target, None, keys, &[])
+    }
 
     fn fk(name: &str, table: &str, foreign: &str, cols: &[(&str, &str)], one: bool) -> ForeignKey {
         ForeignKey {
@@ -704,7 +761,7 @@ mod tests {
     }
 
     #[test]
-    fn self_reference_and_table_ambiguity_are_unsupported() {
+    fn self_reference_and_junctions_are_unsupported() {
         let keys = vec![fk(
             "tree_parent_fkey",
             "tree",
@@ -720,13 +777,146 @@ mod tests {
             find_relationship("public", "tree", "tree", &keys),
             Err(FindError::Unsupported)
         );
-        let keys = vec![
-            fk("a_b1_fkey", "a", "b", &[("b1", "id")], false),
-            fk("a_b2_fkey", "a", "b", &[("b2", "id")], false),
-        ];
         assert_eq!(
-            find_relationship("public", "a", "b", &keys),
+            hinted("tree", "tree", Some("parent"), &keys, &[]),
             Err(FindError::Unsupported)
+        );
+        // A junction table turns a table-name target or a junction-name hint
+        // into a many-to-many link.
+        let keys = posts();
+        let junctions = ["post_reviewers".to_string()];
+        assert_eq!(
+            hinted("posts", "users", None, &keys, &junctions),
+            Err(FindError::Unsupported)
+        );
+        assert_eq!(
+            hinted("posts", "users", Some("post_reviewers"), &keys, &junctions),
+            Err(FindError::Unsupported)
+        );
+        let rel = hinted("posts", "users", Some("editor_id"), &keys, &junctions).unwrap();
+        assert_eq!(rel.root_columns, vec!["editor_id".to_string()]);
+    }
+
+    /// `findRel` with a hint and the junctions of the pair.
+    fn hinted<'a>(
+        relation: &str,
+        target: &str,
+        hint: Option<&str>,
+        keys: &'a [ForeignKey],
+        junctions: &[String],
+    ) -> Result<Relationship, FindError<'a>> {
+        super::find_relationship("public", relation, target, hint, keys, junctions)
+    }
+
+    /// The issue #376 schema: two keys from `posts` to `users`.
+    fn posts() -> Vec<ForeignKey> {
+        vec![
+            fk(
+                "posts_author_id_fkey",
+                "posts",
+                "users",
+                &[("author_id", "id")],
+                false,
+            ),
+            fk(
+                "posts_editor_id_fkey",
+                "posts",
+                "users",
+                &[("editor_id", "id")],
+                false,
+            ),
+        ]
+    }
+
+    #[test]
+    fn several_keys_to_one_table_are_ambiguous() {
+        let keys = posts();
+        let Err(FindError::Ambiguous(rels)) = find_relationship("public", "posts", "users", &keys)
+        else {
+            panic!("expected ambiguity");
+        };
+        assert_eq!(
+            rels.iter().map(Candidate::compressed).collect::<Vec<_>>(),
+            vec![
+                serde_json::json!({
+                    "cardinality": "many-to-one",
+                    "embedding": "posts with users",
+                    "relationship": "posts_author_id_fkey using posts(author_id) and users(id)",
+                }),
+                serde_json::json!({
+                    "cardinality": "many-to-one",
+                    "embedding": "posts with users",
+                    "relationship": "posts_editor_id_fkey using posts(editor_id) and users(id)",
+                }),
+            ]
+        );
+        assert_eq!(
+            ambiguous_hint("users", &rels),
+            "Try changing 'users' to one of the following: 'users!posts_author_id_fkey', 'users!posts_editor_id_fkey'. Find the desired relationship in the 'details' key."
+        );
+    }
+
+    #[test]
+    fn hint_picks_a_key_by_constraint_or_column() {
+        let keys = posts();
+        let by_constraint =
+            hinted("posts", "users", Some("posts_author_id_fkey"), &keys, &[]).unwrap();
+        assert_eq!(
+            by_constraint,
+            Relationship {
+                table: "users".to_string(),
+                to_many: false,
+                root_columns: vec!["author_id".to_string()],
+                target_columns: vec!["id".to_string()],
+            }
+        );
+        let by_column = hinted("posts", "users", Some("editor_id"), &keys, &[]).unwrap();
+        assert_eq!(by_column.root_columns, vec!["editor_id".to_string()]);
+        // From the referenced side, the hint names the column on `posts`.
+        let reverse = hinted("users", "posts", Some("author_id"), &keys, &[]).unwrap();
+        assert!(reverse.to_many);
+        assert_eq!(reverse.root_columns, vec!["id".to_string()]);
+        assert_eq!(reverse.target_columns, vec!["author_id".to_string()]);
+    }
+
+    #[test]
+    fn hint_on_the_referenced_column_can_stay_ambiguous() {
+        let keys = posts();
+        let Err(FindError::Ambiguous(rels)) = hinted("posts", "users", Some("id"), &keys, &[])
+        else {
+            panic!("expected ambiguity");
+        };
+        assert_eq!(rels.len(), 2);
+    }
+
+    #[test]
+    fn hint_must_match_the_target_table() {
+        let keys = posts();
+        // The constraint exists but the hinted target is not its table.
+        assert_eq!(
+            hinted(
+                "posts",
+                "comments",
+                Some("posts_author_id_fkey"),
+                &keys,
+                &[]
+            ),
+            Err(FindError::NotFound)
+        );
+        assert_eq!(
+            hinted("posts", "users", Some("title"), &keys, &[]),
+            Err(FindError::NotFound)
+        );
+        // A hint never lets a constraint or column stand in for the target.
+        assert_eq!(
+            hinted(
+                "posts",
+                "author_id",
+                Some("posts_author_id_fkey"),
+                &keys,
+                &[]
+            ),
+            Err(FindError::NotFound)
         );
     }
 }
