@@ -92,6 +92,7 @@ struct Services<'a> {
     rest: &'a megabase_rest::RestState,
     meta: &'a megabase_meta::MetaState,
     storage: &'a megabase_storage::StorageState,
+    functions: &'a megabase_functions::FunctionsState,
 }
 
 impl Services<'_> {
@@ -103,7 +104,7 @@ impl Services<'_> {
             megabase_storage::COMPONENT => {
                 megabase_storage::router_with_state(self.storage.clone())
             }
-            megabase_functions::COMPONENT => megabase_functions::router(),
+            megabase_functions::COMPONENT => megabase_functions::router(self.functions.clone()),
             megabase_meta::COMPONENT => megabase_meta::router_with_state(self.meta.clone()),
             _ => megabase_studio::router(),
         }
@@ -137,6 +138,7 @@ pub fn create_router_from(auth: &megabase_auth::AuthState, config: &Config) -> R
             rest: &rest,
             meta: &meta,
             storage: &storage,
+            functions: &megabase_functions::FunctionsState::disabled(),
         }),
         config,
     )
@@ -228,6 +230,10 @@ pub async fn run(config: Config) -> std::io::Result<()> {
     let meta = megabase_meta::MetaState::new(pool.clone(), config.jwt_hs256().ok());
     let storage = megabase_storage::StorageState::new(pool, config.jwt_hs256().ok())
         .with_file_root(config.storage_file_path.as_deref());
+    let functions = megabase_functions::FunctionsState::from_env(&config);
+    if !functions.is_enabled() {
+        info!("MEGABASE_FUNCTIONS_DIR unset; /functions/v1 answers 501");
+    }
     let addr = config.bind_address();
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     info!("megabase listening on {}", listener.local_addr()?);
@@ -237,6 +243,7 @@ pub async fn run(config: Config) -> std::io::Result<()> {
             rest: &rest,
             meta: &meta,
             storage: &storage,
+            functions: &functions,
         }),
         &config,
     );

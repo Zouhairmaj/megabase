@@ -44,6 +44,8 @@ rust-version = "1.89"
 tokio = { version = "1.40", features = ["full"] }
 axum = "0.7.9"
 tower = { version = "0.5", features = ["util"] }
+hyper = { version = "1.12", features = ["client", "http1"] }
+hyper-util = { version = "0.1.21", features = ["tokio"] }
 tower-http = { version = "0.6", features = ["catch-panic", "limit", "request-id", "sensitive-headers", "timeout", "trace", "uuid"] }
 sqlx = { version = "0.8.6", default-features = false, features = ["chrono", "json", "macros", "postgres", "runtime-tokio", "tls-none", "uuid"] }
 serde = { version = "1.0", features = ["derive"] }
