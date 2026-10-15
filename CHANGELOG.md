@@ -4,6 +4,13 @@ All notable changes to Megabase are documented in this file.
 The format is produced by [release-please](https://github.com/googleapis/release-please).
 Sections: Features, Bug Fixes, Performance, Conformance/judge, Documentation.
 
+## [0.1.29](https://github.com/Zouhairmaj/megabase/compare/v0.1.28...v0.1.29) (2026-10-15)
+
+
+### Bug Fixes
+
+* serve kong key-auth, auth 405/authorize, meta health/version, realtime ping and storage buckets ([#354](https://github.com/Zouhairmaj/megabase/issues/354)) ([c02c5e9](https://github.com/Zouhairmaj/megabase/commit/c02c5e9c954104116f4028fa1c98ab6cd09d7adb))
+
 ## [0.1.28](https://github.com/Zouhairmaj/megabase/compare/v0.1.27...v0.1.28) (2026-10-14)
 
 
