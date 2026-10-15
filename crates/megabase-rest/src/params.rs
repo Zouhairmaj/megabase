@@ -81,12 +81,6 @@ impl ReadQuery {
         })
     }
 
-    /// `true` when a root filter or logic tree is `<key>=is.null` (or
-    /// `not.is.null`) on the embed called `key`.
-    fn has_null_embed_filter(&self, key: &str) -> bool {
-        names_null(&self.filters, &self.logic, key)
-    }
-
     /// Every embed of the select tree, each parent before its children.
     ///
     /// The relationship map passed to [`build_read_sql_as`] is keyed by
@@ -3965,7 +3959,7 @@ mod tests {
         assert_eq!(filter_path("->a"), None);
         // A JSON path never names an embed with `is.null`.
         let query = parse_get_query("data->a=is.null").unwrap();
-        assert!(!query.has_null_embed_filter("data"));
+        assert!(!names_null(&query.filters, &query.logic, "data"));
         // `PUT` needs plain column `eq` filters.
         let query = parse_get_query("data->a=eq.1").unwrap();
         assert_eq!(query.eq_column_filters(), None);
