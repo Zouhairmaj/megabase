@@ -2216,7 +2216,7 @@ pub(crate) fn count_where(
     let mut exists = Vec::new();
     let mut null_embeds = Vec::new();
     for embed in query.embeds() {
-        let Some(rel) = rels.get(&embed.name) else {
+        let Some(rel) = rels.get(&embed.key()) else {
             continue;
         };
         let named = query.has_null_embed_filter(embed.output_key());
@@ -3397,6 +3397,39 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(count.sql, "\"authors\".\"name\" IS NULL");
+    }
+
+    fn hinted_books_rel() -> HashMap<String, Relationship> {
+        HashMap::from([(
+            "books!author_id".to_string(),
+            books_rel().remove("books").unwrap(),
+        )])
+    }
+
+    #[test]
+    fn count_finds_a_hinted_inner_embed() {
+        let query = parse_get_query("select=name,books!author_id!inner(title)").unwrap();
+        let count = count_where("public", "authors", &query, &[], &hinted_books_rel())
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            count.sql,
+            "EXISTS (SELECT 1 FROM \"public\".\"books\" \
+             WHERE \"books\".\"author_id\" = \"authors\".\"id\")"
+        );
+    }
+
+    #[test]
+    fn count_finds_a_null_filter_on_a_hinted_embed() {
+        let query = parse_get_query("select=name,books!author_id(title)&books=is.null").unwrap();
+        let count = count_where("public", "authors", &query, &[], &hinted_books_rel())
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            count.sql,
+            "NOT EXISTS (SELECT 1 FROM \"public\".\"books\" \
+             WHERE \"books\".\"author_id\" = \"authors\".\"id\")"
+        );
     }
 
     #[test]
