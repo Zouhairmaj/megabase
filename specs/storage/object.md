@@ -41,8 +41,15 @@ Pins: storage `v1.80.2`, supabase `v1.26.08` (`vendor.toml`).
 ## Configuration
 
 Object bytes live under `FILE_STORAGE_BACKEND_PATH` (the self-hosted
-compose sets `/var/lib/storage`). Without it, or without `DATABASE_URL` or
-`JWT_SECRET`, every object route is a 501.
+compose sets `/var/lib/storage`). Without it, or without `DATABASE_URL`,
+every object route is a 501. Without `JWT_SECRET`, the routes that need a
+verified JWT (upload, authenticated download, sign, signed download, delete)
+are a 501; public downloads and `GET /object/:bucket/*` on a public bucket
+(anonymous fallback) still work.
+
+The unported prefixes `list`, `list-v2`, `info`, `sign/:bucket` (sign many)
+and `upload/sign` are explicit 501s, so they never reach the generic
+`:bucket/*` handlers.
 
 ## Request scope
 

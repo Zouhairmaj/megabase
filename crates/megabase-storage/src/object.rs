@@ -255,7 +255,8 @@ fn header_str<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
     headers.get(name).and_then(|value| value.to_str().ok())
 }
 
-/// The object routes need a database, a JWT verifier and a storage root.
+/// The object routes need a database and a storage root; routes that need a
+/// verified JWT check for it separately (public reads do not).
 fn backend(state: &StorageState) -> Option<(&sqlx::PgPool, &FsPath)> {
     Some((state.pool.as_ref()?, state.files.as_deref()?))
 }
@@ -401,7 +402,7 @@ async fn upload(
         return StorageError::invalid_mime_type(mime_type).into_response();
     }
     let max = max_file_size(&object_name, bucket.file_size_limit);
-    if declared_length.is_some_and(|length| length > max) {
+    if declared_length.is_some_and(|length| length > max) || body.len() as u64 > max {
         return StorageError::entity_too_large().into_response();
     }
     if !is_valid_key(&object_name) {
