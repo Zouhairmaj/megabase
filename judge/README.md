@@ -102,6 +102,13 @@ header is absent, so the other cases are not counted.
 grant. The token limiter's burst is 30 in the pinned GoTrue. The rate of
 1 keeps that burst from refilling during the case.
 
+`functions.*` cases invoke the vendored `hello` function in
+`vendor/supabase/docker/volumes/functions` (fixtures cannot add
+TypeScript). The overlay sets `VERIFY_JWT=true` on edge-runtime so the
+401 cases compare the main service's bearer check. Megabase serves the
+same directory when started with `MEGABASE_FUNCTIONS_DIR` pointing at
+it, `FUNCTIONS_VERIFY_JWT=true`, and `deno` on `PATH`.
+
 ## Database side-effects
 
 The harness opens two PostgreSQL connections (it does not import Megabase

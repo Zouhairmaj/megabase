@@ -96,10 +96,11 @@ runs:
         }
 
         # One line per component that has judge/cases/<shard>.toml.
-        # Add "megabase-functions functions", "megabase-studio studio", or
-        # "megabase-pooler pooler" when that shard exists. Until then those
-        # crates are unclassifiable and run every shard.
+        # Add "megabase-studio studio" or "megabase-pooler pooler" when
+        # that shard exists. Until then those crates are unclassifiable and
+        # run every shard.
         COMPONENT_SHARDS='
+        megabase-functions functions
         megabase-auth auth
         megabase-rest rest
         megabase-storage storage
