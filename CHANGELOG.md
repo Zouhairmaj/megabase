@@ -4,6 +4,15 @@ All notable changes to Megabase are documented in this file.
 The format is produced by [release-please](https://github.com/googleapis/release-please).
 Sections: Features, Bug Fixes, Performance, Conformance/judge, Documentation.
 
+## [0.1.34](https://github.com/Zouhairmaj/megabase/compare/v0.1.33...v0.1.34) (2026-10-15)
+
+
+### Features
+
+* **functions:** route std serve() and deno.listen servers to the worker port ([#404](https://github.com/Zouhairmaj/megabase/issues/404)) ([58baa2a](https://github.com/Zouhairmaj/megabase/commit/58baa2ac614609660242e4b8d3823834e3aa4cc1))
+* **storage:** accept multipart/form-data object uploads ([#403](https://github.com/Zouhairmaj/megabase/issues/403)) ([0b326ac](https://github.com/Zouhairmaj/megabase/commit/0b326acb318a0fd21bf0f97ad6124d42508f29c5))
+* **storage:** serve post /object/list/{bucket} through storage.search ([#405](https://github.com/Zouhairmaj/megabase/issues/405)) ([b30cf10](https://github.com/Zouhairmaj/megabase/commit/b30cf10e48617cd314d142c913d8a036bc0d31b1))
+
 ## [0.1.33](https://github.com/Zouhairmaj/megabase/compare/v0.1.32...v0.1.33) (2026-10-15)
 
 
