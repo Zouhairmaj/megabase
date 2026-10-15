@@ -2,12 +2,12 @@
   "schema": 1,
   "totals": {
     "units": 1031,
-    "implemented": 188,
+    "implemented": 192,
     "tested": 177,
     "conformant": 0
   },
   "percent": {
-    "coverage": 18.2,
+    "coverage": 18.6,
     "conformance": 0.0,
     "done": 0.0
   },
@@ -390,13 +390,13 @@
     },
     "storage": {
       "units": 149,
-      "implemented": 12,
+      "implemented": 16,
       "tested": 2,
       "conformant": 0,
       "groups": {
         "bucket": {
           "units": 6,
-          "implemented": 2,
+          "implemented": 6,
           "tested": 2,
           "conformant": 0
         },
@@ -740,7 +740,11 @@
     "rest:route:PUT /rest/v1/{relation}": "tested",
     "storage:route:GET /storage/v1/bucket": "tested",
     "storage:route:GET /storage/v1/bucket/{bucketId}": "tested",
+    "storage:route:GET /storage/v1/bucket/{bucketId}/lifecycle": "implemented",
     "storage:route:GET /storage/v1/health": "implemented",
+    "storage:route:POST /storage/v1/bucket": "implemented",
+    "storage:route:PUT /storage/v1/bucket/{bucketId}": "implemented",
+    "storage:route:PUT /storage/v1/bucket/{bucketId}/lifecycle": "implemented",
     "storage:sql-function:storage.add_prefixes()": "implemented",
     "storage:sql-function:storage.allow_any_operation()": "implemented",
     "storage:sql-function:storage.allow_only_operation()": "implemented",
