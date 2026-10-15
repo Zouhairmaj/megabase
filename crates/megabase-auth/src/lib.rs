@@ -14,7 +14,8 @@
 //! and `POST /magiclink` and `POST /otp` up to mail and SMS delivery.
 //! Every other Auth path returns `MEGABASE_NOT_IMPLEMENTED`. Database objects
 //! listed in `specs/auth/database.md` are installed when `DATABASE_URL` is
-//! set, after the standard API roles in `specs/core/roles.md`.
+//! set, after the standard API roles in `specs/core/roles.md` and the
+//! platform schemas in `specs/core/platform-schemas.md`.
 
 mod admin;
 mod admin_batch2;
@@ -26,6 +27,7 @@ mod hooks;
 mod http;
 mod jsonutil;
 mod otp;
+mod platform;
 mod ratelimit;
 mod roles;
 mod routes;
@@ -37,6 +39,7 @@ mod user;
 mod verify;
 
 pub use config::AuthConfig;
+pub use platform::{install_platform, PlatformError};
 pub use roles::{install_roles, RolesError};
 pub use schema::{install_schema, SchemaError};
 pub use state::AuthState;
