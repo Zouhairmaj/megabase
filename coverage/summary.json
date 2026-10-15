@@ -2,12 +2,12 @@
   "schema": 1,
   "totals": {
     "units": 1031,
-    "implemented": 222,
+    "implemented": 223,
     "tested": 185,
     "conformant": 0
   },
   "percent": {
-    "coverage": 21.5,
+    "coverage": 21.6,
     "conformance": 0.0,
     "done": 0.0
   },
@@ -18,7 +18,7 @@
   "components": {
     "auth": {
       "units": 159,
-      "implemented": 88,
+      "implemented": 89,
       "tested": 79,
       "conformant": 0,
       "groups": {
@@ -96,7 +96,7 @@
         },
         "verify": {
           "units": 10,
-          "implemented": 7,
+          "implemented": 8,
           "tested": 6,
           "conformant": 0
         },
@@ -645,6 +645,7 @@
     "auth:sql-table:auth.users": "tested",
     "auth:sql-table:auth.webauthn_challenges": "tested",
     "auth:sql-table:auth.webauthn_credentials": "tested",
+    "auth:verify-type:email": "implemented",
     "auth:verify-type:email_change": "tested",
     "auth:verify-type:invite": "tested",
     "auth:verify-type:magiclink": "implemented",

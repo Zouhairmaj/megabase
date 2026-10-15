@@ -229,6 +229,10 @@ pub enum VerifyKind {
     Invite,
     Recovery,
     EmailChange,
+    /// `type=email`: the token is looked up as a confirmation token, then
+    /// as a recovery token, and the verify continues as `signup` or
+    /// `magiclink` accordingly.
+    Email,
     /// Email plus OTP for a type this crate does not confirm.
     Other,
 }
@@ -254,7 +258,10 @@ pub struct VerifyRequest {
 
 /// Result of a verify that the database could answer.
 pub enum VerifyOutcome {
-    Session(Box<IssuedSession>),
+    /// A new session. For [`VerifyKind::Email`], the second field is the
+    /// type the token resolved to (`signup` or `magiclink`); GoTrue writes
+    /// that type into the `GET /verify` success redirect.
+    Session(Box<IssuedSession>, Option<&'static str>),
     /// PKCE flow: the flow state's `auth_code`, now marked issued.
     AuthCode(String),
     /// First half of a secure email change. No session.
@@ -707,7 +714,7 @@ impl Backend {
             BackendKind::None => Err(StoreError::Unavailable),
             BackendKind::Memory(db) => {
                 let mut outcome = memory_verify(db, request).await?;
-                if let VerifyOutcome::Session(issued) = &mut outcome {
+                if let VerifyOutcome::Session(issued, _) = &mut outcome {
                     customize_memory(db, hook, issued).await?;
                 }
                 Ok(outcome)
@@ -1290,7 +1297,7 @@ impl Backend {
                     tokens.email_change_token_new = request_hash.to_string();
                 }
             }
-            VerifyKind::Other => {}
+            VerifyKind::Email | VerifyKind::Other => {}
         }
         let mut db = db.lock().await;
         db.one_time.push(OneTimeToken {
@@ -3226,7 +3233,9 @@ enum Mutated {
 #[cfg(test)]
 fn ott_name(kind: VerifyKind, current: bool) -> &'static str {
     match kind {
-        VerifyKind::Signup | VerifyKind::Invite | VerifyKind::Other => OTT_CONFIRMATION,
+        VerifyKind::Signup | VerifyKind::Invite | VerifyKind::Email | VerifyKind::Other => {
+            OTT_CONFIRMATION
+        }
         VerifyKind::Recovery => OTT_RECOVERY,
         VerifyKind::EmailChange if current => OTT_EMAIL_CURRENT,
         VerifyKind::EmailChange => OTT_EMAIL_NEW,
@@ -3238,7 +3247,72 @@ fn hash_types(kind: VerifyKind) -> (&'static str, &'static str) {
         VerifyKind::Signup | VerifyKind::Invite => (OTT_CONFIRMATION, ""),
         VerifyKind::Recovery => (OTT_RECOVERY, ""),
         VerifyKind::EmailChange => (OTT_EMAIL_CURRENT, OTT_EMAIL_NEW),
+        VerifyKind::Email => (OTT_CONFIRMATION, OTT_RECOVERY),
         VerifyKind::Other => ("", ""),
+    }
+}
+
+/// The kind the verify continues as. `type=email` becomes `signup` for a
+/// confirmation token and `magiclink` (the recovery path) for a recovery
+/// token, as `verifyTokenHash` and `verifyUserAndToken` rewrite
+/// `params.Type`.
+fn effective_kind(kind: VerifyKind, side: MatchedSide) -> VerifyKind {
+    match (kind, side) {
+        (VerifyKind::Email, MatchedSide::Recovery) => VerifyKind::Recovery,
+        (VerifyKind::Email, _) => VerifyKind::Signup,
+        (kind, _) => kind,
+    }
+}
+
+/// The `type` a `type=email` verify resolved to, for the GET redirect.
+fn resolved_email_type(kind: VerifyKind, side: MatchedSide) -> Option<&'static str> {
+    (kind == VerifyKind::Email).then_some(match side {
+        MatchedSide::Recovery => "magiclink",
+        _ => "signup",
+    })
+}
+
+/// `verifyTokenHash` for `type=email`: the user's `recovery_token` equal to
+/// the hash means `magiclink`, anything else `signup`. Other kinds keep the
+/// side of the one-time token row.
+fn hash_side(
+    kind: VerifyKind,
+    row_side: MatchedSide,
+    tokens: Option<&UserTokens>,
+    hash: &str,
+) -> MatchedSide {
+    if kind != VerifyKind::Email {
+        return row_side;
+    }
+    if tokens.is_some_and(|tokens| tokens.recovery_token == hash) {
+        MatchedSide::Recovery
+    } else {
+        MatchedSide::Confirmation
+    }
+}
+
+/// `verifyUserAndToken` for `type=email`: the confirmation token first,
+/// then the recovery token.
+fn email_otp_side(request: &VerifyRequest, tokens: &UserTokens) -> Option<MatchedSide> {
+    let hash = &request.token_hash;
+    let exp = request.otp_exp_seconds;
+    let confirmation = || {
+        otp_valid(
+            hash,
+            &tokens.confirmation_token,
+            tokens.confirmation_sent_at,
+            exp,
+        )
+    };
+    let recovery = || otp_valid(hash, &tokens.recovery_token, tokens.recovery_sent_at, exp);
+    match request.kind {
+        VerifyKind::Signup | VerifyKind::Invite if confirmation() => {
+            Some(MatchedSide::Confirmation)
+        }
+        VerifyKind::Recovery if recovery() => Some(MatchedSide::Recovery),
+        VerifyKind::Email if confirmation() => Some(MatchedSide::Confirmation),
+        VerifyKind::Email if recovery() => Some(MatchedSide::Recovery),
+        _ => None,
     }
 }
 
@@ -3337,7 +3411,7 @@ fn sent_at_for(kind: VerifyKind, tokens: &UserTokens) -> Option<SystemTime> {
         VerifyKind::Signup | VerifyKind::Invite => tokens.confirmation_sent_at,
         VerifyKind::Recovery => tokens.recovery_sent_at,
         VerifyKind::EmailChange => tokens.email_change_sent_at,
-        VerifyKind::Other => None,
+        VerifyKind::Email | VerifyKind::Other => None,
     }
 }
 
@@ -3392,7 +3466,9 @@ fn locate_hash_memory(db: &MemoryDb, request: &VerifyRequest) -> Located {
         return Located::Reject(user_banned());
     }
     let tokens = db.tokens.get(&user.id);
-    let sent = tokens.and_then(|tokens| sent_at_for(request.kind, tokens));
+    let side = hash_side(request.kind, side, tokens, &request.token_hash);
+    let kind = effective_kind(request.kind, side);
+    let sent = tokens.and_then(|tokens| sent_at_for(kind, tokens));
     if sent.is_none_or(|sent| otp_expired(sent, request.otp_exp_seconds, SystemTime::now())) {
         return Located::Reject(link_expired());
     }
@@ -3410,28 +3486,8 @@ fn locate_email_memory(db: &MemoryDb, request: &VerifyRequest) -> Located {
         return Located::Reject(user_banned());
     }
     let tokens = db.tokens.get(&user.id).cloned().unwrap_or_default();
-    let side = match request.kind {
-        VerifyKind::Signup | VerifyKind::Invite
-            if otp_valid(
-                &request.token_hash,
-                &tokens.confirmation_token,
-                tokens.confirmation_sent_at,
-                request.otp_exp_seconds,
-            ) =>
-        {
-            MatchedSide::Confirmation
-        }
-        VerifyKind::Recovery
-            if otp_valid(
-                &request.token_hash,
-                &tokens.recovery_token,
-                tokens.recovery_sent_at,
-                request.otp_exp_seconds,
-            ) =>
-        {
-            MatchedSide::Recovery
-        }
-        _ => return Located::Reject(token_invalid()),
+    let Some(side) = email_otp_side(request, &tokens) else {
+        return Located::Reject(token_invalid());
     };
     Located::Found(Found {
         user_id: user.id,
@@ -3533,7 +3589,7 @@ async fn memory_verify(
                     needs_invite_password(
                         user,
                         tokens.unwrap_or(&UserTokens::default()),
-                        request.kind,
+                        effective_kind(request.kind, found.side),
                     )
                 })
             }
@@ -3603,7 +3659,10 @@ async fn memory_verify(
             let mut issued = grant_session(&mut user, SystemTime::now());
             issued.amr_method = "otp".into();
             guard.track(&issued);
-            VerifyOutcome::Session(Box::new(issued))
+            VerifyOutcome::Session(
+                Box::new(issued),
+                resolved_email_type(request.kind, found.side),
+            )
         }
     };
     guard.tokens.insert(user_id, tokens);
@@ -3621,9 +3680,10 @@ fn mutate_user(
     audits: &mut Vec<AuditNote>,
 ) -> Result<(Mutated, ClearOtt), StoreError> {
     user.updated_at = now;
-    match request.kind {
+    let kind = effective_kind(request.kind, side);
+    match kind {
         VerifyKind::Signup | VerifyKind::Invite => {
-            if needs_invite_password(user, tokens, request.kind) {
+            if needs_invite_password(user, tokens, kind) {
                 user.password_hash = password_hash.unwrap_or("").to_string();
                 if user.password_hash.is_empty() {
                     return Err(StoreError::Hash);
@@ -3682,7 +3742,8 @@ fn mutate_user(
             apply_email_change(user, tokens, now);
             Ok((Mutated::Session, ClearOtt::All))
         }
-        VerifyKind::Other => Err(StoreError::Unavailable),
+        // `effective_kind` never returns `Email`.
+        VerifyKind::Email | VerifyKind::Other => Err(StoreError::Unavailable),
     }
 }
 
@@ -3781,11 +3842,12 @@ async fn postgres_verify(
         });
     };
     let mut tokens = load_user_tokens(&mut tx, found.user_id).await?;
-    let password_hash = if needs_invite_password(&user, &tokens, request.kind) {
-        Some(hash_password(secure_alphanumeric(64)).await?)
-    } else {
-        None
-    };
+    let password_hash =
+        if needs_invite_password(&user, &tokens, effective_kind(request.kind, found.side)) {
+            Some(hash_password(secure_alphanumeric(64)).await?)
+        } else {
+            None
+        };
     let mut audits = Vec::new();
     let now = SystemTime::now();
     let (mutated, clear) = mutate_user(
@@ -3836,7 +3898,10 @@ async fn postgres_verify(
                 .await
                 .map_err(write_to_store)?;
             customize_pg(&mut tx, hook, &mut issued).await?;
-            VerifyOutcome::Session(Box::new(issued))
+            VerifyOutcome::Session(
+                Box::new(issued),
+                resolved_email_type(request.kind, found.side),
+            )
         }
     };
     tx.commit().await?;
@@ -3931,7 +3996,8 @@ async fn locate_hash_postgres(
         return Ok(Located::Reject(user_banned()));
     }
     let tokens = load_user_tokens(&mut *tx, user.id).await?;
-    let sent = sent_at_for(request.kind, &tokens);
+    let side = hash_side(request.kind, side, Some(&tokens), &request.token_hash);
+    let sent = sent_at_for(effective_kind(request.kind, side), &tokens);
     if sent.is_none_or(|sent| otp_expired(sent, request.otp_exp_seconds, SystemTime::now())) {
         return Ok(Located::Reject(link_expired()));
     }
@@ -3952,28 +4018,8 @@ async fn locate_email_postgres(
         return Ok(Located::Reject(user_banned()));
     }
     let tokens = load_user_tokens(&mut *tx, user.id).await?;
-    let side = match request.kind {
-        VerifyKind::Signup | VerifyKind::Invite
-            if otp_valid(
-                &request.token_hash,
-                &tokens.confirmation_token,
-                tokens.confirmation_sent_at,
-                request.otp_exp_seconds,
-            ) =>
-        {
-            MatchedSide::Confirmation
-        }
-        VerifyKind::Recovery
-            if otp_valid(
-                &request.token_hash,
-                &tokens.recovery_token,
-                tokens.recovery_sent_at,
-                request.otp_exp_seconds,
-            ) =>
-        {
-            MatchedSide::Recovery
-        }
-        _ => return Ok(Located::Reject(token_invalid())),
+    let Some(side) = email_otp_side(request, &tokens) else {
+        return Ok(Located::Reject(token_invalid()));
     };
     Ok(Located::Found(Found {
         user_id: user.id,

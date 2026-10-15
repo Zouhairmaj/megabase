@@ -4,8 +4,8 @@ Status: complete
 Unit ids (`coverage/units.json`): `auth:route:GET /auth/v1/verify`,
 `auth:route:POST /auth/v1/verify`, `auth:verify-type:signup`,
 `auth:verify-type:invite`, `auth:verify-type:recovery`,
-`auth:verify-type:email_change` (Level 1); `auth:verify-type:magiclink`
-(Level 2)
+`auth:verify-type:email_change` (Level 1); `auth:verify-type:magiclink`,
+`auth:verify-type:email` (Level 2)
 Level: 1
 
 `GET` and `POST /auth/v1/verify` redeem a one-time email token and, when the
@@ -23,6 +23,7 @@ returns JSON, including the session.
 | signup / invite | [`internal/api/verify.go:152`](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/verify.go#L152) |
 | recovery, magiclink | [`internal/api/verify.go:154`](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/verify.go#L154) |
 | email_change | [`internal/api/verify.go:156`](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/verify.go#L156) |
+| `email` OTP type (`verifyTokenHash`, `verifyUserAndToken`) | [`internal/api/verify.go:650`](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/verify.go#L650), [`:676`](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/verify.go#L676), [`:735`](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/verify.go#L735) |
 | Token hash SHA-224 | [`internal/crypto/crypto.go:45`](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/crypto/crypto.go#L45) |
 | Redirect target | [`internal/utilities/request.go:75`](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/utilities/request.go#L75) |
 
@@ -32,9 +33,23 @@ the credit header required by AGENTS.md.
 ## Inputs
 
 Both methods take `type` (`signup`, `invite`, `recovery`, `magiclink`,
-`email_change`). `magiclink` is `recovery` in every step (the
+`email_change`, `email`). `magiclink` is `recovery` in every step (the
 `recovery_token`, its expiry, `recoverVerify`); only the `type` in the GET
 success fragment differs.
+
+`email` (`EmailOTPVerification`, what supabase-js `verifyOtp({ type:
+'email' })` sends after `signInWithOtp`) resolves to one of those types and
+then continues as it:
+
+- Hash path (GET, or POST with `token_hash`): the `auth.one_time_tokens` row
+  may be a `confirmation_token` or a `recovery_token`. When the user's
+  `recovery_token` equals the hash, the type becomes `magiclink` and expiry
+  uses `recovery_sent_at`; otherwise `signup` with `confirmation_sent_at`.
+- Email path (POST with `email` and `token`): the confirmation token is
+  checked first (`signup`), then the recovery token (`magiclink`).
+
+The GET success fragment carries the resolved type (`signup` or
+`magiclink`), not `email`.
 
 GET reads `token` and `redirect_to` from the query. `token` is stored as the
 token hash (GoTrue copies it onto `token_hash`). The redirect target is the
@@ -163,9 +178,8 @@ invite password hash, which is the same order.
 
 ## Out of scope
 
-`auth:verify-type:email`, `auth:verify-type:sms`, and
-`auth:verify-type:phone_change` return
-HTTP 501 via
+`auth:verify-type:sms` and `auth:verify-type:phone_change` return HTTP 501
+via
 `megabase_core::MegabaseNotImplemented`. Phone OTP on an in-scope type does
 too. Anything not served returns the body
 `{"code":"MEGABASE_NOT_IMPLEMENTED","component":"auth","message":"<unit> is not implemented by Megabase yet","unit":"<unit>"}`.

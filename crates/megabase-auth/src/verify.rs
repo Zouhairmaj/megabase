@@ -2,13 +2,14 @@
 // internal/api/errors.go, internal/api/pkce.go, internal/utilities/request.go,
 // and internal/crypto/crypto.go (MIT), pin v2.197.0.
 
-//! `GET` and `POST /auth/v1/verify` for signup, invite, recovery, and email change.
+//! `GET` and `POST /auth/v1/verify` for signup, invite, recovery, magic
+//! link, email change, and the `email` OTP type.
 //!
 //! GET validation failures stay JSON. Later GET failures are 303 redirects
 //! whose fragment matches GoTrue. POST failures stay JSON. A GET `pkce_`
 //! token is the PKCE flow: success redirects with `?code=<auth_code>`
-//! instead of a session, and errors also go in the query. Magic link, SMS,
-//! phone change, and the `email` OTP type stay HTTP 501.
+//! instead of a session, and errors also go in the query. SMS and phone
+//! change stay HTTP 501.
 
 use std::time::SystemTime;
 
@@ -30,7 +31,6 @@ use crate::store::{email_otp_hash, VerifyKind, VerifyOutcome, VerifyRequest, SIN
 use crate::token::{authentication_method, null_as_default, unhandled};
 use crate::COMPONENT;
 
-const UNIT_EMAIL: &str = "auth:verify-type:email";
 const UNIT_SMS: &str = "auth:verify-type:sms";
 const UNIT_PHONE_CHANGE: &str = "auth:verify-type:phone_change";
 
@@ -148,8 +148,12 @@ pub(crate) async fn verify_get(
         },
         // `prepPKCERedirectURL`.
         Ok(VerifyOutcome::AuthCode(code)) => see_other(&with_query(&redirect, &[("code", &code)])),
-        Ok(VerifyOutcome::Session(issued)) => match sign_session(&state, &issued, now) {
-            Ok(signed) => see_other(&success_redirect(&redirect, &params.kind, &signed)),
+        Ok(VerifyOutcome::Session(issued, resolved)) => match sign_session(&state, &issued, now) {
+            Ok(signed) => see_other(&success_redirect(
+                &redirect,
+                resolved.unwrap_or(&params.kind),
+                &signed,
+            )),
             Err(error) => fail(error.status.as_u16(), error.error_code, &error.message),
         },
         Err(error) => {
@@ -240,7 +244,7 @@ pub(crate) async fn verify_post(
             "code": "200",
         }))
         .into_response(),
-        Ok(VerifyOutcome::Session(issued)) => match sign_session(&state, &issued, now) {
+        Ok(VerifyOutcome::Session(issued, _)) => match sign_session(&state, &issued, now) {
             Ok(signed) => signed.response,
             Err(error) => error.into_response(),
         },
@@ -342,13 +346,16 @@ fn known_kind(kind: &str) -> Option<VerifyKind> {
         "magiclink" => Some(VerifyKind::Recovery),
         // megabase:unit auth:verify-type:email_change
         "email_change" => Some(VerifyKind::EmailChange),
+        // `EmailOTPVerification`: the confirmation token, then the recovery
+        // token; the verify continues as `signup` or `magiclink`.
+        // megabase:unit auth:verify-type:email
+        "email" => Some(VerifyKind::Email),
         _ => None,
     }
 }
 
 fn out_of_scope(kind: &str) -> Option<&'static str> {
     match kind {
-        "email" => Some(UNIT_EMAIL),
         "sms" => Some(UNIT_SMS),
         "phone_change" => Some(UNIT_PHONE_CHANGE),
         _ => None,
@@ -1154,6 +1161,173 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn email_type_resolves_to_signup_or_magiclink() {
+        // A confirmation token: `signup`, the user is confirmed.
+        let backend = Backend::memory();
+        backend
+            .plant_verification_for_test("new@example.com", "confirmhash", PlantFlags::default())
+            .await;
+        let (status, _, headers, _) = call(
+            app(true, backend.clone()),
+            "GET",
+            "/auth/v1/verify?type=email&token=confirmhash",
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::SEE_OTHER);
+        let location = headers.get(header::LOCATION).unwrap().to_str().unwrap();
+        assert!(location.contains("&type=signup"), "{location}");
+        assert!(location.contains("#access_token="), "{location}");
+        // The link works once.
+        let (_, _, headers, _) = call(
+            app(true, backend),
+            "GET",
+            "/auth/v1/verify?type=email&token=confirmhash",
+            None,
+        )
+        .await;
+        assert_eq!(
+            headers.get(header::LOCATION).unwrap().to_str().unwrap(),
+            expired_location()
+        );
+
+        // A recovery token (what `/magiclink` and `/otp` send): `magiclink`.
+        let recovery = PlantFlags {
+            kind: VerifyKind::Recovery,
+            confirmed: true,
+            password_hash: "hash".into(),
+            ..PlantFlags::default()
+        };
+        let backend = Backend::memory();
+        backend
+            .plant_verification_for_test("link@example.com", "linkhash", recovery)
+            .await;
+        let (status, _, headers, _) = call(
+            app(true, backend),
+            "GET",
+            "/auth/v1/verify?type=email&token=linkhash",
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::SEE_OTHER);
+        let location = headers.get(header::LOCATION).unwrap().to_str().unwrap();
+        assert!(location.contains("&type=magiclink"), "{location}");
+
+        // POST with the emailed OTP checks the recovery token after the
+        // confirmation token.
+        let email = "otp@example.com";
+        let backend = Backend::memory();
+        backend
+            .plant_verification_for_test(
+                email,
+                &email_otp_hash(email, "654321"),
+                PlantFlags {
+                    kind: VerifyKind::Recovery,
+                    confirmed: true,
+                    password_hash: "hash".into(),
+                    ..PlantFlags::default()
+                },
+            )
+            .await;
+        let router = app(true, backend);
+        let (status, body, _, _) = call(
+            router.clone(),
+            "POST",
+            "/auth/v1/verify",
+            Some(&format!(
+                r#"{{"type":"email","token":"000000","email":"{email}"}}"#
+            )),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_eq!(body["msg"], "Token has expired or is invalid");
+        let (status, body, _, _) = call(
+            router.clone(),
+            "POST",
+            "/auth/v1/verify",
+            Some(&format!(
+                r#"{{"type":"email","token":"654321","email":"{email}"}}"#
+            )),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(body["user"]["email"], email);
+        let access = body["access_token"].as_str().unwrap();
+        let claims = Hs256::new(SECRET.as_bytes())
+            .unwrap()
+            .verify(access)
+            .unwrap();
+        assert_eq!(claims.raw["amr"][0]["method"], "otp");
+
+        // POST with a token hash.
+        let backend = Backend::memory();
+        backend
+            .plant_verification_for_test("hash@example.com", "posthash", PlantFlags::default())
+            .await;
+        let router = app(true, backend);
+        let (status, body, _, _) = call(
+            router.clone(),
+            "POST",
+            "/auth/v1/verify",
+            Some(r#"{"type":"email","token_hash":"posthash"}"#),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert!(body["user"]["email_confirmed_at"].is_string());
+        let (status, body, _, _) = call(
+            router,
+            "POST",
+            "/auth/v1/verify",
+            Some(r#"{"type":"email","token_hash":"posthash"}"#),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_eq!(body["msg"], LINK_EXPIRED);
+    }
+
+    #[tokio::test]
+    async fn email_type_expiry_follows_the_matched_token() {
+        // `verifyTokenHash` takes the expiry from `recovery_sent_at` only
+        // when the hash is the recovery token.
+        let backend = Backend::memory();
+        backend
+            .plant_verification_for_test(
+                "old@example.com",
+                "oldhash",
+                PlantFlags {
+                    kind: VerifyKind::Recovery,
+                    confirmed: true,
+                    password_hash: "hash".into(),
+                    sent_at: SystemTime::now() - std::time::Duration::from_secs(90_000),
+                    ..PlantFlags::default()
+                },
+            )
+            .await;
+        let (status, body, _, _) = call(
+            app(true, backend),
+            "POST",
+            "/auth/v1/verify",
+            Some(r#"{"type":"email","token_hash":"oldhash"}"#),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_eq!(body["error_code"], "otp_expired");
+        assert_eq!(body["msg"], LINK_EXPIRED);
+
+        // `ParseAuthenticationMethod("email")` fails, so a `pkce_` token is
+        // GoTrue's JSON 500.
+        let (status, body, _, _) = call(
+            app(true, Backend::memory()),
+            "GET",
+            "/auth/v1/verify?type=email&token=pkce_abc",
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(body["error_code"], "unexpected_failure");
+    }
+
+    #[tokio::test]
     async fn out_of_scope_types_and_missing_database() {
         let router = app(true, Backend::memory());
         let (status, body, _, _) = call(
@@ -1163,8 +1337,8 @@ mod tests {
             Some(r#"{"type":"email","token_hash":"x"}"#),
         )
         .await;
-        assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
-        assert_eq!(body["unit"], UNIT_EMAIL);
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_eq!(body["msg"], LINK_EXPIRED);
 
         // `magiclink` is served through the recovery path.
         let (status, body, _, _) = call(
