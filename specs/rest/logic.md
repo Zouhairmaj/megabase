@@ -49,10 +49,8 @@ are bound left to right.
 Whitespace around `(`, `,`, `)` is skipped. `not` anywhere in the key path
 negates the tree. Quoted values may contain `,` and `)`.
 
-## Out of scope
-
-JSON-path leaves (`data->a.eq.1`) stay 501
-(routed through the read unit).
+A JSON-path leaf (`data->a.eq.1`) is rendered like a JSON-path filter key
+([query-params](query-params.md)).
 
 ## Judge cases
 

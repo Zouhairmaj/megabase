@@ -1375,6 +1375,8 @@ version = "0.1.30"
 dependencies = [
  "axum",
  "criterion",
+ "hyper",
+ "hyper-util",
  "insta",
  "megabase-auth",
  "megabase-core",
