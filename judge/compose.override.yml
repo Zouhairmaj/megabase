@@ -86,6 +86,12 @@ services:
     image: ${MEGABASE_JUDGE_META_IMAGE:-ghcr.io/zouhairmaj/supabase-postgres-meta:v0.100.0@sha256:145325b7e39f8ef4931d6e8cfd3f6f4d655de09d72a2ccc96d9513542c2202bd}
   functions:
     image: ${MEGABASE_JUDGE_FUNCTIONS_IMAGE:-ghcr.io/zouhairmaj/supabase-edge-runtime:v1.77.4@sha256:ad45164b7548bf5820ed7be714789c17ac2865edce79a09cfb4c3756c3d365a8}
+    environment:
+      # .env.example sets FUNCTIONS_VERIFY_JWT=false. The main service
+      # (volumes/functions/main/index.ts) checks the bearer only when this
+      # is "true", and judge/cases/functions.toml compares those 401s.
+      # Megabase reads FUNCTIONS_VERIFY_JWT=true for the same gate.
+      VERIFY_JWT: "true"
   db:
     image: ${MEGABASE_JUDGE_DB_IMAGE:-ghcr.io/zouhairmaj/supabase-postgres:17.6.1.136@sha256:f371b5f3f2ac0a05703f33d6e6134515fb2498cab708fb948a0aeb7481467c00}
     # Official compose publishes 5432 on the pooler. The harness needs a

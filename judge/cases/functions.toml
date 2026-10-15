@@ -1,0 +1,115 @@
+# Edge Functions invoke cases (issue #395, follow-up to #381).
+#
+# Both stacks serve the functions in vendor/supabase/docker/volumes/functions:
+# the reference mounts it into edge-runtime, Megabase reads it through
+# MEGABASE_FUNCTIONS_DIR. Only the vendored `hello` function is invoked,
+# because repository fixtures cannot add TypeScript (GOAL.md rule 1).
+# judge/compose.override.yml sets VERIFY_JWT=true on the reference, so
+# volumes/functions/main/index.ts checks every non-OPTIONS bearer.
+#
+# Bearers below are fixtures for the public demo JWT_SECRET in
+# vendor/supabase/docker/.env.example (the same ones as auth.toml):
+# `forged` is HMAC'd with a different secret, `expired` with the demo
+# secret and exp in 2001.
+
+[[case]]
+id = "functions.invoke.post-json"
+description = "POST with a JSON body and the anon key runs the hello function"
+units = ["functions:route:* /functions/v1/{function_name}"]
+[[case.step]]
+method = "POST"
+path = "/functions/v1/hello"
+json = { name = "x" }
+
+[[case]]
+id = "functions.invoke.get-query"
+description = "GET with a query string and the service_role key runs the hello function"
+units = ["functions:route:* /functions/v1/{function_name}"]
+[[case.step]]
+method = "GET"
+path = "/functions/v1/hello?a=1"
+key = "service_role"
+
+[[case]]
+id = "functions.invoke.subpath"
+description = "Segments after the function name still route to that function"
+units = ["functions:route:* /functions/v1/{function_name}"]
+[[case.step]]
+method = "GET"
+path = "/functions/v1/hello/extra/path"
+
+[[case]]
+id = "functions.invoke.missing"
+description = "A function without an entrypoint fails worker creation with 500"
+units = ["functions:route:* /functions/v1/{function_name}"]
+[[case.step]]
+method = "POST"
+path = "/functions/v1/missing"
+json = { name = "x" }
+
+[[case]]
+id = "functions.invoke.no-name"
+description = "An empty function name is rejected with 400"
+units = ["functions:route:* /functions/v1/{function_name}"]
+[[case.step]]
+method = "GET"
+path = "/functions/v1/"
+
+[[case]]
+id = "functions.verify-jwt.missing-header"
+description = "No Authorization header is rejected with 401"
+units = ["functions:route:* /functions/v1/{function_name}"]
+[[case.step]]
+method = "GET"
+path = "/functions/v1/hello"
+key = "none"
+
+[[case]]
+id = "functions.verify-jwt.not-bearer"
+description = "A Basic Authorization header is rejected with 401"
+units = ["functions:route:* /functions/v1/{function_name}"]
+[[case.step]]
+method = "GET"
+path = "/functions/v1/hello"
+key = "none"
+headers = { Authorization = "Basic x" }
+
+[[case]]
+id = "functions.verify-jwt.garbage"
+description = "A bearer that is not a JWT is rejected with 401"
+units = ["functions:route:* /functions/v1/{function_name}"]
+[[case.step]]
+method = "GET"
+path = "/functions/v1/hello"
+key = "none"
+headers = { Authorization = "Bearer not-a-jwt" }
+
+[[case]]
+id = "functions.verify-jwt.forged"
+description = "A bearer signed with the wrong secret is rejected with 401"
+units = ["functions:route:* /functions/v1/{function_name}"]
+[[case.step]]
+method = "GET"
+path = "/functions/v1/hello"
+key = "none"
+headers = { Authorization = "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoic2VydmljZV9yb2xlIiwiaXNzIjoic3VwYWJhc2UtZGVtbyIsImlhdCI6MTY0MTc2OTIwMCwiZXhwIjoxNzk5NTM1NjAwfQ._Cmsw8cV9SL5A6EL45e_VWqsHCj4Bnx1R0O32FuxnP0" }
+
+[[case]]
+id = "functions.verify-jwt.expired"
+description = "An expired bearer signed with the demo secret is rejected with 401"
+units = ["functions:route:* /functions/v1/{function_name}"]
+[[case.step]]
+method = "GET"
+path = "/functions/v1/hello"
+key = "none"
+headers = { Authorization = "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoic2VydmljZV9yb2xlIiwiaXNzIjoic3VwYWJhc2UtZGVtbyIsImlhdCI6MTAwMDAwMDAwMCwiZXhwIjoxMDAwMDAwMDAxfQ.7WjbHaaRmKxhIfWEsU4fzYb_tOUYjjmbZOnqMl0zCVk" }
+
+[[case]]
+id = "functions.verify-jwt.options-skips"
+description = "A CORS preflight without a bearer is answered, not rejected"
+units = ["functions:route:* /functions/v1/{function_name}"]
+[[case.step]]
+method = "OPTIONS"
+path = "/functions/v1/hello"
+key = "none"
+headers = { Origin = "http://localhost:3000", "Access-Control-Request-Method" = "POST" }
