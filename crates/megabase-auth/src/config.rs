@@ -57,6 +57,50 @@ pub struct AuthConfig {
     pub(crate) custom_access_token_hook: Option<AccessTokenHook>,
     /// `GOTRUE_MFA_*` enroll and verify switches.
     pub mfa: MfaConfig,
+    /// Provider settings only the `id_token` grant reads.
+    pub id_token: IdTokenConfig,
+    /// `GOTRUE_EXTERNAL_WEB3_SOLANA_ENABLED`. Off on the reference stack.
+    pub web3_solana: bool,
+    /// `GOTRUE_EXTERNAL_WEB3_ETHEREUM_ENABLED`. Off on the reference stack.
+    pub web3_ethereum: bool,
+}
+
+/// `ExternalProviderConfiguration` fields the `id_token` grant reads and
+/// `GET /settings` does not publish.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IdTokenConfig {
+    /// `GOTRUE_EXTERNAL_VERCEL_MARKETPLACE_ENABLED`.
+    pub vercel_marketplace: bool,
+    /// `GOTRUE_EXTERNAL_KEYCLOAK_URL`: the Keycloak issuer.
+    pub keycloak_url: String,
+    /// `GOTRUE_EXTERNAL_ALLOWED_ID_TOKEN_ISSUERS`, comma-separated. Empty
+    /// is raised to the Apple and Google issuers, as `ApplyDefaults` does.
+    pub allowed_issuers: Vec<String>,
+}
+
+impl Default for IdTokenConfig {
+    fn default() -> Self {
+        Self {
+            vercel_marketplace: false,
+            keycloak_url: String::new(),
+            allowed_issuers: default_id_token_issuers(),
+        }
+    }
+}
+
+fn default_id_token_issuers() -> Vec<String> {
+    vec![
+        "https://appleid.apple.com".into(),
+        "https://accounts.google.com".into(),
+    ]
+}
+
+/// envconfig `[]string`: split on `,`; an empty list takes the default.
+fn id_token_issuers(raw: Option<String>) -> Vec<String> {
+    match raw {
+        Some(raw) if !raw.is_empty() => raw.split(',').map(str::to_string).collect(),
+        _ => default_id_token_issuers(),
+    }
 }
 
 /// `MFAConfiguration` enroll and verify switches for each factor type.
@@ -181,6 +225,9 @@ impl AuthConfig {
             secure_email_change: true,
             custom_access_token_hook: None,
             mfa: MfaConfig::default(),
+            id_token: IdTokenConfig::default(),
+            web3_solana: false,
+            web3_ethereum: false,
         }
     }
 
@@ -283,6 +330,15 @@ impl AuthConfig {
             .unwrap_or(defaults.secure_email_change),
             custom_access_token_hook: AccessTokenHook::from_lookup(&lookup)?,
             mfa: MfaConfig::from_lookup(&lookup)?,
+            id_token: IdTokenConfig {
+                vercel_marketplace: flag(&lookup, "GOTRUE_EXTERNAL_VERCEL_MARKETPLACE_ENABLED")?,
+                keycloak_url: lookup("GOTRUE_EXTERNAL_KEYCLOAK_URL").unwrap_or_default(),
+                allowed_issuers: id_token_issuers(lookup(
+                    "GOTRUE_EXTERNAL_ALLOWED_ID_TOKEN_ISSUERS",
+                )),
+            },
+            web3_solana: flag(&lookup, "GOTRUE_EXTERNAL_WEB3_SOLANA_ENABLED")?,
+            web3_ethereum: flag(&lookup, "GOTRUE_EXTERNAL_WEB3_ETHEREUM_ENABLED")?,
         })
     }
 }
@@ -435,6 +491,28 @@ mod tests {
         .unwrap();
         assert_eq!(both.site_url, "https://gotrue.example");
         assert!(!both.secure_email_change);
+    }
+
+    #[test]
+    fn id_token_and_web3_settings() {
+        let defaults = AuthConfig::reference_defaults();
+        assert!(!defaults.web3_solana && !defaults.web3_ethereum);
+        assert_eq!(
+            defaults.id_token.allowed_issuers,
+            ["https://appleid.apple.com", "https://accounts.google.com"]
+        );
+        let config = AuthConfig::from_lookup(|key| match key {
+            "GOTRUE_EXTERNAL_WEB3_SOLANA_ENABLED" => Some("true".into()),
+            "GOTRUE_EXTERNAL_VERCEL_MARKETPLACE_ENABLED" => Some("1".into()),
+            "GOTRUE_EXTERNAL_KEYCLOAK_URL" => Some("https://kc.example/realms/a".into()),
+            "GOTRUE_EXTERNAL_ALLOWED_ID_TOKEN_ISSUERS" => Some("https://a,https://b".into()),
+            _ => None,
+        })
+        .unwrap();
+        assert!(config.web3_solana && !config.web3_ethereum);
+        assert!(config.id_token.vercel_marketplace);
+        assert_eq!(config.id_token.keycloak_url, "https://kc.example/realms/a");
+        assert_eq!(config.id_token.allowed_issuers, ["https://a", "https://b"]);
     }
 
     #[test]

@@ -3,12 +3,13 @@
 
 //! `/auth/v1` routes served by this crate.
 //!
-//! Health, settings, autoconfirm email signup, logout,
+//! Health, settings, email signup, logout,
 //! `POST /token` (password and refresh-token grants),
 //! `GET`/`POST /verify` (signup, invite, recovery, email change), and the
-//! user routes are implemented; `POST /recover` lives in `crate::recover` and
-//! `POST /invite` in `crate::invite`. Resend, reauthenticate, phone signup, anonymous signup, the other
-//! verify types, and mailer confirmation stay HTTP 501. `POST /resend`
+//! user routes are implemented; `POST /recover` lives in `crate::recover`,
+//! `POST /invite` in `crate::invite`, and the signup confirmation email
+//! (autoconfirm off) in `crate::confirm`. Resend, reauthenticate, phone
+//! signup, anonymous signup, and the other verify types stay HTTP 501. `POST /resend`
 //! validates its JSON request, then stays 501 because it needs the mailer
 //! (it does no user lookup).
 
@@ -38,7 +39,7 @@ use crate::gojson;
 use crate::hooks::TokenHookCall;
 use crate::jsonutil::{session_claims, session_json, unix_secs};
 use crate::state::AuthState;
-use crate::store::{LogoutScope, SignupCommand, SignupResult, StoreError};
+use crate::store::{IssuedSession, LogoutScope, SignupCommand, SignupResult, StoreError};
 use crate::token::null_as_default;
 use crate::COMPONENT;
 
@@ -330,7 +331,14 @@ async fn signup(State(state): State<AuthState>, headers: HeaderMap, body: Body) 
         Err(error) => return error.into_response(),
     };
     if !state.config.mailer_autoconfirm {
-        return MegabaseNotImplemented::new(COMPONENT, UNIT_SIGNUP).into_response();
+        let signup = crate::confirm::UnconfirmedSignup {
+            email,
+            password: params.password,
+            data: params.data.unwrap_or_default(),
+            code_challenge: params.code_challenge,
+            code_challenge_method: params.code_challenge_method,
+        };
+        return crate::confirm::signup_unconfirmed(&state, &headers, signup).await;
     }
     let Some(jwt) = state.jwt.clone() else {
         return unexpected("Server lacks JWT secret").into_response();
@@ -360,27 +368,9 @@ async fn signup(State(state): State<AuthState>, headers: HeaderMap, body: Body) 
             hook.as_ref(),
         )
         .await;
-    let issued = match result {
-        Ok(SignupResult::Created(issued)) => issued,
-        Ok(SignupResult::AlreadyExists) => {
-            return GoTrueError::new(
-                StatusCode::UNPROCESSABLE_ENTITY,
-                "user_already_exists",
-                "User already registered",
-            )
-            .into_response();
-        }
-        Err(StoreError::Unavailable) => {
-            return unexpected("Database error saving new user").into_response();
-        }
-        Err(StoreError::Hash) => {
-            return unexpected("Database error creating user").into_response();
-        }
-        Err(StoreError::Hook(error)) => return (*error).into_response(),
-        Err(error) => {
-            tracing::error!(%error, "signup failed");
-            return unexpected("Database error saving new user").into_response();
-        }
+    let issued = match signup_outcome(result) {
+        Ok(issued) => issued,
+        Err(response) => return *response,
     };
     let claims = session_claims(
         &issued,
@@ -521,6 +511,30 @@ struct SignupBody {
     code_challenge: String,
     #[serde(default, deserialize_with = "null_as_default")]
     code_challenge_method: String,
+}
+
+/// The autoconfirm email signup's session, or the error response `Signup`
+/// returns for a store result. `POST /magiclink` runs the same signup for a
+/// new address.
+pub(crate) fn signup_outcome(
+    result: Result<SignupResult, StoreError>,
+) -> Result<Box<IssuedSession>, Box<Response>> {
+    let error = match result {
+        Ok(SignupResult::Created(issued)) => return Ok(issued),
+        Ok(SignupResult::AlreadyExists) => GoTrueError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "user_already_exists",
+            "User already registered",
+        ),
+        Err(StoreError::Unavailable) => unexpected("Database error saving new user"),
+        Err(StoreError::Hash) => unexpected("Database error creating user"),
+        Err(StoreError::Hook(error)) => return Err(Box::new((*error).into_response())),
+        Err(error) => {
+            tracing::error!(%error, "signup failed");
+            unexpected("Database error saving new user")
+        }
+    };
+    Err(Box::new(error.into_response()))
 }
 
 fn validate_signup(config: &AuthConfig, params: &SignupBody) -> Result<(), GoTrueError> {
@@ -1237,17 +1251,26 @@ mod tests {
     #[tokio::test]
     async fn mailer_off_phone_and_missing_deps_do_not_invent_users() {
         let backend = Backend::memory();
-        let off = router(state(false, true, backend.clone()));
+        // Autoconfirm off sends a confirmation email; an SMTP host that
+        // refuses the dial is GoTrue's 500 and the transaction keeps nothing.
+        let closed = std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
+        let mut mailer_off = state(false, true, backend.clone());
+        mailer_off.mail.smtp_host = "127.0.0.1".into();
+        mailer_off.mail.smtp_port = closed;
         let (status, body) = call(
-            off,
+            router(mailer_off),
             "POST",
             "/auth/v1/signup",
             Some(r#"{"email":"a@example.com","password":"secret1"}"#),
             &[],
         )
         .await;
-        assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
-        assert_eq!(body["unit"], UNIT_SIGNUP);
+        assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(body["msg"], "Error sending confirmation email");
         assert!(backend
             .password_hash_for_test("a@example.com")
             .await

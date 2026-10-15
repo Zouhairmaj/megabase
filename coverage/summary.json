@@ -2,12 +2,12 @@
   "schema": 1,
   "totals": {
     "units": 1031,
-    "implemented": 224,
+    "implemented": 228,
     "tested": 186,
     "conformant": 0
   },
   "percent": {
-    "coverage": 21.7,
+    "coverage": 22.1,
     "conformance": 0.0,
     "done": 0.0
   },
@@ -18,7 +18,7 @@
   "components": {
     "auth": {
       "units": 159,
-      "implemented": 85,
+      "implemented": 89,
       "tested": 80,
       "conformant": 0,
       "groups": {
@@ -36,7 +36,7 @@
         },
         "endpoints": {
           "units": 13,
-          "implemented": 6,
+          "implemented": 7,
           "tested": 5,
           "conformant": 0
         },
@@ -84,7 +84,7 @@
         },
         "token": {
           "units": 6,
-          "implemented": 3,
+          "implemented": 4,
           "tested": 3,
           "conformant": 0
         },
@@ -96,7 +96,7 @@
         },
         "verify": {
           "units": 10,
-          "implemented": 6,
+          "implemented": 8,
           "tested": 6,
           "conformant": 0
         },
@@ -563,6 +563,7 @@
   },
   "units": {
     "auth:grant-type:password": "tested",
+    "auth:grant-type:pkce": "implemented",
     "auth:grant-type:refresh_token": "tested",
     "auth:hook:custom_access_token": "implemented",
     "auth:route:DELETE /auth/v1/admin/custom-providers/{identifier}": "tested",
@@ -601,6 +602,7 @@
     "auth:route:POST /auth/v1/admin/users": "tested",
     "auth:route:POST /auth/v1/invite": "tested",
     "auth:route:POST /auth/v1/logout": "tested",
+    "auth:route:POST /auth/v1/magiclink": "implemented",
     "auth:route:POST /auth/v1/recover": "implemented",
     "auth:route:POST /auth/v1/signup": "tested",
     "auth:route:POST /auth/v1/token": "tested",
@@ -643,8 +645,10 @@
     "auth:sql-table:auth.users": "tested",
     "auth:sql-table:auth.webauthn_challenges": "tested",
     "auth:sql-table:auth.webauthn_credentials": "tested",
+    "auth:verify-type:email": "implemented",
     "auth:verify-type:email_change": "tested",
     "auth:verify-type:invite": "tested",
+    "auth:verify-type:magiclink": "implemented",
     "auth:verify-type:recovery": "tested",
     "auth:verify-type:signup": "tested",
     "functions:route:* /functions/v1/{function_name}": "tested",

@@ -68,7 +68,7 @@ impl Backend {
                         Some(user) => user.id,
                         None => {
                             let user = new_invited_user(&cmd);
-                            insert_invited_user(&mut tx, &user).await?;
+                            insert_unconfirmed_user(&mut tx, &user).await?;
                             user.id
                         }
                     };
@@ -138,7 +138,9 @@ fn invite_memory(db: &mut MemoryDb, cmd: &InviteCommand<'_>) -> InviteOutcome {
     InviteOutcome::Invited(Box::new(user))
 }
 
-async fn insert_invited_user(
+/// Insert an unconfirmed email user and its identities. `password_hash` is
+/// empty for an invite and the bcrypt hash for a signup.
+pub(super) async fn insert_unconfirmed_user(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     user: &UserRecord,
 ) -> Result<(), StoreError> {
@@ -152,7 +154,7 @@ async fn insert_invited_user(
             raw_app_meta_data, raw_user_meta_data,
             is_sso_user, is_anonymous, created_at, updated_at
         ) VALUES (
-            $1::uuid, $2::uuid, $3, $4, $5, '',
+            $1::uuid, $2::uuid, $3, $4, $5, $9,
             '', '', '', '',
             '', 0,
             '', '', '',
@@ -168,6 +170,7 @@ async fn insert_invited_user(
     .bind(&user.app_metadata)
     .bind(&user.user_metadata)
     .bind(created)
+    .bind(&user.password_hash)
     .execute(&mut **tx)
     .await
     .map(|done| done.rows_affected());

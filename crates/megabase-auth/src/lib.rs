@@ -24,6 +24,7 @@
 mod admin;
 mod admin_batch2;
 mod config;
+mod confirm;
 mod error;
 mod external;
 mod factors;
