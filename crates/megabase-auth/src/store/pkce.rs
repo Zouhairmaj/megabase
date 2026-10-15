@@ -17,6 +17,41 @@ use super::{
 };
 use crate::hooks::{self, TokenHookCall};
 
+/// The `auth.flow_state` insert of `generateFlowState`, on a connection or
+/// inside a caller's transaction.
+pub(super) async fn insert_flow_state(
+    conn: &mut sqlx::PgConnection,
+    id: Uuid,
+    flow: &FlowStateRecord,
+    created_at: SystemTime,
+) -> Result<(), StoreError> {
+    sqlx::query(
+        "INSERT INTO auth.flow_state
+             (id, user_id, auth_code, code_challenge_method, code_challenge,
+              provider_type, provider_access_token, provider_refresh_token,
+              created_at, updated_at, authentication_method,
+              auth_code_issued_at, referrer, linking_target_id)
+         VALUES ($1::uuid, $2::uuid, $3, $4::auth.code_challenge_method, $5,
+                 $6, $7, $8, $9, $9, $10, $11, $12, $13::uuid)",
+    )
+    .bind(id)
+    .bind(flow.user_id)
+    .bind(flow.auth_code.as_deref())
+    .bind(flow.code_challenge_method.as_deref())
+    .bind(flow.code_challenge.as_deref())
+    .bind(&flow.provider_type)
+    .bind(&flow.provider_access_token)
+    .bind(&flow.provider_refresh_token)
+    .bind(ts(created_at))
+    .bind(&flow.authentication_method)
+    .bind(flow.auth_code_issued_at.map(ts))
+    .bind(flow.referrer.as_deref())
+    .bind(flow.linking_target_id)
+    .execute(&mut *conn)
+    .await?;
+    Ok(())
+}
+
 /// What [`Backend::redeem_pkce_flow`] needs from the flow state row.
 pub struct PkceRedemption<'a> {
     pub flow_id: Uuid,
@@ -47,30 +82,8 @@ impl Backend {
             }
             BackendKind::Postgres(pg) => {
                 timed(async {
-                    sqlx::query(
-                        "INSERT INTO auth.flow_state
-                             (id, user_id, auth_code, code_challenge_method, code_challenge,
-                              provider_type, provider_access_token, provider_refresh_token,
-                              created_at, updated_at, authentication_method,
-                              auth_code_issued_at, referrer, linking_target_id)
-                         VALUES ($1::uuid, $2::uuid, $3, $4::auth.code_challenge_method, $5,
-                                 $6, $7, $8, $9, $9, $10, $11, $12, $13::uuid)",
-                    )
-                    .bind(id)
-                    .bind(flow.user_id)
-                    .bind(flow.auth_code.as_deref())
-                    .bind(flow.code_challenge_method.as_deref())
-                    .bind(flow.code_challenge.as_deref())
-                    .bind(&flow.provider_type)
-                    .bind(&flow.provider_access_token)
-                    .bind(&flow.provider_refresh_token)
-                    .bind(ts(created_at))
-                    .bind(&flow.authentication_method)
-                    .bind(flow.auth_code_issued_at.map(ts))
-                    .bind(flow.referrer.as_deref())
-                    .bind(flow.linking_target_id)
-                    .execute(&pg.pool)
-                    .await?;
+                    let mut conn = pg.pool.acquire().await?;
+                    insert_flow_state(&mut conn, id, flow, created_at).await?;
                     Ok(id)
                 })
                 .await

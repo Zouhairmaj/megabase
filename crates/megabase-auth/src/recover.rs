@@ -258,7 +258,7 @@ pub(crate) async fn send_recovery(
 
 /// `validateSentWithinFrequencyLimit`: the message when another email to
 /// this user is still too soon.
-fn frequency_limited(
+pub(crate) fn frequency_limited(
     sent_at: Option<SystemTime>,
     frequency: Duration,
     now: SystemTime,
@@ -274,7 +274,7 @@ fn frequency_limited(
     ))
 }
 
-fn over_email_limit(message: impl Into<String>) -> GoTrueError {
+pub(crate) fn over_email_limit(message: impl Into<String>) -> GoTrueError {
     GoTrueError::new(
         StatusCode::TOO_MANY_REQUESTS,
         "over_email_send_rate_limit",

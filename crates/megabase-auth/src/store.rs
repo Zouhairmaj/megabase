@@ -26,12 +26,14 @@ use crate::config::BCRYPT_COST;
 use crate::hooks::{self, HookError, MemoryHook, TokenHookCall};
 use crate::schema::SchemaError;
 
+mod confirmation;
 mod custom_provider;
 mod invite;
 mod mfa;
 mod pkce;
 mod recovery;
 
+pub use confirmation::{ConfirmationOutcome, ConfirmationSignup};
 pub use invite::{InviteCommand, InviteOutcome};
 pub use mfa::FactorRow;
 pub use pkce::PkceRedemption;
