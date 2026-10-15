@@ -35,8 +35,11 @@ runs:
           exit 1
         fi
 
+        # One retry budget for every image, so sequential pulls cannot spend
+        # the job timeout on backoff and hide the pull error behind a cancel.
+        retry_deadline=$((SECONDS + 20 * 60))
         pull() {
-          local image=$1 tries=$2 attempt=1
+          local image=$1 tries=$2 attempt=1 wait remaining
           until docker pull "$image"; do
             if [ "$attempt" -ge "$tries" ]; then
               return 1
@@ -46,7 +49,13 @@ runs:
             # parallel Judge shards do not retry in lockstep.
             wait=$((attempt * 15))
             [ "$wait" -gt 120 ] && wait=120
-            sleep $((wait + RANDOM % 15))
+            wait=$((wait + RANDOM % 15))
+            remaining=$((retry_deadline - SECONDS))
+            [ "$wait" -gt "$remaining" ] && wait=$remaining
+            if [ "$wait" -le 0 ]; then
+              return 1
+            fi
+            sleep "$wait"
             attempt=$((attempt + 1))
           done
         }
