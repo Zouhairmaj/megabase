@@ -153,8 +153,10 @@ JWT required. In one transaction: the current row as superuser
 `FOR UPDATE` (none is `NoSuchKey`), then `DELETE` of the current row as the
 request role; when RLS leaves nothing to delete the answer is
 `AccessDenied` with message `Access denied` (status 400, `statusCode`
-`403`) and the transaction rolls back. After the commit the version's file
-is removed. Response `200 {"message":"Successfully deleted"}`. Unlike the
+`403`) and the transaction rolls back. Before the commit the version's file is removed
+(`object.ts:162`); a removal error other than a missing file rolls the
+transaction back, so the row survives for a retry (Megabase answers 501, as
+the backend error mapping is not ported). Response `200 {"message":"Successfully deleted"}`. Unlike the
 other object routes there is no `InvalidKey` check.
 
 ## Object info — `HEAD /object/authenticated/:bucket/*`, `GET /object/info/...`

@@ -672,6 +672,14 @@ async fn write_file(file: &FsPath, body: &[u8]) -> std::io::Result<DateTime<Utc>
     Ok(DateTime::<Utc>::from(modified))
 }
 
+/// Removes `file`, treating a file that is already gone as removed.
+async fn try_remove_file(file: &FsPath) -> std::io::Result<()> {
+    match tokio::fs::remove_file(file).await {
+        Err(error) if error.kind() != std::io::ErrorKind::NotFound => Err(error),
+        _ => Ok(()),
+    }
+}
+
 async fn remove_file(file: &FsPath) {
     if let Err(error) = tokio::fs::remove_file(file).await {
         if error.kind() != std::io::ErrorKind::NotFound {
@@ -1417,19 +1425,22 @@ pub(super) async fn delete_object(
             ))
             .into_response()));
         }
+        // Upstream removes the file inside the transaction, so a backend
+        // failure drops `tx` (rollback) and the row survives for a retry.
+        if let Some(file) = file {
+            if let Err(error) = try_remove_file(&file).await {
+                tracing::error!(%error, "storage object file removal failed");
+                return Ok(Err(not_implemented(&method, &uri)));
+            }
+        }
         tx.commit().await?;
-        Ok::<_, sqlx::Error>(Ok(file))
+        Ok::<_, sqlx::Error>(Ok(()))
     };
     match attempt.await {
-        Ok(Ok(file)) => {
-            if let Some(file) = file {
-                remove_file(&file).await;
-            }
-            fastify_json(
-                StatusCode::OK,
-                &json!({ "message": "Successfully deleted" }),
-            )
-        }
+        Ok(Ok(())) => fastify_json(
+            StatusCode::OK,
+            &json!({ "message": "Successfully deleted" }),
+        ),
         Ok(Err(response)) => response,
         Err(error) => pg_error(&error, StorageError::resource_already_exists),
     }

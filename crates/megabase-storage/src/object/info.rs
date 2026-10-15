@@ -275,8 +275,14 @@ fn asset_metadata(metadata: Option<&Value>) -> Option<AssetMetadata<'_>> {
     }
     let last_modified = match raw.get("lastModified") {
         Some(Value::String(at)) => Some(DateTime::parse_from_rfc3339(at).ok()?.with_timezone(&Utc)),
-        Some(Value::Number(ms)) => Some(DateTime::from_timestamp_millis(ms.as_i64()?)?),
-        _ => None,
+        // `new Date(ms)` applies TimeClip: a finite value within 8.64e15 is
+        // truncated toward zero to whole milliseconds.
+        Some(Value::Number(ms)) => {
+            let ms = ms.as_f64().filter(|ms| ms.abs() <= 8.64e15)?;
+            Some(DateTime::from_timestamp_millis(ms.trunc() as i64)?)
+        }
+        None => None,
+        Some(_) => return None,
     };
     Some(AssetMetadata {
         cache_control: text("cacheControl"),
@@ -407,6 +413,14 @@ mod tests {
     }
 
     #[test]
+    fn fractional_last_modified_truncates_like_date() {
+        let mut metadata = uploaded();
+        metadata["lastModified"] = json!(1500.9);
+        let parsed = asset_metadata(Some(&metadata)).unwrap();
+        assert_eq!(parsed.last_modified.unwrap().timestamp_millis(), 1500);
+    }
+
+    #[test]
     fn unported_metadata_is_501() {
         assert!(asset_metadata(Some(&uploaded())).is_some());
         for patch in [
@@ -414,6 +428,9 @@ mod tests {
             json!({ "httpStatusCode": 206 }),
             json!({ "eTag": null }),
             json!({ "lastModified": "yesterday" }),
+            json!({ "lastModified": null }),
+            json!({ "lastModified": true }),
+            json!({ "lastModified": {} }),
         ] {
             let mut metadata = uploaded();
             for (key, value) in patch.as_object().unwrap() {
