@@ -43,6 +43,11 @@ pub struct AuthConfig {
     /// `GOTRUE_SITE_URL`, or `SITE_URL` when that is unset. Implicit verify
     /// redirects land here when `redirect_to` is missing or not allowed.
     pub site_url: String,
+    /// `GOTRUE_EXTERNAL_REDIRECT_URL`. When set, OAuth callbacks redirect
+    /// here instead of the flow state referrer or the site URL.
+    pub external_redirect_url: String,
+    /// `GOTRUE_EXTERNAL_EMAIL_MAGIC_LINK_ENABLED`. GoTrue default is true.
+    pub magic_link_enabled: bool,
     /// `GOTRUE_MAILER_OTP_EXP` in seconds. `0` is raised to one day, matching
     /// GoTrue's startup default.
     pub mailer_otp_exp_seconds: u64,
@@ -106,6 +111,8 @@ impl AuthConfig {
             password_min_length: MIN_PASSWORD_LENGTH,
             // `vendor/supabase/docker/.env.example` `SITE_URL`.
             site_url: "http://localhost:3000".into(),
+            external_redirect_url: String::new(),
+            magic_link_enabled: true,
             mailer_otp_exp_seconds: 86_400,
             secure_email_change: true,
             custom_access_token_hook: None,
@@ -199,6 +206,10 @@ impl AuthConfig {
                 .filter(|value| !value.is_empty())
                 .or_else(|| lookup("SITE_URL").filter(|value| !value.is_empty()))
                 .unwrap_or(defaults.site_url),
+            external_redirect_url: lookup("GOTRUE_EXTERNAL_REDIRECT_URL")
+                .unwrap_or(defaults.external_redirect_url),
+            magic_link_enabled: optional_bool(&lookup, "GOTRUE_EXTERNAL_EMAIL_MAGIC_LINK_ENABLED")?
+                .unwrap_or(defaults.magic_link_enabled),
             mailer_otp_exp_seconds: otp_exp,
             secure_email_change: optional_bool(
                 &lookup,

@@ -27,6 +27,8 @@ pub(crate) enum Kind {
     Str,
     /// `map[string]interface{}`
     Map,
+    /// `bool`
+    Bool,
 }
 
 /// A Go params struct: its name in `internal/api` and its JSON-tagged fields.
@@ -56,6 +58,31 @@ pub(crate) const PASSWORD_GRANT_PARAMS: GoStruct = GoStruct {
         ("email", Kind::Str),
         ("phone", Kind::Str),
         ("password", Kind::Str),
+    ],
+};
+
+/// `OtpParams` in `internal/api/otp.go`.
+pub(crate) const OTP_PARAMS: GoStruct = GoStruct {
+    name: "OtpParams",
+    fields: &[
+        ("email", Kind::Str),
+        ("phone", Kind::Str),
+        ("create_user", Kind::Bool),
+        ("data", Kind::Map),
+        ("channel", Kind::Str),
+        ("code_challenge_method", Kind::Str),
+        ("code_challenge", Kind::Str),
+    ],
+};
+
+/// `MagicLinkParams` in `internal/api/magic_link.go`.
+pub(crate) const MAGIC_LINK_PARAMS: GoStruct = GoStruct {
+    name: "MagicLinkParams",
+    fields: &[
+        ("email", Kind::Str),
+        ("data", Kind::Map),
+        ("code_challenge_method", Kind::Str),
+        ("code_challenge", Kind::Str),
     ],
 };
 
@@ -114,7 +141,7 @@ fn normalized_object(
         if let Some(message) = field_mismatch(target, name, *kind, &value) {
             return Some(Err(message));
         }
-        if value.is_null() && matches!(kind, Kind::Str) {
+        if value.is_null() && matches!(kind, Kind::Str | Kind::Bool) {
             continue;
         }
         object.insert((*name).to_string(), value);
@@ -194,6 +221,7 @@ fn field_mismatch(target: &GoStruct, name: &str, kind: Kind, value: &Value) -> O
     let (matches, go_type) = match kind {
         Kind::Str => (value.is_string(), "string"),
         Kind::Map => (value.is_object(), "map[string]interface {}"),
+        Kind::Bool => (value.is_boolean(), "bool"),
     };
     (!matches && !value.is_null()).then(|| {
         format!(
