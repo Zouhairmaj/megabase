@@ -610,6 +610,48 @@ mod tests {
         }
     }
 
+    /// The TUS server these routes delegate to is not vendored
+    /// (`specs/storage/resumable.md`), so no resumable answer is guessed.
+    #[tokio::test]
+    async fn resumable_upload_routes_stay_501() {
+        let service = token("service_role");
+        for bearer in [Some(service.as_str()), None] {
+            for (method, path) in [
+                (Method::POST, "/storage/v1/upload/resumable"),
+                (Method::POST, "/storage/v1/upload/resumable/"),
+                (Method::POST, "/storage/v1/upload/resumable/sign"),
+                (Method::OPTIONS, "/storage/v1/upload/resumable"),
+                (Method::OPTIONS, "/storage/v1/upload/resumable/sign"),
+            ] {
+                assert_eq!(
+                    status_of(method, path, bearer).await,
+                    StatusCode::NOT_IMPLEMENTED,
+                    "{path}"
+                );
+            }
+            for prefix in [
+                "/storage/v1/upload/resumable/",
+                "/storage/v1/upload/resumable/sign/",
+            ] {
+                let path = format!("{prefix}YXZhdGFycy9hLnR4dC92MQ");
+                for method in [
+                    Method::POST,
+                    Method::PUT,
+                    Method::PATCH,
+                    Method::HEAD,
+                    Method::DELETE,
+                    Method::OPTIONS,
+                ] {
+                    assert_eq!(
+                        status_of(method, &path, bearer).await,
+                        StatusCode::NOT_IMPLEMENTED,
+                        "{path}"
+                    );
+                }
+            }
+        }
+    }
+
     #[tokio::test]
     async fn without_a_database_the_routes_stay_501() {
         assert_eq!(

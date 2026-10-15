@@ -97,7 +97,7 @@ None.
 
 ### Blocked items
 
-None.
+- Storage resumable uploads (#63): every TUS route delegates to `@tus/server` 2.4.5 (with `@tus/file-store` 2.1.1 and `@tus/utils`), which is not in `vendor/`. The 16 units stay 501 until a human vendors and pins that upstream. Details: `specs/storage/resumable.md`.
 
 ### Judge disputes
 
