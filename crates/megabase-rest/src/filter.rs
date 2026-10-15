@@ -9,6 +9,8 @@
 
 use std::fmt::Write as _;
 
+use crate::params::{push_json, JsonStep};
+
 /// Quantifier inside `eq(any)` / `eq(all)`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Quant {
@@ -862,10 +864,15 @@ pub(crate) struct PredicateSql {
     pub params: Vec<String>,
 }
 
-/// One served filter. `pg_type` is `format_type` when the column exists.
+/// One served filter. `pg_type` is `format_type` when the column exists, or
+/// the type of the JSON path expression.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct BoundFilter {
     pub column: String,
+    /// JSON path after the column; empty for a plain column.
+    pub json: Vec<JsonStep>,
+    /// Wrap the column in `to_jsonb(…)` before the path (`cfToJson`).
+    pub to_json: bool,
     pub negated: bool,
     pub body: FilterBody,
     pub pg_type: Option<String>,
@@ -990,9 +997,7 @@ fn push_field(sql: &mut String, params: &mut Vec<String>, relation: &str, filter
         _ => None,
     };
     let Some(language) = language else {
-        sql.push_str(&quote_ident(relation));
-        sql.push('.');
-        sql.push_str(&quote_ident(&filter.column));
+        push_column(sql, params, relation, filter);
         return;
     };
     sql.push_str("to_tsvector(");
@@ -1000,10 +1005,22 @@ fn push_field(sql: &mut String, params: &mut Vec<String>, relation: &str, filter
         push_text_cast(sql, params, language, "regconfig");
         sql.push_str(", ");
     }
+    push_column(sql, params, relation, filter);
+    sql.push(')');
+}
+
+/// `pgFmtField` without the full-text wrapper: the column, then its JSON path.
+fn push_column(sql: &mut String, params: &mut Vec<String>, relation: &str, filter: &BoundFilter) {
+    if filter.to_json {
+        sql.push_str("to_jsonb(");
+    }
     sql.push_str(&quote_ident(relation));
     sql.push('.');
     sql.push_str(&quote_ident(&filter.column));
-    sql.push(')');
+    if filter.to_json {
+        sql.push(')');
+    }
+    push_json(sql, params, &filter.json);
 }
 
 fn push_op(
@@ -1886,6 +1903,8 @@ mod tests {
     ) -> BoundFilter {
         BoundFilter {
             column: column.into(),
+            json: Vec::new(),
+            to_json: false,
             negated: false,
             body: FilterBody::Op {
                 op,
@@ -1972,6 +1991,8 @@ mod tests {
             &[
                 BoundFilter {
                     column: "id".into(),
+                    json: Vec::new(),
+                    to_json: false,
                     negated: true,
                     body: FilterBody::Op {
                         op: ServedOp::Eq,
@@ -1989,30 +2010,40 @@ mod tests {
                 bound("id", ServedOp::Neq, None, None, "2", "bigint"),
                 BoundFilter {
                     column: "id".into(),
+                    json: Vec::new(),
+                    to_json: false,
                     negated: false,
                     body: FilterBody::In(InList::Values(vec!["1".into(), "3".into()])),
                     pg_type: Some("bigint".into()),
                 },
                 BoundFilter {
                     column: "id".into(),
+                    json: Vec::new(),
+                    to_json: false,
                     negated: false,
                     body: FilterBody::In(InList::Empty),
                     pg_type: Some("bigint".into()),
                 },
                 BoundFilter {
                     column: "done".into(),
+                    json: Vec::new(),
+                    to_json: false,
                     negated: false,
                     body: FilterBody::Is(IsVal::Null),
                     pg_type: Some("boolean".into()),
                 },
                 BoundFilter {
                     column: "done".into(),
+                    json: Vec::new(),
+                    to_json: false,
                     negated: true,
                     body: FilterBody::Is(IsVal::NotNull),
                     pg_type: Some("boolean".into()),
                 },
                 BoundFilter {
                     column: "id".into(),
+                    json: Vec::new(),
+                    to_json: false,
                     negated: false,
                     body: FilterBody::IsDistinct("2".into()),
                     pg_type: Some("bigint".into()),
@@ -2053,6 +2084,8 @@ mod tests {
             "todos",
             &[BoundFilter {
                 column: "title".into(),
+                json: Vec::new(),
+                to_json: false,
                 negated: false,
                 body: FilterBody::In(InList::Values(vec!["a\");drop".into()])),
                 pg_type: Some("text".into()),
@@ -2074,6 +2107,8 @@ mod tests {
                 bound("during", ServedOp::Nxr, None, None, "[4,7)", "int4range"),
                 BoundFilter {
                     column: "during".into(),
+                    json: Vec::new(),
+                    to_json: false,
                     negated: true,
                     body: FilterBody::Op {
                         op: ServedOp::Nxl,
