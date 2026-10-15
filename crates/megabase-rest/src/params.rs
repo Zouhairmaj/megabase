@@ -79,6 +79,26 @@ impl ReadQuery {
             || self.logic.iter().any(|node| logic_names_null(node, key))
     }
 
+    /// The embeds the select list asks for: `(target, hint, relationship key)`.
+    ///
+    /// The key is the target, or `target!hint` for a hinted embed; the
+    /// relationship map passed to [`build_read_sql_as`] uses it.
+    #[must_use]
+    pub(crate) fn embed_targets(&self) -> Vec<(&str, Option<&str>, String)> {
+        match &self.select {
+            SelectList::Mixed(entries) => entries
+                .iter()
+                .filter_map(|entry| match entry {
+                    SelectEntry::Embed(embed) => {
+                        Some((embed.name.as_str(), embed.hint.as_deref(), embed.key()))
+                    }
+                    SelectEntry::Field(_) => None,
+                })
+                .collect(),
+            _ => Vec::new(),
+        }
+    }
+
     /// `true` when `select` applies an aggregate function.
     /// `hasDefaultSelect` in `Plan.hs`: the select is a lone `*` (or absent)
     /// with no embed, so a relation-targeted custom media handler applies.
@@ -196,6 +216,8 @@ enum SelectEntry {
 struct Embed {
     alias: Option<String>,
     name: String,
+    /// `selHint`: the `!constraint` or `!column` after the target.
+    hint: Option<String>,
     inner: bool,
     select: SelectList,
     params: EmbedParams,
@@ -208,7 +230,7 @@ impl Embed {
     }
 
     /// The key a null embed filter (`books=is.null`) names: the alias, else the name.
-    fn key(&self) -> &str {
+    fn output_key(&self) -> &str {
         self.alias.as_deref().unwrap_or(&self.name)
     }
 }
@@ -235,6 +257,17 @@ impl EmbedParams {
             orders: Vec::new(),
             page: Page::inactive(),
             legacy_target: false,
+        }
+    }
+}
+
+impl Embed {
+    /// Relationship map key: a field name never holds `!`, so `name!hint`
+    /// cannot collide with an unhinted target.
+    fn key(&self) -> String {
+        match &self.hint {
+            Some(hint) => format!("{}!{hint}", self.name),
+            None => self.name.clone(),
         }
     }
 }
@@ -944,7 +977,7 @@ fn parse_spread<'a>(at: &mut At<'a>) -> Result<SelectItem, PErr> {
     *at = bump_str(at, "...");
     let (_name, next) = parse_field_name(at)?;
     *at = next;
-    let (_join, _hinted) = parse_embed_params(at)?;
+    let (_join, _hint) = parse_embed_params(at)?;
     if at.peek() != Some('(') {
         return Err(char_err(at, "\"(\""));
     }
@@ -967,7 +1000,7 @@ fn try_relation<'a>(at: &mut At<'a>) -> Result<Option<SelectItem>, PErr> {
         return Ok(None);
     }
     *at = next;
-    let (join, hinted) = match parse_embed_params(at) {
+    let (join, hint) = match parse_embed_params(at) {
         Ok(parsed) => parsed,
         Err(_) => {
             *at = alias_saved;
@@ -980,9 +1013,6 @@ fn try_relation<'a>(at: &mut At<'a>) -> Result<Option<SelectItem>, PErr> {
     }
     let open = at.byte + 1;
     skip_balanced(at)?;
-    if hinted {
-        return Ok(Some(SelectItem::Defer(QueryFail::Route)));
-    }
     let inner_text = &at.input[open..at.byte - 1];
     // An empty embed (`notes()`) means "filter only" upstream; not served yet.
     if inner_text.trim().is_empty() {
@@ -996,6 +1026,7 @@ fn try_relation<'a>(at: &mut At<'a>) -> Result<Option<SelectItem>, PErr> {
     Ok(Some(SelectItem::Embed(Embed {
         alias,
         name,
+        hint,
         inner: matches!(join, Some(JoinKind::Inner)),
         select,
         params: EmbedParams::none(),
@@ -1008,27 +1039,29 @@ enum JoinKind {
     Left,
 }
 
-fn parse_embed_params<'a>(at: &mut At<'a>) -> Result<(Option<JoinKind>, bool), PErr> {
+/// `pEmbedParams`: up to two `!` params; the first hint and the first join
+/// type win (`embedParamHint prm1 <|> embedParamHint prm2`).
+fn parse_embed_params<'a>(at: &mut At<'a>) -> Result<(Option<JoinKind>, Option<String>), PErr> {
     let mut join = None;
-    let mut hinted = false;
+    let mut hint = None;
     for _ in 0..2 {
         if at.peek() != Some('!') {
             break;
         }
         *at = at.bump('!');
-        if at.starts_with("inner") {
-            *at = bump_str(at, "inner");
-            join = Some(JoinKind::Inner);
-        } else if at.starts_with("left") {
+        if at.starts_with("left") {
             *at = bump_str(at, "left");
-            join = Some(JoinKind::Left);
+            join = join.or(Some(JoinKind::Left));
+        } else if at.starts_with("inner") {
+            *at = bump_str(at, "inner");
+            join = join.or(Some(JoinKind::Inner));
         } else {
-            let (_hint, next) = parse_field_name(at)?;
+            let (name, next) = parse_field_name(at)?;
             *at = next;
-            hinted = true;
+            hint = hint.or(Some(name));
         }
     }
-    Ok((join, hinted))
+    Ok((join, hint))
 }
 
 fn parse_field_select<'a>(at: &mut At<'a>) -> Result<SelectItem, PErr> {
@@ -1967,7 +2000,7 @@ pub(crate) fn build_read_sql_as(
                     push_select_field(&mut select_sql, &mut params, &relation_ident, field);
                 }
                 SelectEntry::Embed(embed) => {
-                    let Some(rel) = rels.get(&embed.name) else {
+                    let Some(rel) = rels.get(&embed.key()) else {
                         continue;
                     };
                     let rows = embed_rows(
@@ -1984,7 +2017,7 @@ pub(crate) fn build_read_sql_as(
                     if embed.inner {
                         exists.push(format!("EXISTS ({rows})"));
                     }
-                    null_embeds.push((embed.key().to_string(), rows));
+                    null_embeds.push((embed.output_key().to_string(), rows));
                 }
             }
         }
@@ -2159,7 +2192,7 @@ fn push_embed(sql: &mut String, rows: &str, embed: &Embed, rel: &Relationship) {
         sql.push_str(&format!("(SELECT to_json(_t) FROM ({rows}) _t)"));
     }
     sql.push_str(" AS ");
-    sql.push_str(&quote_ident(embed.key()));
+    sql.push_str(&quote_ident(embed.output_key()));
 }
 
 /// `WHERE` fragment for `Prefer: count`, without the `WHERE` keyword
@@ -2186,7 +2219,7 @@ pub(crate) fn count_where(
         let Some(rel) = rels.get(&embed.name) else {
             continue;
         };
-        let named = query.has_null_embed_filter(embed.key());
+        let named = query.has_null_embed_filter(embed.output_key());
         if !embed.inner && !named {
             continue;
         }
@@ -2202,7 +2235,7 @@ pub(crate) fn count_where(
             exists.push(format!("EXISTS ({rows})"));
         }
         if named {
-            null_embeds.push((embed.key().to_string(), rows));
+            null_embeds.push((embed.output_key().to_string(), rows));
         }
     }
     let filtered = !query.filters.is_empty() || !query.logic.is_empty();
@@ -2778,7 +2811,7 @@ mod tests {
         let query = parse_get_query("select=notes!inner(body)").unwrap();
         assert_eq!(query.embed_names(), vec!["notes"]);
         assert!(matches!(
-            parse_get_query("select=notes!fk(body)").unwrap_err(),
+            parse_get_query("select=...notes!fk(body)").unwrap_err(),
             QueryFail::Route
         ));
         for empty in [
@@ -2825,6 +2858,67 @@ mod tests {
         );
         assert!(
             sql.contains("AND EXISTS") || sql.contains("WHERE EXISTS"),
+            "{sql}"
+        );
+    }
+
+    #[test]
+    fn embed_hints_parse_in_either_order() {
+        for (select, hint) in [
+            (
+                "select=users!posts_author_id_fkey(name)",
+                "posts_author_id_fkey",
+            ),
+            ("select=users!editor_id!inner(name)", "editor_id"),
+            ("select=users!inner!editor_id(name)", "editor_id"),
+            // `pEmbedParams` keeps the first hint.
+            ("select=users!editor_id!author_id(name)", "editor_id"),
+        ] {
+            let query = parse_get_query(select).unwrap();
+            assert_eq!(
+                query.embed_targets(),
+                vec![("users", Some(hint), format!("users!{hint}"))],
+                "{select}"
+            );
+        }
+        let query = parse_get_query("select=users!left!inner(name)").unwrap();
+        let SelectList::Mixed(entries) = &query.select else {
+            panic!("mixed");
+        };
+        let SelectEntry::Embed(embed) = &entries[0] else {
+            panic!("embed");
+        };
+        // The first join type wins too.
+        assert!(!embed.inner);
+        assert_eq!(embed.hint, None);
+    }
+
+    #[test]
+    fn two_hinted_embeds_of_one_table_use_their_own_keys() {
+        let query = parse_get_query(
+            "select=title,author:users!author_id(name),editor:users!editor_id(name)",
+        )
+        .unwrap();
+        let rel = |column: &str| Relationship {
+            table: "users".into(),
+            to_many: false,
+            root_columns: vec![column.into()],
+            target_columns: vec!["id".into()],
+            column_types: Vec::new(),
+        };
+        let rels = HashMap::from([
+            ("users!author_id".to_string(), rel("author_id")),
+            ("users!editor_id".to_string(), rel("editor_id")),
+        ]);
+        let sql = build_read_sql("public", "posts", &query, &[], &rels)
+            .unwrap()
+            .sql;
+        assert!(
+            sql.contains("WHERE \"users\".\"id\" = \"posts\".\"author_id\") _t) AS \"author\""),
+            "{sql}"
+        );
+        assert!(
+            sql.contains("WHERE \"users\".\"id\" = \"posts\".\"editor_id\") _t) AS \"editor\""),
             "{sql}"
         );
     }

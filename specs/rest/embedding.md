@@ -9,22 +9,25 @@ Resource embedding in `select=`. Template:
 
 ## Upstream
 
-- `vendor/postgrest/src/library/PostgREST/ApiRequest/QueryParams.hs:656-657`
-  (`pJoinHint` / `!left`, `!inner`).
+- `vendor/postgrest/src/library/PostgREST/ApiRequest/QueryParams.hs:528-535,647-658`
+  (`pRelationSelect`, `pEmbedParams`: `!left`, `!inner`, `!hint`).
 - `vendor/postgrest/src/library/PostgREST/Plan.hs:652-728` (`findRel`).
-- `vendor/postgrest/src/library/PostgREST/SchemaCache.hs:212-229,585-590,783-829`
-  (`getOverrideRelationshipsMap` sort, `addInverseRels`, `allM2OandO2ORels`).
+- `vendor/postgrest/src/library/PostgREST/SchemaCache.hs:212-229,585-609,783-829`
+  (`getOverrideRelationshipsMap` sort, `addInverseRels`, `addM2MRels`,
+  `allM2OandO2ORels`).
 - `vendor/postgrest/src/library/PostgREST/SchemaCache.hs:142-160,530-583,877-1079`
   (`ViewKeyDependency`, `addViewM2OAndO2ORels`, `allViewsKeyDependencies`).
-- `vendor/postgrest/src/library/PostgREST/Error.hs:245,258,280,409-445`
-  (`AmbiguousRelBetween`, `compressedRel`, `relHint`).
+- `vendor/postgrest/src/library/PostgREST/Error.hs:245,257-258,280,409-445`
+  (`NoRelBetween`, `AmbiguousRelBetween`, `compressedRel`, `relHint`).
 - Pin: `postgrest v16.4` (`vendor.toml`).
 
 ## Inputs
 
 `GET`/`HEAD /rest/v1/{relation}?select=<fields>,<name>(<fields>)`, with an
-optional `alias:` prefix and a `!left` or `!inner` suffix on `<name>`.
-`<name>` is one of:
+optional `alias:` prefix and up to two `!` params on `<name>`: a join type
+(`!left`, `!inner`) and a hint (`!<constraint>` or `!<column>`), in either
+order. With two of a kind the first wins (`pEmbedParams`). `<name>` is one
+of:
 
 - the embedded table or view, in the same schema (`notes(body)`,
   `authors?select=books_view(title)`);
@@ -53,6 +56,15 @@ optional `alias:` prefix and a `!left` or `!inner` suffix on `<name>`.
   requested relation. A constraint name or column never matches a
   relationship whose other end is a view. Multi-column keys never match a
   column hint.
+- With a hint, `<name>` must equal the other table, and the hint must equal
+  the constraint name, the single column on the requested table, or the
+  single column on the other table
+  (`posts?select=users!posts_author_id_fkey(name)`,
+  `users!editor_id(name)`, `users!id(name)`). Two hinted embeds of one
+  table resolve separately
+  (`author:users!author_id(name),editor:users!editor_id(name)`).
+- Several relationships matched by a table name are `PGRST201`, except when
+  a view is one end (501).
 - One-to-many: the embed is a JSON array, `[]` when empty. Many-to-one and
   one-to-one: a JSON object, or `null` when no row matches.
 - `!left` (the default) keeps every parent row.
@@ -86,8 +98,12 @@ optional `alias:` prefix and a `!left` or `!inner` suffix on `<name>`.
 
 ## Errors
 
-- No relationship matches: `PGRST200` (400).
-- Several relationships match a column hint or constraint name: `PGRST201`
+- No relationship matches: `PGRST200` (400). With a hint, `details` reads
+  `Searched for a foreign key relationship between '<relation>' and
+  '<name>' using the hint '<hint>' in the schema '<schema>', but no matches
+  were found.`
+- Several relationships match (a table name with several keys, a column
+  hint, a constraint name, or a hint on a shared referenced column): `PGRST201`
   (300). `message` is `Could not embed because more than one relationship
   was found for '<relation>' and '<name>'`. `details` lists each candidate
   as `{cardinality, embedding, relationship}`
@@ -108,13 +124,16 @@ optional `alias:` prefix and a `!left` or `!inner` suffix on `<name>`.
 
 ## Out of scope (still 501)
 
-Join hints after `!` (`!fk_name`, `!column`), spread (`...name(...)`), nested
-embeds, empty embeds (`notes()`, filter-only upstream), related orders
-(`order=clients(id)` on an embed, or inside one), JSON-path filter keys
-(`books.data->>a=eq.1`), embedding to or from a foreign table,
-many-to-many through a junction table, self-references, several
-relationships matched by a table name (`PGRST201` upstream, where a
-many-to-many candidate may also be listed), and embeds in write responses.
+Spread (`...name(...)`), nested embeds, empty embeds (`notes()`,
+filter-only upstream), related orders (`order=clients(id)` on an embed, or
+inside one), JSON-path filter keys (`books.data->>a=eq.1`), embedding to or
+from a foreign table, self-references, several view relationships matched by
+a table name, and embeds in write responses. Many-to-many through a junction
+table is 501 too: whenever a
+junction exists (a table with two distinct many-to-one keys, one to each
+side, both inside its primary key, as `addM2MRels` builds), an unhinted
+table target or a hint naming that junction is 501, since upstream would
+list the many-to-many candidate.
 
 ## Judge cases
 
