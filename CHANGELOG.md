@@ -4,6 +4,18 @@ All notable changes to Megabase are documented in this file.
 The format is produced by [release-please](https://github.com/googleapis/release-please).
 Sections: Features, Bug Fixes, Performance, Conformance/judge, Documentation.
 
+## [0.1.39](https://github.com/Zouhairmaj/megabase/compare/v0.1.38...v0.1.39) (2026-10-15)
+
+
+### Features
+
+* **storage:** serve batch signed urls and signed upload urls ([#417](https://github.com/Zouhairmaj/megabase/issues/417)) ([c46c63c](https://github.com/Zouhairmaj/megabase/commit/c46c63c213bc20335358fa1321298556b8be7974))
+
+
+### Documentation
+
+* add 15 October day log ([#425](https://github.com/Zouhairmaj/megabase/issues/425)) ([9730e1b](https://github.com/Zouhairmaj/megabase/commit/9730e1bfcc9ee943935a3b290508772e37a95962))
+
 ## [0.1.38](https://github.com/Zouhairmaj/megabase/compare/v0.1.37...v0.1.38) (2026-10-15)
 
 
