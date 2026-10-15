@@ -1388,12 +1388,12 @@ async fn read_rows(
         .map(|(name, pg_type)| (name.as_str(), pg_type.as_str()))
         .collect();
     let mut rels = HashMap::new();
-    for name in read.embed_names() {
-        if rels.contains_key(name) {
+    for (name, hint, key) in read.embed_targets() {
+        if rels.contains_key(&key) {
             continue;
         }
-        let rel = load_relationship(&mut tx, schema, relation, name, session.anon).await?;
-        rels.insert(name.to_string(), rel);
+        let rel = load_relationship(&mut tx, schema, relation, name, hint, session.anon).await?;
+        rels.insert(key, rel);
     }
     let built = build_read_sql_as(
         schema,
@@ -1482,6 +1482,31 @@ const RELATIONSHIPS_SQL: &str = "SELECT con.conname::text, c.relname::text, f.re
            AND n.nspname = $1 AND fnn.nspname = $1
            AND (c.relname = $2 OR f.relname = $2)";
 
+/// Junction tables of a many-to-many link from `$2` to `$3` (`addM2MRels` in
+/// `SchemaCache.hs`): two distinct many-to-one keys, one to each table, whose
+/// columns all sit inside the junction's primary key. A key whose columns
+/// are exactly a primary key or unique constraint is one-to-one instead.
+const JUNCTIONS_SQL: &str = "SELECT DISTINCT j.relname::text
+         FROM pg_constraint AS a
+         JOIN pg_constraint AS b
+           ON b.conrelid = a.conrelid AND b.oid <> a.oid
+          AND b.contype = 'f' AND b.conparentid = 0
+         JOIN pg_constraint AS pk ON pk.conrelid = a.conrelid AND pk.contype = 'p'
+         JOIN pg_class AS j ON j.oid = a.conrelid
+         JOIN pg_namespace AS n ON n.oid = j.relnamespace
+         JOIN pg_class AS ra ON ra.oid = a.confrelid
+         JOIN pg_class AS rb ON rb.oid = b.confrelid
+         WHERE a.contype = 'f' AND a.conparentid = 0
+           AND n.nspname = $1
+           AND ra.relnamespace = n.oid AND rb.relnamespace = n.oid
+           AND ra.relname = $2 AND rb.relname = $3
+           AND a.conkey <@ pk.conkey AND b.conkey <@ pk.conkey
+           AND NOT EXISTS (
+               SELECT 1 FROM pg_constraint AS u
+               WHERE u.conrelid = a.conrelid AND u.contype IN ('p', 'u')
+                 AND ((u.conkey @> a.conkey AND u.conkey <@ a.conkey)
+                   OR (u.conkey @> b.conkey AND u.conkey <@ b.conkey)))";
+
 /// Every pair of tables in a schema joined by a foreign key.
 const FK_EDGES_SQL: &str = "SELECT DISTINCT c.relname::text, f.relname::text
          FROM pg_constraint AS con
@@ -1492,15 +1517,17 @@ const FK_EDGES_SQL: &str = "SELECT DISTINCT c.relname::text, f.relname::text
          WHERE con.contype = 'f' AND n.nspname = $1 AND fnn.nspname = $1";
 
 /// Find the one foreign key `target` names from `relation`: the embedded
-/// table, a constraint name, or a single key column (`findRel`).
+/// table, a constraint name, or a single key column, narrowed by the
+/// optional `!hint` (`findRel`).
 ///
-/// No match is `PGRST200`; several column or constraint matches are
-/// `PGRST201`. A self-reference or several table-name matches stay 501.
+/// No match is `PGRST200`; several matches are `PGRST201`. A
+/// self-reference or a possible many-to-many link stays 501.
 async fn load_relationship(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     schema: &str,
     relation: &str,
     target: &str,
+    hint: Option<&str>,
     anon: bool,
 ) -> Result<Relationship, Box<Response>> {
     // Views, materialized views and foreign tables carry no foreign keys here.
@@ -1545,16 +1572,24 @@ async fn load_relationship(
             },
         )
         .collect();
-    match find_relationship(relation, target, &keys) {
+    let junctions: Vec<String> = sqlx::query_scalar(JUNCTIONS_SQL)
+        .bind(schema)
+        .bind(relation)
+        .bind(target)
+        .fetch_all(&mut **tx)
+        .await
+        .map_err(|error| Box::new(query_failure(&error, anon)))?;
+    match find_relationship(relation, target, hint, &keys, &junctions) {
         Ok(rel) => Ok(rel),
         Err(FindError::NotFound) => {
-            // The hint is optional: a failed lookup must not replace PGRST200.
+            // The suggestion is optional: a failed lookup must not replace PGRST200.
             let edges: Vec<(String, String)> = sqlx::query_as(FK_EDGES_SQL)
                 .bind(schema)
                 .fetch_all(&mut **tx)
                 .await
                 .unwrap_or_default();
-            let hint = no_rel_between_hint(relation, target, &edges);
+            let suggestion = no_rel_between_hint(relation, target, &edges);
+            let using = hint.map_or_else(String::new, |hint| format!("' using the hint '{hint}"));
             Err(Box::new(pgrst(
             StatusCode::BAD_REQUEST,
             "PGRST200",
@@ -1562,9 +1597,9 @@ async fn load_relationship(
                 "Could not find a relationship between '{relation}' and '{target}' in the schema cache"
             ),
             Some(&format!(
-                "Searched for a foreign key relationship between '{relation}' and '{target}' in the schema '{schema}', but no matches were found."
+                "Searched for a foreign key relationship between '{relation}' and '{target}{using}' in the schema '{schema}', but no matches were found."
             )),
-            hint.as_deref(),
+            suggestion.as_deref(),
         )))
         }
         Err(FindError::Ambiguous(rels)) => {
@@ -2070,9 +2105,21 @@ mod tests {
     #[tokio::test]
     async fn embed_select_is_route_501() {
         let app = router(RestState::from_config(&Config::default()));
-        let (status, body, _) = send(app, get("/rest/v1/todos?select=notes!fk(body)")).await;
+        let (status, body, _) = send(app, get("/rest/v1/todos?select=...notes!fk(body)")).await;
         assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
         assert_eq!(body["unit"], "GET /rest/v1/todos");
+    }
+
+    #[tokio::test]
+    async fn hinted_embed_needs_a_database() {
+        let app = router(RestState::from_config(&Config::default()));
+        let (status, body, _) = send(
+            app,
+            get("/rest/v1/posts?select=title,author:users!author_id(name),editor:users!posts_editor_id_fkey(name)"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(body["code"], "PGRST000");
     }
 
     #[tokio::test]
