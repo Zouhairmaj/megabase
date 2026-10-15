@@ -2,12 +2,12 @@
   "schema": 1,
   "totals": {
     "units": 1031,
-    "implemented": 218,
+    "implemented": 219,
     "tested": 185,
     "conformant": 0
   },
   "percent": {
-    "coverage": 21.1,
+    "coverage": 21.2,
     "conformance": 0.0,
     "done": 0.0
   },
@@ -18,7 +18,7 @@
   "components": {
     "auth": {
       "units": 159,
-      "implemented": 84,
+      "implemented": 85,
       "tested": 79,
       "conformant": 0,
       "groups": {
@@ -36,7 +36,7 @@
         },
         "endpoints": {
           "units": 13,
-          "implemented": 5,
+          "implemented": 6,
           "tested": 4,
           "conformant": 0
         },
@@ -599,6 +599,7 @@
     "auth:route:POST /auth/v1/admin/oauth/clients/{client_id}/regenerate_secret": "tested",
     "auth:route:POST /auth/v1/admin/sso/providers": "tested",
     "auth:route:POST /auth/v1/admin/users": "tested",
+    "auth:route:POST /auth/v1/invite": "implemented",
     "auth:route:POST /auth/v1/logout": "tested",
     "auth:route:POST /auth/v1/recover": "implemented",
     "auth:route:POST /auth/v1/signup": "tested",

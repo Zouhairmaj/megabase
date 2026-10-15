@@ -86,6 +86,12 @@ pub(crate) const MAGIC_LINK_PARAMS: GoStruct = GoStruct {
     ],
 };
 
+/// `InviteParams` in `internal/api/invite.go`.
+pub(crate) const INVITE_PARAMS: GoStruct = GoStruct {
+    name: "InviteParams",
+    fields: &[("email", Kind::Str), ("data", Kind::Map)],
+};
+
 /// `RefreshTokenGrantParams` in `internal/api/token_refresh.go`.
 pub(crate) const REFRESH_TOKEN_GRANT_PARAMS: GoStruct = GoStruct {
     name: "RefreshTokenGrantParams",
