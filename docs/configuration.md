@@ -44,13 +44,13 @@ known email waits on the `supabase-mail` dial and returns 500
 the variables, or pass the file with `docker run --env-file`.
 
 ```shell
-DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/postgres
-JWT_SECRET=your-super-secret-jwt-token-with-at-least-32-characters-long
+export DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/postgres
+export JWT_SECRET=your-super-secret-jwt-token-with-at-least-32-characters-long
 # Empty selects GoTrue's no-op mail client: recovery tokens are stored, no mail is sent.
-GOTRUE_SMTP_HOST=
-FILE_STORAGE_BACKEND_PATH=/var/lib/megabase/storage
+export GOTRUE_SMTP_HOST=
+export FILE_STORAGE_BACKEND_PATH=/var/lib/megabase/storage
 # Needs Deno 2.4 or later on PATH, or MEGABASE_DENO.
-MEGABASE_FUNCTIONS_DIR=/srv/functions
+export MEGABASE_FUNCTIONS_DIR=/srv/functions
 ```
 
 `JWT_SECRET` above is the demo secret from

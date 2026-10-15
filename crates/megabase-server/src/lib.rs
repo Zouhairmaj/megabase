@@ -240,7 +240,7 @@ pub async fn run(config: Config) -> std::io::Result<()> {
     let storage = megabase_storage::StorageState::new(pool, config.jwt_hs256().ok())
         .with_file_root(config.storage_file_path.as_deref());
     if config.storage_file_path.is_none() {
-        info!("FILE_STORAGE_BACKEND_PATH unset; /storage/v1/object routes answer 501");
+        info!("FILE_STORAGE_BACKEND_PATH unset or empty;/storage/v1/object routes answer 501");
     }
     let functions = megabase_functions::FunctionsState::from_env(&config);
     if !functions.is_enabled() {
