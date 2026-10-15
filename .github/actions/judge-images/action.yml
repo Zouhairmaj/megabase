@@ -5,7 +5,8 @@ description: >-
   mirror. When a mirror cannot be pulled (not yet mirrored, private, or
   ghcr is down), pull the same tag and digest from the upstream listed in
   .github/image-mirrors.txt instead. Exports every variable it resolves
-  so Compose and later steps use the pulled reference. Issues #350, #358.
+  so Compose and later steps use the pulled reference. Issues #350, #358,
+  #371.
 
 inputs:
   variables:
@@ -39,18 +40,17 @@ runs:
         # the job timeout on backoff and hide the pull error behind a cancel.
         retry_deadline=$((SECONDS + 20 * 60))
         pull() {
-          # Mirror pulls stop once `reserve` seconds are left, so the upstream
-          # fallback always gets part of the shared budget.
-          local image=$1 tries=$2 reserve=$3 attempt=1 wait remaining limit
+          # Stop once only `reserve` seconds of the shared budget are left,
+          # so the images after this one keep their share. `cap` > 0 bounds
+          # a single attempt.
+          local image=$1 tries=$2 reserve=$3 cap=$4 attempt=1 wait limit
           while :; do
-            # Bound each pull by what is left of the shared budget.
-            remaining=$((retry_deadline - SECONDS))
-            if [ "$remaining" -le "$reserve" ]; then
+            limit=$((retry_deadline - SECONDS - reserve))
+            if [ "$limit" -le 0 ]; then
               return 1
             fi
-            limit=$remaining
-            if [ "$reserve" -gt 0 ] && [ "$limit" -gt 120 ]; then
-              limit=120
+            if [ "$cap" -gt 0 ] && [ "$limit" -gt "$cap" ]; then
+              limit=$cap
             fi
             if timeout "${limit}s" docker pull "$image"; then
               return 0
@@ -64,8 +64,8 @@ runs:
             wait=$((attempt * 15))
             [ "$wait" -gt 120 ] && wait=120
             wait=$((wait + RANDOM % 15))
-            remaining=$((retry_deadline - SECONDS - reserve))
-            [ "$wait" -gt "$remaining" ] && wait=$remaining
+            limit=$((retry_deadline - SECONDS - reserve))
+            [ "$wait" -gt "$limit" ] && wait=$limit
             if [ "$wait" -le 0 ]; then
               return 1
             fi
@@ -74,7 +74,10 @@ runs:
           done
         }
 
+        # Pass 1: every mirror. Mirror pulls stop with 8 minutes of the
+        # budget left, so the upstream fallbacks always get a share.
         resolved=0
+        fallbacks=()
         for line in "${lines[@]}"; do
           var=${line%% *}
           mirror=${line#* }
@@ -97,11 +100,29 @@ runs:
           fi
           upstream="${upstream}:${mirror#"$repo":}"
 
-          if pull "$mirror" 3 480; then
+          if pull "$mirror" 3 480 120; then
             echo "${var}=${mirror}" >> "$GITHUB_ENV"
             continue
           fi
           echo "::warning::Could not pull ${mirror}. Falling back to ${upstream} (same digest). Run the Mirror images workflow and make the package public."
+          fallbacks+=("${var} ${upstream}")
+        done
+        if [ -n "$VARIABLES" ] && [ "$resolved" -ne "$(wc -w <<<"$VARIABLES")" ]; then
+          echo "::error::not every variable in '${VARIABLES}' is a mirrored image in judge/compose.override.yml"
+          exit 1
+        fi
+
+        # Pass 2: the upstream of each mirror that failed. The remaining
+        # budget is split evenly: each fallback keeps 1/(queued + 1) of it,
+        # so the current pull always has time even if every mirror failed.
+        left=${#fallbacks[@]}
+        for entry in ${fallbacks[@]+"${fallbacks[@]}"}; do
+          var=${entry%% *}
+          upstream=${entry#* }
+          remaining=$((retry_deadline - SECONDS))
+          [ "$remaining" -lt 0 ] && remaining=0
+          reserve=$((remaining * (left - 1) / left))
+          left=$((left - 1))
           # The official library images also exist on Docker Hub at the same
           # tag and digest. The Judge jobs log in to Docker Hub first, so keep
           # part of the budget for it when ECR answers with 429s.
@@ -112,25 +133,21 @@ runs:
             *) hub="" ;;
           esac
           if [ -z "$hub" ]; then
-            if ! pull "$upstream" 12 0; then
+            if ! pull "$upstream" 12 "$reserve" 0; then
               echo "::error::failed to pull ${upstream}"
               exit 1
             fi
             echo "${var}=${upstream}" >> "$GITHUB_ENV"
             continue
           fi
-          if pull "$upstream" 4 240; then
+          if pull "$upstream" 4 $((reserve + (remaining - reserve) / 2)) 0; then
             echo "${var}=${upstream}" >> "$GITHUB_ENV"
             continue
           fi
           echo "::warning::Could not pull ${upstream}. Falling back to ${hub} (same digest)."
-          if ! pull "$hub" 4 0; then
+          if ! pull "$hub" 4 "$reserve" 0; then
             echo "::error::failed to pull ${upstream} and ${hub}"
             exit 1
           fi
           echo "${var}=${hub}" >> "$GITHUB_ENV"
         done
-        if [ -n "$VARIABLES" ] && [ "$resolved" -ne "$(wc -w <<<"$VARIABLES")" ]; then
-          echo "::error::not every variable in '${VARIABLES}' is a mirrored image in judge/compose.override.yml"
-          exit 1
-        fi

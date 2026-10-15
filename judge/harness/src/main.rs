@@ -650,9 +650,11 @@ mod tests {
                 "line {} must not pull from Docker Hub, got {image}",
                 i + 1
             );
+            // public.ecr.aws is only a fallback (issue #371): an ECR image
+            // is pulled from its ghcr.io/zouhairmaj mirror by default.
             assert!(
-                image.starts_with("public.ecr.aws/") || image.starts_with("ghcr.io/"),
-                "line {} must use public.ecr.aws or ghcr.io, got {image}",
+                image.starts_with("ghcr.io/"),
+                "line {} must use ghcr.io (mirror public.ecr.aws images), got {image}",
                 i + 1
             );
             let Some((_, digest)) = image.rsplit_once("@sha256:") else {
@@ -713,8 +715,8 @@ mod tests {
             }
         }
         assert!(
-            mirrors >= 4,
-            "expected the db, kong, rust and debian mirrors, got {mirrors}"
+            mirrors >= 11,
+            "expected the nine reference-stack and two Dockerfile mirrors, got {mirrors}"
         );
     }
 
