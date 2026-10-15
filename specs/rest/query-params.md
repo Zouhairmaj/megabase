@@ -95,7 +95,7 @@ them. `limit=0` returns no rows. A nonzero `offset` without `limit` is
 
 ## Out of scope
 
-Spreads and nested embeds (embeds are in [`embedding.md`](embedding.md)), `Prefer`, the `Range` header, object and CSV
+Spreads (embeds are in [`embedding.md`](embedding.md)), `Prefer`, the `Range` header, object and CSV
 media types, and writes. Those return HTTP 501 via
 `megabase_core::MegabaseNotImplemented`. `columns` and `on_conflict` are
 stored for a later write and are not applied to `POST` in this unit.

@@ -65,6 +65,21 @@ of:
   (`author:users!author_id(name),editor:users!editor_id(name)`).
 - Several relationships matched by a table name are `PGRST201`, except when
   a view is one end (501).
+- Self-reference (`Plan.hs:688-700`): a key from a table to itself gives a
+  many-to-one and a one-to-many relationship. Without a hint, the table
+  name picks the one-to-many (`categories?select=children:categories(name)`)
+  and the key column picks the many-to-one
+  (`categories?select=parent:parent_id(name)`). With a hint, the table name
+  must be the target and the hint the key column, which picks the
+  one-to-many (`children:categories!parent_id(name)`). A constraint name
+  never matches a self-reference, and a one-to-one self key matches
+  nothing (`PGRST200`).
+- Nested embeds (`authors?select=name,books(title,reviews(rating))`): each
+  embed may hold embeds of its own, at any depth. A nested target is looked
+  up from the table its parent embed resolved to (`addRels`,
+  `Plan.hs:576-602`). Every embedded table is aliased `<table>_<depth>`
+  (root depth 0), as upstream does, so a self-reference or a table embedded
+  at two depths joins the right rows.
 - One-to-many: the embed is a JSON array, `[]` when empty. Many-to-one and
   one-to-one: a JSON object, or `null` when no row matches.
 - `!left` (the default) keeps every parent row.
@@ -77,20 +92,25 @@ of:
   path targets that embed instead of the root. `books.published=eq.true`
   filters the embedded rows, `books.or=(…)` / `books.not.and=(…)` add a logic
   tree, `books.order=title.desc` orders them, and `books.limit=1` /
-  `books.offset=1` page them. The first segment matches the embed's name or
-  alias (`url-use-legacy-target-names`, default `true`); naming the relation
+  `books.offset=1` page them. A longer path targets a nested embed
+  (`books.reviews.rating=gte.4`). Each segment matches the embed's name or
+  alias at its level (`url-use-legacy-target-names`, default `true`); naming the relation
   of an aliased embed adds a deprecation `Warning` header upstream
   (`App.hs:230-290`) and stays 501 here. Filter values are
   typed with the embedded table's columns. A left embed still keeps every
   parent row; its array or object is filtered.
-- Null embed filter (`addNullEmbedFilters`, `Plan.hs:1027-1043`): a root
-  filter or logic-tree leaf named after an embed (its alias, else its name)
+- Nested `!inner` embeds keep only the parent embed rows with a nested row,
+  and a nested null embed filter (`books.reviews=is.null`) applies to the
+  books rows.
+- Null embed filter (`addNullEmbedFilters`, `Plan.hs:1027-1043`): a
+  filter or logic-tree leaf named after a child embed (its alias, else its name)
   with `is.null` keeps the parents whose filtered embed is empty (an
   anti-join, `NOT EXISTS`); `not.is.null` keeps the others. Any other
   operator on that name stays an ordinary column filter.
 - `Prefer: count` (`readPlanToCountQuery`, `QueryBuilder.hs:260-296`) counts
   parents behind the root filters, each `!inner` embed and each null embed
-  filter, using the embed's filters but not its order or page.
+  filter, using the embed's filters, nested `!inner` embeds and nested null
+  embed filters, but not its order or page.
 - The embedded query runs as the request role, so grants and row-level
   security apply. A missing grant is the database error (`42501`).
 - The output key is the alias, else `<name>` as written (`user_id` for
@@ -115,8 +135,9 @@ of:
   '<other>!<constraint>', .... Find the desired relationship in the
   'details' key.`
 
-- An embedded parameter whose first segment is not an embed in `select`,
-  or that names a nested embed (`books.tags.limit=1`): `PGRST108` (400),
+- An embedded parameter with a path segment that is not an embed at its
+  level (`books.tags.limit=1` when `books` embeds no `tags`): `PGRST108`
+  (400), naming the first such segment,
   `'<name>' is not an embedded resource in this request`, hint
   `Verify that '<name>' is included in the 'select' query parameter.`
   Filters are checked first, then orders, ranges and logic trees; within
@@ -124,10 +145,10 @@ of:
 
 ## Out of scope (still 501)
 
-Spread (`...name(...)`), nested embeds, empty embeds (`notes()`,
+Spread (`...name(...)`), empty embeds (`notes()`,
 filter-only upstream), related orders (`order=clients(id)` on an embed, or
 inside one), JSON-path filter keys (`books.data->>a=eq.1`), embedding to or
-from a foreign table, self-references, several view relationships matched by
+from a foreign table, several view relationships matched by
 a table name, and embeds in write responses. Many-to-many through a junction
 table is 501 too: whenever a
 junction exists (a table with two distinct many-to-one keys, one to each
@@ -145,4 +166,7 @@ list the many-to-many candidate.
 `rest.embed.column-hint-inner`, `rest.embed.constraint-target`,
 `rest.embed.column-hint-ambiguous`, `rest.embed.column-hint-not-a-key`.
 Embedded filters (left and `!inner`), embedded order and limit, and the
-`is.null` anti-join need cases in a `review/issue-377-cases` PR.
+`is.null` anti-join need cases in a `review/issue-377-cases` PR. Nested
+to-many embeds (two and three levels), the `alias:fk_column(...)` self
+embed and the reverse `alias:table!fk_column(...)` self embed need cases
+in a `review/issue-378-cases` PR.
