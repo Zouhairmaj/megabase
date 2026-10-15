@@ -2,12 +2,12 @@
   "schema": 1,
   "totals": {
     "units": 1031,
-    "implemented": 179,
+    "implemented": 188,
     "tested": 177,
     "conformant": 0
   },
   "percent": {
-    "coverage": 17.4,
+    "coverage": 18.2,
     "conformance": 0.0,
     "done": 0.0
   },
@@ -390,7 +390,7 @@
     },
     "storage": {
       "units": 149,
-      "implemented": 3,
+      "implemented": 12,
       "tested": 2,
       "conformant": 0,
       "groups": {
@@ -408,7 +408,7 @@
         },
         "database": {
           "units": 46,
-          "implemented": 0,
+          "implemented": 9,
           "tested": 0,
           "conformant": 0
         },
@@ -740,6 +740,15 @@
     "rest:route:PUT /rest/v1/{relation}": "tested",
     "storage:route:GET /storage/v1/bucket": "tested",
     "storage:route:GET /storage/v1/bucket/{bucketId}": "tested",
-    "storage:route:GET /storage/v1/health": "implemented"
+    "storage:route:GET /storage/v1/health": "implemented",
+    "storage:sql-function:storage.add_prefixes()": "implemented",
+    "storage:sql-function:storage.allow_any_operation()": "implemented",
+    "storage:sql-function:storage.allow_only_operation()": "implemented",
+    "storage:sql-function:storage.delete_leaf_prefixes()": "implemented",
+    "storage:sql-function:storage.delete_prefix()": "implemented",
+    "storage:sql-function:storage.delete_prefix_hierarchy_trigger()": "implemented",
+    "storage:sql-function:storage.enforce_bucket_lifecycle_service_role()": "implemented",
+    "storage:sql-function:storage.enforce_bucket_name_length()": "implemented",
+    "storage:sql-function:storage.extension()": "implemented"
   }
 }
