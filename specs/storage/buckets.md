@@ -59,8 +59,9 @@ The list has no `ORDER BY` without `sortColumn`, as upstream.
   queries and storage-api's JWT error bodies are not ported).
 - List query options (`limit`, `offset`, `sortColumn`, `sortOrder`, `search`).
 - Database error mapping.
-- The rest of the `storage` schema: triggers, the versioning and lifecycle
-  constraints, `storage.objects` and the other tables. The
+- The rest of the `storage` schema: the versioning and lifecycle
+  constraints, the triggers not listed in [`database.md`](database.md),
+  `storage.objects` and the other tables. The
   `storage:sql-table:storage.buckets` unit carries no marker.
 
 ## Judge cases

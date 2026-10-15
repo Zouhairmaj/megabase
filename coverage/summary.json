@@ -2,12 +2,12 @@
   "schema": 1,
   "totals": {
     "units": 1031,
-    "implemented": 186,
+    "implemented": 195,
     "tested": 181,
     "conformant": 0
   },
   "percent": {
-    "coverage": 18.0,
+    "coverage": 18.9,
     "conformance": 0.0,
     "done": 0.0
   },
@@ -390,7 +390,7 @@
     },
     "storage": {
       "units": 149,
-      "implemented": 10,
+      "implemented": 19,
       "tested": 6,
       "conformant": 0,
       "groups": {
@@ -408,7 +408,7 @@
         },
         "database": {
           "units": 46,
-          "implemented": 0,
+          "implemented": 9,
           "tested": 0,
           "conformant": 0
         },
@@ -747,6 +747,15 @@
     "storage:route:GET /storage/v1/health": "implemented",
     "storage:route:POST /storage/v1/bucket": "tested",
     "storage:route:PUT /storage/v1/bucket/{bucketId}": "tested",
-    "storage:route:PUT /storage/v1/bucket/{bucketId}/lifecycle": "tested"
+    "storage:route:PUT /storage/v1/bucket/{bucketId}/lifecycle": "tested",
+    "storage:sql-function:storage.add_prefixes()": "implemented",
+    "storage:sql-function:storage.allow_any_operation()": "implemented",
+    "storage:sql-function:storage.allow_only_operation()": "implemented",
+    "storage:sql-function:storage.delete_leaf_prefixes()": "implemented",
+    "storage:sql-function:storage.delete_prefix()": "implemented",
+    "storage:sql-function:storage.delete_prefix_hierarchy_trigger()": "implemented",
+    "storage:sql-function:storage.enforce_bucket_lifecycle_service_role()": "implemented",
+    "storage:sql-function:storage.enforce_bucket_name_length()": "implemented",
+    "storage:sql-function:storage.extension()": "implemented"
   }
 }

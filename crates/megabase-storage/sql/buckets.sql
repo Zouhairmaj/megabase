@@ -9,7 +9,8 @@
 -- 0073-revoke-grants-to-unused-operations.sql.
 --
 -- The `storage.buckets` columns the bucket routes read, in their final
--- shape. Triggers, the versioning and lifecycle CHECK constraints, and every
+-- shape. The triggers listed in specs/storage/database.md are installed by
+-- their own files; the versioning and lifecycle CHECK constraints and every
 -- other storage table are not installed (specs/storage/buckets.md).
 
 CREATE SCHEMA IF NOT EXISTS storage;
