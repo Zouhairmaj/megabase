@@ -2,12 +2,12 @@
   "schema": 1,
   "totals": {
     "units": 1031,
-    "implemented": 218,
+    "implemented": 216,
     "tested": 185,
     "conformant": 0
   },
   "percent": {
-    "coverage": 21.1,
+    "coverage": 21.0,
     "conformance": 0.0,
     "done": 0.0
   },
@@ -18,7 +18,7 @@
   "components": {
     "auth": {
       "units": 159,
-      "implemented": 87,
+      "implemented": 85,
       "tested": 79,
       "conformant": 0,
       "groups": {
@@ -84,7 +84,7 @@
         },
         "token": {
           "units": 6,
-          "implemented": 6,
+          "implemented": 4,
           "tested": 3,
           "conformant": 0
         },
@@ -562,11 +562,9 @@
     }
   },
   "units": {
-    "auth:grant-type:id_token": "implemented",
     "auth:grant-type:password": "tested",
     "auth:grant-type:pkce": "implemented",
     "auth:grant-type:refresh_token": "tested",
-    "auth:grant-type:web3": "implemented",
     "auth:hook:custom_access_token": "implemented",
     "auth:route:DELETE /auth/v1/admin/custom-providers/{identifier}": "tested",
     "auth:route:DELETE /auth/v1/admin/oauth/clients/{client_id}": "tested",

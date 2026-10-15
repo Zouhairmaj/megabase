@@ -65,7 +65,7 @@ struct IdTokenBody {
     link_identity: bool,
 }
 
-// megabase:unit auth:grant-type:id_token
+// Not counted as served yet: an enabled provider is still HTTP 501.
 pub(super) async fn grant(state: AuthState, headers: HeaderMap, body: Body) -> Response {
     let params = match grant_json::<IdTokenBody>(body, &ID_TOKEN_GRANT_PARAMS).await {
         Ok(params) => params,

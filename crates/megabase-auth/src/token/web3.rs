@@ -34,7 +34,7 @@ struct Web3Body {
     chain: String,
 }
 
-// megabase:unit auth:grant-type:web3
+// Not counted as served yet: an enabled chain is still HTTP 501.
 pub(super) async fn grant(state: AuthState, body: Body) -> Response {
     let config = &state.config;
     if !config.web3_solana && !config.web3_ethereum {

@@ -1,6 +1,8 @@
 # Auth: token (issues 17 and 53)
 
-Status: complete
+Status: partial. `id_token` and `web3` are served up to the provider
+check; they carry no `megabase:unit` marker until verification after an
+enabled provider or chain is ported (it is HTTP 501 today).
 Unit ids (`coverage/units.json`): `auth:route:POST /auth/v1/token`,
 `auth:grant-type:password`, `auth:grant-type:refresh_token` (Level 1);
 `auth:grant-type:pkce`, `auth:grant-type:id_token`,
@@ -303,8 +305,10 @@ Already in `judge/cases/auth.toml` (not edited here): `auth.token.password`,
 `auth.token.wrong-password`, `auth.token.refresh`. Each case signs up
 first, so it also depends on `POST /signup` from issue 15.
 
-Proposed for the Level 2 grants (protected-path PR on
-`review/issue-53-cases`): PKCE empty body (400 `validation_failed`),
+Level 2 cases land in their own PR on `review/issue-53-cases`, because
+`judge/cases/` is a protected path that a feature (`issue-*`) branch may
+not touch (root `AGENTS.md`, Task workflow step 8). That PR merges first,
+and each case must pass on the reference stack. Planned cases: PKCE empty body (400 `validation_failed`),
 unknown `auth_code` (404 `flow_state_not_found`); `id_token` empty body
 (400 `id_token required`), `provider: "google"` (400 `provider_disabled`),
 arbitrary `issuer` with `client_id` (400 `Custom OIDC provider "" not
