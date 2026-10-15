@@ -17,3 +17,114 @@ units = ["storage:route:GET /storage/v1/bucket/{bucketId}"]
 method = "GET"
 path = "/storage/v1/bucket/judge-does-not-exist"
 key = "service_role"
+
+# Bucket writes (issue 56). Ids sort after `storage.bucket.list`, so the
+# buckets these cases create never appear in that list on either stack.
+# `{{run}}` keeps bucket names unique across judge runs on a reused volume.
+
+[[case]]
+id = "storage.bucket.write.create"
+description = "Create a bucket with only a name; the response echoes the name"
+units = ["storage:route:POST /storage/v1/bucket"]
+[[case.step]]
+method = "POST"
+path = "/storage/v1/bucket"
+key = "service_role"
+json = { name = "judge-create-{{run}}" }
+
+[[case]]
+id = "storage.bucket.write.create-options"
+description = "Create with id, public, a size string and MIME types; the stored row is normalized"
+units = ["storage:route:POST /storage/v1/bucket", "storage:route:GET /storage/v1/bucket/{bucketId}"]
+[[case.step]]
+method = "POST"
+path = "/storage/v1/bucket"
+key = "service_role"
+json = { id = "judge-options-id-{{run}}", name = "judge-options-{{run}}", public = true, file_size_limit = "1.5MB", allowed_mime_types = ["image/PNG", "image/png", ""] }
+[[case.step]]
+method = "GET"
+path = "/storage/v1/bucket/judge-options-id-{{run}}"
+key = "service_role"
+
+[[case]]
+id = "storage.bucket.write.create-duplicate"
+description = "Creating an existing bucket again is BucketAlreadyExists"
+units = ["storage:route:POST /storage/v1/bucket"]
+[[case.step]]
+method = "POST"
+path = "/storage/v1/bucket"
+key = "service_role"
+json = { name = "judge-duplicate-{{run}}" }
+[[case.step]]
+method = "POST"
+path = "/storage/v1/bucket"
+key = "service_role"
+json = { name = "judge-duplicate-{{run}}" }
+
+[[case]]
+id = "storage.bucket.write.create-invalid-name"
+description = "A name with a slash is InvalidBucketName"
+units = ["storage:route:POST /storage/v1/bucket"]
+[[case.step]]
+method = "POST"
+path = "/storage/v1/bucket"
+key = "service_role"
+json = { name = "judge/invalid-{{run}}" }
+
+[[case]]
+id = "storage.bucket.write.create-too-large"
+description = "A file_size_limit above FILE_SIZE_LIMIT is EntityTooLarge"
+units = ["storage:route:POST /storage/v1/bucket"]
+[[case.step]]
+method = "POST"
+path = "/storage/v1/bucket"
+key = "service_role"
+json = { name = "judge-too-large-{{run}}", file_size_limit = "1GB" }
+
+[[case]]
+id = "storage.bucket.write.update"
+description = "Update public, the size limit and MIME types; the stored row changes"
+units = ["storage:route:POST /storage/v1/bucket", "storage:route:PUT /storage/v1/bucket/{bucketId}", "storage:route:GET /storage/v1/bucket/{bucketId}"]
+[[case.step]]
+method = "POST"
+path = "/storage/v1/bucket"
+key = "service_role"
+json = { name = "judge-update-{{run}}", file_size_limit = 1024, allowed_mime_types = ["image/png"] }
+[[case.step]]
+method = "PUT"
+path = "/storage/v1/bucket/judge-update-{{run}}"
+key = "service_role"
+json = { public = true, file_size_limit = "2KB", allowed_mime_types = ["image/jpeg", "text/plain;charset=utf-8"] }
+[[case.step]]
+method = "GET"
+path = "/storage/v1/bucket/judge-update-{{run}}"
+key = "service_role"
+
+[[case]]
+id = "storage.bucket.write.update-missing"
+description = "Updating an unknown bucket is NoSuchBucket"
+units = ["storage:route:PUT /storage/v1/bucket/{bucketId}"]
+[[case.step]]
+method = "PUT"
+path = "/storage/v1/bucket/judge-update-missing-{{run}}"
+key = "service_role"
+json = { public = true }
+
+[[case]]
+id = "storage.bucket.write.lifecycle-get"
+description = "Lifecycle read is FeatureNotEnabled in the self-hosted configuration"
+units = ["storage:route:GET /storage/v1/bucket/{bucketId}/lifecycle"]
+[[case.step]]
+method = "GET"
+path = "/storage/v1/bucket/judge-does-not-exist/lifecycle"
+key = "service_role"
+
+[[case]]
+id = "storage.bucket.write.lifecycle-put"
+description = "Lifecycle write with a valid body is FeatureNotEnabled in the self-hosted configuration"
+units = ["storage:route:PUT /storage/v1/bucket/{bucketId}/lifecycle"]
+[[case.step]]
+method = "PUT"
+path = "/storage/v1/bucket/judge-does-not-exist/lifecycle"
+key = "service_role"
+json = { rules = [{ status = "Enabled", filter = {}, noncurrentVersionExpiration = { noncurrentDays = 30 } }] }
