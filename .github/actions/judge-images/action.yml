@@ -102,11 +102,33 @@ runs:
             continue
           fi
           echo "::warning::Could not pull ${mirror}. Falling back to ${upstream} (same digest). Run the Mirror images workflow and make the package public."
-          if ! pull "$upstream" 12 0; then
-            echo "::error::failed to pull ${upstream}"
+          # The official library images also exist on Docker Hub at the same
+          # tag and digest. The Judge jobs log in to Docker Hub first, so keep
+          # part of the budget for it when ECR answers with 429s.
+          case "$upstream" in
+            public.ecr.aws/docker/library/*)
+              hub="docker.io/library/${upstream#public.ecr.aws/docker/library/}"
+              ;;
+            *) hub="" ;;
+          esac
+          if [ -z "$hub" ]; then
+            if ! pull "$upstream" 12 0; then
+              echo "::error::failed to pull ${upstream}"
+              exit 1
+            fi
+            echo "${var}=${upstream}" >> "$GITHUB_ENV"
+            continue
+          fi
+          if pull "$upstream" 4 240; then
+            echo "${var}=${upstream}" >> "$GITHUB_ENV"
+            continue
+          fi
+          echo "::warning::Could not pull ${upstream}. Falling back to ${hub} (same digest)."
+          if ! pull "$hub" 4 0; then
+            echo "::error::failed to pull ${upstream} and ${hub}"
             exit 1
           fi
-          echo "${var}=${upstream}" >> "$GITHUB_ENV"
+          echo "${var}=${hub}" >> "$GITHUB_ENV"
         done
         if [ -n "$VARIABLES" ] && [ "$resolved" -ne "$(wc -w <<<"$VARIABLES")" ]; then
           echo "::error::not every variable in '${VARIABLES}' is a mirrored image in judge/compose.override.yml"
