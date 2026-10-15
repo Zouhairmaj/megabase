@@ -152,8 +152,9 @@ per path in request order, keys `error, path, signedURL`: a found path has
 `error: null` and `signedURL: "/object/sign/<bucket>/<path>?token=<jwt>"`
 (same payload as single sign); any other has `error: "Either the object
 does not exist or you do not have access to it"` and `signedURL: null`. A
-missing bucket finds nothing, so every entry is the error. A path with `?`,
-`#` or `%` is a 501: upstream does not escape the key in `signedURL`.
+missing bucket finds nothing, so every entry is the error. Paths with `?`,
+`#` or `%` are looked up as they are, and `signedURL` is built without
+escaping the key, as upstream does.
 
 ## Signed upload URL — `POST /object/upload/sign/:bucket/*`
 
