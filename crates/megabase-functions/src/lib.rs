@@ -11,6 +11,7 @@
 //! is nothing to serve and every request returns the structured
 //! `MEGABASE_NOT_IMPLEMENTED` 501. Spec: `specs/functions/invoke.md`.
 
+pub mod bootstrap;
 pub mod gate;
 pub mod proxy;
 pub mod worker;
