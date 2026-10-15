@@ -57,6 +57,10 @@ pub struct AuthState {
     /// `grant_type=web3` limiter: `GOTRUE_RATE_LIMIT_WEB3` (default 30) per
     /// five minutes, burst 30, one bucket per header value.
     pub(crate) web3_limiter: Arc<KeyedLimiter>,
+    /// `POST /oauth/clients/register` limiter:
+    /// `GOTRUE_RATE_LIMIT_OAUTH_DYNAMIC_CLIENT_REGISTER` (default 10) per five
+    /// minutes, burst 30, one bucket per header value.
+    pub(crate) oauth_register_limiter: Arc<KeyedLimiter>,
     /// Shared Auth pool. `try_from_env` leaves this empty. `megabase_server::run`
     /// replaces it with `Backend::connect` before `router_with_state`, and
     /// closes it on shutdown. Signup, logout, verify, the password and
@@ -138,6 +142,14 @@ impl AuthState {
                 rate_setting(&lookup, "GOTRUE_RATE_LIMIT_WEB3", DEFAULT_WEB3_RATE)? / (60.0 * 5.0),
                 TOKEN_BURST,
             )),
+            oauth_register_limiter: Arc::new(KeyedLimiter::new(
+                rate_setting(
+                    &lookup,
+                    "GOTRUE_RATE_LIMIT_OAUTH_DYNAMIC_CLIENT_REGISTER",
+                    DEFAULT_OAUTH_REGISTER_RATE,
+                )? / (60.0 * 5.0),
+                TOKEN_BURST,
+            )),
             backend: Backend::none(),
         })
     }
@@ -176,6 +188,7 @@ impl AuthState {
             rate_limit_header: defaults.rate_limit_header,
             token_limiter: defaults.token_limiter,
             web3_limiter: defaults.web3_limiter,
+            oauth_register_limiter: defaults.oauth_register_limiter,
             backend,
         }
     }
@@ -274,6 +287,8 @@ const REFERENCE_TOKEN_REFRESH_RATE: f64 = 1.0;
 
 /// GoTrue's `RateLimitWeb3` default; the reference stack does not set it.
 const DEFAULT_WEB3_RATE: f64 = 30.0;
+/// `RateLimitOAuthDynamicClientRegister` default.
+const DEFAULT_OAUTH_REGISTER_RATE: f64 = 10.0;
 
 /// A `GOTRUE_RATE_LIMIT_*` float (events per five minutes); unset or empty
 /// is `default`.

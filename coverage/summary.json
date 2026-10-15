@@ -2,12 +2,12 @@
   "schema": 1,
   "totals": {
     "units": 1031,
-    "implemented": 231,
+    "implemented": 233,
     "tested": 186,
     "conformant": 0
   },
   "percent": {
-    "coverage": 22.4,
+    "coverage": 22.6,
     "conformance": 0.0,
     "done": 0.0
   },
@@ -18,7 +18,7 @@
   "components": {
     "auth": {
       "units": 159,
-      "implemented": 92,
+      "implemented": 94,
       "tested": 80,
       "conformant": 0,
       "groups": {
@@ -54,7 +54,7 @@
         },
         "oauth": {
           "units": 6,
-          "implemented": 0,
+          "implemented": 2,
           "tested": 0,
           "conformant": 0
         },
@@ -592,6 +592,7 @@
     "auth:route:GET /auth/v1/admin/users/{user_id}/passkeys": "tested",
     "auth:route:GET /auth/v1/factors/recovery-codes": "implemented",
     "auth:route:GET /auth/v1/health": "tested",
+    "auth:route:GET /auth/v1/oauth/userinfo": "implemented",
     "auth:route:GET /auth/v1/settings": "tested",
     "auth:route:GET /auth/v1/user": "tested",
     "auth:route:GET /auth/v1/user/identities/authorize": "tested",
@@ -606,6 +607,7 @@
     "auth:route:POST /auth/v1/invite": "tested",
     "auth:route:POST /auth/v1/logout": "tested",
     "auth:route:POST /auth/v1/magiclink": "implemented",
+    "auth:route:POST /auth/v1/oauth/clients/register": "implemented",
     "auth:route:POST /auth/v1/recover": "implemented",
     "auth:route:POST /auth/v1/signup": "tested",
     "auth:route:POST /auth/v1/token": "tested",
