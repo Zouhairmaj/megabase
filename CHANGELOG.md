@@ -4,6 +4,13 @@ All notable changes to Megabase are documented in this file.
 The format is produced by [release-please](https://github.com/googleapis/release-please).
 Sections: Features, Bug Fixes, Performance, Conformance/judge, Documentation.
 
+## [0.1.33](https://github.com/Zouhairmaj/megabase/compare/v0.1.32...v0.1.33) (2026-10-15)
+
+
+### Features
+
+* **functions:** invoke deno edge functions via /functions/v1/{name} ([#394](https://github.com/Zouhairmaj/megabase/issues/394)) ([0a4593c](https://github.com/Zouhairmaj/megabase/commit/0a4593cbc1410d1c0c23010a82418b25f8c16f89))
+
 ## [0.1.32](https://github.com/Zouhairmaj/megabase/compare/v0.1.31...v0.1.32) (2026-10-15)
 
 
