@@ -2,12 +2,12 @@
   "schema": 1,
   "totals": {
     "units": 1031,
-    "implemented": 178,
+    "implemented": 182,
     "tested": 177,
     "conformant": 0
   },
   "percent": {
-    "coverage": 17.3,
+    "coverage": 17.7,
     "conformance": 0.0,
     "done": 0.0
   },
@@ -390,13 +390,13 @@
     },
     "storage": {
       "units": 149,
-      "implemented": 2,
+      "implemented": 6,
       "tested": 2,
       "conformant": 0,
       "groups": {
         "bucket": {
           "units": 6,
-          "implemented": 2,
+          "implemented": 6,
           "tested": 2,
           "conformant": 0
         },
@@ -739,6 +739,10 @@
     "rest:route:POST /rest/v1/{relation}": "tested",
     "rest:route:PUT /rest/v1/{relation}": "tested",
     "storage:route:GET /storage/v1/bucket": "tested",
-    "storage:route:GET /storage/v1/bucket/{bucketId}": "tested"
+    "storage:route:GET /storage/v1/bucket/{bucketId}": "tested",
+    "storage:route:GET /storage/v1/bucket/{bucketId}/lifecycle": "implemented",
+    "storage:route:POST /storage/v1/bucket": "implemented",
+    "storage:route:PUT /storage/v1/bucket/{bucketId}": "implemented",
+    "storage:route:PUT /storage/v1/bucket/{bucketId}/lifecycle": "implemented"
   }
 }

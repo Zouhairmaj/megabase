@@ -1,16 +1,17 @@
 //! Supabase Storage-compatible API (`/storage/v1`) for Megabase.
 //!
 //! Target behavior: Supabase Storage, vendor/storage (Apache-2.0), pinned in `vendor/`.
-//! `GET /bucket` and `GET /bucket/{bucketId}` are served for the service
-//! role (`specs/storage/buckets.md`). Other roles, a missing or invalid JWT,
-//! and every other route return the structured `MEGABASE_NOT_IMPLEMENTED` 501.
+//! The bucket routes (list, get, create, update, and the lifecycle get and
+//! put) are served for the service role (`specs/storage/buckets.md`,
+//! `specs/storage/bucket.md`). Other roles, a missing or invalid JWT, and
+//! every other route return the structured `MEGABASE_NOT_IMPLEMENTED` 501.
 
 // Ported from supabase/storage src/http/routes/bucket/getAllBuckets.ts,
 // src/http/routes/bucket/getBucket.ts, src/storage/database/pg.ts,
 // src/storage/schemas/bucket.ts, src/http/error-handler.ts and
 // src/internal/errors/codes.ts (Apache-2.0), pin v1.80.2.
 
-use std::sync::Arc;
+use std::{borrow::Cow, sync::Arc};
 
 use axum::{
     extract::{OriginalUri, Path, State},
@@ -20,9 +21,12 @@ use axum::{
     Router,
 };
 use chrono::{DateTime, Utc};
-use megabase_core::{bearer_token, Hs256, MegabaseNotImplemented};
+use megabase_core::{bearer_token, Hs256, JwtClaims, MegabaseNotImplemented};
 use serde_json::{json, Map, Value};
 
+mod bucket;
+mod limits;
+mod mime;
 mod schema;
 
 pub use schema::{install_schema, SchemaError};
@@ -63,9 +67,22 @@ pub fn router() -> Router {
 /// `/storage/v1` routes sharing `state`.
 pub fn router_with_state(state: StorageState) -> Router {
     Router::new()
-        .route("/storage/v1/bucket", get(list_buckets))
-        .route("/storage/v1/bucket/", get(list_buckets))
-        .route("/storage/v1/bucket/:bucket_id", get(get_bucket))
+        .route(
+            "/storage/v1/bucket",
+            get(list_buckets).post(bucket::create_bucket),
+        )
+        .route(
+            "/storage/v1/bucket/",
+            get(list_buckets).post(bucket::create_bucket),
+        )
+        .route(
+            "/storage/v1/bucket/:bucket_id",
+            get(get_bucket).put(bucket::update_bucket),
+        )
+        .route(
+            "/storage/v1/bucket/:bucket_id/lifecycle",
+            get(bucket::get_bucket_lifecycle).put(bucket::put_bucket_lifecycle),
+        )
         .with_state(state)
         .merge(megabase_core::not_implemented_router(COMPONENT))
         .method_not_allowed_fallback(megabase_core::not_implemented_handler(COMPONENT))
@@ -111,7 +128,10 @@ fn iso(at: Option<DateTime<Utc>>) -> String {
 }
 
 /// Requests Megabase serves: a valid service-role JWT and a pool.
-fn service_role_pool<'a>(state: &'a StorageState, headers: &HeaderMap) -> Option<&'a sqlx::PgPool> {
+fn service_role<'a>(
+    state: &'a StorageState,
+    headers: &HeaderMap,
+) -> Option<(&'a sqlx::PgPool, JwtClaims)> {
     let jwt = state.jwt.as_deref()?;
     let token = headers
         .get(header::AUTHORIZATION)
@@ -121,7 +141,7 @@ fn service_role_pool<'a>(state: &'a StorageState, headers: &HeaderMap) -> Option
     if claims.role.as_deref() != Some("service_role") {
         return None;
     }
-    state.pool.as_ref()
+    Some((state.pool.as_ref()?, claims))
 }
 
 fn not_implemented(method: &Method, uri: &axum::http::Uri) -> Response {
@@ -155,7 +175,7 @@ async fn list_buckets(
     OriginalUri(uri): OriginalUri,
     headers: HeaderMap,
 ) -> Response {
-    let Some(pool) = service_role_pool(&state, &headers) else {
+    let Some((pool, _claims)) = service_role(&state, &headers) else {
         return not_implemented(&method, &uri);
     };
     // `limit`, `offset`, `sortColumn`, `sortOrder` and `search` are not ported.
@@ -182,22 +202,14 @@ async fn get_bucket(
     OriginalUri(uri): OriginalUri,
     headers: HeaderMap,
 ) -> Response {
-    let Some(pool) = service_role_pool(&state, &headers) else {
+    let Some((pool, _claims)) = service_role(&state, &headers) else {
         return not_implemented(&method, &uri);
     };
     let sql = format!("SELECT {GET_COLUMNS} FROM storage.buckets WHERE id = $1 LIMIT 1");
     match fetch_as_service_role(pool, &sql, Some(&bucket_id)).await {
         Ok(rows) => match rows.first() {
             Some(row) => fastify_json(StatusCode::OK, &row.to_json(false)),
-            None => fastify_json(
-                StatusCode::BAD_REQUEST,
-                &json!({
-                    "statusCode": "404",
-                    "code": "NoSuchBucket",
-                    "error": "Bucket not found",
-                    "message": "Bucket not found",
-                }),
-            ),
+            None => StorageError::no_such_bucket().into_response(),
         },
         Err(error) => database_error(&error),
     }
@@ -205,6 +217,101 @@ async fn get_bucket(
 
 /// A failed query is outside the ported surface: log it and answer 501
 /// rather than invent storage-api's database error mapping.
+/// A `StorageBackendError` from `src/internal/errors/codes.ts`.
+pub(crate) struct StorageError {
+    status_code: &'static str,
+    code: &'static str,
+    error: &'static str,
+    message: Cow<'static, str>,
+}
+
+impl StorageError {
+    /// `ERRORS.NoSuchBucket`.
+    fn no_such_bucket() -> Self {
+        Self {
+            status_code: "404",
+            code: "NoSuchBucket",
+            error: "Bucket not found",
+            message: Cow::Borrowed("Bucket not found"),
+        }
+    }
+
+    /// `ERRORS.InvalidBucketName`.
+    fn invalid_bucket_name() -> Self {
+        Self {
+            status_code: "400",
+            code: "InvalidBucketName",
+            error: "Invalid Input",
+            message: Cow::Borrowed("Bucket name invalid"),
+        }
+    }
+
+    /// `ERRORS.BucketAlreadyExists`.
+    fn bucket_already_exists() -> Self {
+        Self {
+            status_code: "409",
+            code: "BucketAlreadyExists",
+            error: "Duplicate",
+            message: Cow::Borrowed("The resource already exists"),
+        }
+    }
+
+    /// `ERRORS.EntityTooLarge()` with its default entity and limit.
+    fn entity_too_large() -> Self {
+        Self {
+            status_code: "413",
+            code: "EntityTooLarge",
+            error: "Payload too large",
+            message: Cow::Borrowed("The object exceeded the maximum allowed size"),
+        }
+    }
+
+    /// `ERRORS.InvalidMimeType`.
+    fn invalid_mime_type(mime_type: &str) -> Self {
+        Self {
+            status_code: "415",
+            code: "InvalidMimeType",
+            error: "invalid_mime_type",
+            message: Cow::Owned(format!("mime type {mime_type} is not supported")),
+        }
+    }
+
+    /// `ERRORS.FeatureNotEnabled`. It sets no `error`, so the global error
+    /// handler repeats the code there.
+    fn feature_not_enabled(feature: &str) -> Self {
+        Self {
+            status_code: "409",
+            code: "FeatureNotEnabled",
+            error: "FeatureNotEnabled",
+            message: Cow::Owned(format!(
+                "The feature {feature} is not enabled for this resource"
+            )),
+        }
+    }
+
+    fn body(&self) -> Value {
+        json!({
+            "statusCode": self.status_code,
+            "code": self.code,
+            "error": self.error,
+            "message": self.message,
+        })
+    }
+}
+
+impl IntoResponse for StorageError {
+    /// The global error handler sends `userStatusCode`: 500 for a 500
+    /// error, 400 for every other one.
+    fn into_response(self) -> Response {
+        let status = if self.status_code == "500" {
+            StatusCode::INTERNAL_SERVER_ERROR
+        } else {
+            StatusCode::BAD_REQUEST
+        };
+        fastify_json(status, &self.body())
+    }
+}
+
 fn database_error(error: &sqlx::Error) -> Response {
     tracing::error!(%error, "storage bucket query failed");
     MegabaseNotImplemented::new(COMPONENT, "storage database error mapping").into_response()
@@ -238,8 +345,15 @@ mod tests {
     }
 
     async fn status(path: &str, bearer: Option<&str>) -> StatusCode {
+        status_of(Method::GET, path, bearer).await
+    }
+
+    async fn status_of(method: Method, path: &str, bearer: Option<&str>) -> StatusCode {
         let app = router_with_state(StorageState::new(None, Some(Hs256::new(SECRET).unwrap())));
-        let mut request = axum::http::Request::get(path);
+        let mut request = axum::http::Request::builder()
+            .method(method)
+            .uri(path)
+            .header(header::CONTENT_TYPE, "application/json");
         if let Some(bearer) = bearer {
             request = request.header(header::AUTHORIZATION, format!("Bearer {bearer}"));
         }
@@ -263,6 +377,18 @@ mod tests {
                 status("/storage/v1/bucket/avatars", bearer.as_deref()).await,
                 StatusCode::NOT_IMPLEMENTED
             );
+            for (method, path) in [
+                (Method::POST, "/storage/v1/bucket"),
+                (Method::PUT, "/storage/v1/bucket/avatars"),
+                (Method::GET, "/storage/v1/bucket/avatars/lifecycle"),
+                (Method::PUT, "/storage/v1/bucket/avatars/lifecycle"),
+            ] {
+                assert_eq!(
+                    status_of(method, path, bearer.as_deref()).await,
+                    StatusCode::NOT_IMPLEMENTED,
+                    "{path}"
+                );
+            }
         }
     }
 
