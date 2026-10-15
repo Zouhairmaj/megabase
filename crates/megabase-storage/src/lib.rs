@@ -146,6 +146,14 @@ pub fn router_with_state(state: StorageState) -> Router {
             "/storage/v1/object/list/:bucket_name",
             post(object::list_objects),
         )
+        .route(
+            "/storage/v1/object/sign/:bucket_name",
+            post(object::sign_objects),
+        )
+        .route(
+            "/storage/v1/object/upload/sign/:bucket_name/*object_name",
+            post(object::sign_upload_object),
+        )
         // Unported upstream routes whose first segment the generic
         // `:bucket_name/*object_name` route would take for a bucket name.
         .route(
@@ -153,15 +161,7 @@ pub fn router_with_state(state: StorageState) -> Router {
             post(not_implemented_any),
         )
         .route(
-            "/storage/v1/object/sign/:bucket_name",
-            post(not_implemented_any),
-        )
-        .route(
             "/storage/v1/object/info/:bucket_name/*object_name",
-            any(not_implemented_any),
-        )
-        .route(
-            "/storage/v1/object/upload/sign/:bucket_name/*object_name",
             any(not_implemented_any),
         )
         .route(

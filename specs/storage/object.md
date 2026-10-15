@@ -11,8 +11,10 @@ Unit ids (`coverage/units.json`):
 - `storage:route:POST /storage/v1/object/sign/{bucketName}/{*}`
 - `storage:route:GET /storage/v1/object/sign/{bucketName}/{*}`
 - `storage:route:DELETE /storage/v1/object/{bucketName}`
+- `storage:route:POST /storage/v1/object/sign/{bucketName}`
+- `storage:route:POST /storage/v1/object/upload/sign/{bucketName}/{*}`
 
-supabase-js `storage.from(b).upload/update/download/remove/createSignedUrl/getPublicUrl`.
+supabase-js `storage.from(b).upload/update/download/remove/createSignedUrl/createSignedUrls/createSignedUploadUrl/getPublicUrl`.
 The table these routes write is in [`database.md`](database.md).
 
 Pins: storage `v1.80.2`, supabase `v1.26.08` (`vendor.toml`).
@@ -36,6 +38,8 @@ Pins: storage `v1.80.2`, supabase `v1.26.08` (`vendor.toml`).
 | Download handlers | `vendor/storage/src/http/routes/object/getObject.ts:36`, `getPublicObject.ts:52`, `getSignedObject.ts:58` |
 | Response headers | `vendor/storage/src/storage/renderer/renderer.ts:123` |
 | Sign: body, `signObjectUrl`, token payload `{url, scope: "download", iat, exp}` | `vendor/storage/src/http/routes/object/getSignedURL.ts:19`, `vendor/storage/src/storage/object.ts:825`, `vendor/storage/src/internal/auth/jwt.ts:509` |
+| Sign many: body (`paths` 1 to `MAX_OBJECTS_PER_REQUEST` = 1000), `signObjectUrls`, `findObjects` SQL | `vendor/storage/src/http/routes/object/getSignedURLs.ts:16`, `vendor/storage/src/storage/object.ts:885`, `vendor/storage/src/storage/database/pg.ts:1405` |
+| Signed upload URL: headers, `canUpload`, token payload `{owner, url, upsert, scope: "upload", iat, exp}`, `UPLOAD_SIGNED_URL_EXPIRATION_TIME` default 60 | `vendor/storage/src/http/routes/object/getSignedUploadURL.ts:61`, `vendor/storage/src/storage/object.ts:940`, `vendor/storage/src/storage/uploader.ts:76`, `vendor/storage/src/config.ts:459` |
 | `verifyObjectSignature` | `vendor/storage/src/storage/object.ts:979` |
 | Delete: body, `deleteObjects` SQL, `objectSchema` response | `vendor/storage/src/http/routes/object/deleteObjects.ts:16`, `vendor/storage/src/storage/object.ts:193`, `vendor/storage/src/storage/database/pg.ts:1276`, `vendor/storage/src/storage/schemas/object.ts:4` |
 
@@ -49,8 +53,8 @@ are a 501; public downloads and `GET /object/:bucket/*` on a public bucket
 (anonymous fallback) still work.
 
 `list` is served by [`object-list.md`](object-list.md). The unported
-prefixes `list-v2`, `info`, `sign/:bucket` (sign many) and `upload/sign`
-are explicit 501s, so they never reach the generic `:bucket/*` handlers.
+prefixes `list-v2` and `info` are explicit 501s, so they never reach the
+generic `:bucket/*` handlers.
 
 ## Request scope
 
@@ -127,6 +131,31 @@ Body `{"expiresIn": n}`. Then JWT, `InvalidKey`, the row under RLS
 `{url: "<bucket>/<name>", scope: "download", iat, exp: iat + n}`. Response
 `200 {"signedURL": "/object/sign/<bucket>/<name>?token=<jwt>"}`.
 
+## Sign many — `POST /object/sign/:bucket`
+
+Body `{"expiresIn": n, "paths": ["<name>", ...]}` (1 to 1000 strings).
+Then JWT, `InvalidBucketName`, one `findObjects` lookup of the current rows
+under RLS (`SELECT name ... WHERE bucket_id = $1 AND name COLLATE "C" =
+ANY($2) AND archived_at IS NULL`; no key check). Response `200`, one entry
+per path in request order, keys `error, path, signedURL`: a found path has
+`error: null` and `signedURL: "/object/sign/<bucket>/<path>?token=<jwt>"`
+(same payload as single sign); any other has `error: "Either the object
+does not exist or you do not have access to it"` and `signedURL: null`. A
+missing bucket finds nothing, so every entry is the error.
+
+## Signed upload URL — `POST /object/upload/sign/:bucket/*`
+
+No body is read (supabase-js sends `{}`). Then JWT, `InvalidBucketName`,
+and `canUpload` as for an upload: the insert (or the upsert with
+`x-upsert: true`) as the request role, rolled back, with `metadata`
+`{mimetype: Content-Type, contentLength: Number(Content-Length)}` (each
+left out when the header is absent). RLS rejection is `AccessDenied`
+`new row violates row-level security policy`; an existing name without
+upsert is `KeyAlreadyExists`. The token is HS256 with `JWT_SECRET`, payload
+`{owner: sub, url: "<bucket>/<name>", upsert, scope: "upload", iat, exp:
+iat + 60}` (`owner` left out without `sub`). Response `200 {"url":
+"/object/upload/sign/<bucket>/<name>?token=<jwt>", "token": "<jwt>"}`.
+
 ## Remove — `DELETE /object/:bucket`
 
 Body `{"prefixes": ["<name>", ...]}` (1 to 500 names). Deletes the current
@@ -158,12 +187,18 @@ their files. Response `200` with the deleted rows in `objectSchema` order:
   `contentEncoding`.
 - Sign bodies other than `{"expiresIn": 1..315360000}` (`transform`,
   `versionId`, Fastify validation messages); paths with percent escapes.
+- Sign-many bodies with other properties or outside the schema, and
+  `expiresIn` above 315360000.
+- Signed upload URLs with `x-metadata`, a non-decimal `Content-Length`, a
+  body other than none or a JSON object (with `application/json`), an
+  invalid key, paths with percent escapes, or a missing bucket (the
+  insert's foreign-key error).
 - Delete entries with `versionId`, more than 500 names, validation messages.
 - Other jose failures on signed URLs; database errors other than `42501`
   and `23505`; object keys with `.`/`..`/empty segments.
 - `HEAD` (object info), `/object/list-v2`, `/object/info`,
-  copy, move, single `DELETE`, `POST /object/sign/:bucket` (many) and
-  signed uploads.
+  copy, move, single `DELETE`, and the signed upload itself
+  (`PUT /object/upload/sign/:bucket/*`).
 
 ## Judge cases
 
@@ -176,5 +211,11 @@ different object (`Invalid signature`), remove, and an upload with the
 (issue 398, on `review/issue-398-cases`): a small PNG as a supabase-js
 `Blob` form, a form with `cacheControl`, and a form upsert
 (`x-upsert: true`) over an existing object, each downloaded to compare the
-bytes, `Content-Type` and `Cache-Control`. Timestamps,
+bytes, `Content-Type` and `Cache-Control`. Sign many and signed upload
+URLs (issue 61, on `review/issue-61-cases`): sign two uploaded paths and
+one missing path, then fetch a returned URL; sign many with the `anon` key
+on a private bucket (every entry the error); a signed upload URL for a new
+name, for an existing name (`KeyAlreadyExists`) and with `x-upsert: true`
+over it; and one with the `anon` key on a bucket without policies
+(`AccessDenied`). Timestamps,
 `Id`, `ETag`/`Last-Modified` and the token need the harness normalizer.

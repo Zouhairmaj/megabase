@@ -1,5 +1,5 @@
 //! `/object` routes: upload, download, remove and signed URLs
-//! (`specs/storage/object.md`).
+//! (`specs/storage/object.md`); batch and upload signing live in [`sign`].
 //!
 //! Object bytes live under `FILE_STORAGE_BACKEND_PATH` as
 //! `<bucket>/<name>/<version>`, like storage-api's file backend; rows live in
@@ -32,6 +32,10 @@ use md5::{Digest, Md5};
 use megabase_core::{JwtClaims, JwtError};
 use serde_json::{json, Map, Value};
 use sqlx::{Postgres, Row, Transaction};
+
+mod sign;
+
+pub(super) use sign::{sign_objects, sign_upload_object};
 
 use super::{
     database_error, fastify_json, iso,
@@ -1620,6 +1624,17 @@ mod tests {
             (Method::POST, "/storage/v1/object/sign/avatars/a.png", true),
             (Method::DELETE, "/storage/v1/object/avatars", true),
             (Method::POST, "/storage/v1/object/list/avatars", true),
+            (Method::POST, "/storage/v1/object/sign/avatars", true),
+            (
+                Method::POST,
+                "/storage/v1/object/upload/sign/avatars/a.png",
+                true,
+            ),
+            (
+                Method::PUT,
+                "/storage/v1/object/upload/sign/avatars/a.png",
+                true,
+            ),
         ] {
             let mut request = axum::http::Request::builder()
                 .method(&method)
