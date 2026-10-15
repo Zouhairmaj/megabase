@@ -160,9 +160,35 @@ pub(crate) fn normalize_allowed_mime_types(mime_types: &[String]) -> Result<Vec<
     Ok(normalized)
 }
 
+/// `validateMimeType`: whether an upload's `mime_type` matches one of the
+/// bucket's `allowed` entries exactly or as `type/*`.
+pub(crate) fn is_allowed_mime_type(mime_type: &str, allowed: &[String]) -> bool {
+    let Some(requested) = parse_media_type(mime_type, false) else {
+        return false;
+    };
+    let wildcard = format!("{}*", &requested[..=requested.find('/').unwrap_or(0)]);
+    allowed.iter().any(|entry| {
+        *entry == requested
+            || *entry == wildcard
+            || parse_media_type(entry, true)
+                .is_some_and(|parsed| parsed == requested || parsed == wildcard)
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn upload_mime_types_match_exact_or_wildcard_entries() {
+        let allowed = vec!["image/png".to_string(), "text/*".to_string()];
+        assert!(is_allowed_mime_type("image/png", &allowed));
+        assert!(is_allowed_mime_type("IMAGE/PNG; charset=x", &allowed));
+        assert!(is_allowed_mime_type("text/plain", &allowed));
+        assert!(!is_allowed_mime_type("image/jpeg", &allowed));
+        assert!(!is_allowed_mime_type("not a type", &allowed));
+        assert!(!is_allowed_mime_type("image/*", &allowed));
+    }
 
     fn normalize(input: &[&str]) -> Result<Vec<String>, String> {
         let owned: Vec<String> = input.iter().map(|s| (*s).to_string()).collect();
