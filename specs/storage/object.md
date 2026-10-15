@@ -142,8 +142,9 @@ their files. Response `200` with the deleted rows in `objectSchema` order:
 
 - A missing or invalid JWT where a JWT is required (`AccessDenied` with
   the verifier's message).
-- `Content-Encoding`, `x-metadata`, `x-robots-tag`, an upload without
-  `Content-Length` or with an empty file.
+- `Content-Encoding`, `x-robots-tag`, `x-metadata` on a raw upload (a
+  form ignores it), an upload without `Content-Length` or with an empty
+  file.
 - Multipart forms that are malformed or have no file part
   (`NoContentProvided`), `contentEncoding`, `metadata` or `userMetadata`
   fields, a repeated `contentType` field, a file part without its own
