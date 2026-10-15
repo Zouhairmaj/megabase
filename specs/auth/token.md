@@ -4,8 +4,10 @@ Status: partial. `id_token` and `web3` are served up to the provider
 check; they carry no `megabase:unit` marker until verification after an
 enabled provider or chain is ported (it is HTTP 501 today). `pkce` is
 served: PKCE `POST /recover` (`specs/auth/recover.md`), PKCE
-`POST /magiclink` or `POST /otp` with autoconfirm on, and PKCE
-`POST /signup` with autoconfirm off (`specs/auth/endpoints.md`) write the
+`POST /magiclink` or `POST /otp` (a `magiclink` flow for a confirmed user;
+with autoconfirm off, an `email/signup` flow for a new or unconfirmed
+one), and PKCE `POST /signup` with autoconfirm off
+(`specs/auth/endpoints.md`) write the
 flow state with its `auth_code`, and `GET /verify` with the emailed
 `pkce_` link issues that code (`specs/auth/verify.md`). The OAuth
 `/callback` producer is not ported; with autoconfirm on, signup creates no

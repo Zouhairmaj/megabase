@@ -59,14 +59,23 @@ pub(crate) async fn signup_unconfirmed(
     headers: &HeaderMap,
     params: UnconfirmedSignup,
 ) -> Response {
-    match run(state, headers, &params).await {
+    match confirm_signup(state, headers, &params).await {
         Ok(response) => response,
         Err(Stop::Error(error)) => error.into_response(),
         Err(Stop::NotPorted) => MegabaseNotImplemented::new(COMPONENT, UNIT_SIGNUP).into_response(),
     }
 }
 
-async fn run(
+/// `Signup` for an unconfirmed email followed by `sendConfirmation`. The
+/// response is `Signup`'s own: 200 with the user, or GoTrue's default 500
+/// for an unknown challenge method. `MagicLink` calls it as well and
+/// discards a 200 body.
+///
+/// # Errors
+///
+/// [`Stop`] for a lookup, frequency-limit, or mail failure, or a mail step
+/// that is not ported.
+pub(crate) async fn confirm_signup(
     state: &AuthState,
     headers: &HeaderMap,
     params: &UnconfirmedSignup,

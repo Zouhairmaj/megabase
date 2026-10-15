@@ -5,12 +5,12 @@
 //! `POST /magiclink` and `POST /otp`.
 //!
 //! Provider gates, body decoding, validation, and the `create_user: false`
-//! lookup match GoTrue. With autoconfirm on, the email flow is served: a new
+//! lookup match GoTrue. The email flow is served. With autoconfirm on, a new
 //! address is signed up, then the magic link goes through the same mail
 //! client as `POST /recover` (the no-op client when no SMTP host is set).
-//! With autoconfirm off, a new address would get the signup confirmation
-//! email, which is not ported, so those requests stay 501 before the user
-//! lookup. The SMS sender is not ported either: a phone OTP stays 501.
+//! With autoconfirm off, a new or unconfirmed address gets the signup
+//! confirmation email instead (`POST /signup`'s path), and a confirmed one
+//! gets the magic link. The SMS sender is not ported: a phone OTP stays 501.
 
 use std::time::SystemTime;
 
@@ -25,6 +25,7 @@ use serde::Deserialize;
 use serde_json::{json, Map, Value};
 
 use crate::admin_batch2::random_bytes;
+use crate::confirm::{confirm_signup, UnconfirmedSignup};
 use crate::error::{unexpected, GoTrueError};
 use crate::gojson;
 use crate::hooks::TokenHookCall;
@@ -121,21 +122,21 @@ pub(crate) async fn magiclink(
 /// link template. The PKCE flow writes a `magiclink` flow state before the
 /// send, as `/recover` does.
 ///
-/// With autoconfirm off, the signup sends a confirmation email instead,
-/// which is not ported. That request stays 501 before the user lookup, so
-/// the answer does not depend on whether the account exists.
+/// With autoconfirm off, a new or unconfirmed address goes through `Signup`
+/// instead, whose confirmation email is the magic link; the answer is `{}`
+/// either way.
 async fn send_magic_link(
     state: &AuthState,
     headers: &HeaderMap,
     params: MagicLinkBody,
     unit: &'static str,
 ) -> Response {
-    if !state.config.mailer_autoconfirm {
-        return MegabaseNotImplemented::new(COMPONENT, unit).into_response();
-    }
     let aud = request_aud(headers, &state.config);
     let user = match find_confirmed(state, &params.email, &aud).await {
         Ok(Some(user)) => user,
+        Ok(None) if !state.config.mailer_autoconfirm => {
+            return confirm_for_magic_link(state, headers, params, unit).await;
+        }
         Ok(None) => {
             if let Err(response) = signup_for_magic_link(state, headers, &params, aud.clone()).await
             {
@@ -202,28 +203,7 @@ async fn signup_for_magic_link(
     aud: String,
 ) -> Result<(), Box<Response>> {
     let config = &state.config;
-    if config.disable_signup {
-        return Err(Box::new(
-            GoTrueError::new(
-                StatusCode::UNPROCESSABLE_ENTITY,
-                "signup_disabled",
-                "Signups not allowed for this instance",
-            )
-            .into_response(),
-        ));
-    }
-    if GENERATED_PASSWORD_LENGTH < config.password_min_length {
-        return Err(Box::new(
-            GoTrueError::weak_password(
-                format!(
-                    "Password should be at least {} characters.",
-                    config.password_min_length
-                ),
-                vec!["length"],
-            )
-            .into_response(),
-        ));
-    }
+    signup_gates(state)?;
     if state.jwt.is_none() {
         return Err(Box::new(
             unexpected("Server lacks JWT secret").into_response(),
@@ -254,6 +234,69 @@ async fn signup_for_magic_link(
         )
         .await;
     signup_outcome(result).map(drop)
+}
+
+/// The `Signup` call `MagicLink` makes for a new or unconfirmed address
+/// while autoconfirm is off: the same generated password and `data`, plus
+/// the PKCE params, so `sendConfirmation` writes the `email/signup` flow
+/// state and a `pkce_` token. `MagicLink` discards `Signup`'s body and
+/// answers `{}`.
+async fn confirm_for_magic_link(
+    state: &AuthState,
+    headers: &HeaderMap,
+    params: MagicLinkBody,
+    unit: &'static str,
+) -> Response {
+    if let Err(response) = signup_gates(state) {
+        return *response;
+    }
+    let Ok(password) = generate_password() else {
+        return unhandled();
+    };
+    let signup = UnconfirmedSignup {
+        email: params.email,
+        password,
+        data: params.data.unwrap_or_default(),
+        code_challenge: params.code_challenge,
+        code_challenge_method: params.code_challenge_method,
+    };
+    match confirm_signup(state, headers, &signup).await {
+        Ok(response) if response.status().is_success() => {
+            (StatusCode::OK, Json(json!({}))).into_response()
+        }
+        Ok(response) => response,
+        Err(Stop::Error(error)) => error.into_response(),
+        Err(Stop::NotPorted) => MegabaseNotImplemented::new(COMPONENT, unit).into_response(),
+    }
+}
+
+/// The `Signup` checks that run before its user lookup: `DisableSignup`,
+/// then the generated password against `GOTRUE_PASSWORD_MIN_LENGTH`.
+fn signup_gates(state: &AuthState) -> Result<(), Box<Response>> {
+    let config = &state.config;
+    if config.disable_signup {
+        return Err(Box::new(
+            GoTrueError::new(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "signup_disabled",
+                "Signups not allowed for this instance",
+            )
+            .into_response(),
+        ));
+    }
+    if GENERATED_PASSWORD_LENGTH < config.password_min_length {
+        return Err(Box::new(
+            GoTrueError::weak_password(
+                format!(
+                    "Password should be at least {} characters.",
+                    config.password_min_length
+                ),
+                vec!["length"],
+            )
+            .into_response(),
+        ));
+    }
+    Ok(())
 }
 
 const GENERATED_PASSWORD_LENGTH: usize = 33;
@@ -867,50 +910,174 @@ mod tests {
 
     #[tokio::test]
     async fn magic_link_signup_gates() {
+        for autoconfirm in [true, false] {
+            let mut config = AuthConfig::reference_defaults();
+            config.mailer_autoconfirm = autoconfirm;
+            config.disable_signup = true;
+            let backend = Backend::memory();
+            backend
+                .insert_unconfirmed_for_test(
+                    "known@example.com",
+                    "authenticated",
+                    "authenticated",
+                    "",
+                )
+                .await;
+            let closed = app(config, backend);
+            for email in ["new@example.com", "known@example.com"] {
+                let body = serde_json::json!({ "email": email }).to_string();
+                assert_error(
+                    &post(&closed, "/auth/v1/magiclink", &body).await,
+                    422,
+                    "signup_disabled",
+                    "Signups not allowed for this instance",
+                );
+            }
+
+            let mut config = AuthConfig::reference_defaults();
+            config.mailer_autoconfirm = autoconfirm;
+            config.password_min_length = 40;
+            let strict = app(config, Backend::memory());
+            let result = post(
+                &strict,
+                "/auth/v1/magiclink",
+                r#"{"email":"a@example.com"}"#,
+            )
+            .await;
+            assert_eq!(result.0, StatusCode::UNPROCESSABLE_ENTITY, "{}", result.1);
+            assert_eq!(result.1["error_code"], "weak_password");
+        }
+    }
+
+    /// Autoconfirm off, no SMTP host, and no `GOTRUE_SMTP_MAX_FREQUENCY`
+    /// wait so one address can get several emails.
+    fn unconfirmed_app(backend: Backend) -> Router {
+        let mut config = AuthConfig::reference_defaults();
+        config.mailer_autoconfirm = false;
+        let jwt = megabase_core::Hs256::new(SECRET.as_bytes()).unwrap();
+        let mut state = AuthState::new(config, Some(jwt), backend);
+        state.mail.smtp_host = String::new();
+        state.mail.max_frequency = std::time::Duration::ZERO;
+        crate::router_with_state(state)
+    }
+
+    #[tokio::test]
+    async fn pkce_magic_link_without_autoconfirm_sends_the_confirmation() {
+        let backend = Backend::memory();
+        let app = unconfirmed_app(backend.clone());
+        let body = serde_json::json!({
+            "email": "New@Example.com",
+            "data": { "name": "Ada" },
+            "code_challenge": S256_CHALLENGE,
+            "code_challenge_method": "S256",
+        })
+        .to_string();
+        assert_ok(&post(&app, "/auth/v1/magiclink", &body).await);
+        // `Signup` sent the confirmation email; no magic link was sent.
+        let token = backend.confirmation_token_for_test("new@example.com").await;
+        assert!(token.starts_with("pkce_"), "{token}");
+        assert_eq!(backend.recovery_token_for_test("new@example.com").await, "");
+
+        let link = format!("/auth/v1/verify?type=signup&token={token}");
+        let (status, location) = get_location(&app, &link).await;
+        assert_eq!(status, StatusCode::SEE_OTHER);
+        let code = location
+            .strip_prefix("http://localhost:3000?code=")
+            .unwrap_or_else(|| panic!("{location}"))
+            .to_string();
+        let exchange = serde_json::json!({ "auth_code": code, "code_verifier": VERIFIER });
+        let path = "/auth/v1/token?grant_type=pkce";
+        let (status, session) = post(&app, path, &exchange.to_string()).await;
+        assert_eq!(status, StatusCode::OK, "{session}");
+        assert_eq!(session["user"]["email"], "new@example.com");
+        assert_eq!(session["user"]["user_metadata"]["name"], "Ada");
+        assert!(session["user"]["email_confirmed_at"].is_string());
+
+        // The address is confirmed now, so the next request is a magic link.
+        let again = serde_json::json!({
+            "email": "new@example.com",
+            "code_challenge": S256_CHALLENGE,
+            "code_challenge_method": "s256",
+        })
+        .to_string();
+        assert_ok(&post(&app, "/auth/v1/otp", &again).await);
+        let token = backend.recovery_token_for_test("new@example.com").await;
+        assert!(token.starts_with("pkce_"), "{token}");
+    }
+
+    #[tokio::test]
+    async fn otp_without_autoconfirm_resends_to_an_unconfirmed_user() {
+        let backend = Backend::memory();
+        let app = unconfirmed_app(backend.clone());
+        let signup = r#"{"email":"known@example.com","password":"known-password-1"}"#;
+        assert_eq!(
+            post(&app, "/auth/v1/signup", signup).await.0,
+            StatusCode::OK
+        );
+        let first = backend
+            .confirmation_token_for_test("known@example.com")
+            .await;
+        assert_ok(
+            &post(
+                &app,
+                "/auth/v1/otp",
+                r#"{"email":"known@example.com","create_user":false}"#,
+            )
+            .await,
+        );
+        let token = backend
+            .confirmation_token_for_test("known@example.com")
+            .await;
+        assert!(!token.is_empty() && !token.starts_with("pkce_"), "{token}");
+        assert_ne!(token, first);
+
+        let verify = serde_json::json!({ "type": "signup", "token_hash": token }).to_string();
+        let (status, session) = post(&app, "/auth/v1/verify", &verify).await;
+        assert_eq!(status, StatusCode::OK, "{session}");
+        // `Signup` keeps an unconfirmed user's password.
+        let (status, _) = post(&app, "/auth/v1/token?grant_type=password", signup).await;
+        assert_eq!(status, StatusCode::OK);
+
+        // An unknown challenge method is `Signup`'s 500, and nothing is kept.
+        let body = serde_json::json!({
+            "email": "bad@example.com",
+            "code_challenge": S256_CHALLENGE,
+            "code_challenge_method": "sha1",
+        })
+        .to_string();
+        let result = post(&app, "/auth/v1/magiclink", &body).await;
+        assert_eq!(result.0, StatusCode::INTERNAL_SERVER_ERROR, "{}", result.1);
+        assert_eq!(result.1["error_code"], "unexpected_failure");
+        assert!(backend
+            .password_hash_for_test("bad@example.com")
+            .await
+            .is_none());
+    }
+
+    #[tokio::test]
+    async fn magic_link_without_autoconfirm_reports_mail_failures() {
+        // A reachable SMTP host needs the SMTP exchange, which is not ported.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let mut config = AuthConfig::reference_defaults();
         config.mailer_autoconfirm = false;
         let backend = Backend::memory();
-        let off = app(config, backend.clone());
-        // Without autoconfirm a new address needs the confirmation email, so
-        // every address stays 501 before the lookup.
+        let jwt = megabase_core::Hs256::new(SECRET.as_bytes()).unwrap();
+        let mut state = AuthState::new(config, Some(jwt), backend.clone());
+        state.mail.smtp_host = "127.0.0.1".into();
+        state.mail.smtp_port = listener.local_addr().unwrap().port();
+        let app = crate::router_with_state(state);
         assert_501(
-            &post(&off, "/auth/v1/magiclink", r#"{"email":"a@example.com"}"#).await,
+            &post(&app, "/auth/v1/magiclink", r#"{"email":"a@example.com"}"#).await,
             UNIT_MAGICLINK,
         );
         assert_501(
-            &post(&off, "/auth/v1/otp", r#"{"email":"a@example.com"}"#).await,
+            &post(&app, "/auth/v1/otp", r#"{"email":"a@example.com"}"#).await,
             UNIT_OTP,
         );
-        assert_eq!(backend.recovery_token_for_test("a@example.com").await, "");
-
-        let mut config = AuthConfig::reference_defaults();
-        config.disable_signup = true;
-        let backend = Backend::memory();
-        backend
-            .insert_unconfirmed_for_test("known@example.com", "authenticated", "authenticated", "")
-            .await;
-        let closed = app(config, backend);
-        for email in ["new@example.com", "known@example.com"] {
-            let body = serde_json::json!({ "email": email }).to_string();
-            assert_error(
-                &post(&closed, "/auth/v1/magiclink", &body).await,
-                422,
-                "signup_disabled",
-                "Signups not allowed for this instance",
-            );
-        }
-
-        let mut config = AuthConfig::reference_defaults();
-        config.password_min_length = 40;
-        let strict = app(config, Backend::memory());
-        let result = post(
-            &strict,
-            "/auth/v1/magiclink",
-            r#"{"email":"a@example.com"}"#,
-        )
-        .await;
-        assert_eq!(result.0, StatusCode::UNPROCESSABLE_ENTITY, "{}", result.1);
-        assert_eq!(result.1["error_code"], "weak_password");
+        assert!(backend
+            .password_hash_for_test("a@example.com")
+            .await
+            .is_none());
     }
 
     #[test]
