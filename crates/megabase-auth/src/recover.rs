@@ -124,7 +124,7 @@ pub(crate) async fn recover(
         // `generateFlowState` commits before the email transaction, so the
         // flow state stays even when the send below fails.
         if let Err(response) = create_recovery_flow(&state, &user, &params).await {
-            return response;
+            return *response;
         }
     }
     match send_recovery(&state, &user, pkce).await {
@@ -147,11 +147,11 @@ async fn create_recovery_flow(
     state: &AuthState,
     user: &UserRecord,
     params: &RecoverBody,
-) -> Result<(), Response> {
+) -> Result<(), Box<Response>> {
     // `ParseCodeChallengeMethod`; its plain error is GoTrue's default 500.
     let method = params.code_challenge_method.to_ascii_lowercase();
     if method != "s256" && method != "plain" {
-        return Err(unhandled());
+        return Err(Box::new(unhandled()));
     }
     let flow = FlowStateRecord {
         provider_type: "recovery".into(),
@@ -173,7 +173,7 @@ async fn create_recovery_flow(
         .await
         .map_err(|error| {
             tracing::error!(%error, "creating recovery flow state failed");
-            unhandled()
+            Box::new(unhandled())
         })?;
     Ok(())
 }
