@@ -193,7 +193,9 @@ impl EmailLimiter {
 /// The raw value when it is neither a float nor `uint/duration`.
 pub(crate) fn parse_email_rate(raw: &str) -> Result<EmailRate, String> {
     if let Ok(events) = raw.parse::<f64>() {
-        return Ok(EmailRate::Interval { events });
+        if events.is_finite() {
+            return Ok(EmailRate::Interval { events });
+        }
     }
     let mut parts = raw.split('/');
     let (Some(events), Some(over), None) = (parts.next(), parts.next(), parts.next()) else {

@@ -42,7 +42,7 @@ const SMTP_DIAL_TIMEOUT: Duration = Duration::from_secs(10);
 
 const SEND_FAILED: &str = "Error sending recovery email";
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Default)]
 struct RecoverBody {
     #[serde(default, deserialize_with = "null_as_default")]
     email: String,
@@ -94,19 +94,15 @@ pub(crate) async fn recover(
         Ok(bytes) => bytes,
         Err(error) => return error.into_response(),
     };
-    let params: RecoverBody = match serde_json::from_slice(&bytes) {
-        Ok(params) => params,
+    // Go decodes a top-level `null` into zero-valued params.
+    let params: RecoverBody = match serde_json::from_slice::<Option<RecoverBody>>(&bytes) {
+        Ok(params) => params.unwrap_or_default(),
         Err(error) => return bad_json(error).into_response(),
     };
     let email = match params.validate() {
         Ok(email) => email,
         Err(error) => return error.into_response(),
     };
-    if !params.code_challenge.is_empty() {
-        // PKCE recovery writes `auth.flow_state` and a `pkce_` token prefix
-        // that verify does not exchange yet.
-        return MegabaseNotImplemented::new(COMPONENT, UNIT_RECOVER).into_response();
-    }
     let aud = request_aud(&headers, &state.config);
     let user = match state
         .backend
@@ -120,6 +116,11 @@ pub(crate) async fn recover(
             return unexpected("Unable to process request").into_response();
         }
     };
+    if !params.code_challenge.is_empty() {
+        // PKCE recovery writes `auth.flow_state` and a `pkce_` token prefix
+        // that verify does not exchange yet.
+        return MegabaseNotImplemented::new(COMPONENT, UNIT_RECOVER).into_response();
+    }
     match send_recovery(&state, &user).await {
         Ok(()) => empty_ok(),
         Err(Stop::Error(error)) => error.into_response(),
@@ -284,6 +285,12 @@ mod tests {
 
     const SECRET: &str = "your-super-secret-jwt-token-with-at-least-32-characters-long";
 
+    /// A loopback port that was just free: the dial is refused.
+    fn closed_port() -> u16 {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.local_addr().unwrap().port()
+    }
+
     fn app_with(smtp_host: &str, smtp_port: u16) -> (Router, Backend) {
         let backend = Backend::memory();
         let jwt = Hs256::new(SECRET.as_bytes()).unwrap();
@@ -332,7 +339,7 @@ mod tests {
     async fn recover_validates_like_gotrue() {
         let (app, _) = app_with("", 0);
         let post = |body: &'static str| call(&app, "POST", "/auth/v1/recover", body, "");
-        for body in ["{}", r#"{"email":null}"#] {
+        for body in ["{}", "null", r#"{"email":null}"#] {
             let (status, json) = post(body).await;
             assert_eq!(status, StatusCode::BAD_REQUEST);
             assert_eq!(json["error_code"], "validation_failed");
@@ -371,8 +378,8 @@ mod tests {
 
     #[tokio::test]
     async fn unknown_email_is_200_even_when_mail_would_fail() {
-        // Port 1 on loopback refuses the dial; unknown users never reach it.
-        let (app, _) = app_with("127.0.0.1", 1);
+        // A closed loopback port refuses the dial; unknown users never reach it.
+        let (app, _) = app_with("127.0.0.1", closed_port());
         let (status, json) = call(
             &app,
             "POST",
@@ -453,7 +460,7 @@ mod tests {
 
     #[tokio::test]
     async fn unreachable_smtp_host_is_500_and_stores_nothing() {
-        let (app, backend) = app_with("127.0.0.1", 1);
+        let (app, backend) = app_with("127.0.0.1", closed_port());
         signup(&app, "real@example.com", &test_password()).await;
         let (status, json) = call(
             &app,
