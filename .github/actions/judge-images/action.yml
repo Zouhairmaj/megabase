@@ -40,7 +40,15 @@ runs:
         retry_deadline=$((SECONDS + 20 * 60))
         pull() {
           local image=$1 tries=$2 attempt=1 wait remaining
-          until docker pull "$image"; do
+          while :; do
+            # Bound each pull by what is left of the shared budget.
+            remaining=$((retry_deadline - SECONDS))
+            if [ "$remaining" -le 0 ]; then
+              return 1
+            fi
+            if timeout "${remaining}s" docker pull "$image"; then
+              return 0
+            fi
             if [ "$attempt" -ge "$tries" ]; then
               return 1
             fi
