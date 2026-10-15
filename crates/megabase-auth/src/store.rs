@@ -26,9 +26,11 @@ use crate::config::BCRYPT_COST;
 use crate::hooks::{self, HookError, MemoryHook, TokenHookCall};
 use crate::schema::SchemaError;
 
+mod invite;
 mod mfa;
 mod recovery;
 
+pub use invite::{InviteCommand, InviteOutcome};
 pub use mfa::FactorRow;
 
 const EMAIL_PROVIDER: &str = "email";

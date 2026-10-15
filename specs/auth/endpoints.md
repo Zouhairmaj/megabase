@@ -13,10 +13,9 @@ keeps the Kong prefix, so clients call `/auth/v1/...`. Health and settings
 are public. Signup is public and, with the judge's autoconfirm overlay,
 creates an `auth.users` row and a session. Logout revokes sessions for a
 verified user access token. Recover is specified in
-[`recover.md`](recover.md). Invite, resend, and reauthenticate answer HTTP
-501 with their unit id after any implemented validation.
-Resend is public; invite needs admin credentials and reauthenticate needs
-a user session in GoTrue.
+[`recover.md`](recover.md) and invite in [`invite.md`](invite.md). Resend
+and reauthenticate answer HTTP 501 with their unit id after any implemented
+validation. Resend is public; reauthenticate needs a user session in GoTrue.
 
 ## Upstream
 
@@ -62,7 +61,8 @@ Logout reads `Authorization: Bearer <access token>` and optional query
 | `POST /auth/v1/signup` | email autoconfirm | 200 access-token response: `access_token`, `token_type` `bearer`, `expires_in` (JWT expiry, 3600 by default), `expires_at`, `refresh_token`, `user` |
 | `POST /auth/v1/logout` | yes | 204 empty body |
 | `POST /auth/v1/recover` | see [`recover.md`](recover.md) | 200 `{}` |
-| `GET /auth/v1/reauthenticate`, `POST /auth/v1/invite`, `POST /auth/v1/resend` | no | 501 `MEGABASE_NOT_IMPLEMENTED` with that unit id |
+| `POST /auth/v1/invite` | see [`invite.md`](invite.md) | 200 user object |
+| `GET /auth/v1/reauthenticate`, `POST /auth/v1/resend` | no | 501 `MEGABASE_NOT_IMPLEMENTED` with that unit id |
 
 Signup user JSON matches GoTrue's user object for an autoconfirmed email
 user: `phone` is `""`, and `confirmed_at` is omitted. Signup reloads the
