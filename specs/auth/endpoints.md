@@ -244,10 +244,12 @@ the reference stack enables.
 
 ### GET /authorize
 
-Served up to the provider lookup (unchanged by issue 46): an unknown,
-disabled, or (custom OAuth off) `custom:` provider is 400
-`validation_failed` / `Unsupported provider: <reason>`. An enabled provider
-would create an `auth.flow_state` row and 302 to the provider; that is 501.
+An unknown, disabled or misconfigured provider, or a `custom:` provider
+with custom OAuth off, is 400 `validation_failed` /
+`Unsupported provider: <reason>`. For the providers whose constructor is
+ported, the handler writes an `auth.flow_state` row and sends a 302 to the
+provider; see [`oauth-providers.md`](oauth-providers.md) for that flow
+and for which providers stay 501.
 
 ### GET and POST /callback
 
@@ -289,8 +291,9 @@ body and no `Content-Type`. In order:
 - `error` parameter present: OAuth error, `error` and `error_description`
   copied, no `error_code`.
 - `code` empty: 400 `bad_oauth_callback` / `OAuth callback with missing authorization code missing`.
-- Provider unknown or disabled: 400 `oauth_provider_not_supported` /
-  `Unsupported provider: <reason>` (same reasons as authorize).
+- Provider unknown, disabled or misconfigured: 400
+  `oauth_provider_not_supported` / `Unsupported provider: <reason>` (same
+  reasons as authorize).
 - Enabled provider, or a `twitter` row (OAuth 1.0): 501, since the code
   exchange and account linking are not ported.
 

@@ -2,12 +2,12 @@
   "schema": 1,
   "totals": {
     "units": 1031,
-    "implemented": 233,
+    "implemented": 241,
     "tested": 186,
     "conformant": 0
   },
   "percent": {
-    "coverage": 22.6,
+    "coverage": 23.4,
     "conformance": 0.0,
     "done": 0.0
   },
@@ -18,7 +18,7 @@
   "components": {
     "auth": {
       "units": 159,
-      "implemented": 94,
+      "implemented": 102,
       "tested": 80,
       "conformant": 0,
       "groups": {
@@ -60,7 +60,7 @@
         },
         "oauth-providers": {
           "units": 26,
-          "implemented": 0,
+          "implemented": 8,
           "tested": 0,
           "conformant": 0
         },
@@ -566,6 +566,14 @@
     "auth:grant-type:pkce": "implemented",
     "auth:grant-type:refresh_token": "tested",
     "auth:hook:custom_access_token": "implemented",
+    "auth:provider:azure": "implemented",
+    "auth:provider:bitbucket": "implemented",
+    "auth:provider:discord": "implemented",
+    "auth:provider:facebook": "implemented",
+    "auth:provider:figma": "implemented",
+    "auth:provider:fly": "implemented",
+    "auth:provider:github": "implemented",
+    "auth:provider:gitlab": "implemented",
     "auth:route:DELETE /auth/v1/admin/custom-providers/{identifier}": "tested",
     "auth:route:DELETE /auth/v1/admin/oauth/clients/{client_id}": "tested",
     "auth:route:DELETE /auth/v1/admin/sso/providers/{idp_id}": "tested",

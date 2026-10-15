@@ -1,8 +1,9 @@
 // Ported from supabase/auth internal/api/external.go and
 // internal/api/external_oauth.go (MIT), pin v2.197.0.
 
-//! `GET` and `POST /callback` (`ExternalProviderCallback`) up to the provider
-//! token exchange.
+//! `GET /authorize` (`ExternalProviderRedirect`), and `GET` and
+//! `POST /callback` (`ExternalProviderCallback`) up to the provider token
+//! exchange.
 //!
 //! The `loadFlowState` middleware resolves `state` to an `auth.flow_state`
 //! row. When that fails GoTrue writes a 303 to the site URL with the error in
@@ -22,19 +23,153 @@ use megabase_core::MegabaseNotImplemented;
 use serde_json::json;
 use uuid::Uuid;
 
-use crate::error::GoTrueError;
-use crate::routes::read_body;
+use crate::admin_batch2::get_referrer;
+use crate::error::{validation, GoTrueError};
+use crate::routes::{read_body, validate_pkce};
 use crate::state::AuthState;
 use crate::store::FlowStateRecord;
 use crate::user::{provider_decision, ProviderDecision};
 use crate::verify::{html_escape, query_escape};
 use crate::COMPONENT;
 
+const UNIT_AUTHORIZE: &str = "auth:route:GET /auth/v1/authorize";
 const UNIT_CALLBACK_GET: &str = "auth:route:GET /auth/v1/callback";
 const UNIT_CALLBACK_POST: &str = "auth:route:POST /auth/v1/callback";
 
+/// `reservedOAuthParams` (`custom_oauth_admin.go`). `/authorize` lets
+/// `nonce` through.
+const RESERVED_OAUTH_PARAMS: &[&str] = &[
+    "client_id",
+    "client_secret",
+    "redirect_uri",
+    "response_type",
+    "state",
+    "code_challenge",
+    "code_challenge_method",
+    "code_verifier",
+    "nonce",
+];
+
 /// Go `url.Values` in insertion order.
-type Values = Vec<(String, String)>;
+pub(crate) type Values = Vec<(String, String)>;
+
+/// `GET /authorize` (`ExternalProviderRedirect`).
+///
+/// An unknown, disabled or misconfigured provider is GoTrue's 400
+/// `validation_failed` before `redirect_to` is read, so no redirect is ever
+/// sent. A ported provider gets an `auth.flow_state` row whose id is the
+/// OAuth `state`, then a 302 to the provider's authorize URL. Providers
+/// without a ported constructor, `custom:` providers, `invite_token`, and a
+/// redirect allow-list pattern the glob port does not cover stay 501.
+pub(crate) async fn authorize(
+    State(state): State<AuthState>,
+    headers: HeaderMap,
+    uri: Uri,
+) -> Response {
+    let not_ported = || MegabaseNotImplemented::new(COMPONENT, UNIT_AUTHORIZE).into_response();
+    let query = parse_query(uri.query().unwrap_or(""));
+    let provider_type = first(&query, "provider");
+    let code_challenge = first(&query, "code_challenge");
+    let code_challenge_method = first(&query, "code_challenge_method");
+    let (config, email_optional) =
+        match provider_decision(&state, provider_type, first(&query, "scopes")) {
+            ProviderDecision::Reject(detail) => {
+                return validation(format!("Unsupported provider: {detail}")).into_response()
+            }
+            ProviderDecision::Ready(None) => return not_ported(),
+            ProviderDecision::Ready(Some(ready)) => ready,
+        };
+    // `FindUserByOneTimeToken` for an invite is not ported.
+    if !first(&query, "invite_token").is_empty() {
+        return not_ported();
+    }
+    let Ok(referrer) = get_referrer(&state, &headers, first(&query, "redirect_to")) else {
+        return not_ported();
+    };
+    if let Err(error) = validate_pkce(code_challenge_method, code_challenge) {
+        return error.into_response();
+    }
+
+    // Every other query parameter is passed on to the provider, first value
+    // per key, except `scopes`, `provider` and the reserved OAuth names.
+    let mut params = Values::new();
+    let mut seen: Vec<&str> = Vec::new();
+    for (key, value) in &query {
+        if seen.contains(&key.as_str()) {
+            continue;
+        }
+        seen.push(key);
+        let lower = key.to_lowercase();
+        if key == "scopes"
+            || key == "provider"
+            || (lower != "nonce" && RESERVED_OAUTH_PARAMS.contains(&lower.as_str()))
+        {
+            continue;
+        }
+        // See https://workos.com/docs/reference/sso/authorize/get
+        let name = if key == "workos_provider" {
+            "provider"
+        } else {
+            key
+        };
+        set(&mut params, name, value);
+    }
+
+    // `NewFlowState`: PKCE fields only with a code challenge.
+    let (auth_code, challenge, method) = if code_challenge.is_empty() {
+        (None, None, None)
+    } else {
+        let method = match code_challenge_method.to_lowercase().as_str() {
+            "s256" => "s256",
+            "plain" => "plain",
+            _ => return validation("Invalid code_challenge_method").into_response(),
+        };
+        (
+            Some(Uuid::new_v4().to_string()),
+            Some(code_challenge.to_string()),
+            Some(method.to_string()),
+        )
+    };
+    let flow = FlowStateRecord {
+        provider_type: provider_type.to_string(),
+        auth_code,
+        code_challenge: challenge,
+        code_challenge_method: method,
+        user_id: None,
+        authentication_method: "oauth".into(),
+        provider_access_token: String::new(),
+        provider_refresh_token: String::new(),
+        created_at: None,
+        auth_code_issued_at: None,
+        referrer: Some(referrer).filter(|referrer| !referrer.is_empty()),
+        linking_target_id: None,
+        email_optional,
+    };
+    let id = match state.backend.create_flow_state(&flow).await {
+        Ok(id) => id,
+        Err(error) => {
+            tracing::error!(%error, "creating the OAuth flow state failed");
+            return crate::error::unexpected("Error creating flow state").into_response();
+        }
+    };
+    let location = config.auth_code_url(&id.to_string(), &params);
+    // `http.Redirect` rewrites a URL without scheme or host against the
+    // request path; that only happens with a scheme-less provider `URL`.
+    if !has_scheme(&location) && !location.starts_with("//") {
+        return not_ported();
+    }
+    redirect(&Method::GET, StatusCode::FOUND, &location, None)
+}
+
+/// `url.Parse` finds a scheme: `^[A-Za-z][A-Za-z0-9+.-]*:`.
+fn has_scheme(url: &str) -> bool {
+    let Some((scheme, _)) = url.split_once(':') else {
+        return false;
+    };
+    let mut chars = scheme.chars();
+    chars.next().is_some_and(|ch| ch.is_ascii_alphabetic())
+        && chars.all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '+' | '.' | '-'))
+}
 
 pub(crate) async fn callback_get(State(state): State<AuthState>, uri: Uri) -> Response {
     let form = parse_query(uri.query().unwrap_or(""));
@@ -143,13 +278,13 @@ fn provider_callback(
             "OAuth callback with missing authorization code missing",
         )));
     }
-    match provider_decision(state, &flow.provider_type) {
+    match provider_decision(state, &flow.provider_type, "") {
         ProviderDecision::Reject(detail) => Err(Failure::Http(GoTrueError::new(
             StatusCode::BAD_REQUEST,
             "oauth_provider_not_supported",
             format!("Unsupported provider: {detail}"),
         ))),
-        ProviderDecision::RedirectNotPorted => Ok(()),
+        ProviderDecision::Ready(_) => Ok(()),
     }
 }
 
@@ -248,7 +383,12 @@ fn oauth_error(error: &GoTrueError) -> &'static str {
 
 /// Go `http.Redirect`: `GET` gets the short HTML body. `trailing` is written
 /// after the headers were sent; Go sniffs `text/plain` for it on `POST`.
-fn redirect(method: &Method, status: StatusCode, url: &str, trailing: Option<String>) -> Response {
+pub(crate) fn redirect(
+    method: &Method,
+    status: StatusCode,
+    url: &str,
+    trailing: Option<String>,
+) -> Response {
     let mut builder = Response::builder()
         .status(status)
         .header(header::LOCATION, url);
@@ -282,7 +422,7 @@ fn media_type(headers: &HeaderMap) -> String {
         .to_ascii_lowercase()
 }
 
-fn first<'a>(values: &'a Values, key: &str) -> &'a str {
+pub(crate) fn first<'a>(values: &'a Values, key: &str) -> &'a str {
     values
         .iter()
         .find(|(name, _)| name == key)
@@ -290,13 +430,13 @@ fn first<'a>(values: &'a Values, key: &str) -> &'a str {
 }
 
 /// `url.Values.Set`.
-fn set(values: &mut Values, key: &str, value: &str) {
+pub(crate) fn set(values: &mut Values, key: &str, value: &str) {
     values.retain(|(name, _)| name != key);
     values.push((key.to_string(), value.to_string()));
 }
 
 /// `url.Values.Encode`: keys sorted, values in order.
-fn encode(values: &Values) -> String {
+pub(crate) fn encode(values: &Values) -> String {
     let mut sorted: Vec<&(String, String)> = values.iter().collect();
     sorted.sort_by(|left, right| left.0.cmp(&right.0));
     sorted
@@ -307,7 +447,7 @@ fn encode(values: &Values) -> String {
 }
 
 /// `url.ParseQuery`: pairs with a `;` or a bad escape are dropped.
-fn parse_query(raw: &str) -> Values {
+pub(crate) fn parse_query(raw: &str) -> Values {
     raw.split('&')
         .filter(|pair| !pair.is_empty() && !pair.contains(';'))
         .filter_map(|pair| {
@@ -408,6 +548,7 @@ mod tests {
             auth_code_issued_at: None,
             referrer: Some("http://localhost:3000/after".into()),
             linking_target_id: None,
+            email_optional: false,
         }
     }
 
@@ -515,10 +656,127 @@ mod tests {
         backend.plant_flow_state_for_test(id, flow("github")).await;
         let mut config = AuthConfig::reference_defaults();
         config.external.github = true;
-        let app = app(config, backend);
+        let app = app(config, backend.clone());
+        let (_, headers, _) = get(&app, &format!("/auth/v1/callback?state={id}&code=x")).await;
+        assert!(headers[header::LOCATION]
+            .to_str()
+            .unwrap()
+            .contains("Unsupported+provider%3A+missing+OAuth+client+ID"));
+        let app = super::tests::app(github_config(), backend);
         let (status, _, body) = get(&app, &format!("/auth/v1/callback?state={id}&code=x")).await;
         assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
         assert!(body.contains(UNIT_CALLBACK_GET), "{body}");
+    }
+
+    fn github_config() -> AuthConfig {
+        let mut config = AuthConfig::reference_defaults();
+        config.external.github = true;
+        config.oauth_clients.set(
+            "github",
+            crate::config::OAuthClient {
+                client_id: vec!["cid".into()],
+                secret: "s".into(),
+                redirect_uri: "http://localhost:8000/auth/v1/callback".into(),
+                url: String::new(),
+                email_optional: true,
+            },
+        );
+        config
+    }
+
+    fn state_param(location: &str) -> Uuid {
+        let query = parse_query(url_query(location));
+        Uuid::parse_str(first(&query, "state")).unwrap()
+    }
+
+    #[tokio::test]
+    async fn authorize_creates_a_flow_state_and_redirects_to_the_provider() {
+        let backend = Backend::memory();
+        let app = app(github_config(), backend.clone());
+        let (status, headers, body) = get(
+            &app,
+            "/auth/v1/authorize?provider=GitHub&scopes=repo&redirect_to=http%3A%2F%2Flocalhost%3A3000%2Fdone&state=evil&Redirect_URI=evil&nonce=n&prompt=consent",
+        )
+        .await;
+        assert_eq!(status, StatusCode::FOUND);
+        let location = headers[header::LOCATION].to_str().unwrap();
+        let id = state_param(location);
+        assert_eq!(
+            location,
+            format!(
+                "https://github.com/login/oauth/authorize?client_id=cid&nonce=n&prompt=consent&redirect_to=http%3A%2F%2Flocalhost%3A3000%2Fdone&redirect_uri=http%3A%2F%2Flocalhost%3A8000%2Fauth%2Fv1%2Fcallback&response_type=code&scope=user%3Aemail+repo&state={id}"
+            )
+        );
+        assert_eq!(headers[header::CONTENT_TYPE], "text/html; charset=utf-8");
+        assert!(body.ends_with("\">Found</a>.\n\n"), "{body}");
+
+        let flow = backend.find_flow_state(id).await.unwrap().unwrap();
+        assert_eq!(flow.provider_type, "GitHub");
+        assert_eq!(flow.authentication_method, "oauth");
+        assert_eq!(flow.referrer.as_deref(), Some("http://localhost:3000/done"));
+        assert!(flow.email_optional);
+        assert!(!flow.is_pkce());
+        assert!(flow.auth_code.is_none());
+    }
+
+    #[tokio::test]
+    async fn authorize_pkce_stores_the_challenge_and_rejects_bad_parameters() {
+        let backend = Backend::memory();
+        let app = app(github_config(), backend.clone());
+        let challenge = "a".repeat(43);
+        let (status, headers, _) = get(
+            &app,
+            &format!("/auth/v1/authorize?provider=github&code_challenge={challenge}&code_challenge_method=S256&redirect_to=https%3A%2F%2Fevil.example"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FOUND);
+        let location = headers[header::LOCATION].to_str().unwrap();
+        assert!(!location.contains("code_challenge"), "{location}");
+        let flow = backend
+            .find_flow_state(state_param(location))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(flow.code_challenge.as_deref(), Some(challenge.as_str()));
+        assert_eq!(flow.code_challenge_method.as_deref(), Some("s256"));
+        assert!(flow.auth_code.is_some());
+        // A disallowed `redirect_to` falls back to the site URL.
+        assert_eq!(flow.referrer.as_deref(), Some("http://localhost:3000"));
+
+        for (query, message) in [
+            (
+                "code_challenge_method=s256".to_string(),
+                "PKCE flow requires code_challenge_method and code_challenge",
+            ),
+            (
+                format!("code_challenge={challenge}&code_challenge_method=md5"),
+                "Invalid code_challenge_method",
+            ),
+        ] {
+            let (status, _, body) =
+                get(&app, &format!("/auth/v1/authorize?provider=github&{query}")).await;
+            assert_eq!(status, StatusCode::BAD_REQUEST, "{query}");
+            let body: serde_json::Value = serde_json::from_str(&body).unwrap();
+            assert_eq!(body["error_code"], "validation_failed");
+            assert_eq!(body["msg"], message);
+        }
+    }
+
+    #[tokio::test]
+    async fn authorize_leaves_unported_paths_at_501() {
+        let mut config = github_config();
+        let mut scheme_less = config.oauth_clients.get("github").unwrap().clone();
+        scheme_less.url = "github.example.com".into();
+        let app = app(config.clone(), Backend::memory());
+        let (status, _, body) =
+            get(&app, "/auth/v1/authorize?provider=github&invite_token=t").await;
+        assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
+        assert!(body.contains(UNIT_AUTHORIZE), "{body}");
+
+        config.oauth_clients.set("github", scheme_less);
+        let app = super::tests::app(config, Backend::memory());
+        let (status, _, _) = get(&app, "/auth/v1/authorize?provider=github").await;
+        assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
     }
 
     #[test]

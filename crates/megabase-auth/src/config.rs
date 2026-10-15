@@ -31,6 +31,8 @@ pub struct AuthConfig {
     pub email_enabled: bool,
     pub phone_enabled: bool,
     pub external: ExternalProviders,
+    /// `GOTRUE_EXTERNAL_<PROVIDER>_*` client settings `API.Provider` reads.
+    pub oauth_clients: OAuthClients,
     pub sms_provider: String,
     /// `GOTRUE_SMS_OTP_EXP` in seconds. `0` is raised to 60, matching
     /// GoTrue's startup default.
@@ -200,6 +202,106 @@ pub struct ExternalProviders {
     pub zoom: bool,
 }
 
+/// `OAuthProviderConfiguration` fields other than `enabled`, for one
+/// provider. `Debug` leaves the secret out.
+#[derive(Clone, Default, PartialEq, Eq)]
+pub struct OAuthClient {
+    /// `CLIENT_ID`, split on `,` like envconfig does for a `[]string`.
+    pub client_id: Vec<String>,
+    pub secret: String,
+    pub redirect_uri: String,
+    /// `URL`: the provider host override `chooseHost` reads.
+    pub url: String,
+    pub email_optional: bool,
+}
+
+impl std::fmt::Debug for OAuthClient {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OAuthClient")
+            .field("client_id", &self.client_id)
+            .field("secret_set", &!self.secret.is_empty())
+            .field("redirect_uri", &self.redirect_uri)
+            .field("url", &self.url)
+            .field("email_optional", &self.email_optional)
+            .finish()
+    }
+}
+
+/// Every built-in provider's [`OAuthClient`], keyed by provider name.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct OAuthClients(std::collections::BTreeMap<&'static str, OAuthClient>);
+
+/// `ProviderConfiguration` OAuth fields. The env segment is the name in
+/// upper case (`LINKEDIN_OIDC`, `SLACK_OIDC`, `VERCEL_MARKETPLACE` and `X`
+/// come from envconfig tags or `split_words`).
+const OAUTH_PROVIDER_NAMES: &[&str] = &[
+    "apple",
+    "azure",
+    "bitbucket",
+    "discord",
+    "facebook",
+    "snapchat",
+    "figma",
+    "fly",
+    "github",
+    "gitlab",
+    "google",
+    "kakao",
+    "notion",
+    "keycloak",
+    "linkedin",
+    "linkedin_oidc",
+    "spotify",
+    "slack",
+    "slack_oidc",
+    "twitter",
+    "twitch",
+    "vercel_marketplace",
+    "workos",
+    "x",
+    "zoom",
+];
+
+impl OAuthClients {
+    /// The settings of provider `name`, if it is a built-in provider.
+    pub fn get(&self, name: &str) -> Option<&OAuthClient> {
+        self.0.get(name)
+    }
+
+    /// Replace the settings of built-in provider `name`; other names are
+    /// ignored.
+    pub fn set(&mut self, name: &str, client: OAuthClient) {
+        if let Some(known) = OAUTH_PROVIDER_NAMES.iter().find(|known| **known == name) {
+            self.0.insert(known, client);
+        }
+    }
+
+    fn from_lookup(lookup: &impl Fn(&str) -> Option<String>) -> Result<Self, ConfigError> {
+        let mut clients = Self::default();
+        for name in OAUTH_PROVIDER_NAMES {
+            let prefix = format!("GOTRUE_EXTERNAL_{}", name.to_ascii_uppercase());
+            let text = |field: &str| lookup(&format!("{prefix}_{field}")).unwrap_or_default();
+            let client_id = text("CLIENT_ID");
+            // envconfig leaves a `[]string` empty for a blank value and does
+            // not trim the parts.
+            let client_id = if client_id.trim().is_empty() {
+                Vec::new()
+            } else {
+                client_id.split(',').map(str::to_string).collect()
+            };
+            let client = OAuthClient {
+                client_id,
+                secret: text("SECRET"),
+                redirect_uri: text("REDIRECT_URI"),
+                url: text("URL"),
+                email_optional: flag(lookup, &format!("{prefix}_EMAIL_OPTIONAL"))?,
+            };
+            clients.0.insert(name, client);
+        }
+        Ok(clients)
+    }
+}
+
 impl AuthConfig {
     /// Reference-stack defaults used when `GOTRUE_*` is unset.
     pub fn reference_defaults() -> Self {
@@ -213,6 +315,7 @@ impl AuthConfig {
             email_enabled: true,
             phone_enabled: true,
             external: ExternalProviders::default(),
+            oauth_clients: OAuthClients::default(),
             sms_provider: String::new(),
             sms_otp_exp_seconds: 60,
             sms_test_otp_configured: false,
@@ -315,6 +418,7 @@ impl AuthConfig {
                 twitter: flag(&lookup, "GOTRUE_EXTERNAL_TWITTER_ENABLED")?,
                 zoom: flag(&lookup, "GOTRUE_EXTERNAL_ZOOM_ENABLED")?,
             },
+            oauth_clients: OAuthClients::from_lookup(&lookup)?,
             sms_provider: lookup("GOTRUE_SMS_PROVIDER").unwrap_or(defaults.sms_provider),
             sms_otp_exp_seconds: sms_otp_exp,
             sms_test_otp_configured: lookup("GOTRUE_SMS_TEST_OTP")

@@ -23,9 +23,10 @@ use serde::Deserialize;
 use serde_json::{json, Map, Value};
 use uuid::Uuid;
 
-use crate::config::{AuthConfig, ExternalProviders};
+use crate::config::AuthConfig;
 use crate::error::{bad_json, unexpected, validation, GoTrueError};
 use crate::jsonutil::{format_ts, user_json};
+use crate::provider::{AuthCodeConfig, Provider};
 use crate::routes::{
     banned, jwt_failure, query_param, read_body, session_claim, valid_channel, validate_email,
     JsonOk, INVALID_CHANNEL,
@@ -285,11 +286,12 @@ pub(crate) async fn link_identity(
         return feature_off("manual_linking_disabled", "Manual linking is disabled");
     }
     let provider = query_param(uri.query(), "provider").unwrap_or_default();
-    match provider_decision(&state, &provider) {
+    let scopes = query_param(uri.query(), "scopes").unwrap_or_default();
+    match provider_decision(&state, &provider, &scopes) {
         ProviderDecision::Reject(detail) => {
             validation(format!("Unsupported provider: {detail}")).into_response()
         }
-        ProviderDecision::RedirectNotPorted => {
+        ProviderDecision::Ready(_) => {
             MegabaseNotImplemented::new(COMPONENT, UNIT_AUTHORIZE).into_response()
         }
     }
@@ -639,55 +641,31 @@ fn update_store_error(error: &StoreError) -> Response {
     unexpected("Error updating user").into_response()
 }
 
-/// `API.Provider` outcome shared by `/authorize` and identity linking.
+/// `API.Provider` outcome shared by `/authorize`, `/callback` and identity
+/// linking.
 pub(crate) enum ProviderDecision {
     Reject(String),
-    RedirectNotPorted,
+    /// The provider is usable. `Some` carries the authorize URL settings
+    /// and `email_optional` of a ported provider; `None` is not ported.
+    Ready(Option<(AuthCodeConfig, bool)>),
 }
 
-pub(crate) fn provider_decision(state: &AuthState, name: &str) -> ProviderDecision {
+pub(crate) fn provider_decision(state: &AuthState, name: &str, scopes: &str) -> ProviderDecision {
     let name = name.to_ascii_lowercase();
     if name.starts_with("custom:") {
         if !state.custom_oauth_enabled {
             return ProviderDecision::Reject("custom OAuth providers are disabled".into());
         }
-        return ProviderDecision::RedirectNotPorted;
+        return ProviderDecision::Ready(None);
     }
-    match known_provider(&state.config.external, &name) {
-        None => ProviderDecision::Reject(format!("Provider {name} could not be found")),
-        Some(false) => ProviderDecision::Reject("provider is not enabled".into()),
-        Some(true) => ProviderDecision::RedirectNotPorted,
+    match crate::provider::provider(&state.config, &name, scopes) {
+        Provider::Rejected(reason) => ProviderDecision::Reject(reason),
+        Provider::Ready {
+            config,
+            email_optional,
+        } => ProviderDecision::Ready(Some((config, email_optional))),
+        Provider::NotPorted => ProviderDecision::Ready(None),
     }
-}
-
-fn known_provider(external: &ExternalProviders, name: &str) -> Option<bool> {
-    Some(match name {
-        "apple" => external.apple,
-        "azure" => external.azure,
-        "bitbucket" => external.bitbucket,
-        "discord" => external.discord,
-        "facebook" => external.facebook,
-        "figma" => external.figma,
-        "fly" => external.fly,
-        "github" => external.github,
-        "gitlab" => external.gitlab,
-        "google" => external.google,
-        "kakao" => external.kakao,
-        "keycloak" => external.keycloak,
-        "linkedin" => external.linkedin,
-        "linkedin_oidc" => external.linkedin_oidc,
-        "notion" => external.notion,
-        "snapchat" => external.snapchat,
-        "spotify" => external.spotify,
-        "slack" => external.slack,
-        "slack_oidc" => external.slack_oidc,
-        "twitch" => external.twitch,
-        "twitter" => external.twitter,
-        "workos" => external.workos,
-        "zoom" => external.zoom,
-        "x" | "vercel_marketplace" => false,
-        _ => return None,
-    })
 }
 
 fn grant_json(grant: &OAuthGrantView) -> Value {
@@ -1201,6 +1179,15 @@ mod tests {
         let (enabled, _) = app(|state| {
             state.manual_linking_enabled = true;
             state.config.external.github = true;
+            state.config.oauth_clients.set(
+                "github",
+                crate::config::OAuthClient {
+                    client_id: vec!["cid".into()],
+                    secret: "s".into(),
+                    redirect_uri: "http://localhost:8000/auth/v1/callback".into(),
+                    ..Default::default()
+                },
+            );
         });
         let created = signup(&enabled, "redirect@example.com").await;
         let auth = bearer(created["access_token"].as_str().unwrap());

@@ -147,13 +147,15 @@ pub struct FlowStateRecord {
     pub auth_code_issued_at: Option<SystemTime>,
     pub referrer: Option<String>,
     pub linking_target_id: Option<Uuid>,
+    /// The provider's `EMAIL_OPTIONAL` setting when the OAuth flow began.
+    pub email_optional: bool,
 }
 
 /// `auth.flow_state` columns [`flow_state_from_row`] reads.
 const FLOW_STATE_COLUMNS: &str = "id, provider_type, auth_code, code_challenge,
     code_challenge_method::text AS code_challenge_method, user_id, authentication_method,
     provider_access_token, provider_refresh_token, created_at, auth_code_issued_at,
-    referrer, linking_target_id";
+    referrer, linking_target_id, email_optional";
 
 /// Map a [`FLOW_STATE_COLUMNS`] row. NULL provider tokens read as `""`, as
 /// the Go `string` fields do.
@@ -180,6 +182,7 @@ fn flow_state_from_row(row: &sqlx::postgres::PgRow) -> Result<FlowStateRecord, S
         auth_code_issued_at: time("auth_code_issued_at")?,
         referrer: row.try_get("referrer")?,
         linking_target_id: row.try_get("linking_target_id")?,
+        email_optional: row.try_get("email_optional")?,
     })
 }
 
