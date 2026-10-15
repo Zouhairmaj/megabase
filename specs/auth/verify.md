@@ -5,7 +5,8 @@ Unit ids (`coverage/units.json`): `auth:route:GET /auth/v1/verify`,
 `auth:route:POST /auth/v1/verify`, `auth:verify-type:signup`,
 `auth:verify-type:invite`, `auth:verify-type:recovery`,
 `auth:verify-type:email_change` (Level 1); `auth:verify-type:magiclink`,
-`auth:verify-type:email` (Level 2)
+`auth:verify-type:email`, `auth:verify-type:sms`,
+`auth:verify-type:phone_change` (Level 2, issue 54)
 Level: 1
 
 `GET` and `POST /auth/v1/verify` redeem a one-time email token and, when the
@@ -24,6 +25,9 @@ returns JSON, including the session.
 | recovery, magiclink | [`internal/api/verify.go:154`](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/verify.go#L154) |
 | email_change | [`internal/api/verify.go:156`](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/verify.go#L156) |
 | `email` OTP type (`verifyTokenHash`, `verifyUserAndToken`) | [`internal/api/verify.go:650`](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/verify.go#L650), [`:676`](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/verify.go#L676), [`:735`](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/verify.go#L735) |
+| `sms`, `phone_change` (`smsVerify`, phone branch of `verifyUserAndToken`) | [`internal/api/verify.go:402`](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/verify.go#L402), [`:753`](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/verify.go#L753) |
+| `ConfirmPhone`, `ConfirmPhoneChange`, phone lookups | [`internal/models/user.go:547`](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/models/user.go#L547), [`:614`](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/models/user.go#L614), [`:704`](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/models/user.go#L704), [`:1205`](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/models/user.go#L1205) |
+| `validatePhone` | [`internal/api/phone.go:27`](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/phone.go#L27) |
 | Token hash SHA-224 | [`internal/crypto/crypto.go:45`](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/crypto/crypto.go#L45) |
 | Redirect target | [`internal/utilities/request.go:75`](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/utilities/request.go#L75) |
 
@@ -33,7 +37,7 @@ the credit header required by AGENTS.md.
 ## Inputs
 
 Both methods take `type` (`signup`, `invite`, `recovery`, `magiclink`,
-`email_change`, `email`). `magiclink` is `recovery` in every step (the
+`email_change`, `email`, `sms`, `phone_change`). `magiclink` is `recovery` in every step (the
 `recovery_token`, its expiry, `recoverVerify`); only the `type` in the GET
 success fragment differs.
 
@@ -50,6 +54,35 @@ then continues as it:
 
 The GET success fragment carries the resolved type (`signup` or
 `magiclink`), not `email`.
+
+`sms` and `phone_change` are served only by POST with `phone` and `token`.
+`verifyTokenHash` does not know them, so GET and POST with `token_hash`
+give the `Invalid email verification type` 400, as an unknown type does.
+POST with `email` and `token` looks up an empty phone and gets the 403
+`Token has expired or is invalid`. With `phone`:
+
+- The phone is validated as in signup (`+` and spaces removed, then
+  `^[1-9][0-9]{1,14}$`), and the hash is SHA-224 of `phone + token`.
+- `sms` finds the non-SSO user in the request audience whose `phone` is
+  that number, and checks the hash against `confirmation_token` and
+  `confirmation_sent_at`. `phone_change` matches `phone_change` instead, and
+  checks `phone_change_token` and `phone_change_sent_at`. Expiry is
+  `GOTRUE_SMS_OTP_EXP` seconds (`0` or unset means 60), not the mailer
+  window. A stored `pkce_` prefix still matches.
+- `sms` (`ConfirmPhone`): writes a `user_signedup` / `team` audit with
+  `provider` `phone`, clears `confirmation_token`, sets
+  `phone_confirmed_at`, and clears every one-time token of the user.
+- `phone_change` (`ConfirmPhoneChange`): writes a `user_modified` / `user`
+  audit. The `phone` identity (provider id = user id) gets `phone` and
+  `phone_verified: true`, or is created with them. `phone_change` moves onto
+  `phone`, `phone_change` and `phone_change_token` are cleared,
+  `phone_confirmed_at` is set, and every one-time token of the user is
+  cleared.
+- Both turn `is_anonymous` off, refresh `app_metadata.providers`, and issue
+  the same OTP session as the email types.
+
+Phone plus OTP on an email type looks up an empty email and gets the 403
+`Token has expired or is invalid`.
 
 GET reads `token` and `redirect_to` from the query. `token` is stored as the
 token hash (GoTrue copies it onto `token_hash`). The redirect target is the
@@ -114,6 +147,8 @@ already confirmed user writes `login` / `account`. Email change writes
 | POST token with both or neither of email and phone | 400 | `validation_failed` / `Only an email address or phone number should be provided on verify` |
 | POST token_hash plus email, phone, or redirect_to | 400 | `validation_failed` / `Only the token_hash and type should be provided` |
 | POST email that fails format checks | 422 | `validation_failed` / `Invalid email format` |
+| POST phone that fails the E.164 check | 400 | `validation_failed` / `Invalid phone number format (E.164 required)` |
+| Phone OTP: no user for the phone, wrong token, or expired | 403 | `otp_expired` / `Token has expired or is invalid` |
 | Hash lookup, unknown type | 400 | `validation_failed` / `Invalid email verification type` (GET redirects this) |
 | Hash not found, expired, or `sent_at` missing | 403 | `otp_expired` / `Email link is invalid or has expired` |
 | Email OTP not found or not valid | 403 | `otp_expired` / `Token has expired or is invalid` |
@@ -178,10 +213,13 @@ invite password hash, which is the same order.
 
 ## Out of scope
 
-`auth:verify-type:sms` and `auth:verify-type:phone_change` return HTTP 501
-via
-`megabase_core::MegabaseNotImplemented`. Phone OTP on an in-scope type does
-too. Anything not served returns the body
+Phone OTP (`sms`, `phone_change` with `phone`) returns HTTP 501 via
+`megabase_core::MegabaseNotImplemented` when `GOTRUE_SMS_TEST_OTP` is set
+(unit `GOTRUE_SMS_TEST_OTP`) or `GOTRUE_SMS_PROVIDER` is `twilio_verify`
+(unit `GOTRUE_SMS_PROVIDER=twilio_verify`). GoTrue accepts the test OTP map
+or asks Twilio Verify before the stored token there, and neither is ported.
+The phone-changed and identity-linked notification emails are not sent
+(both are off by default). Anything not served returns the body
 `{"code":"MEGABASE_NOT_IMPLEMENTED","component":"auth","message":"<unit> is not implemented by Megabase yet","unit":"<unit>"}`.
 
 ## Judge cases
@@ -190,4 +228,7 @@ too. Anything not served returns the body
 validation errors, the unknown-type 400, and the not-found 403/303 for each
 in-scope type. A success path needs a token the reference stack and Megabase
 both store; autoconfirm and the lack of a mail catcher make that a crate
-test on the memory backend instead.
+test on the memory backend instead. The same holds for `sms` and
+`phone_change`: the reference stack autoconfirms phones and has no SMS
+provider, so no OTP is ever stored. Their judge cases can cover the hash
+path 400/303 and the unknown-phone 403.
