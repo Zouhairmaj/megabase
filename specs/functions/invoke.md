@@ -107,6 +107,16 @@ upstream's comes from edge-runtime internals (eszip build, V8 boot).
 - Each function runs in its own `deno run --allow-all --no-prompt` process
   with `DENO_SERVE_ADDRESS=tcp:127.0.0.1:<port>`; concurrent first requests
   for the same function wait for one boot.
+- Servers built on TCP `Deno.listen` work unchanged, whatever port they
+  ask for: the legacy `serve()` of `https://deno.land/std@0.168.0/http/server.ts`
+  (`Deno.listen({ port: 8000 })` + `Deno.serveHttp`). In edge-runtime every
+  `Deno.listen` of a user worker receives the worker's requests and
+  `Deno.serveHttp` serves them (`vendor/edge-runtime/ext/runtime/js/denoOverrides.js:98`–`:103`,
+  `ext/runtime/js/http.js:64`, `:120`). Megabase preloads a bootstrap
+  (`crates/megabase-functions/src/bootstrap.rs`, `deno run --preload`, Deno
+  2.4+) that routes TCP `Deno.listen` to the worker's own `Deno.serve` and
+  provides `Deno.serveHttp` for those connections, so two std-`serve()`
+  functions never compete for `:8000`. Unix-socket listeners are untouched.
 - Without `MEGABASE_FUNCTIONS_DIR` every request is the structured 501.
 
 ## Out of scope
@@ -131,3 +141,6 @@ both stacks, `MEGABASE_FUNCTIONS_DIR` and Deno on the Megabase side, and
 - `verify_jwt`: no header, `Basic x`, garbage token, bad signature → 401.
 - A function that calls `${SUPABASE_URL}/rest/v1/...` with the forwarded
   `Authorization` header.
+- Issue #400: a function using std@0.168.0 `serve()`, one using
+  `Deno.serve`, and two std-`serve()` functions invoked concurrently (both
+  200, no `AddrInUse`).

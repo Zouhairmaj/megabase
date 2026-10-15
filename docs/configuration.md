@@ -21,7 +21,7 @@ other names. There is no `.env.example` in this tree; the judge uses
 | MEGABASE_REQUEST_BODY_LIMIT_BYTES | Maximum request body in bytes. Default `52428800`, `FILE_SIZE_LIMIT` in `vendor/supabase/docker/docker-compose.yml`. A non-integer aborts startup. A larger body returns 413. |
 | JWT_SECRET | HS256 secret for verifying and signing JWTs (same name as the self-hosted demo stack). Raw UTF-8 bytes, not base64, and not a default. Omit it and the process still starts so `/_megabase/health` and `GET /auth/v1/health` work; verification and signing then fail with `Server lacks JWT secret`. Email signup then returns 500 `Server lacks JWT secret` and does not insert a user. A present value shorter than 32 bytes, including empty, aborts startup before listen: `JWT_SECRET is N bytes; HMAC-SHA-256 keys shorter than 32 bytes are disabled`. Length is bytes, not an entropy check. Required for `/auth/v1/admin` (a missing Bearer token is still 401). |
 | MEGABASE_FUNCTIONS_DIR | Edge Functions directory, one sub-directory per function with an `index.ts` (or `.tsx`, `.js`, `.mjs`, `.jsx`), like `/home/deno/functions` in the self-hosted stack. Unset or empty: every `/functions/v1` request returns 501. See [Edge Functions](#edge-functions). |
-| MEGABASE_DENO | Deno 2 executable that runs each function. Default `deno` on `PATH`. |
+| MEGABASE_DENO | Deno 2 executable (2.4 or later) that runs each function. Default `deno` on `PATH`. |
 | VERIFY_JWT, FUNCTIONS_VERIFY_JWT | Edge-runtime `VERIFY_JWT` (read first) or the `.env` name `FUNCTIONS_VERIFY_JWT`. Exactly `true` requires a valid HS256 JWT on every non-`OPTIONS` `/functions/v1` request. Default off, as in `.env.example`. |
 | GOTRUE_JWT_ADMIN_ROLES | Comma-separated JWT `role` values that may call `/auth/v1/admin`. When unset, `service_role,supabase_admin`, same as GoTrue. An empty value falls back to that pair. Signup settings do not use this allow-list. On `PUT /auth/v1/user`, a role in this list ignores the token audience when the request audience is chosen. |
 | GOTRUE_JWT_ADMIN_GROUP_NAME | GoTrue `JWT.AdminGroupName`. Default `admin`. `PUT /auth/v1/user` accepts `app_metadata` only when the user's `role` equals this value and the user's `aud` equals `GOTRUE_JWT_AUD`. This is not the admin-route allow-list. |
@@ -154,7 +154,10 @@ Spec: [`specs/functions/invoke.md`](../specs/functions/invoke.md).
 `/functions/v1/{name}` runs `{MEGABASE_FUNCTIONS_DIR}/{name}/index.ts` as
 `deno run --allow-all --no-prompt` in its own child process, started on the
 first request and reused while it runs. `DENO_SERVE_ADDRESS` makes the
-function's `Deno.serve` listen on a loopback port; Megabase forwards the
+function's `Deno.serve` listen on a loopback port, and a preloaded
+bootstrap routes TCP `Deno.listen` servers such as std@0.168.0 `serve()`
+to the same port, as edge-runtime does (so the Deno executable must be 2.4
+or later, for `--preload`). Megabase forwards the
 method, the path after `/functions/v1`, the query, headers (including
 `Authorization`) and the body, and streams the response back. The child
 inherits Megabase's environment plus `SUPABASE_URL` (Megabase's own

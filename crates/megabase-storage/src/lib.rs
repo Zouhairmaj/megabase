@@ -38,6 +38,7 @@ mod bucket;
 mod cdn;
 mod limits;
 mod mime;
+mod multipart;
 mod object;
 mod render;
 mod schema;

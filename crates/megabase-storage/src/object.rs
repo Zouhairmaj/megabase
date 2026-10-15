@@ -37,7 +37,7 @@ use super::{
     database_error, fastify_json, iso,
     limits::{is_uuid, is_valid_bucket_name, is_valid_key, UPLOAD_FILE_SIZE_LIMIT},
     mime::is_allowed_mime_type,
-    not_implemented,
+    multipart, not_implemented,
     render::{is_download_scoped, query_pairs, single, verified_signed_payload, SCOPE_DOWNLOAD},
     verified_claims, StorageError, StorageState,
 };
@@ -367,19 +367,21 @@ async fn upload(
     let Some((claims, jwt)) = request_jwt(state, headers) else {
         return not_implemented(method, uri);
     };
-    let content_type = header_str(headers, header::CONTENT_TYPE.as_str());
-    // Multipart bodies, content encodings, custom metadata and
-    // `x-robots-tag` are not ported; an upload without a declared length
-    // or with an empty body is outside the spec.
+    // Content encodings, custom metadata and `x-robots-tag` are not ported;
+    // an upload without a declared length or with an empty file is outside
+    // the spec.
     let declared_length = header_str(headers, header::CONTENT_LENGTH.as_str())
         .and_then(|value| value.parse::<u64>().ok());
-    if content_type.is_some_and(|value| value.starts_with("multipart/form-data"))
-        || headers.contains_key(header::CONTENT_ENCODING)
-        || headers.contains_key("x-metadata")
+    if headers.contains_key(header::CONTENT_ENCODING)
         || headers.contains_key("x-robots-tag")
         || declared_length.is_none_or(|length| length == 0)
-        || body.is_empty()
     {
+        return not_implemented(method, uri);
+    }
+    let Some(file) = file_upload(headers, body) else {
+        return not_implemented(method, uri);
+    };
+    if file.body.is_empty() {
         return not_implemented(method, uri);
     }
     let scope = Scope {
@@ -398,8 +400,7 @@ async fn upload(
         Ok(None) => return StorageError::no_such_bucket().into_response(),
         Err(error) => return database_error(&error),
     };
-    let mime_type = content_type.unwrap_or("application/octet-stream");
-    let cache_control = header_str(headers, header::CACHE_CONTROL.as_str()).unwrap_or("no-cache");
+    let mime_type = file.mime_type.as_ref();
     let allowed = bucket.allowed_mime_types.unwrap_or_default();
     if !allowed.is_empty()
         && !is_empty_folder(&object_name)
@@ -407,15 +408,18 @@ async fn upload(
     {
         return StorageError::invalid_mime_type(mime_type).into_response();
     }
+    // A binary upload is checked against its declared length up front; a
+    // multipart file only once streamed (`isTruncated`), after `canUpload`.
     let max = max_file_size(&object_name, bucket.file_size_limit);
-    if declared_length.is_some_and(|length| length > max) || body.len() as u64 > max {
+    let too_large = file.body.len() as u64 > max;
+    if !file.multipart && (declared_length.is_some_and(|length| length > max) || too_large) {
         return StorageError::entity_too_large().into_response();
     }
     if !is_valid_key(&object_name) {
         return StorageError::invalid_key(&object_name).into_response();
     }
     let version = uuid::Uuid::new_v4().to_string();
-    let Some(file) = object_file(root, &bucket_id, &object_name, &version) else {
+    let Some(path) = object_file(root, &bucket_id, &object_name, &version) else {
         return not_implemented(method, uri);
     };
     let owner_id = claims.sub.as_ref().map(|sub| sub.as_str());
@@ -437,8 +441,12 @@ async fn upload(
     {
         return *response;
     }
+    if too_large {
+        return StorageError::entity_too_large().into_response();
+    }
 
-    let last_modified = match write_file(&file, body).await {
+    let body = &file.body;
+    let last_modified = match write_file(&path, body).await {
         Ok(at) => at,
         Err(error) => {
             tracing::error!(%error, "storage object write failed");
@@ -449,7 +457,7 @@ async fn upload(
         "eTag": etag(body),
         "size": body.len(),
         "mimetype": mime_type,
-        "cacheControl": cache_control,
+        "cacheControl": file.cache_control,
         "lastModified": iso(Some(last_modified)),
         "contentLength": body.len(),
         "httpStatusCode": 200,
@@ -480,10 +488,60 @@ async fn upload(
             )
         }
         Err(response) => {
-            remove_file(&file).await;
+            remove_file(&path).await;
             *response
         }
     }
+}
+
+/// The uploaded file as `fileUploadFromRequest` reads it.
+struct FileUpload<'a> {
+    body: Cow<'a, Bytes>,
+    mime_type: Cow<'a, str>,
+    cache_control: Cow<'a, str>,
+    multipart: bool,
+}
+
+/// A `multipart/form-data` body's file part (`multipart::parse`), or the
+/// raw body with `Content-Type` (default `application/octet-stream`) and
+/// `Cache-Control` (default `no-cache`). `None` for what is not ported:
+/// a malformed or unsupported form, a form type in other letter case
+/// (upstream's check is a case-sensitive `startsWith`, and how Fastify
+/// parses such a body is not verified), and `x-metadata` on a binary upload.
+fn file_upload<'a>(headers: &'a HeaderMap, body: &'a Bytes) -> Option<FileUpload<'a>> {
+    let content_type = header_str(headers, header::CONTENT_TYPE.as_str());
+    if content_type.is_some_and(|value| {
+        value
+            .get(.."multipart/form-data".len())
+            .is_some_and(|prefix| {
+                prefix.eq_ignore_ascii_case("multipart/form-data")
+                    && prefix != "multipart/form-data"
+            })
+    }) {
+        return None;
+    }
+    if let Some(content_type) =
+        content_type.filter(|value| value.starts_with("multipart/form-data"))
+    {
+        let form = multipart::parse(content_type, body)?;
+        return Some(FileUpload {
+            body: Cow::Owned(form.body),
+            mime_type: Cow::Owned(form.mime_type),
+            cache_control: Cow::Owned(form.cache_control),
+            multipart: true,
+        });
+    }
+    if headers.contains_key("x-metadata") {
+        return None;
+    }
+    Some(FileUpload {
+        body: Cow::Borrowed(body),
+        mime_type: Cow::Borrowed(content_type.unwrap_or("application/octet-stream")),
+        cache_control: Cow::Borrowed(
+            header_str(headers, header::CACHE_CONTROL.as_str()).unwrap_or("no-cache"),
+        ),
+        multipart: false,
+    })
 }
 
 async fn fetch_upload_bucket(
@@ -1617,6 +1675,47 @@ mod tests {
         assert_eq!(max_file_size("a.png", None), 52_428_800);
         assert_eq!(max_file_size("a.png", Some(10)), 10);
         assert_eq!(max_file_size("a.png", Some(1 << 40)), 52_428_800);
+    }
+
+    #[test]
+    fn uploads_read_a_raw_body_or_a_form_file() {
+        let mut headers = HeaderMap::new();
+        let raw = Bytes::from_static(b"bytes");
+        let file = file_upload(&headers, &raw).unwrap();
+        assert_eq!(
+            (&file.body[..], &*file.mime_type, &*file.cache_control),
+            (&b"bytes"[..], "application/octet-stream", "no-cache")
+        );
+        assert!(!file.multipart);
+
+        headers.insert("x-metadata", HeaderValue::from_static("e30="));
+        assert!(file_upload(&headers, &raw).is_none());
+
+        // A form ignores `x-metadata` and `Cache-Control` headers.
+        headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("max-age=1"));
+        headers.insert(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("multipart/form-data; boundary=b"),
+        );
+        let form = Bytes::from_static(
+            b"--b\r\nContent-Disposition: form-data; name=\"cacheControl\"\r\n\r\n60\r\n\
+              --b\r\nContent-Disposition: form-data; name=\"\"; filename=\"blob\"\r\n\
+              Content-Type: image/png\r\n\r\nPNG\r\n--b--\r\n",
+        );
+        let file = file_upload(&headers, &form).unwrap();
+        assert_eq!(
+            (&file.body[..], &*file.mime_type, &*file.cache_control),
+            (&b"PNG"[..], "image/png", "max-age=60")
+        );
+        assert!(file.multipart);
+        assert!(file_upload(&headers, &raw).is_none());
+
+        // A form type in other letter case is not stored as a raw body.
+        headers.insert(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("Multipart/Form-Data; boundary=b"),
+        );
+        assert!(file_upload(&headers, &form).is_none());
     }
 
     #[test]
