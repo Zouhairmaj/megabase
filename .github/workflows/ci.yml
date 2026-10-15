@@ -470,11 +470,18 @@ jobs:
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
+      # ghcr.io mirrors of the FROM images first, ECR fallback through a
+      # retargeted Dockerfile copy (docs/decisions/0040-ghcr-library-image-mirrors.md).
+      - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
+        id: bases
+        uses: ./.github/actions/dockerfile-bases
       # Compiles inside Docker. sccache is not installed in the image:
       # R2 keys would be a second credential path, and fork PRs have none.
       # Runner jobs above use sccache. See docs/decisions/0035-ci-sccache-r2.md.
       - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
-        run: docker build -t megabase:ci .
+        env:
+          DOCKERFILE: ${{ steps.bases.outputs.file }}
+        run: docker build -f "$DOCKERFILE" -t megabase:ci .
       - if: needs.changes.result != 'success' || needs.changes.outputs.server != 'false'
         run: |
           docker run -d --name megabase-ci -p 8000:8000 megabase:ci

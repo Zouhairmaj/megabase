@@ -1,0 +1,16 @@
+# ghcr.io mirrors of public.ecr.aws images (decisions 0039 and 0040).
+#
+# One line per mirrored repository: the ghcr.io repository, then the
+# upstream repository it copies. Tags and digests are not written here.
+# They come from the references in judge/compose.override.yml and
+# Dockerfile, which are the one place each pin is written.
+#
+# Read by .github/workflows/mirror-images.yml (copies each referenced
+# tag at its digest), .github/actions/judge-images and
+# .github/actions/dockerfile-bases (fall back to the upstream reference
+# when the mirror cannot be pulled), and the megabase-judge harness test
+# that checks every mirror reference is listed.
+ghcr.io/zouhairmaj/supabase-postgres public.ecr.aws/supabase/postgres
+ghcr.io/zouhairmaj/kong public.ecr.aws/docker/library/kong
+ghcr.io/zouhairmaj/rust public.ecr.aws/docker/library/rust
+ghcr.io/zouhairmaj/debian public.ecr.aws/docker/library/debian

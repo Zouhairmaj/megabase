@@ -26,9 +26,9 @@
 #   6. keeps the pooler alive on GitHub Actions (RLIMIT_NOFILE + a longer
 #      healthcheck; Elixir migrate+eval+server is slower than compose --wait
 #      would otherwise allow).
-# Kong uses the Docker official `kong:3.9.3` library image on ECR (same
-# 3.9.3 as vendor `kong/kong:3.9.3`; `kong/kong` has no public ECR/GHCR
-# mirror). That library image's entrypoint is `/docker-entrypoint.sh`;
+# Kong uses the Docker official `kong:3.9.3` library image from ECR,
+# through our ghcr.io mirror (same 3.9.3 as vendor `kong/kong:3.9.3`;
+# `kong/kong` has no public ECR/GHCR mirror). That library image's entrypoint is `/docker-entrypoint.sh`;
 # the vendor script execs `/entrypoint.sh` from `kong/kong`. `!override`
 # replaces the vendor entrypoint (Compose appends sequences otherwise,
 # so the container kept running the script that cannot exec
@@ -42,7 +42,11 @@ services:
     volumes:
       - judge-snippets:/app/snippets
   kong:
-    image: public.ecr.aws/docker/library/kong:3.9.3@sha256:92035d16d7ff86b7bc12fb1d0090d29357d924238b1880f78735f3f2fea6b631
+    # ghcr.io mirror of public.ecr.aws/docker/library/kong at the same tag
+    # and digest (.github/workflows/mirror-images.yml, issue #358). CI sets
+    # MEGABASE_JUDGE_KONG_IMAGE to the ECR reference when ghcr cannot be
+    # pulled.
+    image: ${MEGABASE_JUDGE_KONG_IMAGE:-ghcr.io/zouhairmaj/kong:3.9.3@sha256:92035d16d7ff86b7bc12fb1d0090d29357d924238b1880f78735f3f2fea6b631}
     entrypoint: !override
       - /bin/sh
       - -c
@@ -82,7 +86,7 @@ services:
     image: public.ecr.aws/supabase/edge-runtime:v1.77.4@sha256:ad45164b7548bf5820ed7be714789c17ac2865edce79a09cfb4c3756c3d365a8
   db:
     # ghcr.io mirror of public.ecr.aws/supabase/postgres at the same tag and
-    # digest (.github/workflows/mirror-postgres-image.yml, issue #350). The
+    # digest (.github/workflows/mirror-images.yml, issue #350). The
     # largest image in the stack, so ECR rate limits hit it most. CI sets
     # MEGABASE_JUDGE_DB_IMAGE to the ECR reference when ghcr cannot be pulled.
     image: ${MEGABASE_JUDGE_DB_IMAGE:-ghcr.io/zouhairmaj/supabase-postgres:17.6.1.136@sha256:f371b5f3f2ac0a05703f33d6e6134515fb2498cab708fb948a0aeb7481467c00}

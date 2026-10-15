@@ -64,8 +64,8 @@ jobs:
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-      # ghcr.io mirror first, ECR fallback (sets MEGABASE_JUDGE_DB_IMAGE).
-      - uses: ./.github/actions/judge-db-image
+      # ghcr.io mirrors first, ECR fallback (sets MEGABASE_JUDGE_*_IMAGE).
+      - uses: ./.github/actions/judge-images
       - name: Pull reference images
         run: |
           set -euo pipefail

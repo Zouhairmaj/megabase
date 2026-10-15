@@ -1,0 +1,86 @@
+name: Judge mirrored images
+description: >-
+  Pull each reference image that judge/compose.override.yml writes as
+  ${MEGABASE_JUDGE_<NAME>_IMAGE:-ghcr.io/zouhairmaj/...} from its ghcr.io
+  mirror. When a mirror cannot be pulled (not yet mirrored, private, or
+  ghcr is down), pull the same tag and digest from the upstream listed in
+  .github/image-mirrors.txt instead. Exports every variable it resolves
+  so Compose and later steps use the pulled reference. Issues #350, #358.
+
+inputs:
+  variables:
+    description: >-
+      Space-separated MEGABASE_JUDGE_*_IMAGE variables to resolve. Empty
+      resolves every mirrored image in the overlay.
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Pull mirrored reference images
+      shell: bash
+      env:
+        VARIABLES: ${{ inputs.variables }}
+      run: |
+        set -euo pipefail
+        # The overlay is the one place each reference is written. The
+        # mirror workflow (.github/workflows/mirror-images.yml) reads the
+        # same references.
+        mapfile -t lines < <(sed -n \
+          's|^ *image: \${\(MEGABASE_JUDGE_[A-Z_]*_IMAGE\):-\(ghcr\.io/zouhairmaj/[^}]*\)}$|\1 \2|p' \
+          judge/compose.override.yml)
+        if [ "${#lines[@]}" -eq 0 ]; then
+          echo "::error::judge/compose.override.yml has no \${MEGABASE_JUDGE_*_IMAGE:-ghcr.io/zouhairmaj/...} image"
+          exit 1
+        fi
+
+        pull() {
+          local image=$1 tries=$2 attempt=1
+          until docker pull "$image"; do
+            if [ "$attempt" -ge "$tries" ]; then
+              return 1
+            fi
+            sleep $((attempt * 5))
+            attempt=$((attempt + 1))
+          done
+        }
+
+        resolved=0
+        for line in "${lines[@]}"; do
+          var=${line%% *}
+          mirror=${line#* }
+          if [ -n "$VARIABLES" ] && ! printf ' %s ' "$VARIABLES" | grep -qF " ${var} "; then
+            continue
+          fi
+          resolved=$((resolved + 1))
+          case "$mirror" in
+            ghcr.io/zouhairmaj/*:*@sha256:*) ;;
+            *)
+              echo "::error::unexpected mirror reference ${mirror}"
+              exit 1
+              ;;
+          esac
+          repo=${mirror%%:*}
+          upstream=$(awk -v r="$repo" '$1 == r { print $2 }' .github/image-mirrors.txt)
+          if [ -z "$upstream" ]; then
+            echo "::error::${repo} is not listed in .github/image-mirrors.txt"
+            exit 1
+          fi
+          upstream="${upstream}:${mirror#"$repo":}"
+
+          if pull "$mirror" 3; then
+            echo "${var}=${mirror}" >> "$GITHUB_ENV"
+            continue
+          fi
+          echo "::warning::Could not pull ${mirror}. Falling back to ${upstream} (same digest). Run the Mirror images workflow and make the package public."
+          if ! pull "$upstream" 8; then
+            echo "::error::failed to pull ${upstream}"
+            exit 1
+          fi
+          echo "${var}=${upstream}" >> "$GITHUB_ENV"
+        done
+        if [ -n "$VARIABLES" ] && [ "$resolved" -ne "$(wc -w <<<"$VARIABLES")" ]; then
+          echo "::error::not every variable in '${VARIABLES}' is a mirrored image in judge/compose.override.yml"
+          exit 1
+        fi
