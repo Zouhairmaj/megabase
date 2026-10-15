@@ -274,7 +274,6 @@ async fn recovery_codes_status(State(state): State<AuthState>, headers: HeaderMa
     }
 }
 
-// megabase:unit auth:route:POST /auth/v1/factors/recovery-codes
 async fn recovery_codes_generate(
     State(state): State<AuthState>,
     headers: HeaderMap,
@@ -324,7 +323,6 @@ async fn recovery_codes_generate(
     }
 }
 
-// megabase:unit auth:route:POST /auth/v1/factors/recovery-codes/regenerate
 async fn recovery_codes_regenerate(State(state): State<AuthState>, headers: HeaderMap) -> Response {
     let authed = match require_factor_user(&state, &headers).await {
         Ok(authed) => authed,
@@ -355,7 +353,6 @@ async fn recovery_codes_regenerate(State(state): State<AuthState>, headers: Head
     }
 }
 
-// megabase:unit auth:route:POST /auth/v1/factors/recovery-codes/verify
 async fn recovery_codes_verify(
     State(state): State<AuthState>,
     headers: HeaderMap,

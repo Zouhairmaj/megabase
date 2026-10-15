@@ -103,6 +103,7 @@ case, `null` is the zero value, and a decode error is 400 `bad_json`.
 `crates/megabase-auth/src/store/mfa.rs` reads `auth.mfa_factors`,
 `auth.mfa_recovery_code_sets`, `auth.mfa_recovery_codes`, and
 `auth.sessions.aal`. Markers are on `DELETE /factors/{factor_id}` and the
-five recovery-code routes, whose reference-stack behavior is fully served.
-`POST /factors` and the `{factor_id}` challenge and verify routes carry no
-marker: with the reference configuration their main path (TOTP) is 501.
+recovery-code status and delete routes, whose behavior is fully served.
+`POST /factors`, the `{factor_id}` challenge and verify routes, and the
+recovery-code generate, regenerate and verify routes carry no marker: their
+main path (TOTP, or argon2id when the switches are on) is 501.
