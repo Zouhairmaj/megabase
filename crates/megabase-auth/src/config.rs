@@ -96,7 +96,8 @@ impl AuthConfig {
             external: ExternalProviders::default(),
             sms_provider: String::new(),
             saml_enabled: false,
-            saml_private_key_next_configured: false,
+            // With SAML off, GoTrue reports `true`: see `from_lookup`.
+            saml_private_key_next_configured: true,
             passkeys_enabled: false,
             jwt_aud: "authenticated".into(),
             jwt_default_group: "authenticated".into(),
@@ -135,6 +136,16 @@ impl AuthConfig {
             }
             None => defaults.jwt_exp_seconds,
         };
+        let saml_enabled =
+            optional_bool(&lookup, "GOTRUE_SAML_ENABLED")?.unwrap_or(defaults.saml_enabled);
+        // `settings.go` reports `SAML.CertificateNext != nil`. envconfig
+        // allocates a zero-value certificate for that pointer, and only
+        // `SAMLConfiguration.PopulateFields` resets it to nil when
+        // `GOTRUE_SAML_PRIVATE_KEY_NEXT` is empty. `ApplyDefaults` calls it
+        // only when SAML is enabled, so with SAML off the flag is `true`
+        // (`internal/conf/configuration.go`, `internal/conf/saml.go`).
+        let saml_private_key_next_configured = !saml_enabled
+            || lookup("GOTRUE_SAML_PRIVATE_KEY_NEXT").is_some_and(|value| !value.is_empty());
         Ok(Self {
             disable_signup: optional_bool(&lookup, "GOTRUE_DISABLE_SIGNUP")?
                 .unwrap_or(defaults.disable_signup),
@@ -174,10 +185,8 @@ impl AuthConfig {
                 zoom: flag(&lookup, "GOTRUE_EXTERNAL_ZOOM_ENABLED")?,
             },
             sms_provider: lookup("GOTRUE_SMS_PROVIDER").unwrap_or(defaults.sms_provider),
-            saml_enabled: optional_bool(&lookup, "GOTRUE_SAML_ENABLED")?
-                .unwrap_or(defaults.saml_enabled),
-            saml_private_key_next_configured: lookup("GOTRUE_SAML_CERTIFICATE_NEXT")
-                .is_some_and(|value| !value.is_empty()),
+            saml_enabled,
+            saml_private_key_next_configured,
             passkeys_enabled: optional_bool(&lookup, "GOTRUE_PASSKEY_ENABLED")?
                 .unwrap_or(defaults.passkeys_enabled),
             jwt_aud: lookup("GOTRUE_JWT_AUD").unwrap_or(defaults.jwt_aud),
@@ -279,6 +288,7 @@ mod tests {
         assert!(!config.external.github);
         assert_eq!(config.sms_provider, "");
         assert!(!config.saml_enabled);
+        assert!(config.saml_private_key_next_configured);
         assert!(!config.passkeys_enabled);
         assert_eq!(config.jwt_aud, "authenticated");
         assert_eq!(config.jwt_default_group, "authenticated");
@@ -300,7 +310,6 @@ mod tests {
             "GOTRUE_PASSWORD_MIN_LENGTH" => Some("4".into()),
             "GOTRUE_JWT_EXP" => Some("120".into()),
             "GOTRUE_SMS_PROVIDER" => Some("twilio".into()),
-            "GOTRUE_SAML_CERTIFICATE_NEXT" => Some("cert".into()),
             _ => None,
         })
         .unwrap();
@@ -312,6 +321,25 @@ mod tests {
         assert_eq!(config.jwt_exp_seconds, 120);
         assert_eq!(config.sms_provider, "twilio");
         assert!(config.saml_private_key_next_configured);
+    }
+
+    #[test]
+    fn saml_next_key_flag_follows_gotrue_apply_defaults() {
+        let enabled_without_next =
+            AuthConfig::from_lookup(|key| (key == "GOTRUE_SAML_ENABLED").then(|| "true".into()))
+                .unwrap();
+        assert!(!enabled_without_next.saml_private_key_next_configured);
+        let enabled_with_next = AuthConfig::from_lookup(|key| match key {
+            "GOTRUE_SAML_ENABLED" => Some("true".into()),
+            "GOTRUE_SAML_PRIVATE_KEY_NEXT" => Some("key".into()),
+            _ => None,
+        })
+        .unwrap();
+        assert!(enabled_with_next.saml_private_key_next_configured);
+        let disabled =
+            AuthConfig::from_lookup(|key| (key == "GOTRUE_SAML_ENABLED").then(|| "false".into()))
+                .unwrap();
+        assert!(disabled.saml_private_key_next_configured);
     }
 
     #[test]
