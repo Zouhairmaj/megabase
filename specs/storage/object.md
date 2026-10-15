@@ -148,6 +148,10 @@ their files. Response `200` with the deleted rows in `objectSchema` order:
   (`NoContentProvided`), `contentEncoding`, `metadata` or `userMetadata`
   fields, a repeated `contentType` field, a file part without its own
   `Content-Type`.
+- A `Content-Type` that starts with `multipart/form-data` in other letter
+  case. `uploader.ts:433` tests a case-sensitive `startsWith`, so it would
+  take the binary path; what Fastify's multipart parser does with that body
+  first is not verified.
 - `versionId`, `Range` and conditional request headers, `download` names
   other than `[A-Za-z0-9._-]*`, objects whose metadata has `xRobotsTag` or
   `contentEncoding`.

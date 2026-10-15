@@ -499,9 +499,21 @@ struct FileUpload<'a> {
 /// A `multipart/form-data` body's file part (`multipart::parse`), or the
 /// raw body with `Content-Type` (default `application/octet-stream`) and
 /// `Cache-Control` (default `no-cache`). `None` for what is not ported:
-/// a malformed or unsupported form, and `x-metadata` on a binary upload.
+/// a malformed or unsupported form, a form type in other letter case
+/// (upstream's check is a case-sensitive `startsWith`, and how Fastify
+/// parses such a body is not verified), and `x-metadata` on a binary upload.
 fn file_upload<'a>(headers: &'a HeaderMap, body: &'a Bytes) -> Option<FileUpload<'a>> {
     let content_type = header_str(headers, header::CONTENT_TYPE.as_str());
+    if content_type.is_some_and(|value| {
+        value
+            .get(.."multipart/form-data".len())
+            .is_some_and(|prefix| {
+                prefix.eq_ignore_ascii_case("multipart/form-data")
+                    && prefix != "multipart/form-data"
+            })
+    }) {
+        return None;
+    }
     if let Some(content_type) =
         content_type.filter(|value| value.starts_with("multipart/form-data"))
     {
@@ -1441,6 +1453,13 @@ mod tests {
         );
         assert!(file.multipart);
         assert!(file_upload(&headers, &raw).is_none());
+
+        // A form type in other letter case is not stored as a raw body.
+        headers.insert(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("Multipart/Form-Data; boundary=b"),
+        );
+        assert!(file_upload(&headers, &form).is_none());
     }
 
     #[test]
