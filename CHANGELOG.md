@@ -4,6 +4,17 @@ All notable changes to Megabase are documented in this file.
 The format is produced by [release-please](https://github.com/googleapis/release-please).
 Sections: Features, Bug Fixes, Performance, Conformance/judge, Documentation.
 
+## [0.1.31](https://github.com/Zouhairmaj/megabase/compare/v0.1.30...v0.1.31) (2026-10-15)
+
+
+### Features
+
+* **auth:** serve mfa factor gates, unenroll, and recovery-code status and delete ([#374](https://github.com/Zouhairmaj/megabase/issues/374)) ([2d9070d](https://github.com/Zouhairmaj/megabase/commit/2d9070d9b4298070bcf5dfed65118e8252462e8e))
+* bootstrap extensions, supabase_functions, vault schemas and supabase_realtime publication ([#388](https://github.com/Zouhairmaj/megabase/issues/388)) ([9625c93](https://github.com/Zouhairmaj/megabase/commit/9625c932783af7ff56222fd858656689afd513b8))
+* **rest:** embed through views via inherited foreign keys ([#385](https://github.com/Zouhairmaj/megabase/issues/385)) ([0564b64](https://github.com/Zouhairmaj/megabase/commit/0564b649649aa0c6407a5dd3ba11171e52a91358))
+* **rest:** filters, order and limit on embedded resources ([#386](https://github.com/Zouhairmaj/megabase/issues/386)) ([486682f](https://github.com/Zouhairmaj/megabase/commit/486682fcc8649789dbc6e59f73f62eaae404fa34))
+* **rest:** serve nested embeds and self-referencing embeds ([#389](https://github.com/Zouhairmaj/megabase/issues/389)) ([7e314df](https://github.com/Zouhairmaj/megabase/commit/7e314dfcfe9c82d4f7000d376a8fa439285f9edf)), closes [#378](https://github.com/Zouhairmaj/megabase/issues/378)
+
 ## [0.1.30](https://github.com/Zouhairmaj/megabase/compare/v0.1.29...v0.1.30) (2026-10-15)
 
 
