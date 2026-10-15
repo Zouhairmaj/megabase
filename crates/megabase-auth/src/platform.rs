@@ -41,8 +41,9 @@ impl From<SchemaError> for PlatformError {
 }
 
 /// Create the `extensions` and `supabase_functions` schemas, the extensions
-/// a fresh Supabase project has, `vault` when `supabase_vault` is available,
-/// and the empty `supabase_realtime` publication, when they are missing.
+/// a fresh Supabase project has, the `vault` schema (with `supabase_vault`
+/// when it is available), and the empty `supabase_realtime` publication,
+/// when they are missing.
 ///
 /// Idempotent. Run after [`crate::install_roles`], whose roles the grants
 /// name. Runs in one transaction under
@@ -118,13 +119,13 @@ mod tests {
     }
 
     #[test]
-    fn vault_is_created_only_when_available() {
+    fn vault_schema_always_exists_and_the_extension_only_when_available() {
+        let schema = PLATFORM
+            .find("CREATE SCHEMA IF NOT EXISTS vault;")
+            .expect("vault schema");
         let guard = PLATFORM
             .find("SELECT 1 FROM pg_available_extensions WHERE name = 'supabase_vault'")
             .expect("availability guard");
-        let schema = PLATFORM
-            .find("CREATE SCHEMA IF NOT EXISTS vault;")
-            .expect("vault schema is created first");
         let create = PLATFORM
             .find("CREATE EXTENSION supabase_vault WITH SCHEMA vault;")
             .expect("create");
@@ -132,10 +133,17 @@ mod tests {
             + PLATFORM[guard..]
                 .find("END IF;")
                 .expect("availability guard closes");
-        assert!(guard < schema && schema < create);
         assert!(
-            create < guard_end,
-            "the vault schema and extension stay inside the availability guard"
+            schema < guard,
+            "the vault schema is created before, and outside, the availability guard"
+        );
+        assert!(
+            guard < create && create < guard_end,
+            "the extension stays inside the availability guard"
+        );
+        assert!(
+            !PLATFORM.contains("CREATE TABLE vault.") && !PLATFORM.contains("CREATE VIEW vault."),
+            "no unencrypted stand-in for vault.secrets"
         );
     }
 
