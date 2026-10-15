@@ -193,6 +193,7 @@ pub(crate) fn find_relationship<'a>(
             to_many: rel.cardinality == Cardinality::OneToMany,
             root_columns: rel.columns.iter().map(|(r, _)| (*r).to_string()).collect(),
             target_columns: rel.columns.iter().map(|(_, t)| (*t).to_string()).collect(),
+            column_types: Vec::new(),
         }),
         // A table-name target may also match a many-to-many link through a
         // junction table, which this lookup does not list.
@@ -267,6 +268,7 @@ mod tests {
                 to_many: false,
                 root_columns: vec!["user_id".to_string()],
                 target_columns: vec!["id".to_string()],
+                column_types: Vec::new(),
             }
         );
         let rel = find_relationship("messages", "channel_id", &keys).unwrap();

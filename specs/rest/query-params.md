@@ -70,8 +70,8 @@ them. `limit=0` returns no rows. A nonzero `offset` without `limit` is
 | When | Status | Code / message (upstream) |
 |---|---|---|
 | `order`, logic, `columns`, `select`, a filter, or `on_conflict` does not parse | 400 | `PGRST100`. The first parser in the `parse` do-block wins. `order=id.ac` is column 4, unexpected `"c"`, expecting `"asc", "desc", "nullsfirst" or "nullslast"` |
-| `order`, `limit`, `offset`, `and`, or `or` names a resource that is not embedded (`items.order`, `order=clients(id)`) | 400 | `PGRST108` `'{resource}' is not an embedded resource in this request`, hint `Verify that '{resource}' is included in the 'select' query parameter.`, details null. The rightmost parameter in each stage wins, and order is checked before limit/offset, then logic, then a related order term |
-| Select embed, spread, or a JSON-path filter (`a.b=eq.1`, `tags->0=eq.1`) | 501 | Route unit `{METHOD} {path}`, after a successful parse of the other parameters. `select=notes(body)&id=nope` is still `PGRST100` |
+| A filter, `order`, `limit`, `offset`, `and`, or `or` names a resource that is not embedded (`a.b=eq.1`, `items.order`, `order=clients(id)`) | 400 | `PGRST108` `'{resource}' is not an embedded resource in this request`, hint `Verify that '{resource}' is included in the 'select' query parameter.`, details null. The rightmost parameter in each stage wins; filters are checked before order, then limit/offset, then logic, then a related order term. Embedded parameters on an embed in `select` follow [`embedding.md`](embedding.md) |
+| Spread, or a JSON-path filter (`tags->0=eq.1`) | 501 | Route unit `{METHOD} {path}`, after a successful parse of the other parameters. `select=notes(body)&id=nope` is still `PGRST100` |
 | `!inner` / `!left` embed, or `count()` / `.sum()` / `.avg()` / `.max()` / `.min()` | 501 | `rest:embed-join:inner`, `rest:embed-join:left`, or `rest:aggregate:{name}` |
 | Column is missing | 400 | PostgreSQL `42703` |
 | `limit` or `offset` is negative, or does not fit `bigint` | 400 | PostgreSQL `2201W`, `2201X`, or `22003` |

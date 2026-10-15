@@ -39,7 +39,8 @@ Modifiers combine per term; terms keep request order.
 
 ## Out of scope
 
-Related-order terms and embedded ordering (`rest:query-param:order`).
+Related-order terms (`rest:query-param:order`). Embedded ordering
+(`books.order=title.desc`) is in [`embedding.md`](embedding.md).
 
 ## Judge cases
 

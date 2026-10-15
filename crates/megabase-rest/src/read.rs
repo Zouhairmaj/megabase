@@ -23,7 +23,7 @@ use crate::hint::no_rel_between_hint;
 use crate::mutate::mutate;
 use crate::openapi::document;
 use crate::params::{
-    build_read_sql_as, parse_get_query, where_clause, BodyHandler, QueryFail, Relationship,
+    build_read_sql_as, count_where, parse_get_query, BodyHandler, QueryFail, Relationship,
 };
 use crate::prefer::{set_applied, Count, Prefer, Scope};
 use crate::query::{path_decode, query_parts};
@@ -1256,19 +1256,21 @@ const DB_MAX_ROWS: i64 = 1000;
 // megabase:unit rest:prefer:count=exact
 // megabase:unit rest:prefer:count=planned
 // megabase:unit rest:prefer:count=estimated
-/// Total rows behind the filters. `exact` counts. `estimated` counts up to
-/// `DB_MAX_ROWS`, then reads the planner's row estimate like `planned`
-/// (`Statements.hs` `mainRead`).
+/// Total rows behind the filters and `!inner` embeds. `exact` counts.
+/// `estimated` counts up to `DB_MAX_ROWS`, then reads the planner's row
+/// estimate like `planned` (`Statements.hs` `mainRead`).
+#[allow(clippy::too_many_arguments)]
 async fn count_total(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     schema: &str,
     relation: &str,
     read: &crate::params::ReadQuery,
     column_types: &[(&str, &str)],
+    rels: &HashMap<String, Relationship>,
     mode: Count,
     anon: bool,
 ) -> Result<i64, Box<Response>> {
-    let filter = where_clause(relation, read, column_types)
+    let filter = count_where(schema, relation, read, column_types, rels)
         .map_err(|error| Box::new(unsafe_type(&error)))?;
     let from = format!("{}.{}", quote_ident(schema), quote_ident(relation));
     let (where_sql, params) = match filter {
@@ -1392,7 +1394,8 @@ async fn read_rows(
         if rels.contains_key(name) {
             continue;
         }
-        let rel = load_relationship(&mut tx, schema, relation, name, session.anon).await?;
+        let mut rel = load_relationship(&mut tx, schema, relation, name, session.anon).await?;
+        rel.column_types = load_columns(&mut tx, schema, &rel.table, session.anon).await?;
         rels.insert(name.to_string(), rel);
     }
     let built = build_read_sql_as(
@@ -1422,6 +1425,7 @@ async fn read_rows(
                 relation,
                 read,
                 &column_types,
+                &rels,
                 count_mode,
                 session.anon,
             )
@@ -2092,11 +2096,30 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn dotted_filter_stays_501() {
+    async fn dotted_filter_without_embed_is_pgrst108() {
         let app = router(RestState::from_config(&Config::default()));
-        let (status, body, _) = send(app, get("/rest/v1/todos?a.b=eq.1")).await;
+        let (status, body, _) = send(app.clone(), get("/rest/v1/todos?a.b=eq.1")).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(body["code"], "PGRST108");
+        assert_eq!(
+            body["message"],
+            "'a' is not an embedded resource in this request"
+        );
+        // A JSON-path filter key is still the route unit.
+        let (status, body, _) = send(app, get("/rest/v1/todos?a-%3Eb=eq.1")).await;
         assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
         assert_eq!(body["unit"], "GET /rest/v1/todos");
+    }
+
+    #[tokio::test]
+    async fn embedded_filter_needs_a_database() {
+        let app = router(RestState::from_config(&Config::default()));
+        let (status, body, _) = send(
+            app,
+            get("/rest/v1/authors?select=name,books!inner(title)&books.published=eq.true"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{body}");
     }
 
     #[tokio::test]
