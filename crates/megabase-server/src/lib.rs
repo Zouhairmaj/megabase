@@ -7,7 +7,6 @@
 //! `dashboard` route. Supavisor's management API is not routed through Kong
 //! upstream, so it has no prefix here; see `docs/adr/0002-gateway-layout.md`.
 
-use std::future::IntoFuture;
 use std::sync::Arc;
 
 use axum::{
@@ -19,6 +18,7 @@ use axum::{
 mod cors;
 mod key_auth;
 mod layers;
+mod target;
 
 use megabase_core::Config;
 use tower::ServiceExt;
@@ -268,14 +268,12 @@ async fn serve_until_drained(
     drain: std::time::Duration,
 ) -> std::io::Result<()> {
     let (tx, mut graceful) = tokio::sync::watch::channel(false);
-    // `WithGracefulShutdown` is `IntoFuture`, not `Future`. Connection tasks are
-    // spawned, so dropping this future stops the accept loop and lets the
-    // caller close the pool; it does not wait out `MEGABASE_HTTP_TIMEOUT_MS`.
-    let server = axum::serve(listener, app)
-        .with_graceful_shutdown(async move {
-            let _ = graceful.wait_for(|stopping| *stopping).await;
-        })
-        .into_future();
+    // Connection tasks are spawned, so dropping this future stops the accept
+    // loop and lets the caller close the pool; it does not wait out
+    // `MEGABASE_HTTP_TIMEOUT_MS`.
+    let server = serve(listener, app, async move {
+        let _ = graceful.wait_for(|stopping| *stopping).await;
+    });
     tokio::pin!(server);
     tokio::select! {
         result = &mut server => return result,
@@ -290,6 +288,89 @@ async fn serve_until_drained(
         }
     }
     Ok(())
+}
+
+/// `axum::serve(listener, app).with_graceful_shutdown(signal)` (axum 0.7.9
+/// `serve.rs`, HTTP/1), with every connection read through [`target::Encoded`] so a
+/// raw `"`, `<` or `>` in the request-target reaches the router instead of
+/// failing in hyper with an empty `400`.
+async fn serve(
+    listener: tokio::net::TcpListener,
+    app: Router,
+    signal: impl std::future::Future<Output = ()> + Send + 'static,
+) -> std::io::Result<()> {
+    use hyper::server::conn::http1::Builder;
+    use hyper_util::rt::TokioIo;
+    use hyper_util::service::TowerToHyperService;
+
+    let (signal_tx, signal_rx) = tokio::sync::watch::channel(());
+    let signal_tx = Arc::new(signal_tx);
+    tokio::spawn(async move {
+        signal.await;
+        drop(signal_rx);
+    });
+    let (close_tx, close_rx) = tokio::sync::watch::channel(());
+    loop {
+        let stream = tokio::select! {
+            accepted = accept(&listener) => match accepted {
+                Some(stream) => stream,
+                None => continue,
+            },
+            () = signal_tx.closed() => break,
+        };
+        let io = TokioIo::new(target::Encoded::new(stream));
+        let service = TowerToHyperService::new(app.clone());
+        let signal_tx = Arc::clone(&signal_tx);
+        let close_rx = close_rx.clone();
+        tokio::spawn(async move {
+            // HTTP/1 only, as axum without its `http2` feature. Upgrades are
+            // needed for websockets.
+            let conn = Builder::new().serve_connection(io, service).with_upgrades();
+            tokio::pin!(conn);
+            let closed = signal_tx.closed();
+            tokio::pin!(closed);
+            let mut draining = false;
+            loop {
+                tokio::select! {
+                    result = conn.as_mut() => {
+                        if let Err(error) = result {
+                            tracing::debug!(%error, "failed to serve connection");
+                        }
+                        break;
+                    }
+                    () = &mut closed, if !draining => {
+                        draining = true;
+                        conn.as_mut().graceful_shutdown();
+                    }
+                }
+            }
+            drop(close_rx);
+        });
+    }
+    drop(close_rx);
+    drop(listener);
+    close_tx.closed().await;
+    Ok(())
+}
+
+/// One accepted stream. A reset before `accept` returns is skipped; any other
+/// error (such as `EMFILE`) is logged and retried after a second, as axum does.
+async fn accept(listener: &tokio::net::TcpListener) -> Option<tokio::net::TcpStream> {
+    match listener.accept().await {
+        Ok((stream, _)) => Some(stream),
+        Err(error) => {
+            if !matches!(
+                error.kind(),
+                std::io::ErrorKind::ConnectionRefused
+                    | std::io::ErrorKind::ConnectionAborted
+                    | std::io::ErrorKind::ConnectionReset
+            ) {
+                tracing::error!(%error, "accept error");
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            }
+            None
+        }
+    }
 }
 
 async fn shutdown_signal() {
@@ -413,6 +494,49 @@ mod tests {
             elapsed < std::time::Duration::from_secs(2),
             "drain waited {elapsed:?}"
         );
+    }
+
+    #[tokio::test]
+    async fn a_raw_json_arrow_in_the_target_reaches_the_router() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (trigger, shutdown) = tokio::sync::oneshot::channel::<()>();
+        let app =
+            Router::new().route(
+                "/echo",
+                get(|request: Request| async move {
+                    request.uri().query().unwrap_or_default().to_string()
+                }),
+            );
+        let server = tokio::spawn(serve(listener, app, async move {
+            let _ = shutdown.await;
+        }));
+        let mut stream = tokio::net::TcpStream::connect(addr).await.unwrap();
+        // Two requests on one connection; the second follows a sized body.
+        stream
+            .write_all(
+                b"POST /echo?a->b HTTP/1.1\r\nHost: h\r\nContent-Length: 4\r\n\r\nx->y\
+                  GET /echo?select=payload->user->>name&b=eq.\"<x>\" HTTP/1.1\r\nHost: h\r\n\
+                  Connection: close\r\n\r\n",
+            )
+            .await
+            .unwrap();
+        let mut response = String::new();
+        stream.read_to_string(&mut response).await.unwrap();
+        // `POST` has no route: 405, not hyper's empty 400.
+        assert!(response.starts_with("HTTP/1.1 405"), "{response}");
+        assert!(
+            response.ends_with("select=payload-%3Euser-%3E%3Ename&b=eq.%22%3Cx%3E%22"),
+            "{response}"
+        );
+        assert!(!response.contains(" 400 "), "{response}");
+        trigger.send(()).unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(2), server)
+            .await
+            .expect("idle server stops")
+            .unwrap()
+            .unwrap();
     }
 
     #[tokio::test]

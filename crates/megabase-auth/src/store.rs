@@ -27,6 +27,7 @@ use crate::hooks::{self, HookError, MemoryHook, TokenHookCall};
 use crate::schema::SchemaError;
 
 mod mfa;
+mod recovery;
 
 pub use mfa::FactorRow;
 

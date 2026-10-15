@@ -12,8 +12,9 @@ These are the GoTrue routes in the Level 1 endpoints group. The gateway
 keeps the Kong prefix, so clients call `/auth/v1/...`. Health and settings
 are public. Signup is public and, with the judge's autoconfirm overlay,
 creates an `auth.users` row and a session. Logout revokes sessions for a
-verified user access token. Invite, recover, resend, and reauthenticate
-answer HTTP 501 with their unit id after any implemented validation.
+verified user access token. Recover is specified in
+[`recover.md`](recover.md). Invite, resend, and reauthenticate answer HTTP
+501 with their unit id after any implemented validation.
 Resend is public; invite needs admin credentials and reauthenticate needs
 a user session in GoTrue.
 
@@ -60,7 +61,8 @@ Logout reads `Authorization: Bearer <access token>` and optional query
 | `GET /auth/v1/settings` | yes | 200 provider booleans plus `disable_signup`, `mailer_autoconfirm`, `phone_autoconfirm`, `sms_provider`, `saml_enabled`, `saml_private_key_next_configured`, `passkeys_enabled`. `saml_private_key_next_configured` is `true` while SAML is disabled: envconfig allocates `SAML.CertificateNext`, and only `PopulateFields` (called by `ApplyDefaults` when SAML is enabled) resets it to nil (`internal/conf/configuration.go:1094`, `internal/conf/saml.go:115`) |
 | `POST /auth/v1/signup` | email autoconfirm | 200 access-token response: `access_token`, `token_type` `bearer`, `expires_in` (JWT expiry, 3600 by default), `expires_at`, `refresh_token`, `user` |
 | `POST /auth/v1/logout` | yes | 204 empty body |
-| `GET /auth/v1/reauthenticate`, `POST /auth/v1/invite`, `POST /auth/v1/recover`, `POST /auth/v1/resend` | no | 501 `MEGABASE_NOT_IMPLEMENTED` with that unit id |
+| `POST /auth/v1/recover` | see [`recover.md`](recover.md) | 200 `{}` |
+| `GET /auth/v1/reauthenticate`, `POST /auth/v1/invite`, `POST /auth/v1/resend` | no | 501 `MEGABASE_NOT_IMPLEMENTED` with that unit id |
 
 Signup user JSON matches GoTrue's user object for an autoconfirmed email
 user: `phone` is `""`, and `confirmed_at` is omitted. Signup reloads the
@@ -112,21 +114,6 @@ GoTrue's default API shape (no `X-Supabase-Api-Version: 2024-01-01`):
 | `banned_until` in the future | 403 | `user_banned` / `User is banned` |
 | Session id not in the database | 403 | `session_not_found` / `Session from session_id claim in JWT does not exist` |
 | Bad logout scope | 400 | `validation_failed` / `Unsupported logout scope "<scope>"` |
-
-## Partial: `POST /recover`
-
-Served up to the mail step (validation is upstream `recover.go:18-28`; the
-mail is `sendPasswordRecovery`, `recover.go:65-70`). With the email provider
-disabled the route is 400 `email_provider_disabled` / `Email logins are
-disabled` before the body is read (`requireEmailProvider`,
-`middleware.go:231-239`, wired at `api.go:256`). Otherwise a JSON
-`null` string counts as empty, like Go's decoder. Empty `email` is 400
-`Password recovery requires an email`; a bad email and bad PKCE params use the
-signup messages. GoTrue then answers 200 `{}` for known and unknown emails
-alike. Sending the mail needs a mailer that is not ported (SMTP crate approval
-pending), so every request that passes validation is 501, whether or not the
-account exists (no enumeration), and `recover` has no `megabase:unit` marker
-yet. The same mailer blocks `invite`, `resend`, and `reauthenticate`.
 
 ## Edge cases
 

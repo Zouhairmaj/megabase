@@ -3,12 +3,13 @@
 //! Runtime flags the admin routes read. Names match GoTrue's `GOTRUE_*` env.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use megabase_core::jwt::Hs256;
 
 use crate::config::{optional_bool, AuthConfig};
 use crate::error::ConfigError;
-use crate::ratelimit::{KeyedLimiter, TOKEN_BURST};
+use crate::ratelimit::{parse_email_rate, EmailLimiter, EmailRate, KeyedLimiter, TOKEN_BURST};
 use crate::store::Backend;
 
 const DEFAULT_ADMIN_ROLES: &[&str] = &["service_role", "supabase_admin"];
@@ -37,6 +38,8 @@ pub struct AuthState {
     pub mailer_recovery_path: String,
     pub mailer_email_change_path: String,
     pub otp_length: usize,
+    /// Outgoing mail settings for recovery email.
+    pub mail: MailConfig,
     pub cursor_pagination: bool,
     /// Signup and settings flags. Unset `GOTRUE_*` follows the reference stack.
     pub config: AuthConfig,
@@ -102,6 +105,7 @@ impl AuthState {
             mailer_recovery_path: mailer_path(&lookup, "RECOVERY"),
             mailer_email_change_path: mailer_path(&lookup, "EMAIL_CHANGE"),
             otp_length: otp_length(lookup("GOTRUE_MAILER_OTP_LENGTH").as_deref()),
+            mail: MailConfig::from_lookup(&lookup)?,
             cursor_pagination: env_bool(
                 lookup("GOTRUE_EXPERIMENTAL_CURSOR_PAGINATION_ENABLED").as_deref(),
                 false,
@@ -144,6 +148,7 @@ impl AuthState {
             mailer_recovery_path: defaults.mailer_recovery_path,
             mailer_email_change_path: defaults.mailer_email_change_path,
             otp_length: defaults.otp_length,
+            mail: defaults.mail,
             cursor_pagination: defaults.cursor_pagination,
             config,
             rate_limit_header: defaults.rate_limit_header,
@@ -154,6 +159,83 @@ impl AuthState {
 
     pub fn is_admin_role(&self, role: Option<&str>) -> bool {
         role.is_some_and(|role| self.admin_roles.iter().any(|allowed| allowed == role))
+    }
+}
+
+/// SMTP and email-send settings (`SMTPConfiguration`, `RateLimitEmailSent`,
+/// `EmailProviderConfiguration.AuthorizedAddresses`).
+#[derive(Clone)]
+pub struct MailConfig {
+    /// `GOTRUE_SMTP_HOST`. Empty selects GoTrue's no-op mail client, which
+    /// accepts every message without sending it. Unset follows the
+    /// reference stack (`SMTP_HOST=supabase-mail` in `.env.example`).
+    pub smtp_host: String,
+    /// `GOTRUE_SMTP_PORT`. Unset follows the reference stack (`2500`).
+    pub smtp_port: u16,
+    /// `GOTRUE_SMTP_MAX_FREQUENCY`: least time between two recovery emails
+    /// to one user. GoTrue raises zero or unset to one minute.
+    pub max_frequency: Duration,
+    /// `GOTRUE_EXTERNAL_EMAIL_AUTHORIZED_ADDRESSES`, comma-separated.
+    pub authorized_addresses: Vec<String>,
+    /// `GOTRUE_RATE_LIMIT_EMAIL_SENT` (default 30 per hour). Applied only
+    /// when email autoconfirm is off, as in GoTrue.
+    pub(crate) email_limiter: Arc<EmailLimiter>,
+}
+
+/// `SMTP_HOST` and `SMTP_PORT` in `vendor/supabase/docker/.env.example`.
+const REFERENCE_SMTP_HOST: &str = "supabase-mail";
+const REFERENCE_SMTP_PORT: u16 = 2500;
+
+impl MailConfig {
+    fn from_lookup(lookup: &impl Fn(&str) -> Option<String>) -> Result<Self, ConfigError> {
+        let invalid = |key: &str, value: &str| ConfigError::Invalid {
+            key: key.into(),
+            value: value.into(),
+        };
+        let smtp_host = lookup("GOTRUE_SMTP_HOST").unwrap_or_else(|| REFERENCE_SMTP_HOST.into());
+        let smtp_port = match lookup("GOTRUE_SMTP_PORT").filter(|raw| !raw.trim().is_empty()) {
+            Some(raw) => raw
+                .trim()
+                .parse()
+                .map_err(|_| invalid("GOTRUE_SMTP_PORT", &raw))?,
+            None => REFERENCE_SMTP_PORT,
+        };
+        let max_frequency =
+            match lookup("GOTRUE_SMTP_MAX_FREQUENCY").filter(|raw| !raw.trim().is_empty()) {
+                Some(raw) => {
+                    let nanos = crate::admin_batch2::batch3::parse_go_duration(raw.trim())
+                        .map_err(|_| invalid("GOTRUE_SMTP_MAX_FREQUENCY", &raw))?;
+                    Duration::from_nanos(u64::try_from(nanos.max(0)).unwrap_or(u64::MAX))
+                }
+                None => Duration::ZERO,
+            };
+        let max_frequency = if max_frequency.is_zero() {
+            Duration::from_secs(60)
+        } else {
+            max_frequency
+        };
+        let rate = match lookup("GOTRUE_RATE_LIMIT_EMAIL_SENT").filter(|raw| !raw.is_empty()) {
+            Some(raw) => {
+                parse_email_rate(&raw).map_err(|_| invalid("GOTRUE_RATE_LIMIT_EMAIL_SENT", &raw))?
+            }
+            None => EmailRate::Interval { events: 30.0 },
+        };
+        let authorized_addresses = lookup("GOTRUE_EXTERNAL_EMAIL_AUTHORIZED_ADDRESSES")
+            .map(|raw| {
+                raw.split(',')
+                    .map(str::trim)
+                    .filter(|address| !address.is_empty())
+                    .map(str::to_string)
+                    .collect()
+            })
+            .unwrap_or_default();
+        Ok(Self {
+            smtp_host,
+            smtp_port,
+            max_frequency,
+            authorized_addresses,
+            email_limiter: Arc::new(EmailLimiter::new(rate)),
+        })
     }
 }
 
@@ -262,6 +344,49 @@ fn env_bool(raw: Option<&str>, default: bool) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mail_defaults_follow_the_reference_stack_and_env_overrides() {
+        let mail = AuthState::from_lookup(|_| None).mail;
+        assert_eq!(mail.smtp_host, "supabase-mail");
+        assert_eq!(mail.smtp_port, 2500);
+        assert_eq!(mail.max_frequency, Duration::from_secs(60));
+        assert!(mail.authorized_addresses.is_empty());
+        assert_eq!(
+            mail.email_limiter.rate(),
+            EmailRate::Interval { events: 30.0 }
+        );
+        let mail = AuthState::from_lookup(|key| match key {
+            "GOTRUE_SMTP_HOST" => Some(String::new()),
+            "GOTRUE_SMTP_PORT" => Some("587".into()),
+            "GOTRUE_SMTP_MAX_FREQUENCY" => Some("1s".into()),
+            "GOTRUE_RATE_LIMIT_EMAIL_SENT" => Some("10/1m".into()),
+            "GOTRUE_EXTERNAL_EMAIL_AUTHORIZED_ADDRESSES" => Some(" a@x.io, ,b@x.io".into()),
+            _ => None,
+        })
+        .mail;
+        assert_eq!(mail.smtp_host, "");
+        assert_eq!(mail.smtp_port, 587);
+        assert_eq!(mail.max_frequency, Duration::from_secs(1));
+        assert_eq!(mail.authorized_addresses, ["a@x.io", "b@x.io"]);
+        assert_eq!(
+            mail.email_limiter.rate(),
+            EmailRate::Burst {
+                events: 10.0,
+                every: Duration::from_secs(60)
+            }
+        );
+        for (key, value) in [
+            ("GOTRUE_SMTP_PORT", "smtp"),
+            ("GOTRUE_SMTP_MAX_FREQUENCY", "soon"),
+            ("GOTRUE_RATE_LIMIT_EMAIL_SENT", "1/2/3"),
+        ] {
+            let error = AuthState::try_from_lookup(|k| (k == key).then(|| value.into()))
+                .err()
+                .unwrap();
+            assert!(error.to_string().contains(key), "{error}");
+        }
+    }
 
     #[test]
     fn defaults_match_gotrue() {
