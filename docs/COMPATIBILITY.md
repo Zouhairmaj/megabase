@@ -117,7 +117,7 @@ Implemented and tested counts come from markers and `judge/cases/`. Live conform
 | Realtime | protocol | 3 | 6 | 0 | 0 |
 | Realtime | server-events | 3 | 6 | 0 | 0 |
 | Realtime | websocket | 3 | 1 | 0 | 0 |
-| Storage | bucket | 2 | 6 | 2 | 2 |
+| Storage | bucket | 2 | 6 | 6 | 2 |
 | Storage | cdn | 2 | 3 | 0 | 0 |
 | Storage | database | 2 | 46 | 0 | 0 |
 | Storage | health | 2 | 1 | 1 | 0 |
