@@ -119,6 +119,20 @@ pub struct IdentityRecord {
     pub updated_at: SystemTime,
 }
 
+/// One `auth.flow_state` row, as far as the OAuth callback reads it
+/// (`FindFlowStateByID`, `internal/models/flow_state.go`).
+#[derive(Clone, Debug)]
+pub struct FlowStateRecord {
+    pub provider_type: String,
+    pub code_challenge: Option<String>,
+    pub user_id: Option<Uuid>,
+    pub authentication_method: String,
+    pub created_at: Option<SystemTime>,
+    pub auth_code_issued_at: Option<SystemTime>,
+    pub referrer: Option<String>,
+    pub linking_target_id: Option<Uuid>,
+}
+
 #[derive(Clone, Debug)]
 pub struct IssuedSession {
     pub user: UserRecord,
@@ -292,6 +306,7 @@ struct MemoryDb {
     one_time: Vec<OneTimeToken>,
     oauth_clients: HashMap<Uuid, MemoryClient>,
     oauth_consents: Vec<MemoryConsent>,
+    flow_states: HashMap<Uuid, FlowStateRecord>,
     /// Test stand-in for the custom access token hook function.
     access_token_hook: Option<Arc<MemoryHook>>,
 }
@@ -328,6 +343,7 @@ impl Backend {
                 one_time: Vec::new(),
                 oauth_clients: HashMap::new(),
                 oauth_consents: Vec::new(),
+                flow_states: HashMap::new(),
                 access_token_hook: None,
             }))),
         }
@@ -640,6 +656,46 @@ impl Backend {
         }
     }
 
+    /// `auth.flow_state` row by id (`FindFlowStateByID`).
+    pub async fn find_flow_state(&self, id: Uuid) -> Result<Option<FlowStateRecord>, StoreError> {
+        match &self.inner {
+            BackendKind::None => Err(StoreError::Unavailable),
+            BackendKind::Memory(db) => Ok(db.lock().await.flow_states.get(&id).cloned()),
+            BackendKind::Postgres(pg) => {
+                timed(async {
+                    use sqlx::Row;
+                    let row = sqlx::query(
+                        "SELECT provider_type, code_challenge, user_id, authentication_method,
+                                created_at, auth_code_issued_at, referrer, linking_target_id
+                         FROM auth.flow_state WHERE id = $1::uuid LIMIT 1",
+                    )
+                    .bind(id)
+                    .fetch_optional(&pg.pool)
+                    .await?;
+                    let Some(row) = row else {
+                        return Ok(None);
+                    };
+                    let time = |name: &str| -> Result<Option<SystemTime>, sqlx::Error> {
+                        Ok(row
+                            .try_get::<Option<chrono::DateTime<chrono::Utc>>, _>(name)?
+                            .map(from_ts))
+                    };
+                    Ok(Some(FlowStateRecord {
+                        provider_type: row.try_get("provider_type")?,
+                        code_challenge: row.try_get("code_challenge")?,
+                        user_id: row.try_get("user_id")?,
+                        authentication_method: row.try_get("authentication_method")?,
+                        created_at: time("created_at")?,
+                        auth_code_issued_at: time("auth_code_issued_at")?,
+                        referrer: row.try_get("referrer")?,
+                        linking_target_id: row.try_get("linking_target_id")?,
+                    }))
+                })
+                .await
+            }
+        }
+    }
+
     /// Verified MFA factor with a session that is not AAL2.
     ///
     /// GoTrue refuses email, phone, and password changes in that case.
@@ -926,6 +982,13 @@ impl Backend {
     pub async fn set_access_token_hook_for_test(&self, function: Arc<MemoryHook>) {
         if let BackendKind::Memory(db) = &self.inner {
             db.lock().await.access_token_hook = Some(function);
+        }
+    }
+
+    /// Insert an `auth.flow_state` row.
+    pub async fn plant_flow_state_for_test(&self, id: Uuid, flow: FlowStateRecord) {
+        if let BackendKind::Memory(db) = &self.inner {
+            db.lock().await.flow_states.insert(id, flow);
         }
     }
 

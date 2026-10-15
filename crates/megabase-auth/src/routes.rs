@@ -64,6 +64,12 @@ pub(crate) fn router(state: AuthState) -> Router {
         .route("/auth/v1/logout", post(logout))
         .route("/auth/v1/recover", post(recover))
         .route("/auth/v1/resend", post(resend))
+        .route("/auth/v1/magiclink", post(crate::otp::magiclink))
+        .route("/auth/v1/otp", post(crate::otp::otp))
+        .route(
+            "/auth/v1/callback",
+            get(crate::external::callback_get).post(crate::external::callback_post),
+        )
         .route(
             "/auth/v1/verify",
             get(crate::verify::verify_get).post(crate::verify::verify_post),
@@ -612,7 +618,7 @@ pub(crate) fn valid_channel(channel: &str, sms_provider: &str) -> bool {
     }
 }
 
-fn validate_pkce(method: &str, challenge: &str) -> Result<(), GoTrueError> {
+pub(crate) fn validate_pkce(method: &str, challenge: &str) -> Result<(), GoTrueError> {
     if challenge.is_empty() != method.is_empty() {
         return Err(validation(
             "PKCE flow requires code_challenge_method and code_challenge",

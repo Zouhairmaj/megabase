@@ -10,6 +10,8 @@
 //! change. Issue #19 serves `GET` and `PUT /user`, identity authorize and
 //! unlink, and the OAuth grant list and revoke. Issue #339 runs the
 //! `pg-functions://` custom access token hook at every token issuance.
+//! Issue #46 serves `GET`/`POST /callback` up to the provider code exchange
+//! and `POST /magiclink` and `POST /otp` up to mail and SMS delivery.
 //! Every other Auth path returns `MEGABASE_NOT_IMPLEMENTED`. Database objects
 //! listed in `specs/auth/database.md` are installed when `DATABASE_URL` is
 //! set, after the standard API roles in `specs/core/roles.md`.
@@ -18,10 +20,12 @@ mod admin;
 mod admin_batch2;
 mod config;
 mod error;
+mod external;
 mod gojson;
 mod hooks;
 mod http;
 mod jsonutil;
+mod otp;
 mod ratelimit;
 mod roles;
 mod routes;

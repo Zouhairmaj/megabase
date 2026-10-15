@@ -27,7 +27,10 @@ use crate::params::{
 };
 use crate::prefer::{set_applied, Count, Prefer, Scope};
 use crate::query::{path_decode, query_parts};
-use crate::relationship::{ambiguous_hint, find_relationship, Candidate, FindError, ForeignKey};
+use crate::relationship::{
+    add_view_keys, ambiguous_hint, find_relationship, Candidate, FindError, ForeignKey, KeyDepKind,
+    ViewKeyDep,
+};
 use crate::RestState;
 
 pub(crate) const JSON_UTF8: &str = "application/json; charset=utf-8";
@@ -1390,11 +1393,20 @@ async fn read_rows(
         .map(|(name, pg_type)| (name.as_str(), pg_type.as_str()))
         .collect();
     let mut rels = HashMap::new();
+    let mut view_keys = None;
     for name in read.embed_names() {
         if rels.contains_key(name) {
             continue;
         }
-        let mut rel = load_relationship(&mut tx, schema, relation, name, session.anon).await?;
+        let mut rel = load_relationship(
+            &mut tx,
+            schema,
+            relation,
+            name,
+            &mut view_keys,
+            session.anon,
+        )
+        .await?;
         rel.column_types = load_columns(&mut tx, schema, &rel.table, session.anon).await?;
         rels.insert(name.to_string(), rel);
     }
@@ -1463,10 +1475,14 @@ async fn read_rows(
     Ok((row.0, row.1, built.offset, total))
 }
 
-/// Foreign keys of one schema with an end on the requested table
-/// (`allM2OandO2ORels` in `SchemaCache.hs`). `one_to_one` holds when the key
-/// columns are a primary key or unique constraint of the referencing table.
-const RELATIONSHIPS_SQL: &str = "SELECT con.conname::text, c.relname::text, f.relname::text,
+/// Foreign keys between tables (`allM2OandO2ORels` in `SchemaCache.hs`).
+/// `one_to_one` holds when the key columns are a primary key or unique
+/// constraint of the referencing table. With `$3` false only keys with an
+/// end on `$1.$2` and both ends in `$1` are read; with `$3` true (a view is
+/// involved) every key is read, since a view in `$1` may select tables of
+/// another schema.
+const RELATIONSHIPS_SQL: &str = "SELECT con.conname::text, n.nspname::text, c.relname::text,
+         fnn.nspname::text, f.relname::text,
          ARRAY(SELECT a.attname::text FROM unnest(con.conkey) WITH ORDINALITY AS k(num, ord)
                JOIN pg_attribute AS a ON a.attrelid = con.conrelid AND a.attnum = k.num
                ORDER BY k.ord),
@@ -1483,8 +1499,170 @@ const RELATIONSHIPS_SQL: &str = "SELECT con.conname::text, c.relname::text, f.re
          JOIN pg_class AS f ON f.oid = con.confrelid
          JOIN pg_namespace AS fnn ON fnn.oid = f.relnamespace
          WHERE con.contype = 'f' AND con.conparentid = 0
-           AND n.nspname = $1 AND fnn.nspname = $1
-           AND (c.relname = $2 OR f.relname = $2)";
+           AND ($3::bool OR (n.nspname = $1 AND fnn.nspname = $1
+                       AND (c.relname = $2 OR f.relname = $2)))";
+
+/// Search path schemas PostgREST also follows through nested views
+/// (`PGRST_DB_EXTRA_SEARCH_PATH`, `public` in the pinned compose file).
+const EXTRA_SEARCH_PATH: &[&str] = &["public"];
+
+// Ported from PostgREST src/library/PostgREST/SchemaCache.hs
+// `allViewsKeyDependencies` (MIT), pin v16.4.
+/// Foreign key ends that views of `$1` select in full, following views
+/// through `$1` and `$2` (`allViewsKeyDependencies`). The view definition
+/// (`pg_rewrite.ev_action`) is turned into JSON to read each target entry's
+/// `resorigtbl` / `resorigcol`. Upstream's primary key rows are left out; the
+/// column dependencies come back as JSON text instead of a record array.
+const VIEW_KEY_DEPS_SQL: &str = r#"with recursive
+      pks_fks as (
+        select
+          contype::text as contype,
+          conname,
+          array_length(conkey, 1) as ncol,
+          conrelid as resorigtbl,
+          col as resorigcol,
+          ord
+        from pg_constraint
+        left join lateral unnest(conkey) with ordinality as _(col, ord) on true
+        where contype = 'f'
+        union
+        select
+          concat(contype, '_ref') as contype,
+          conname,
+          array_length(confkey, 1) as ncol,
+          confrelid,
+          col,
+          ord
+        from pg_constraint
+        left join lateral unnest(confkey) with ordinality as _(col, ord) on true
+        where contype='f'
+      ),
+      views as (
+        select
+          c.oid          as view_id,
+          c.relnamespace as view_schema_id,
+          n.nspname      as view_schema,
+          c.relname      as view_name,
+          r.ev_action    as view_definition
+        from pg_class c
+        join pg_namespace n on n.oid = c.relnamespace
+        join pg_rewrite r on r.ev_class = c.oid
+        where c.relkind in ('v', 'm')
+          and (n.nspname::text = ANY($1::text[]) or n.nspname::text = ANY($2::text[]))
+      ),
+      transform_json as (
+        select
+          view_id, view_schema_id, view_schema, view_name,
+          replace(
+            replace(
+            replace(
+            replace(
+            replace(
+            replace(
+            replace(
+            regexp_replace(
+            replace(
+            replace(
+            replace(
+            replace(
+            replace(
+            replace(
+            replace(
+            replace(
+            replace(
+            replace(
+            replace(
+              view_definition::text,
+               '<>'              , '()'
+            ), ','               , ''
+            ), E'\\{'            , ''
+            ), E'\\}'            , ''
+            ), ' :targetList '   , ',"targetList":'
+            ), ' :resno '        , ',"resno":'
+            ), ' :resorigtbl '   , ',"resorigtbl":'
+            ), ' :resorigcol '   , ',"resorigcol":'
+            ), '{'               , '{ :'
+            ), '(('              , '{(('
+            ), '({'              , '{({'
+            ), ' :[^}{,]+'       , ',"":'              , 'g'
+            ), ',"":}'           , '}'
+            ), ',"":,'           , ','
+            ), '{('              , '('
+            ), '{,'              , '{'
+            ), '('               , '['
+            ), ')'               , ']'
+            ), ' '             , ','
+          )::json as view_definition
+        from views
+      ),
+      target_entries as(
+        select
+          view_id, view_schema_id, view_schema, view_name,
+          json_array_elements(view_definition->0->'targetList') as entry
+        from transform_json
+      ),
+      results as(
+        select
+          view_id, view_schema_id, view_schema, view_name,
+          (entry->>'resno')::int as view_column,
+          (entry->>'resorigtbl')::oid as resorigtbl,
+          (entry->>'resorigcol')::int as resorigcol
+        from target_entries
+      ),
+      recursion(view_id, view_schema_id, view_schema, view_name, view_column, resorigtbl, resorigcol, is_cycle, path) as(
+        select
+          r.*,
+          false,
+          ARRAY[resorigtbl]
+        from results r
+        where view_schema::text = ANY ($1::text[])
+        union all
+        select
+          view.view_id,
+          view.view_schema_id,
+          view.view_schema,
+          view.view_name,
+          view.view_column,
+          tab.resorigtbl,
+          tab.resorigcol,
+          tab.resorigtbl = ANY(path),
+          path || tab.resorigtbl
+        from recursion view
+        join results tab on view.resorigtbl=tab.view_id and view.resorigcol=tab.view_column
+        where not is_cycle
+      ),
+      repeated_references as(
+        select
+          view_id,
+          view_schema,
+          view_name,
+          resorigtbl,
+          resorigcol,
+          array_agg(attname::text) as view_columns
+        from recursion
+        join pg_attribute vcol on vcol.attrelid = view_id and vcol.attnum = view_column
+        group by
+          view_id,
+          view_schema,
+          view_name,
+          resorigtbl,
+          resorigcol
+      )
+      select
+        sch.nspname::text as table_schema,
+        tbl.relname::text as table_name,
+        rep.view_schema::text,
+        rep.view_name::text,
+        pks_fks.conname::text as constraint_name,
+        pks_fks.contype as constraint_type,
+        json_agg(json_build_array(col.attname, view_columns) order by pks_fks.ord)::text as column_dependencies
+      from repeated_references rep
+      join pks_fks using (resorigtbl, resorigcol)
+      join pg_class tbl on tbl.oid = rep.resorigtbl
+      join pg_attribute col on col.attrelid = tbl.oid and col.attnum = rep.resorigcol
+      join pg_namespace sch on sch.oid = tbl.relnamespace
+      group by sch.nspname, tbl.relname, rep.view_schema, rep.view_name, pks_fks.conname, pks_fks.contype, pks_fks.ncol
+      having pks_fks.ncol = count(*)"#;
 
 /// Every pair of tables in a schema joined by a foreign key.
 const FK_EDGES_SQL: &str = "SELECT DISTINCT c.relname::text, f.relname::text
@@ -1498,6 +1676,9 @@ const FK_EDGES_SQL: &str = "SELECT DISTINCT c.relname::text, f.relname::text
 /// Find the one foreign key `target` names from `relation`: the embedded
 /// table, a constraint name, or a single key column (`findRel`).
 ///
+/// When `relation` or `target` is a view, the keys the view inherits from its
+/// tables are candidates too (`addViewM2OAndO2ORels`).
+///
 /// No match is `PGRST200`; several column or constraint matches are
 /// `PGRST201`. A self-reference or several table-name matches stay 501.
 async fn load_relationship(
@@ -1505,9 +1686,10 @@ async fn load_relationship(
     schema: &str,
     relation: &str,
     target: &str,
+    view_keys: &mut Option<Vec<ForeignKey>>,
     anon: bool,
 ) -> Result<Relationship, Box<Response>> {
-    // Views, materialized views and foreign tables carry no foreign keys here.
+    // Foreign tables carry no foreign keys here.
     let kinds: Vec<String> = sqlx::query_scalar(
         "SELECT c.relkind::text FROM pg_class AS c
          JOIN pg_namespace AS n ON n.oid = c.relnamespace
@@ -1518,38 +1700,30 @@ async fn load_relationship(
     .fetch_all(&mut **tx)
     .await
     .map_err(|error| Box::new(query_failure(&error, anon)))?;
-    if kinds.iter().any(|kind| kind != "r" && kind != "p") {
+    if kinds
+        .iter()
+        .any(|kind| !matches!(kind.as_str(), "r" | "p" | "v" | "m"))
+    {
         return Err(Box::new(
             MegabaseNotImplemented::new(crate::COMPONENT, "rest:embed-join:left").into_response(),
         ));
     }
-    type KeyRow = (
-        String,
-        String,
-        String,
-        Vec<String>,
-        Vec<String>,
-        Option<bool>,
-    );
-    let rows: Vec<KeyRow> = sqlx::query_as(RELATIONSHIPS_SQL)
-        .bind(schema)
-        .bind(relation)
-        .fetch_all(&mut **tx)
-        .await
-        .map_err(|error| Box::new(query_failure(&error, anon)))?;
-    let keys: Vec<ForeignKey> = rows
-        .into_iter()
-        .map(
-            |(name, table, foreign_table, columns, referenced, one_to_one)| ForeignKey {
-                name,
-                table,
-                foreign_table,
-                columns: columns.into_iter().zip(referenced).collect(),
-                one_to_one: one_to_one.unwrap_or(false),
-            },
-        )
-        .collect();
-    match find_relationship(relation, target, &keys) {
+    let with_views = kinds.iter().any(|kind| kind == "v" || kind == "m");
+    let narrow;
+    let keys: &[ForeignKey] = if with_views {
+        // Keys of every schema plus the view-inherited ones do not depend on
+        // `relation`, so one request loads them once for all its embeds.
+        if view_keys.is_none() {
+            let keys = load_foreign_keys(tx, schema, relation, true, anon).await?;
+            let deps = load_view_key_deps(tx, schema, anon).await?;
+            *view_keys = Some(add_view_keys(keys, &deps));
+        }
+        view_keys.as_deref().unwrap_or_default()
+    } else {
+        narrow = load_foreign_keys(tx, schema, relation, false, anon).await?;
+        &narrow
+    };
+    match find_relationship(schema, relation, target, keys) {
         Ok(rel) => Ok(rel),
         Err(FindError::NotFound) => {
             // The hint is optional: a failed lookup must not replace PGRST200.
@@ -1593,6 +1767,109 @@ async fn load_relationship(
             MegabaseNotImplemented::new(crate::COMPONENT, "rest:embed-join:left").into_response(),
         )),
     }
+}
+
+/// Foreign keys of `schema` touching `relation`, or of every schema when
+/// `all_schemas` (a view may select tables elsewhere).
+async fn load_foreign_keys(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    schema: &str,
+    relation: &str,
+    all_schemas: bool,
+    anon: bool,
+) -> Result<Vec<ForeignKey>, Box<Response>> {
+    type KeyRow = (
+        String,
+        String,
+        String,
+        String,
+        String,
+        Vec<String>,
+        Vec<String>,
+        Option<bool>,
+    );
+    let rows: Vec<KeyRow> = sqlx::query_as(RELATIONSHIPS_SQL)
+        .bind(schema)
+        .bind(relation)
+        .bind(all_schemas)
+        .fetch_all(&mut **tx)
+        .await
+        .map_err(|error| Box::new(query_failure(&error, anon)))?;
+    Ok(rows
+        .into_iter()
+        .map(
+            |(
+                name,
+                schema,
+                table,
+                foreign_schema,
+                foreign_table,
+                columns,
+                referenced,
+                one_to_one,
+            )| ForeignKey {
+                name,
+                schema,
+                table,
+                foreign_schema,
+                foreign_table,
+                columns: columns.into_iter().zip(referenced).collect(),
+                one_to_one: one_to_one.unwrap_or(false),
+                table_is_view: false,
+                foreign_is_view: false,
+            },
+        )
+        .collect())
+}
+
+/// Foreign key ends selected in full by the views of `schema`
+/// ([`VIEW_KEY_DEPS_SQL`]).
+async fn load_view_key_deps(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    schema: &str,
+    anon: bool,
+) -> Result<Vec<ViewKeyDep>, Box<Response>> {
+    type DepRow = (String, String, String, String, String, String, String);
+    let rows: Vec<DepRow> = sqlx::query_as(VIEW_KEY_DEPS_SQL)
+        .bind(vec![schema.to_string()])
+        .bind(
+            EXTRA_SEARCH_PATH
+                .iter()
+                .map(|name| (*name).to_string())
+                .collect::<Vec<_>>(),
+        )
+        .fetch_all(&mut **tx)
+        .await
+        .map_err(|error| Box::new(query_failure(&error, anon)))?;
+    rows.into_iter()
+        .map(
+            |(table_schema, table, view_schema, view, constraint, kind, columns)| {
+                // A dropped row would remove a relationship and turn into a
+                // wrong PGRST200, so an unreadable one is a 501.
+                let unreadable = || {
+                    Box::new(
+                        MegabaseNotImplemented::new(crate::COMPONENT, "rest:embed-join:left")
+                            .into_response(),
+                    )
+                };
+                let kind = match kind.as_str() {
+                    "f" => KeyDepKind::Referencing,
+                    "f_ref" => KeyDepKind::Referenced,
+                    _ => return Err(unreadable()),
+                };
+                let columns = serde_json::from_str(&columns).map_err(|_| unreadable())?;
+                Ok(ViewKeyDep {
+                    table_schema,
+                    table,
+                    view_schema,
+                    view,
+                    constraint,
+                    kind,
+                    columns,
+                })
+            },
+        )
+        .collect()
 }
 
 /// Column names and base types. `NULL` typmod matches an unknown literal:

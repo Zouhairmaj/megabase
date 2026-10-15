@@ -14,6 +14,8 @@ Resource embedding in `select=`. Template:
 - `vendor/postgrest/src/library/PostgREST/Plan.hs:652-728` (`findRel`).
 - `vendor/postgrest/src/library/PostgREST/SchemaCache.hs:212-229,585-590,783-829`
   (`getOverrideRelationshipsMap` sort, `addInverseRels`, `allM2OandO2ORels`).
+- `vendor/postgrest/src/library/PostgREST/SchemaCache.hs:142-160,530-583,877-1079`
+  (`ViewKeyDependency`, `addViewM2OAndO2ORels`, `allViewsKeyDependencies`).
 - `vendor/postgrest/src/library/PostgREST/Error.hs:245,258,280,409-445`
   (`AmbiguousRelBetween`, `compressedRel`, `relHint`).
 - Pin: `postgrest v16.4` (`vendor.toml`).
@@ -24,7 +26,8 @@ Resource embedding in `select=`. Template:
 optional `alias:` prefix and a `!left` or `!inner` suffix on `<name>`.
 `<name>` is one of:
 
-- the embedded table, in the same schema (`notes(body)`);
+- the embedded table or view, in the same schema (`notes(body)`,
+  `authors?select=books_view(title)`);
 - a foreign key constraint name (`note_comments_note_id_fkey(body)`);
 - a column hint: the single column of a foreign key, as seen from the
   requested table (`messages?select=author:user_id(*)`). From the
@@ -38,9 +41,18 @@ optional `alias:` prefix and a `!left` or `!inner` suffix on `<name>`.
   gives a relationship from the referencing side (many-to-one, or
   one-to-one when the key columns are a primary key or unique constraint)
   and one from the referenced side (one-to-many, or one-to-one).
-- `<name>` matches a relationship when it equals the other table, the
-  constraint name, or the relationship's single column on the requested
-  table. Multi-column keys never match a column hint.
+- Views and materialized views inherit the keys of the tables they select.
+  A view that selects every column of one end of a key (followed through
+  nested views in the request schema and `public`, the extra search path)
+  gets that key with its own column names: view to table, table to view,
+  and view to view, with the base key's cardinality. A key column the view
+  selects twice gives one relationship per view column. The view
+  definition is read from `pg_rewrite.ev_action` as upstream does.
+- `<name>` matches a relationship when it equals the other table or view,
+  the constraint name, or the relationship's single column on the
+  requested relation. A constraint name or column never matches a
+  relationship whose other end is a view. Multi-column keys never match a
+  column hint.
 - One-to-many: the embed is a JSON array, `[]` when empty. Many-to-one and
   one-to-one: a JSON object, or `null` when no row matches.
 - `!left` (the default) keeps every parent row.
@@ -99,7 +111,7 @@ optional `alias:` prefix and a `!left` or `!inner` suffix on `<name>`.
 Join hints after `!` (`!fk_name`, `!column`), spread (`...name(...)`), nested
 embeds, empty embeds (`notes()`, filter-only upstream), related orders
 (`order=clients(id)` on an embed, or inside one), JSON-path filter keys
-(`books.data->>a=eq.1`), embedding a view, materialized view or foreign table,
+(`books.data->>a=eq.1`), embedding to or from a foreign table,
 many-to-many through a junction table, self-references, several
 relationships matched by a table name (`PGRST201` upstream, where a
 many-to-many candidate may also be listed), and embeds in write responses.

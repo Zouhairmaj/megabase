@@ -98,8 +98,11 @@ async fn key_auth_routes_reject_a_request_without_a_key() {
     // Storage has no key-auth, and the open Auth routes skip it.
     let (status, _) = send_with_key("GET", "/storage/v1/x", None).await;
     assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
-    let (status, _) = send_with_key("GET", "/auth/v1/callback", None).await;
-    assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
+    // Without `state`, GoTrue's callback redirects to the site URL; a POST
+    // body is only the JSON error written after the redirect headers.
+    let (status, body) = send_with_key("POST", "/auth/v1/callback", None).await;
+    assert_eq!(status, StatusCode::SEE_OTHER);
+    assert_eq!(body["error_code"], "bad_oauth_callback");
 }
 
 #[tokio::test]
