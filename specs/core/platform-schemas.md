@@ -13,8 +13,8 @@ A fresh Supabase project has per-database objects that dumps
   `pg_stat_statements`, on the default `search_path`;
 - schema `supabase_functions` with `hooks`, `migrations` and the trigger
   function `http_request` used by database webhooks;
-- schema `vault` (`vault.secrets`, `vault.decrypted_secrets`) from the
-  `supabase_vault` extension;
+- schema `vault`, with `vault.secrets` and `vault.decrypted_secrets` from
+  the `supabase_vault` extension;
 - an empty publication `supabase_realtime`.
 
 On a stock PostgreSQL, or a new database on the Supabase image, none of
@@ -60,11 +60,10 @@ One transaction under
 2. For each of `uuid-ossp`, `pgcrypto`, `pg_stat_statements`, `pg_net`:
    when `pg_available_extensions` lists it and `pg_extension` does not,
    `CREATE EXTENSION <name> WITH SCHEMA extensions`. Then
-   `CREATE SCHEMA IF NOT EXISTS vault` and
+   `CREATE SCHEMA IF NOT EXISTS vault` unconditionally (issue 402), and
    `CREATE EXTENSION supabase_vault WITH SCHEMA vault` under the same
-   condition (the schema is created first, so the install does not depend
-   on the extension creating it; the extension creates the tables and
-   view). A failure rolls the schema back with the extension. A failure of any of these is
+   availability condition (the extension creates the table and view). A
+   failure of any extension is
    raised as a PostgreSQL `WARNING` (`megabase: extension <name> not
    created: <message>`) inside a subtransaction and the install continues.
 3. When the database has no database-level `search_path`
@@ -111,8 +110,14 @@ create trigger t after insert on public.posts for each row
   extension is created, but its background worker serves the database in
   `pg_net.database_name` (default `postgres`), so queued requests in
   another database are not sent.
-- **No `supabase_vault`.** `vault` is not created (the schema is only created together with the extension); that is the "when
-  available" case of the issue.
+- **No `supabase_vault`.** The empty `vault` schema is created, so dump
+  statements that name the schema (`GRANT ... ON SCHEMA vault`,
+  `COMMENT ON SCHEMA vault`) restore. `vault.secrets` and
+  `vault.decrypted_secrets` are not stubbed: a plain table would store
+  secrets unencrypted where callers expect Vault's encryption, and existing
+  objects would make a later `CREATE EXTENSION supabase_vault` fail. A
+  statement that reads or writes them still fails with `relation
+  "vault.secrets" does not exist`.
 - **Extension already installed elsewhere** (for example `pgcrypto` in
   `public`): left there, not moved.
 - **Database the official stack initialised.** Every object exists; no DDL
@@ -133,7 +138,7 @@ Supabase project lists but does not install by default.
 
 Not in this PR: cases live under `judge/`, a protected path, and land in a
 separate `review/issue-383-cases` PR (AGENTS.md task workflow step 8).
-Planned: compare `pg_namespace`, `pg_publication` and the schema ACLs of
+Planned: compare `pg_namespace` (including `vault`), `pg_publication` and the schema ACLs of
 `extensions` and `supabase_functions` between the `megabase` and
 reference databases through Postgres Meta once it serves a query endpoint,
 and restore a small dump that uses these objects.

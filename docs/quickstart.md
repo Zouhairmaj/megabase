@@ -30,7 +30,9 @@ Or `cargo build --release --locked -p megabase` and run
 [Configuration](configuration.md). Set `JWT_SECRET` to the same HS256
 secret that signed your `ANON_KEY` when you start wiring Auth or REST.
 A value you set must be at least 32 bytes. The 501 gateway starts if the
-variable is omitted.
+variable is omitted. Without the compose stack, also set the mail, storage
+and functions variables in
+[Running outside the Supabase stack](configuration.md#running-outside-the-supabase-stack).
 
 ## Check it runs
 

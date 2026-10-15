@@ -20,6 +20,7 @@ other names. There is no `.env.example` in this tree; the judge uses
 | MEGABASE_HTTP_TIMEOUT_MS | Whole-request deadline in milliseconds. Default `150000`, the functions `read_timeout` in `vendor/supabase/docker/volumes/api/kong.yml`. `0` and non-integers abort startup. A request that exceeds it returns 504. |
 | MEGABASE_REQUEST_BODY_LIMIT_BYTES | Maximum request body in bytes. Default `52428800`, `FILE_SIZE_LIMIT` in `vendor/supabase/docker/docker-compose.yml`. A non-integer aborts startup. A larger body returns 413. |
 | JWT_SECRET | HS256 secret for verifying and signing JWTs (same name as the self-hosted demo stack). Raw UTF-8 bytes, not base64, and not a default. Omit it and the process still starts so `/_megabase/health` and `GET /auth/v1/health` work; verification and signing then fail with `Server lacks JWT secret`. Email signup then returns 500 `Server lacks JWT secret` and does not insert a user. A present value shorter than 32 bytes, including empty, aborts startup before listen: `JWT_SECRET is N bytes; HMAC-SHA-256 keys shorter than 32 bytes are disabled`. Length is bytes, not an entropy check. Required for `/auth/v1/admin` (a missing Bearer token is still 401). |
+| FILE_STORAGE_BACKEND_PATH | Directory Storage keeps object bytes in, like `/var/lib/storage` in the self-hosted stack. Unset or empty: every `/storage/v1/object` route returns 501 ([`specs/storage/object.md`](../specs/storage/object.md)); bucket routes still work. |
 | MEGABASE_FUNCTIONS_DIR | Edge Functions directory, one sub-directory per function with an `index.ts` (or `.tsx`, `.js`, `.mjs`, `.jsx`), like `/home/deno/functions` in the self-hosted stack. Unset or empty: every `/functions/v1` request returns 501. See [Edge Functions](#edge-functions). |
 | MEGABASE_DENO | Deno 2 executable (2.4 or later) that runs each function. Default `deno` on `PATH`. |
 | VERIFY_JWT, FUNCTIONS_VERIFY_JWT | Edge-runtime `VERIFY_JWT` (read first) or the `.env` name `FUNCTIONS_VERIFY_JWT`. Exactly `true` requires a valid HS256 JWT on every non-`OPTIONS` `/functions/v1` request. Default off, as in `.env.example`. |
@@ -31,6 +32,31 @@ other names. There is no `.env.example` in this tree; the judge uses
 | GOTRUE_SECURITY_UPDATE_PASSWORD_REQUIRE_REAUTHENTICATION | GoTrue flag. Default `false`. Accepted values match Go's bool parser (`1`, `t`, `T`, `true`, `0`, `f`, `F`, `false`, any case). Any other value aborts startup. When true, `PUT /auth/v1/user` with `password` returns 501. |
 | GOTRUE_SECURITY_UPDATE_PASSWORD_REQUIRE_CURRENT_PASSWORD | GoTrue flag. Default `false`. Accepted values match Go's bool parser (`1`, `t`, `T`, `true`, `0`, `f`, `F`, `false`, any case). Any other value aborts startup. When true, `PUT /auth/v1/user` with `password` returns 501. |
 | GOTRUE_URI_ALLOW_LIST | Comma-separated redirect globs for `POST /auth/v1/admin/generate_link` and `GET /auth/v1/verify`. `*` and `?` do not cross `.` or `/`; `**` does. When this is unset or blank, `ADDITIONAL_REDIRECT_URLS` is used instead. A pattern with an unescaped `[` `]` `{` or `}` is not implemented: a redirect that must be checked against it returns 501. |
+
+## Running outside the Supabase stack
+
+Unset variables follow the self-hosted compose stack, which has a mail
+host, a storage volume and an Edge Runtime container. A standalone binary
+has none of them. Without the settings below, `POST /auth/v1/recover` for a
+known email waits on the `supabase-mail` dial and returns 500
+(see [Auth HTTP](#auth-http)), object routes return 501, and
+`/functions/v1` returns 501. The binary does not read a `.env` file: export
+the variables, or pass the file with `docker run --env-file`.
+
+```shell
+export DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/postgres
+export JWT_SECRET=your-super-secret-jwt-token-with-at-least-32-characters-long
+# Empty selects GoTrue's no-op mail client: recovery tokens are stored, no mail is sent.
+export GOTRUE_SMTP_HOST=
+export FILE_STORAGE_BACKEND_PATH=/var/lib/megabase/storage
+# Needs Deno 2.4 or later on PATH, or MEGABASE_DENO.
+export MEGABASE_FUNCTIONS_DIR=/srv/functions
+```
+
+`JWT_SECRET` above is the demo secret from
+`vendor/supabase/docker/.env.example`; use your own outside local testing.
+Startup logs which mail client is in use, and when
+`FILE_STORAGE_BACKEND_PATH` or `MEGABASE_FUNCTIONS_DIR` is unset.
 
 ## JWT verification
 
@@ -70,8 +96,11 @@ served ([`specs/auth/recover.md`](../specs/auth/recover.md)). Its mail
 client follows `GOTRUE_SMTP_HOST`: unset is the reference stack's
 `supabase-mail` (port `GOTRUE_SMTP_PORT`, unset `2500`), which has no
 server, so a known email gets 500 `Error sending recovery email` as on that
-stack. Set `GOTRUE_SMTP_HOST=` (empty) for GoTrue's no-op mail client: the
-recovery token is stored without sending mail. An SMTP server that accepts the connection
+stack, after up to 10 seconds (GoTrue's dial timeout) when the host does not
+answer. The unset default stays the reference stack's so the judge compares
+like with like. Set `GOTRUE_SMTP_HOST=` (empty) for GoTrue's no-op mail
+client: the recovery token is stored without sending mail and the request
+returns 200 at once. An SMTP server that accepts the connection
 returns 501, because the SMTP exchange is not ported.
 `GOTRUE_SMTP_MAX_FREQUENCY` (default one minute),
 `GOTRUE_RATE_LIMIT_EMAIL_SENT` (default 30 per hour, applied when mailer
