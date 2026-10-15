@@ -70,6 +70,11 @@ async fn every_method_on_every_route_is_501() {
             continue;
         }
         for suffix in ["", "x", "/some/deep/path"] {
+            // The bare OAuth discovery path is GoTrue's `GET`-only route
+            // (`well_known_routes_are_served` below); its sub-paths are not.
+            if *prefix == "/.well-known/oauth-authorization-server" && suffix.is_empty() {
+                continue;
+            }
             for method in methods {
                 let path = format!("{prefix}{suffix}");
                 let (status, body) = send(method, &path).await;
@@ -80,6 +85,26 @@ async fn every_method_on_every_route_is_501() {
             }
         }
     }
+}
+
+#[tokio::test]
+async fn well_known_routes_are_served() {
+    // The OAuth server is off on the reference stack, and the route has no
+    // Kong `key-auth`.
+    let (status, body) =
+        send_with_key("GET", "/.well-known/oauth-authorization-server", None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_eq!(body["error_code"], "feature_disabled");
+    let (status, _) = send("POST", "/.well-known/oauth-authorization-server").await;
+    assert_eq!(status, StatusCode::METHOD_NOT_ALLOWED);
+    let (status, body) = send_with_key("GET", "/auth/v1/.well-known/jwks.json", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body, serde_json::json!({ "keys": [] }));
+    let (status, _) = send_with_key("GET", "/auth/v1/.well-known/openid-configuration", None).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    let (status, body) = send("GET", "/auth/v1/.well-known/openid-configuration").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["issuer"], "http://localhost:8000/auth/v1");
 }
 
 #[tokio::test]

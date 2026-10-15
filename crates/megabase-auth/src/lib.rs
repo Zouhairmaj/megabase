@@ -16,6 +16,7 @@
 //! and `POST /magiclink` and `POST /otp` up to mail and SMS delivery.
 //! Issue #382 serves `POST /recover` through GoTrue's no-op mail client and
 //! an unreachable SMTP host. Issue #401 serves `POST /invite` the same way.
+//! Issue #55 serves the JWKS and OIDC / OAuth discovery documents.
 //! Every other Auth path returns `MEGABASE_NOT_IMPLEMENTED`. Database objects
 //! listed in `specs/auth/database.md` are installed when `DATABASE_URL` is
 //! set, after the standard API roles in `specs/core/roles.md` and the
@@ -45,6 +46,7 @@ mod store;
 mod token;
 mod user;
 mod verify;
+mod well_known;
 
 pub use config::AuthConfig;
 pub use platform::{install_platform, PlatformError};
@@ -68,6 +70,7 @@ pub fn router() -> Router {
 pub fn router_with_state(state: AuthState) -> Router {
     admin::router(state.clone())
         .merge(factors::router(state.clone()))
+        .merge(well_known::router(state.clone()))
         .merge(routes::router(state))
         // Path match without a method handler is Axum 405; send those to the
         // same 501 as unknown paths (GOAL.md §3 rule 5).

@@ -94,7 +94,7 @@ pub(crate) fn router(state: AuthState) -> Router {
 /// A chi route registered with `r.Get` only. chi does not answer `HEAD` from a
 /// `GET` handler, and every method without a handler gets chi's
 /// `methodNotAllowedHandler`: 405, `Allow: GET`, empty body.
-fn get_only(route: MethodRouter<AuthState>) -> MethodRouter<AuthState> {
+pub(crate) fn get_only(route: MethodRouter<AuthState>) -> MethodRouter<AuthState> {
     route
         .head(chi_method_not_allowed)
         .fallback(chi_method_not_allowed)
