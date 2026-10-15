@@ -48,9 +48,9 @@ verified JWT (upload, authenticated download, sign, signed download, delete)
 are a 501; public downloads and `GET /object/:bucket/*` on a public bucket
 (anonymous fallback) still work.
 
-The unported prefixes `list`, `list-v2`, `info`, `sign/:bucket` (sign many)
-and `upload/sign` are explicit 501s, so they never reach the generic
-`:bucket/*` handlers.
+`list` is served by [`object-list.md`](object-list.md). The unported
+prefixes `list-v2`, `info`, `sign/:bucket` (sign many) and `upload/sign`
+are explicit 501s, so they never reach the generic `:bucket/*` handlers.
 
 ## Request scope
 
@@ -161,7 +161,7 @@ their files. Response `200` with the deleted rows in `objectSchema` order:
 - Delete entries with `versionId`, more than 500 names, validation messages.
 - Other jose failures on signed URLs; database errors other than `42501`
   and `23505`; object keys with `.`/`..`/empty segments.
-- `HEAD` (object info), `/object/list`, `/object/list-v2`, `/object/info`,
+- `HEAD` (object info), `/object/list-v2`, `/object/info`,
   copy, move, single `DELETE`, `POST /object/sign/:bucket` (many) and
   signed uploads.
 

@@ -35,7 +35,7 @@ use sqlx::{Postgres, Row, Transaction};
 
 use super::{
     database_error, fastify_json, iso,
-    limits::{is_uuid, is_valid_key, UPLOAD_FILE_SIZE_LIMIT},
+    limits::{is_uuid, is_valid_bucket_name, is_valid_key, UPLOAD_FILE_SIZE_LIMIT},
     mime::is_allowed_mime_type,
     multipart, not_implemented,
     render::{is_download_scoped, query_pairs, single, verified_signed_payload, SCOPE_DOWNLOAD},
@@ -50,6 +50,7 @@ const OP_GET_PUBLIC: &str = "storage.object.get_public";
 const OP_GET_SIGNED: &str = "storage.object.get_signed";
 const OP_SIGN: &str = "storage.object.sign";
 const OP_DELETE_MANY: &str = "storage.object.delete_many";
+const OP_LIST: &str = "storage.object.list";
 
 /// `MAX_OBJECTS_PER_DELETE_BATCH`: storage-api deletes larger requests in
 /// several transactions, which is not ported.
@@ -108,6 +109,11 @@ const DELETE_OBJECTS_SQL: &str = "DELETE FROM storage.objects \
      RETURNING name, bucket_id, owner::text AS owner, owner_id, version, id::text AS id, \
      updated_at, created_at, last_accessed_at, metadata, user_metadata, archived_at, \
      is_delete_marker, is_versioned";
+
+/// `searchObjects` once the `list-objects-with-versions` migration ran.
+const SEARCH_OBJECTS_SQL: &str = "select name, id::text AS id, updated_at, created_at, \
+     last_accessed_at, metadata, version, archived_at, is_delete_marker, is_versioned \
+     from storage.search($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)";
 
 /// Who a query runs as: the request JWT, or storage-api's superuser
 /// connection (the service key user).
@@ -1319,6 +1325,256 @@ pub(super) async fn delete_objects(
     }
 }
 
+// ---------------------------------------------------------------------------
+// List
+// ---------------------------------------------------------------------------
+
+/// A `searchRequestBodySchema` body Megabase serves.
+#[derive(Debug, PartialEq)]
+struct ListOptions {
+    prefix: String,
+    limit: Option<i32>,
+    offset: Option<i32>,
+    sort_column: Option<String>,
+    sort_order: Option<String>,
+    search: Option<String>,
+    noncurrent_versions: Option<String>,
+    delete_markers: Option<String>,
+}
+
+/// An optional string property: `None` when absent, `Err` when present
+/// but not a string or outside `allowed` (when given).
+fn optional_str(
+    body: &Map<String, Value>,
+    key: &str,
+    allowed: Option<&[&str]>,
+) -> Result<Option<String>, ()> {
+    match body.get(key) {
+        None => Ok(None),
+        Some(Value::String(value))
+            if allowed.is_none_or(|allowed| allowed.contains(&value.as_str())) =>
+        {
+            Ok(Some(value.clone()))
+        }
+        Some(_) => Err(()),
+    }
+}
+
+/// An optional integer property of at least `minimum` that PostgreSQL
+/// binds as `integer`.
+fn optional_int(body: &Map<String, Value>, key: &str, minimum: i32) -> Result<Option<i32>, ()> {
+    match body.get(key) {
+        None => Ok(None),
+        Some(value) => value
+            .as_i64()
+            .and_then(|n| i32::try_from(n).ok())
+            .filter(|n| *n >= minimum)
+            .map(Some)
+            .ok_or(()),
+    }
+}
+
+/// Parse a list body. Fastify validation messages, type coercion
+/// (`"10"`, `null`) and `exactMatch: true` are not ported: `None`.
+fn list_options(body: &[u8]) -> Option<ListOptions> {
+    const VERSION_FILTERS: &[&str] = &["exclude", "include", "only"];
+    let body: Value = serde_json::from_slice(body).ok()?;
+    let body = body.as_object()?;
+    let prefix = optional_str(body, "prefix", None).ok()??;
+    match body.get("exactMatch") {
+        None | Some(Value::Bool(false)) => {}
+        Some(_) => return None,
+    }
+    let (sort_column, sort_order) = match body.get("sortBy") {
+        None => (None, None),
+        Some(Value::Object(sort_by)) => (
+            Some(
+                optional_str(
+                    sort_by,
+                    "column",
+                    Some(&["name", "updated_at", "created_at", "last_accessed_at"]),
+                )
+                .ok()??,
+            ),
+            optional_str(sort_by, "order", Some(&["asc", "desc"])).ok()?,
+        ),
+        Some(_) => return None,
+    };
+    Some(ListOptions {
+        prefix,
+        limit: optional_int(body, "limit", 1).ok()?,
+        offset: optional_int(body, "offset", 0).ok()?,
+        sort_column,
+        sort_order,
+        search: optional_str(body, "search", None).ok()?,
+        noncurrent_versions: optional_str(body, "noncurrentVersions", Some(VERSION_FILTERS))
+            .ok()?,
+        delete_markers: optional_str(body, "deleteMarkers", Some(VERSION_FILTERS)).ok()?,
+    })
+}
+
+/// `escapeLike`.
+fn escape_like(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for c in value.chars() {
+        if matches!(c, '\\' | '%' | '_') {
+            out.push('\\');
+        }
+        out.push(c);
+    }
+    out
+}
+
+/// The `storage.search` arguments `searchObjects` binds, after
+/// `ObjectStorage.searchObjects` makes a non-empty prefix a folder.
+#[derive(Debug, PartialEq)]
+struct SearchArgs {
+    prefix: String,
+    limit: i32,
+    levels: i32,
+    offset: i32,
+    search: String,
+    sort_column: String,
+    sort_order: String,
+    noncurrent_versions: String,
+    delete_markers: String,
+}
+
+impl ListOptions {
+    fn search_args(&self) -> SearchArgs {
+        let mut prefix = self.prefix.clone();
+        if !prefix.is_empty() && !prefix.ends_with('/') {
+            prefix.push('/');
+        }
+        let sort_column = self.sort_column.as_deref().unwrap_or("name");
+        let search = self.search.as_deref().unwrap_or_default();
+        let (prefix, search) = if sort_column == "name" {
+            (prefix, search.to_string())
+        } else {
+            (escape_like(&prefix), escape_like(search))
+        };
+        // `(prefix + search).split('/').length`; unused by the function.
+        let levels = prefix.matches('/').count() + search.matches('/').count() + 1;
+        SearchArgs {
+            limit: self.limit.unwrap_or(100),
+            levels: i32::try_from(levels).unwrap_or(i32::MAX),
+            offset: self.offset.unwrap_or(0),
+            prefix,
+            search,
+            sort_column: sort_column.to_string(),
+            sort_order: self.sort_order.as_deref().unwrap_or("asc").to_string(),
+            noncurrent_versions: self
+                .noncurrent_versions
+                .as_deref()
+                .unwrap_or("exclude")
+                .to_string(),
+            delete_markers: self
+                .delete_markers
+                .as_deref()
+                .unwrap_or("exclude")
+                .to_string(),
+        }
+    }
+}
+
+/// A `storage.search` row through fast-json-stringify and
+/// `objectListEntrySchema`: schema property order, folders keep their
+/// `null`s.
+fn list_entry_json(row: &sqlx::postgres::PgRow) -> Result<Value, sqlx::Error> {
+    let mut out = Map::new();
+    out.insert(
+        "name".into(),
+        json!(row
+            .try_get::<Option<String>, _>("name")?
+            .unwrap_or_default()),
+    );
+    out.insert(
+        "version".into(),
+        json!(row.try_get::<Option<String>, _>("version")?),
+    );
+    out.insert("id".into(), json!(row.try_get::<Option<String>, _>("id")?));
+    out.insert("updated_at".into(), timestamp(row, "updated_at")?);
+    out.insert("created_at".into(), timestamp(row, "created_at")?);
+    out.insert(
+        "last_accessed_at".into(),
+        timestamp(row, "last_accessed_at")?,
+    );
+    out.insert(
+        "metadata".into(),
+        json!(row.try_get::<Option<Value>, _>("metadata")?),
+    );
+    out.insert("archived_at".into(), timestamp(row, "archived_at")?);
+    out.insert(
+        "is_delete_marker".into(),
+        json!(row.try_get::<Option<bool>, _>("is_delete_marker")?),
+    );
+    out.insert(
+        "is_versioned".into(),
+        json!(row.try_get::<Option<bool>, _>("is_versioned")?),
+    );
+    Ok(Value::Object(out))
+}
+
+/// `POST /object/list/:bucketName`: `storage.search` under the request's
+/// RLS scope. A bucket that does not exist lists nothing, as upstream.
+// megabase:unit storage:route:POST /storage/v1/object/list/{bucketName}
+pub(super) async fn list_objects(
+    State(state): State<StorageState>,
+    Path(bucket_id): Path<String>,
+    method: Method,
+    OriginalUri(uri): OriginalUri,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    let Some(options) = list_options(&body) else {
+        return not_implemented(&method, &uri);
+    };
+    let Some(pool) = state.pool.as_ref() else {
+        return not_implemented(&method, &uri);
+    };
+    let Some((claims, jwt)) = request_jwt(&state, &headers) else {
+        return not_implemented(&method, &uri);
+    };
+    if !is_valid_bucket_name(&bucket_id) {
+        return StorageError::invalid_bucket_name().into_response();
+    }
+    let args = options.search_args();
+    let scope = Scope {
+        actor: Actor::Request {
+            claims: &claims,
+            jwt,
+        },
+        method: &method,
+        uri: &uri,
+        headers: &headers,
+        operation: OP_LIST,
+    };
+    let attempt = async {
+        let mut tx = scope.begin(pool).await?;
+        let rows = sqlx::query(SEARCH_OBJECTS_SQL)
+            .bind(&args.prefix)
+            .bind(&bucket_id)
+            .bind(args.limit)
+            .bind(args.levels)
+            .bind(args.offset)
+            .bind(&args.search)
+            .bind(&args.sort_column)
+            .bind(&args.sort_order)
+            .bind(&args.noncurrent_versions)
+            .bind(&args.delete_markers)
+            .fetch_all(&mut *tx)
+            .await?;
+        tx.commit().await?;
+        rows.iter()
+            .map(list_entry_json)
+            .collect::<Result<Vec<_>, _>>()
+    };
+    match attempt.await {
+        Ok(entries) => fastify_json(StatusCode::OK, &Value::Array(entries)),
+        Err(error) => pg_error(&error, StorageError::resource_already_exists),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1477,6 +1733,79 @@ mod tests {
         ] {
             assert_eq!(delete_prefixes(body), None);
         }
+    }
+
+    #[test]
+    fn list_bodies_follow_the_search_schema() {
+        let options = list_options(
+            br#"{"prefix":"u1","limit":10,"offset":2,"search":"a",
+                "sortBy":{"column":"name","order":"desc"},"extra":1}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            options.search_args(),
+            SearchArgs {
+                prefix: "u1/".into(),
+                limit: 10,
+                levels: 2,
+                offset: 2,
+                search: "a".into(),
+                sort_column: "name".into(),
+                sort_order: "desc".into(),
+                noncurrent_versions: "exclude".into(),
+                delete_markers: "exclude".into(),
+            }
+        );
+        let defaults = list_options(br#"{"prefix":""}"#).unwrap().search_args();
+        assert_eq!(
+            (
+                defaults.prefix.as_str(),
+                defaults.limit,
+                defaults.levels,
+                defaults.offset,
+                defaults.sort_column.as_str(),
+                defaults.sort_order.as_str()
+            ),
+            ("", 100, 1, 0, "name", "asc")
+        );
+        assert!(list_options(br#"{"prefix":"a","exactMatch":false}"#).is_some());
+        for body in [
+            &br#"{}"#[..],
+            br#"{"prefix":null}"#,
+            br#"{"prefix":"a","limit":0}"#,
+            br#"{"prefix":"a","limit":"10"}"#,
+            br#"{"prefix":"a","limit":4294967296}"#,
+            br#"{"prefix":"a","offset":-1}"#,
+            br#"{"prefix":"a","sortBy":{"order":"asc"}}"#,
+            br#"{"prefix":"a","sortBy":{"column":"size"}}"#,
+            br#"{"prefix":"a","sortBy":{"column":"name","order":"up"}}"#,
+            br#"{"prefix":"a","search":null}"#,
+            br#"{"prefix":"a","exactMatch":true}"#,
+            br#"{"prefix":"a","deleteMarkers":"all"}"#,
+            b"not json",
+        ] {
+            assert_eq!(
+                list_options(body),
+                None,
+                "{}",
+                String::from_utf8_lossy(body)
+            );
+        }
+    }
+
+    #[test]
+    fn non_name_sorts_escape_like_patterns() {
+        let args =
+            list_options(br#"{"prefix":"a_b/","search":"50%\\","sortBy":{"column":"created_at"}}"#)
+                .unwrap()
+                .search_args();
+        assert_eq!(args.prefix, r"a\_b/");
+        assert_eq!(args.search, r"50\%\\");
+        assert_eq!(args.levels, 2);
+        let args = list_options(br#"{"prefix":"a_b","search":"%"}"#)
+            .unwrap()
+            .search_args();
+        assert_eq!((args.prefix.as_str(), args.search.as_str()), ("a_b/", "%"));
     }
 
     #[test]

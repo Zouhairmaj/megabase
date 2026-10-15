@@ -188,6 +188,13 @@ Upstream: `0060-optimize-existing-functions-again.sql:22` and
 `IMMUTABLE` plpgsql: `foldername('u1/a/b.png')` is `{u1,a}`,
 `filename('u1/a/b.png')` is `b.png`.
 
+## `storage:sql-function:storage.search()` and `storage.get_common_prefix()`
+
+Upstream: `0070-list-objects-with-versions.sql:763` and `:89`. File:
+`sql/search.sql`, copied from the final definitions; the eight-argument
+`storage.search` of 0050–0063 is dropped first. Behavior and the route that
+calls it are in [`object-list.md`](object-list.md).
+
 ## Judge cases
 
 Not written yet. They go in a separate `review/issue-58-cases` PR and
