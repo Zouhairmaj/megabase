@@ -11,13 +11,15 @@ Unit ids (`coverage/units.json`):
 - `storage:route:POST /storage/v1/object/sign/{bucketName}/{*}`
 - `storage:route:GET /storage/v1/object/sign/{bucketName}/{*}`
 - `storage:route:DELETE /storage/v1/object/{bucketName}`
+- `storage:route:POST /storage/v1/object/sign/{bucketName}`
+- `storage:route:POST /storage/v1/object/upload/sign/{bucketName}/{*}`
 - `storage:route:DELETE /storage/v1/object/{bucketName}/{*}` (issue 61)
 - `storage:route:HEAD /storage/v1/object/authenticated/{bucketName}/{*}` (issue 61)
 - `storage:route:GET /storage/v1/object/info/authenticated/{bucketName}/{*}` (issue 61)
 - `storage:route:GET /storage/v1/object/info/{bucketName}/{*}` (issue 61)
 - `storage:route:GET /storage/v1/object/info/public/{bucketName}/{*}` (issue 61)
 
-supabase-js `storage.from(b).upload/update/download/remove/createSignedUrl/getPublicUrl/info/exists`.
+supabase-js `storage.from(b).upload/update/download/remove/createSignedUrl/createSignedUrls/createSignedUploadUrl/getPublicUrl/info/exists`.
 The table these routes write is in [`database.md`](database.md).
 
 Pins: storage `v1.80.2`, supabase `v1.26.08` (`vendor.toml`).
@@ -41,6 +43,8 @@ Pins: storage `v1.80.2`, supabase `v1.26.08` (`vendor.toml`).
 | Download handlers | `vendor/storage/src/http/routes/object/getObject.ts:36`, `getPublicObject.ts:52`, `getSignedObject.ts:58` |
 | Response headers | `vendor/storage/src/storage/renderer/renderer.ts:123` |
 | Sign: body, `signObjectUrl`, token payload `{url, scope: "download", iat, exp}` | `vendor/storage/src/http/routes/object/getSignedURL.ts:19`, `vendor/storage/src/storage/object.ts:825`, `vendor/storage/src/internal/auth/jwt.ts:509` |
+| Sign many: body (`paths` 1 to `MAX_OBJECTS_PER_REQUEST` = 1000), `signObjectUrls`, `findObjects` SQL | `vendor/storage/src/http/routes/object/getSignedURLs.ts:16`, `vendor/storage/src/storage/object.ts:885`, `vendor/storage/src/storage/database/pg.ts:1405` |
+| Signed upload URL: headers, `canUpload`, token payload `{owner, url, upsert, scope: "upload", iat, exp}`, `UPLOAD_SIGNED_URL_EXPIRATION_TIME` default 60 | `vendor/storage/src/http/routes/object/getSignedUploadURL.ts:61`, `vendor/storage/src/storage/object.ts:940`, `vendor/storage/src/storage/uploader.ts:76`, `vendor/storage/src/config.ts:459` |
 | `verifyObjectSignature` | `vendor/storage/src/storage/object.ts:979` |
 | Delete: body, `deleteObjects` SQL, `objectSchema` response | `vendor/storage/src/http/routes/object/deleteObjects.ts:16`, `vendor/storage/src/storage/object.ts:193`, `vendor/storage/src/storage/database/pg.ts:1276`, `vendor/storage/src/storage/schemas/object.ts:4` |
 | Single delete: superuser `findObject ... FOR UPDATE`, `deleteObject` as the request role, `AccessDenied` when nothing was deleted, `{"message":"Successfully deleted"}` | `vendor/storage/src/http/routes/object/deleteObject.ts:42`, `vendor/storage/src/storage/object.ts:144`, `vendor/storage/src/storage/database/pg.ts:1247` |
@@ -50,16 +54,18 @@ Pins: storage `v1.80.2`, supabase `v1.26.08` (`vendor.toml`).
 ## Configuration
 
 Object bytes live under `FILE_STORAGE_BACKEND_PATH` (the self-hosted
-compose sets `/var/lib/storage`). Without it, or without `DATABASE_URL`,
-every object route is a 501. Without `JWT_SECRET`, the routes that need a
+compose sets `/var/lib/storage`). Without `DATABASE_URL`, every object
+route is a 501, and without the file root so is every route that reads or
+writes object bytes. `POST /object/sign/:bucket` reads no bytes, so it needs
+only `DATABASE_URL` and `JWT_SECRET`. Without `JWT_SECRET`, the routes that need a
 verified JWT (upload, authenticated download and info, sign, signed
 download, delete) are a 501; public downloads and info, and
 `GET /object/:bucket/*` and `GET /object/info/:bucket/*` on a public bucket
 (anonymous fallback) still work.
 
 `list` is served by [`object-list.md`](object-list.md). The unported
-prefixes `list-v2`, `sign/:bucket` (sign many) and `upload/sign` are
-explicit 501s, so they never reach the generic `:bucket/*` handlers.
+prefix `list-v2` is an explicit 501, so it never reaches the generic
+`:bucket/*` handlers.
 
 ## Request scope
 
@@ -136,6 +142,33 @@ Body `{"expiresIn": n}`. Then JWT, `InvalidKey`, the row under RLS
 `{url: "<bucket>/<name>", scope: "download", iat, exp: iat + n}`. Response
 `200 {"signedURL": "/object/sign/<bucket>/<name>?token=<jwt>"}`.
 
+## Sign many — `POST /object/sign/:bucket`
+
+Body `{"expiresIn": n, "paths": ["<name>", ...]}` (1 to 1000 strings).
+Then JWT, `InvalidBucketName`, one `findObjects` lookup of the current rows
+under RLS (`SELECT name ... WHERE bucket_id = $1 AND name COLLATE "C" =
+ANY($2) AND archived_at IS NULL`; no key check). Response `200`, one entry
+per path in request order, keys `error, path, signedURL`: a found path has
+`error: null` and `signedURL: "/object/sign/<bucket>/<path>?token=<jwt>"`
+(same payload as single sign); any other has `error: "Either the object
+does not exist or you do not have access to it"` and `signedURL: null`. A
+missing bucket finds nothing, so every entry is the error. Paths with `?`,
+`#` or `%` are looked up as they are, and `signedURL` is built without
+escaping the key, as upstream does.
+
+## Signed upload URL — `POST /object/upload/sign/:bucket/*`
+
+No body is read (supabase-js sends `{}`). Then JWT, `InvalidBucketName`,
+and `canUpload` as for an upload: the insert (or the upsert with
+`x-upsert: true`) as the request role, rolled back, with `metadata`
+`{mimetype: Content-Type, contentLength: Number(Content-Length)}` (each
+left out when the header is absent). RLS rejection is `AccessDenied`
+`new row violates row-level security policy`; an existing name without
+upsert is `KeyAlreadyExists`. The token is HS256 with `JWT_SECRET`, payload
+`{owner: sub, url: "<bucket>/<name>", upsert, scope: "upload", iat, exp:
+iat + 60}` (`owner` left out without `sub`). Response `200 {"url":
+"/object/upload/sign/<bucket>/<name>?token=<jwt>", "token": "<jwt>"}`.
+
 ## Remove — `DELETE /object/:bucket`
 
 Body `{"prefixes": ["<name>", ...]}` (1 to 500 names). Deletes the current
@@ -206,6 +239,12 @@ missing metadata values are `null`, timestamps are ISO with milliseconds.
   `contentEncoding`.
 - Sign bodies other than `{"expiresIn": 1..315360000}` (`transform`,
   `versionId`, Fastify validation messages); paths with percent escapes.
+- Sign-many bodies with other properties or outside the schema, and
+  `expiresIn` above 315360000.
+- Signed upload URLs with `x-metadata`, a non-decimal `Content-Length`, a
+  body other than none or a JSON object (with `application/json`), an
+  invalid key, paths with percent escapes, or a missing bucket (the
+  insert's foreign-key error).
 - Delete entries with `versionId`, more than 500 names, validation messages.
 - Other jose failures on signed URLs; database errors other than `42501`
   and `23505`; object keys with `.`/`..`/empty segments.
@@ -218,8 +257,8 @@ missing metadata values are `null`, timestamps are ISO with milliseconds.
   `mimetype` and `contentLength`. Fastify's automatic `HEAD` on the
   `/object/info` routes.
 - `HEAD /object/public/:bucket/*` and `HEAD /object/:bucket/*` (the same
-  handler; issue 61 PR 2), `/object/list-v2`, copy, move,
-  `POST /object/sign/:bucket` (many) and signed uploads.
+  handler; issue 61 PR 2), `/object/list-v2`, copy, move, and the signed
+  upload itself (`PUT /object/upload/sign/:bucket/*`).
 
 ## Judge cases
 
@@ -237,5 +276,11 @@ bytes, `Content-Type` and `Cache-Control`. Object info and single delete
 private and a public bucket, info for a missing object (`NoSuchKey`) and
 bucket (`NoSuchBucket`), anonymous info on a private bucket, single
 `DELETE` then a download (`NoSuchKey`), and a single `DELETE` with the
-`anon` key under RLS (`AccessDenied`). Timestamps,
+`anon` key under RLS (`AccessDenied`). Sign many and signed upload
+URLs (issue 61, on `review/issue-61-cases`): sign two uploaded paths and
+one missing path, then fetch a returned URL; sign many with the `anon` key
+on a private bucket (every entry the error); a signed upload URL for a new
+name, for an existing name (`KeyAlreadyExists`) and with `x-upsert: true`
+over it; and one with the `anon` key on a bucket without policies
+(`AccessDenied`). Timestamps,
 `Id`, `ETag`/`Last-Modified` and the token need the harness normalizer.
