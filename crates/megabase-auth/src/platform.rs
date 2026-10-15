@@ -128,7 +128,15 @@ mod tests {
         let create = PLATFORM
             .find("CREATE EXTENSION supabase_vault WITH SCHEMA vault;")
             .expect("create");
+        let guard_end = guard
+            + PLATFORM[guard..]
+                .find("END IF;")
+                .expect("availability guard closes");
         assert!(guard < schema && schema < create);
+        assert!(
+            create < guard_end,
+            "the vault schema and extension stay inside the availability guard"
+        );
     }
 
     #[test]
