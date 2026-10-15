@@ -14,6 +14,8 @@
 //! gates, factor unenroll, and the recovery-code status and delete routes.
 //! Issue #46 serves `GET`/`POST /callback` up to the provider code exchange
 //! and `POST /magiclink` and `POST /otp` up to mail and SMS delivery.
+//! Issue #382 serves `POST /recover` through GoTrue's no-op mail client and
+//! an unreachable SMTP host.
 //! Every other Auth path returns `MEGABASE_NOT_IMPLEMENTED`. Database objects
 //! listed in `specs/auth/database.md` are installed when `DATABASE_URL` is
 //! set, after the standard API roles in `specs/core/roles.md` and the
@@ -32,6 +34,7 @@ mod jsonutil;
 mod otp;
 mod platform;
 mod ratelimit;
+mod recover;
 mod roles;
 mod routes;
 mod schema;
@@ -45,7 +48,7 @@ pub use config::AuthConfig;
 pub use platform::{install_platform, PlatformError};
 pub use roles::{install_roles, RolesError};
 pub use schema::{install_schema, SchemaError};
-pub use state::AuthState;
+pub use state::{AuthState, MailConfig};
 pub use store::Backend;
 
 use axum::{extract::OriginalUri, http::Method, Router};

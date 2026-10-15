@@ -2,12 +2,12 @@
   "schema": 1,
   "totals": {
     "units": 1031,
-    "implemented": 201,
+    "implemented": 202,
     "tested": 184,
     "conformant": 0
   },
   "percent": {
-    "coverage": 19.5,
+    "coverage": 19.6,
     "conformance": 0.0,
     "done": 0.0
   },
@@ -18,7 +18,7 @@
   "components": {
     "auth": {
       "units": 159,
-      "implemented": 83,
+      "implemented": 84,
       "tested": 79,
       "conformant": 0,
       "groups": {
@@ -36,7 +36,7 @@
         },
         "endpoints": {
           "units": 13,
-          "implemented": 4,
+          "implemented": 5,
           "tested": 4,
           "conformant": 0
         },
@@ -600,6 +600,7 @@
     "auth:route:POST /auth/v1/admin/sso/providers": "tested",
     "auth:route:POST /auth/v1/admin/users": "tested",
     "auth:route:POST /auth/v1/logout": "tested",
+    "auth:route:POST /auth/v1/recover": "implemented",
     "auth:route:POST /auth/v1/signup": "tested",
     "auth:route:POST /auth/v1/token": "tested",
     "auth:route:POST /auth/v1/verify": "tested",
