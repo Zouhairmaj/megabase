@@ -41,6 +41,18 @@
       "pinDigests": true
     },
     {
+      "description": "Dockerfile FROM images are ghcr.io mirrors that only hold the pinned tag; look up updates on ECR Public (decision 0040). Mirror workflow copies the new digest after merge",
+      "matchDatasources": ["docker"],
+      "matchPackageNames": ["ghcr.io/zouhairmaj/rust"],
+      "overridePackageName": "public.ecr.aws/docker/library/rust"
+    },
+    {
+      "description": "See the rule above",
+      "matchDatasources": ["docker"],
+      "matchPackageNames": ["ghcr.io/zouhairmaj/debian"],
+      "overridePackageName": "public.ecr.aws/docker/library/debian"
+    },
+    {
       "description": "Group non-major GitHub Actions weekly; automerge patch/minor when CI is green",
       "matchManagers": ["github-actions"],
       "matchUpdateTypes": ["minor", "patch", "digest", "pin"],

@@ -1,0 +1,120 @@
+name: Mirror images
+
+# Copies every ghcr.io/zouhairmaj/<repo>:<tag>@<digest> reference in
+# judge/compose.override.yml and Dockerfile from its public.ecr.aws
+# upstream (.github/image-mirrors.txt) to ghcr.io at the same tag and
+# digest. public.ecr.aws answers bursts and the anonymous data quota with
+# "toomanyrequests" (issues #350 and #358). Consumers go through
+# .github/actions/judge-images and .github/actions/dockerfile-bases,
+# which fall back to ECR while a mirror is missing.
+#
+# Runs on dispatch and whenever a pin (and so a tag or digest) changes on
+# main. Each copy keeps every platform and refuses to change the digest.
+# The packages must be public so pull requests and local runs can pull
+# them without credentials.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - judge/compose.override.yml
+      - Dockerfile
+      - .github/image-mirrors.txt
+      - .github/workflows/mirror-images.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  mirror:
+    name: Mirror images
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+          sparse-checkout: |
+            judge/compose.override.yml
+            Dockerfile
+            .github/image-mirrors.txt
+          sparse-checkout-cone-mode: false
+      - name: Log in to ghcr.io
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: skopeo login ghcr.io --username "$GITHUB_ACTOR" --password-stdin <<<"$GH_TOKEN"
+      - name: Copy every platform, keeping the digest
+        run: |
+          set -euo pipefail
+          skopeo --version
+          mapfile -t refs < <(grep -ohE \
+            'ghcr\.io/zouhairmaj/[a-z0-9._/-]+:[A-Za-z0-9._-]+@sha256:[0-9a-f]{64}' \
+            judge/compose.override.yml Dockerfile | sort -u)
+          if [ "${#refs[@]}" -eq 0 ]; then
+            echo "::error::no ghcr.io/zouhairmaj/<repo>:<tag>@sha256:<digest> reference found"
+            exit 1
+          fi
+          failed=0
+          for ref in "${refs[@]}"; do
+            repo=${ref%%:*}
+            rest=${ref#"$repo":}
+            tag=${rest%@*}
+            digest=${rest#*@}
+            upstream=$(awk -v r="$repo" '$1 == r { print $2 }' .github/image-mirrors.txt)
+            if [ -z "$upstream" ]; then
+              echo "::error::${repo} is not listed in .github/image-mirrors.txt"
+              failed=1
+              continue
+            fi
+            source="${upstream}@${digest}"
+            dest="${repo}:${tag}"
+            echo "::group::${upstream}:${tag}@${digest} -> ${dest}"
+            if current=$(skopeo inspect --raw "docker://${dest}" 2>/dev/null | sha256sum | cut -d' ' -f1) \
+              && [ "sha256:${current}" = "$digest" ]; then
+              echo "${dest} already has ${digest}"
+            else
+              attempt=1
+              copied=1
+              until skopeo copy --all --preserve-digests --retry-times 3 \
+                "docker://${source}" "docker://${dest}"; do
+                if [ "$attempt" -ge 5 ]; then
+                  echo "::error::failed to copy ${source}"
+                  failed=1
+                  copied=0
+                  break
+                fi
+                sleep $((attempt * 15))
+                attempt=$((attempt + 1))
+              done
+              if [ "$copied" -eq 0 ]; then
+                echo "::endgroup::"
+                continue
+              fi
+            fi
+            got="sha256:$(skopeo inspect --raw "docker://${dest}" 2>/dev/null | sha256sum | cut -d' ' -f1)"
+            if [ "$got" != "$digest" ]; then
+              echo "::error::${dest} has ${got}, expected ${digest}"
+              failed=1
+            # Anonymous pull, as pull requests and local runs do. Fails until
+            # the package is public (Package settings, Change visibility).
+            elif skopeo inspect --raw --no-creds "docker://${repo}@${digest}" >/dev/null; then
+              echo "Mirrored ${dest}@${digest} (public)" >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "::warning::${repo} is not anonymously pullable. Make the package public; until then CI falls back to ${upstream}."
+              echo "Mirrored ${dest}@${digest} (not public yet)" >> "$GITHUB_STEP_SUMMARY"
+            fi
+            echo "::endgroup::"
+          done
+          exit "$failed"
+      - name: Log out
+        if: always()
+        run: skopeo logout ghcr.io || true

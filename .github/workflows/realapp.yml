@@ -106,16 +106,15 @@ jobs:
       # (decision 0037); this image keeps the job on the same Postgres the
       # reference stack runs, and its initdb already has them, so the
       # idempotent bootstrap must also succeed here.
-      - uses: ./.github/actions/judge-db-image
-        id: db-image
+      - uses: ./.github/actions/judge-images
         if: steps.run.outputs.run == 'true'
+        with:
+          variables: MEGABASE_JUDGE_DB_IMAGE
       - name: Start PostgreSQL
         if: steps.run.outputs.run == 'true'
-        env:
-          IMAGE: ${{ steps.db-image.outputs.image }}
         run: |
           set -euo pipefail
-          image="$IMAGE"
+          image="$MEGABASE_JUDGE_DB_IMAGE"
           # Same environment and command as the `db` service in the official
           # compose file. Host 54322, like the Judge, so a runner-local
           # PostgreSQL on 5432 cannot collide.

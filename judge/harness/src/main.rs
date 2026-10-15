@@ -672,6 +672,53 @@ mod tests {
     }
 
     #[test]
+    fn ghcr_mirrors_are_listed_and_overridable() {
+        let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let read =
+            |p: &str| std::fs::read_to_string(root.join(p)).unwrap_or_else(|e| panic!("{p}: {e}"));
+        let table = read(".github/image-mirrors.txt");
+        let listed: Vec<&str> = table
+            .lines()
+            .filter(|l| !l.trim_start().starts_with('#'))
+            .filter_map(|l| l.split_whitespace().next())
+            .collect();
+        let mut mirrors = 0usize;
+        for file in ["judge/compose.override.yml", "Dockerfile"] {
+            let text = read(file);
+            for (i, line) in text.lines().enumerate() {
+                let Some(start) = line.find("ghcr.io/zouhairmaj/") else {
+                    continue;
+                };
+                if line.trim_start().starts_with('#') {
+                    continue;
+                }
+                mirrors += 1;
+                let reference = &line[start..];
+                let repo = reference.split(':').next().unwrap_or(reference);
+                assert!(
+                    listed.contains(&repo),
+                    "{file}:{} uses {repo}, which .github/image-mirrors.txt does not list",
+                    i + 1
+                );
+                // CI falls back to the upstream through this variable.
+                if file.ends_with(".yml") {
+                    let image = line.trim().trim_start_matches("image:").trim();
+                    assert!(
+                        image.starts_with("${MEGABASE_JUDGE_")
+                            && image.contains("_IMAGE:-ghcr.io/"),
+                        "{file}:{} must write the mirror as ${{MEGABASE_JUDGE_<NAME>_IMAGE:-…}}",
+                        i + 1
+                    );
+                }
+            }
+        }
+        assert!(
+            mirrors >= 4,
+            "expected the db, kong, rust and debian mirrors, got {mirrors}"
+        );
+    }
+
+    #[test]
     fn kong_entrypoint_replaces_vendor_script() {
         let path =
             std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../compose.override.yml");

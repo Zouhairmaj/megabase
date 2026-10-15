@@ -27,12 +27,16 @@ bootstrap exception. Architecture and commands are in
 - Harness tests: `cargo test -p megabase-judge`.
 - `compose.override.yml` must pin every reference-stack `image:` to
   `public.ecr.aws/…@sha256:…` or `ghcr.io/…@sha256:…`. Do not pull
-  from Docker Hub (anonymous 429s fail CI). The `db` image is
-  `${MEGABASE_JUDGE_DB_IMAGE:-ghcr.io/zouhairmaj/supabase-postgres:…}`,
-  a mirror of the ECR image at the same digest
-  ([decision 0039](../docs/decisions/0039-ghcr-postgres-mirror.md)).
-  To bump it, change tag and digest there only, then let the mirror
-  workflow run on `main`. The Kong service uses
+  from Docker Hub (anonymous 429s fail CI). The `db` and `kong` images
+  are `${MEGABASE_JUDGE_<NAME>_IMAGE:-ghcr.io/zouhairmaj/<repo>:…}`,
+  mirrors of the ECR images at the same digest, listed in
+  `.github/image-mirrors.txt`
+  ([decisions 0039](../docs/decisions/0039-ghcr-postgres-mirror.md) and
+  [0040](../docs/decisions/0040-ghcr-library-image-mirrors.md)).
+  The tag and digest live in `judge/compose.override.yml` (`db`,
+  `kong`) and in the `Dockerfile` `FROM` lines; the table holds only
+  the repository mappings. To bump one, change the tag and digest in
+  those files, then let the mirror workflow run on `main`. The Kong service uses
   `entrypoint: !override` so Compose replaces the vendor script
   instead of appending it. The wrapper points that script at
-  `/docker-entrypoint.sh` on the ECR library image.
+  `/docker-entrypoint.sh` on the Docker library image.
