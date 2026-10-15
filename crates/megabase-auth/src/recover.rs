@@ -318,6 +318,10 @@ mod tests {
         )
     }
 
+    fn test_password() -> String {
+        format!("pw-{}", uuid::Uuid::new_v4().simple())
+    }
+
     async fn signup(app: &Router, email: &str, password: &str) {
         let body = json!({ "email": email, "password": password }).to_string();
         let (status, _) = call(app, "POST", "/auth/v1/signup", &body, "").await;
@@ -384,7 +388,8 @@ mod tests {
     #[tokio::test]
     async fn recover_verify_update_password_then_sign_in() {
         let (app, backend) = app_with("", 0);
-        signup(&app, "real@example.com", "secret1").await;
+        let old_password = test_password();
+        signup(&app, "real@example.com", &old_password).await;
         let (status, json) = call(
             &app,
             "POST",
@@ -439,7 +444,7 @@ mod tests {
         let path = "/auth/v1/token?grant_type=password";
         let (status, _) = call(&app, "POST", path, &login("brand-new-1"), "").await;
         assert_eq!(status, StatusCode::OK);
-        let (status, _) = call(&app, "POST", path, &login("secret1"), "").await;
+        let (status, _) = call(&app, "POST", path, &login(&old_password), "").await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
         // The token is single-use.
         let (status, _) = call(&app, "POST", "/auth/v1/verify", &verify, "").await;
@@ -449,7 +454,7 @@ mod tests {
     #[tokio::test]
     async fn unreachable_smtp_host_is_500_and_stores_nothing() {
         let (app, backend) = app_with("127.0.0.1", 1);
-        signup(&app, "real@example.com", "secret1").await;
+        signup(&app, "real@example.com", &test_password()).await;
         let (status, json) = call(
             &app,
             "POST",
@@ -473,7 +478,7 @@ mod tests {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = listener.local_addr().unwrap().port();
         let (app, backend) = app_with("127.0.0.1", port);
-        signup(&app, "real@example.com", "secret1").await;
+        signup(&app, "real@example.com", &test_password()).await;
         let (status, json) = call(
             &app,
             "POST",
