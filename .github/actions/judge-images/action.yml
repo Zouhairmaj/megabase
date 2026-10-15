@@ -39,14 +39,20 @@ runs:
         # the job timeout on backoff and hide the pull error behind a cancel.
         retry_deadline=$((SECONDS + 20 * 60))
         pull() {
-          local image=$1 tries=$2 attempt=1 wait remaining
+          # Mirror pulls stop once `reserve` seconds are left, so the upstream
+          # fallback always gets part of the shared budget.
+          local image=$1 tries=$2 reserve=$3 attempt=1 wait remaining limit
           while :; do
             # Bound each pull by what is left of the shared budget.
             remaining=$((retry_deadline - SECONDS))
-            if [ "$remaining" -le 0 ]; then
+            if [ "$remaining" -le "$reserve" ]; then
               return 1
             fi
-            if timeout "${remaining}s" docker pull "$image"; then
+            limit=$remaining
+            if [ "$reserve" -gt 0 ] && [ "$limit" -gt 120 ]; then
+              limit=120
+            fi
+            if timeout "${limit}s" docker pull "$image"; then
               return 0
             fi
             if [ "$attempt" -ge "$tries" ]; then
@@ -58,7 +64,7 @@ runs:
             wait=$((attempt * 15))
             [ "$wait" -gt 120 ] && wait=120
             wait=$((wait + RANDOM % 15))
-            remaining=$((retry_deadline - SECONDS))
+            remaining=$((retry_deadline - SECONDS - reserve))
             [ "$wait" -gt "$remaining" ] && wait=$remaining
             if [ "$wait" -le 0 ]; then
               return 1
@@ -91,12 +97,12 @@ runs:
           fi
           upstream="${upstream}:${mirror#"$repo":}"
 
-          if pull "$mirror" 3; then
+          if pull "$mirror" 3 480; then
             echo "${var}=${mirror}" >> "$GITHUB_ENV"
             continue
           fi
           echo "::warning::Could not pull ${mirror}. Falling back to ${upstream} (same digest). Run the Mirror images workflow and make the package public."
-          if ! pull "$upstream" 12; then
+          if ! pull "$upstream" 12 0; then
             echo "::error::failed to pull ${upstream}"
             exit 1
           fi

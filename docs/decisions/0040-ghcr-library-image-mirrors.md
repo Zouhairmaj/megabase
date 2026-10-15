@@ -41,6 +41,10 @@ digest, and pull the mirror first with ECR as the fallback:
   `Dockerfile` under `$RUNNER_TEMP` with that `FROM` retargeted; the
   Container image job builds the file it returns. The `FROM` lines stay
   literal, so Scorecard Pinned-Dependencies still sees tag and digest.
+  If ECR is also exhausted, it pulls `docker.io/library/<name>` at the
+  same tag and digest (the job logs in to Docker Hub). `judge-images`
+  has no Docker Hub step: its mirror pulls stop with 8 minutes of the
+  shared 20-minute budget left, so the ECR pull always gets a turn.
 - `megabase-judge` has a test that every mirror reference in the overlay
   and the `Dockerfile` is listed in the table, and that overlay mirrors
   go through a `MEGABASE_JUDGE_*_IMAGE` variable.

@@ -3,7 +3,8 @@ description: >-
   Pull each ghcr.io/zouhairmaj/... FROM image in the root Dockerfile from
   its ghcr.io mirror. When a mirror cannot be pulled (not yet mirrored,
   private, or ghcr is down), pull the same tag and digest from the
-  upstream listed in .github/image-mirrors.txt and write a copy of the
+  upstream listed in .github/image-mirrors.txt (for the official library
+  images, then Docker Hub at the same digest) and write a copy of the
   Dockerfile that names the upstream instead. Build with the `file`
   output. Issue #358.
 
@@ -62,16 +63,32 @@ runs:
             continue
           fi
           echo "::warning::Could not pull ${mirror}. Falling back to ${upstream} (same digest). Run the Mirror images workflow and make the package public."
+          target=$upstream
           if ! pull "$upstream" 8; then
-            echo "::error::failed to pull ${upstream}"
-            exit 1
+            # Last resort for the official library images: the same tag and
+            # digest on Docker Hub, which the Container image job logs in to.
+            case "$upstream_repo" in
+              public.ecr.aws/docker/library/*)
+                hub="docker.io/library/${upstream#public.ecr.aws/docker/library/}"
+                echo "::warning::Could not pull ${upstream}. Falling back to ${hub} (same digest)."
+                if ! pull "$hub" 3; then
+                  echo "::error::failed to pull ${upstream} and ${hub}"
+                  exit 1
+                fi
+                target=$hub
+                ;;
+              *)
+                echo "::error::failed to pull ${upstream}"
+                exit 1
+                ;;
+            esac
           fi
           if [ "$file" = Dockerfile ]; then
             file="${RUNNER_TEMP}/Dockerfile.upstream"
             cp Dockerfile "$file"
           fi
           # Exact reference match only; the tag and digest stay the same.
-          MIRROR="$mirror" UPSTREAM="$upstream" \
+          MIRROR="$mirror" UPSTREAM="$target" \
             awk '$1 == "FROM" && $2 == ENVIRON["MIRROR"] { $2 = ENVIRON["UPSTREAM"] } { print }' \
             "$file" > "${file}.tmp"
           mv "${file}.tmp" "$file"
