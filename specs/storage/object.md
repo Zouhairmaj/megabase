@@ -28,6 +28,7 @@ Pins: storage `v1.80.2`, supabase `v1.26.08` (`vendor.toml`).
 | Upload: `x-upsert`, `PUT` always upserts, response `{Id, Key}` | `vendor/storage/src/http/routes/object/createObject.ts:65`, `updateObject.ts:65` |
 | Bucket lookup as superuser, then file checks | `vendor/storage/src/storage/object.ts:92` |
 | Binary body: `content-type` default `application/octet-stream`, `cache-control` default `no-cache`, MIME check, `Content-Length` over the limit | `vendor/storage/src/storage/uploader.ts:380`, `:470` |
+| Multipart body: first file part, fields before it, `contentType` field over the part type, `cacheControl` field as `max-age=`, MIME check, truncation is `EntityTooLarge` after `canUpload` | `vendor/storage/src/storage/uploader.ts:161`, `:432` |
 | `mustBeValidKey`, then `canUpload` (insert or upsert as the request role, rolled back), then `completeUpload` as superuser | `vendor/storage/src/storage/object.ts:125`, `vendor/storage/src/storage/uploader.ts:62`, `:184` |
 | `createObject` / `upsertObject` SQL and `ON CONFLICT (bucket_id, name COLLATE "C") WHERE archived_at IS NULL` | `vendor/storage/src/storage/database/pg.ts:1093`, `:1209` |
 | PG error mapping (`42501` AccessDenied, `23505` duplicate) | `vendor/storage/src/storage/database/errors.ts:16` |
@@ -73,6 +74,18 @@ when it is a UUID), `owner_id` (`sub`), `version` (a new UUID) and
 `metadata` `{eTag, size, mimetype, cacheControl, lastModified,
 contentLength, httpStatusCode: 200}`. The replaced version's file is
 removed. Response `200 {"Id": <row id>, "Key": "<bucket>/<name>"}`.
+
+A `multipart/form-data` body (supabase-js sends one for a `Blob`, `File`
+or `FormData`) uploads its first file part (a part whose
+`Content-Disposition` has a `filename`; supabase-js names it `""`). Only
+fields before that part count, and the first of each name wins. The
+mimetype is the `contentType` field when non-empty, else the part's
+lowercased `type/subtype`; `cacheControl` is `max-age=<cacheControl
+field>`, else `no-cache` (the `Cache-Control` header is ignored). The MIME
+check runs as for a binary body, but the size limit applies to the file
+bytes and only after `canUpload` (busboy truncates the stream; the request
+`Content-Length` counts the form overhead). `x-upsert` and `PUT` behave as
+for a binary body.
 
 | Case | `statusCode` | `code` | `error` | `message` |
 |---|---|---|---|---|
@@ -129,8 +142,12 @@ their files. Response `200` with the deleted rows in `objectSchema` order:
 
 - A missing or invalid JWT where a JWT is required (`AccessDenied` with
   the verifier's message).
-- Multipart uploads, `Content-Encoding`, `x-metadata`, `x-robots-tag`, an
-  upload without `Content-Length` or with an empty body.
+- `Content-Encoding`, `x-metadata`, `x-robots-tag`, an upload without
+  `Content-Length` or with an empty file.
+- Multipart forms that are malformed or have no file part
+  (`NoContentProvided`), `contentEncoding`, `metadata` or `userMetadata`
+  fields, a repeated `contentType` field, a file part without its own
+  `Content-Type`.
 - `versionId`, `Range` and conditional request headers, `download` names
   other than `[A-Za-z0-9._-]*`, objects whose metadata has `xRobotsTag` or
   `contentEncoding`.
@@ -150,5 +167,9 @@ creating its own public or private bucket with `{{run}}`: upload then
 upsert (`x-upsert`), duplicate upload (`KeyAlreadyExists`), authenticated
 and public download, sign then fetch the signed URL, a signed URL for a
 different object (`Invalid signature`), remove, and an upload with the
-`anon` key to a bucket without policies (RLS `AccessDenied`). Timestamps,
+`anon` key to a bucket without policies (RLS `AccessDenied`). Multipart
+(issue 398, on `review/issue-398-cases`): a small PNG as a supabase-js
+`Blob` form, a form with `cacheControl`, and a form upsert
+(`x-upsert: true`) over an existing object, each downloaded to compare the
+bytes, `Content-Type` and `Cache-Control`. Timestamps,
 `Id`, `ETag`/`Last-Modified` and the token need the harness normalizer.
