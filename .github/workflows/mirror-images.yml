@@ -83,16 +83,22 @@ jobs:
               echo "${dest} already has ${digest}"
             else
               attempt=1
+              copied=1
               until skopeo copy --all --preserve-digests --retry-times 3 \
                 "docker://${source}" "docker://${dest}"; do
                 if [ "$attempt" -ge 5 ]; then
                   echo "::error::failed to copy ${source}"
                   failed=1
+                  copied=0
                   break
                 fi
                 sleep $((attempt * 15))
                 attempt=$((attempt + 1))
               done
+              if [ "$copied" -eq 0 ]; then
+                echo "::endgroup::"
+                continue
+              fi
             fi
             got="sha256:$(skopeo inspect --raw "docker://${dest}" 2>/dev/null | sha256sum | cut -d' ' -f1)"
             if [ "$got" != "$digest" ]; then

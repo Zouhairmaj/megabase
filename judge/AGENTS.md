@@ -33,8 +33,10 @@ bootstrap exception. Architecture and commands are in
   `.github/image-mirrors.txt`
   ([decisions 0039](../docs/decisions/0039-ghcr-postgres-mirror.md) and
   [0040](../docs/decisions/0040-ghcr-library-image-mirrors.md)).
-  To bump one, change tag and digest there only, then let the mirror
-  workflow run on `main`. The Kong service uses
+  The tag and digest live in `judge/compose.override.yml` (`db`,
+  `kong`) and in the `Dockerfile` `FROM` lines; the table holds only
+  the repository mappings. To bump one, change the tag and digest in
+  those files, then let the mirror workflow run on `main`. The Kong service uses
   `entrypoint: !override` so Compose replaces the vendor script
   instead of appending it. The wrapper points that script at
   `/docker-entrypoint.sh` on the Docker library image.
