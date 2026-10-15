@@ -30,7 +30,7 @@ END $$;
 -- non-superuser creating an untrusted extension, is reported as a WARNING
 -- and leaves the rest of the install in place. pg_net and supabase_vault
 -- need the Supabase image (shared_preload_libraries); on a stock server they
--- are not available and are skipped.
+-- are not available and are skipped (the vault schema is still created).
 DO $$
 DECLARE
     ext text;
@@ -46,14 +46,17 @@ BEGIN
         END IF;
     END LOOP;
 
-    -- supabase_vault is installed into the vault schema, which is created
-    -- first so that installing it never depends on the extension creating
-    -- it. The extension creates vault.secrets and vault.decrypted_secrets.
-    -- A failure rolls the schema back with the extension.
+    -- The vault schema exists even without supabase_vault, so dumps that
+    -- name it (GRANT ... ON SCHEMA vault, COMMENT ON SCHEMA vault) restore.
+    -- No stand-in vault.secrets or vault.decrypted_secrets is created: a
+    -- plain table would keep secrets unencrypted, and existing objects would
+    -- stop CREATE EXTENSION supabase_vault on a later server that ships it.
+    CREATE SCHEMA IF NOT EXISTS vault;
+
+    -- The extension creates vault.secrets and vault.decrypted_secrets.
     IF EXISTS (SELECT 1 FROM pg_available_extensions WHERE name = 'supabase_vault')
        AND NOT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'supabase_vault') THEN
         BEGIN
-            CREATE SCHEMA IF NOT EXISTS vault;
             CREATE EXTENSION supabase_vault WITH SCHEMA vault;
         EXCEPTION WHEN OTHERS THEN
             RAISE WARNING 'megabase: extension supabase_vault not created: %', SQLERRM;

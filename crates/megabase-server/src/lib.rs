@@ -192,6 +192,15 @@ async fn health() -> Json<serde_json::Value> {
 pub async fn run(config: Config) -> std::io::Result<()> {
     let mut auth = megabase_auth::AuthState::try_from_env().map_err(std::io::Error::other)?;
     auth.database_url = config.database_url.clone();
+    if auth.mail.smtp_host.is_empty() {
+        info!("GOTRUE_SMTP_HOST empty; recovery email uses the no-op mail client");
+    } else {
+        info!(
+            "recovery email dials SMTP {}:{}; POST /auth/v1/recover returns 500 when it is \
+             unreachable (set GOTRUE_SMTP_HOST= for the no-op mail client)",
+            auth.mail.smtp_host, auth.mail.smtp_port
+        );
+    }
     if let Some(url) = auth.database_url.clone() {
         info!("installing standard roles");
         megabase_auth::install_roles(&url)
@@ -230,6 +239,9 @@ pub async fn run(config: Config) -> std::io::Result<()> {
     let meta = megabase_meta::MetaState::new(pool.clone(), config.jwt_hs256().ok());
     let storage = megabase_storage::StorageState::new(pool, config.jwt_hs256().ok())
         .with_file_root(config.storage_file_path.as_deref());
+    if config.storage_file_path.is_none() {
+        info!("FILE_STORAGE_BACKEND_PATH unset; /storage/v1/object routes answer 501");
+    }
     let functions = megabase_functions::FunctionsState::from_env(&config);
     if !functions.is_enabled() {
         info!("MEGABASE_FUNCTIONS_DIR unset; /functions/v1 answers 501");
