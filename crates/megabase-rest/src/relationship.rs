@@ -289,8 +289,8 @@ pub(crate) enum FindError<'a> {
     NotFound,
     /// `AmbiguousRelBetween` (`PGRST201`), candidates in upstream order.
     Ambiguous(Vec<Candidate<'a>>),
-    /// A shape Megabase does not serve yet: a self-reference, or several
-    /// candidates where a many-to-many link could also match.
+    /// A shape Megabase does not serve yet: a possible many-to-many link,
+    /// or several view relationships matched by a table name.
     Unsupported,
 }
 
@@ -417,7 +417,6 @@ pub(crate) fn find_relationship<'a>(
     matched.sort_by(Candidate::sort_cmp);
     match matched.as_slice() {
         [] => Err(FindError::NotFound),
-        [rel] if rel.is_self => Err(FindError::Unsupported),
         [rel] => Ok(Relationship {
             table: rel.foreign_table.to_string(),
             to_many: rel.cardinality == Cardinality::OneToMany,
@@ -764,27 +763,86 @@ mod tests {
         );
     }
 
-    #[test]
-    fn self_reference_and_junctions_are_unsupported() {
-        let keys = vec![fk(
-            "tree_parent_fkey",
-            "tree",
-            "tree",
-            &[("parent", "id")],
+    /// The issue #378 schema: `categories.parent_id` references `categories.id`.
+    fn categories() -> Vec<ForeignKey> {
+        vec![fk(
+            "categories_parent_id_fkey",
+            "categories",
+            "categories",
+            &[("parent_id", "id")],
             false,
-        )];
+        )]
+    }
+
+    #[test]
+    fn self_reference_by_column_is_the_parent() {
+        let keys = categories();
+        // `categories?select=parent:parent_id(name)`.
+        let rel = find_relationship("public", "categories", "parent_id", &keys).unwrap();
         assert_eq!(
-            find_relationship("public", "tree", "parent", &keys),
-            Err(FindError::Unsupported)
+            rel,
+            Relationship {
+                table: "categories".to_string(),
+                to_many: false,
+                root_columns: vec!["parent_id".to_string()],
+                target_columns: vec!["id".to_string()],
+                column_types: Vec::new(),
+            }
         );
+    }
+
+    #[test]
+    fn self_reference_by_table_is_the_children() {
+        let keys = categories();
+        // `categories?select=children:categories(name)` and
+        // `children:categories!parent_id(name)`.
+        let expected = Relationship {
+            table: "categories".to_string(),
+            to_many: true,
+            root_columns: vec!["id".to_string()],
+            target_columns: vec!["parent_id".to_string()],
+            column_types: Vec::new(),
+        };
+        let rel = find_relationship("public", "categories", "categories", &keys).unwrap();
+        assert_eq!(rel, expected);
+        let rel = hinted("categories", "categories", Some("parent_id"), &keys, &[]).unwrap();
+        assert_eq!(rel, expected);
+    }
+
+    #[test]
+    fn self_reference_rejects_other_shapes() {
+        let keys = categories();
+        // The hint names the referenced column of the child rows only.
         assert_eq!(
-            find_relationship("public", "tree", "tree", &keys),
-            Err(FindError::Unsupported)
+            hinted("categories", "categories", Some("id"), &keys, &[]),
+            Err(FindError::NotFound)
         );
+        // The constraint name is not a self-reference target upstream.
         assert_eq!(
-            hinted("tree", "tree", Some("parent"), &keys, &[]),
-            Err(FindError::Unsupported)
+            find_relationship("public", "categories", "categories_parent_id_fkey", &keys),
+            Err(FindError::NotFound)
         );
+        // Two self keys named by the table are ambiguous.
+        let mut keys = keys;
+        keys.push(fk(
+            "categories_moved_from_fkey",
+            "categories",
+            "categories",
+            &[("moved_from", "id")],
+            false,
+        ));
+        let Err(FindError::Ambiguous(rels)) =
+            find_relationship("public", "categories", "categories", &keys)
+        else {
+            panic!("expected ambiguity");
+        };
+        assert_eq!(rels.len(), 2);
+        let rel = find_relationship("public", "categories", "moved_from", &keys).unwrap();
+        assert_eq!(rel.root_columns, vec!["moved_from".to_string()]);
+    }
+
+    #[test]
+    fn junctions_are_unsupported() {
         // A junction table turns a table-name target or a junction-name hint
         // into a many-to-many link.
         let keys = posts();
