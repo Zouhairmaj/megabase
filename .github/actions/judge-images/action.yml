@@ -41,7 +41,12 @@ runs:
             if [ "$attempt" -ge "$tries" ]; then
               return 1
             fi
-            sleep $((attempt * 5))
+            # ECR Public answers the anonymous data quota with
+            # "toomanyrequests". Back off up to two minutes and add jitter so
+            # parallel Judge shards do not retry in lockstep.
+            wait=$((attempt * 15))
+            [ "$wait" -gt 120 ] && wait=120
+            sleep $((wait + RANDOM % 15))
             attempt=$((attempt + 1))
           done
         }
@@ -74,7 +79,7 @@ runs:
             continue
           fi
           echo "::warning::Could not pull ${mirror}. Falling back to ${upstream} (same digest). Run the Mirror images workflow and make the package public."
-          if ! pull "$upstream" 8; then
+          if ! pull "$upstream" 12; then
             echo "::error::failed to pull ${upstream}"
             exit 1
           fi
