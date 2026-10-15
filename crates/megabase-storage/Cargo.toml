@@ -22,5 +22,9 @@ uuid = { workspace = true }
 [dev-dependencies]
 tower = { workspace = true }
 
+[package.metadata.cargo-machete]
+# `md-5` is imported as `md5`; machete does not follow the rename.
+ignored = ["md-5"]
+
 [lints]
 workspace = true
