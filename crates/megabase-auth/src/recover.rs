@@ -45,6 +45,33 @@ const SMTP_DIAL_TIMEOUT: Duration = Duration::from_secs(10);
 
 const SEND_FAILED: &str = "Error sending recovery email";
 
+/// Which email `send_recovery` hands to the mail client. A magic link is a
+/// recovery token with another template (`sendMagicLink`), so only the
+/// failure message differs.
+#[derive(Clone, Copy)]
+pub(crate) enum RecoveryMail {
+    Recovery,
+    MagicLink,
+}
+
+impl RecoveryMail {
+    fn send_failed(self) -> &'static str {
+        match self {
+            Self::Recovery => SEND_FAILED,
+            Self::MagicLink => "Error sending magic link email",
+        }
+    }
+
+    /// `AuthenticationMethod.String()` of the flow state the PKCE flow
+    /// writes; also its `provider_type`.
+    fn flow_method(self) -> &'static str {
+        match self {
+            Self::Recovery => "recovery",
+            Self::MagicLink => "magiclink",
+        }
+    }
+}
+
 #[derive(Deserialize, Default)]
 struct RecoverBody {
     #[serde(default, deserialize_with = "null_as_default")]
@@ -68,7 +95,7 @@ impl RecoverBody {
 }
 
 /// Why a recovery request stopped after the user lookup.
-enum Stop {
+pub(crate) enum Stop {
     Error(GoTrueError),
     NotPorted,
 }
@@ -123,11 +150,19 @@ pub(crate) async fn recover(
     if pkce {
         // `generateFlowState` commits before the email transaction, so the
         // flow state stays even when the send below fails.
-        if let Err(response) = create_recovery_flow(&state, &user, &params).await {
+        if let Err(response) = create_email_flow(
+            &state,
+            &user,
+            RecoveryMail::Recovery,
+            &params.code_challenge,
+            &params.code_challenge_method,
+        )
+        .await
+        {
             return *response;
         }
     }
-    match send_recovery(&state, &user, pkce).await {
+    match send_recovery(&state, &user, pkce, RecoveryMail::Recovery).await {
         Ok(()) => empty_ok(),
         Err(Stop::Error(error)) => error.into_response(),
         Err(Stop::NotPorted) => {
@@ -140,26 +175,29 @@ fn empty_ok() -> Response {
     (StatusCode::OK, Json(json!({}))).into_response()
 }
 
-/// `generateFlowState(db, "recovery", models.Recovery, ...)`: a PKCE flow
-/// state for the user with a fresh `auth_code`, which `GET /verify` issues
-/// and `grant_type=pkce` redeems.
-async fn create_recovery_flow(
+/// `generateFlowState(db, "recovery", models.Recovery, ...)` (or `magiclink`,
+/// `models.MagicLink` for `POST /magiclink`): a PKCE flow state for the user
+/// with a fresh `auth_code`, which `GET /verify` issues and `grant_type=pkce`
+/// redeems.
+pub(crate) async fn create_email_flow(
     state: &AuthState,
     user: &UserRecord,
-    params: &RecoverBody,
+    mail: RecoveryMail,
+    code_challenge: &str,
+    code_challenge_method: &str,
 ) -> Result<(), Box<Response>> {
     // `ParseCodeChallengeMethod`; its plain error is GoTrue's default 500.
-    let method = params.code_challenge_method.to_ascii_lowercase();
+    let method = code_challenge_method.to_ascii_lowercase();
     if method != "s256" && method != "plain" {
         return Err(Box::new(unhandled()));
     }
     let flow = FlowStateRecord {
-        provider_type: "recovery".into(),
+        provider_type: mail.flow_method().into(),
         auth_code: Some(Uuid::new_v4().to_string()),
-        code_challenge: Some(params.code_challenge.clone()),
+        code_challenge: Some(code_challenge.to_string()),
         code_challenge_method: Some(method),
         user_id: Some(user.id),
-        authentication_method: "recovery".into(),
+        authentication_method: mail.flow_method().into(),
         provider_access_token: String::new(),
         provider_refresh_token: String::new(),
         created_at: None,
@@ -172,41 +210,48 @@ async fn create_recovery_flow(
         .create_flow_state(&flow)
         .await
         .map_err(|error| {
-            tracing::error!(%error, "creating recovery flow state failed");
+            tracing::error!(%error, "creating {} flow state failed", mail.flow_method());
             Box::new(unhandled())
         })?;
     Ok(())
 }
 
-/// `sendPasswordRecovery`. The PKCE flow stores the token hash with a
-/// `pkce_` prefix (`addFlowPrefixToToken`).
-async fn send_recovery(state: &AuthState, user: &UserRecord, pkce: bool) -> Result<(), Stop> {
+/// `sendPasswordRecovery`, or `sendMagicLink`, which differs only in the
+/// template and the failure message. The PKCE flow stores the token hash
+/// with a `pkce_` prefix (`addFlowPrefixToToken`).
+pub(crate) async fn send_recovery(
+    state: &AuthState,
+    user: &UserRecord,
+    pkce: bool,
+    kind: RecoveryMail,
+) -> Result<(), Stop> {
     let mail = &state.mail;
+    let failed = kind.send_failed();
     let sent_at = state
         .backend
         .recovery_sent_at(user.id)
         .await
         .map_err(|error| {
             tracing::error!(%error, "recovery_sent_at lookup failed");
-            unexpected(SEND_FAILED)
+            unexpected(failed)
         })?;
     if let Some(message) = frequency_limited(sent_at, mail.max_frequency, SystemTime::now()) {
         return Err(over_email_limit(message).into());
     }
-    let otp = generate_otp(state.otp_length).map_err(|_| unexpected(SEND_FAILED))?;
+    let otp = generate_otp(state.otp_length).map_err(|_| unexpected(failed))?;
     let mut token_hash = email_otp_hash(&user.email, &otp);
     if pkce {
         token_hash.insert_str(0, "pkce_");
     }
     check_send_allowed(state, &user.email)?;
-    deliver(mail).await?;
+    deliver(mail, failed).await?;
     state
         .backend
         .save_recovery(user, &token_hash, SystemTime::now())
         .await
         .map_err(|error| {
             tracing::error!(%error, "saving recovery token failed");
-            unexpected(SEND_FAILED)
+            unexpected(failed)
         })?;
     Ok(())
 }
@@ -299,9 +344,9 @@ fn strip_labels(email: &str) -> String {
 /// first step of gomail's `DialAndSend` is a TCP dial with a ten-second
 /// timeout; a failed dial is GoTrue's 500. A host that answers would need the
 /// SMTP exchange, which is not ported.
-async fn deliver(mail: &MailConfig) -> Result<(), Stop> {
+async fn deliver(mail: &MailConfig, failed: &'static str) -> Result<(), Stop> {
     if mail.smtp_host.is_empty() {
-        tracing::info!("no SMTP host configured; recovery email not sent (no-op mail client)");
+        tracing::info!("no SMTP host configured; email not sent (no-op mail client)");
         return Ok(());
     }
     let dial = TcpStream::connect((mail.smtp_host.as_str(), mail.smtp_port));
@@ -309,11 +354,11 @@ async fn deliver(mail: &MailConfig) -> Result<(), Stop> {
         Ok(Ok(_stream)) => Err(Stop::NotPorted),
         Ok(Err(error)) => {
             tracing::error!(%error, host = %mail.smtp_host, "SMTP dial failed");
-            Err(unexpected(SEND_FAILED).into())
+            Err(unexpected(failed).into())
         }
         Err(_) => {
             tracing::error!(host = %mail.smtp_host, "SMTP dial timed out");
-            Err(unexpected(SEND_FAILED).into())
+            Err(unexpected(failed).into())
         }
     }
 }

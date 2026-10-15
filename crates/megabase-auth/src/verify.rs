@@ -31,7 +31,6 @@ use crate::token::{authentication_method, null_as_default, unhandled};
 use crate::COMPONENT;
 
 const UNIT_EMAIL: &str = "auth:verify-type:email";
-const UNIT_MAGICLINK: &str = "auth:verify-type:magiclink";
 const UNIT_SMS: &str = "auth:verify-type:sms";
 const UNIT_PHONE_CHANGE: &str = "auth:verify-type:phone_change";
 
@@ -336,6 +335,11 @@ fn known_kind(kind: &str) -> Option<VerifyKind> {
         "invite" => Some(VerifyKind::Invite),
         // megabase:unit auth:verify-type:recovery
         "recovery" => Some(VerifyKind::Recovery),
+        // `MagicLinkVerification` shares every step with recovery: the
+        // `recovery_token`, its expiry, and `recoverVerify`. Only the `type`
+        // in the success redirect differs.
+        // megabase:unit auth:verify-type:magiclink
+        "magiclink" => Some(VerifyKind::Recovery),
         // megabase:unit auth:verify-type:email_change
         "email_change" => Some(VerifyKind::EmailChange),
         _ => None,
@@ -345,7 +349,6 @@ fn known_kind(kind: &str) -> Option<VerifyKind> {
 fn out_of_scope(kind: &str) -> Option<&'static str> {
     match kind {
         "email" => Some(UNIT_EMAIL),
-        "magiclink" => Some(UNIT_MAGICLINK),
         "sms" => Some(UNIT_SMS),
         "phone_change" => Some(UNIT_PHONE_CHANGE),
         _ => None,
@@ -1157,11 +1160,22 @@ mod tests {
             router.clone(),
             "POST",
             "/auth/v1/verify",
-            Some(r#"{"type":"magiclink","token_hash":"x"}"#),
+            Some(r#"{"type":"email","token_hash":"x"}"#),
         )
         .await;
         assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
-        assert_eq!(body["unit"], UNIT_MAGICLINK);
+        assert_eq!(body["unit"], UNIT_EMAIL);
+
+        // `magiclink` is served through the recovery path.
+        let (status, body, _, _) = call(
+            router.clone(),
+            "POST",
+            "/auth/v1/verify",
+            Some(r#"{"type":"magiclink","token_hash":"x"}"#),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_eq!(body["msg"], LINK_EXPIRED);
 
         let (status, body, _, _) = call(
             router.clone(),

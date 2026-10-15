@@ -2,12 +2,12 @@
   "schema": 1,
   "totals": {
     "units": 1031,
-    "implemented": 219,
+    "implemented": 221,
     "tested": 185,
     "conformant": 0
   },
   "percent": {
-    "coverage": 21.2,
+    "coverage": 21.4,
     "conformance": 0.0,
     "done": 0.0
   },
@@ -18,7 +18,7 @@
   "components": {
     "auth": {
       "units": 159,
-      "implemented": 85,
+      "implemented": 87,
       "tested": 79,
       "conformant": 0,
       "groups": {
@@ -36,7 +36,7 @@
         },
         "endpoints": {
           "units": 13,
-          "implemented": 5,
+          "implemented": 6,
           "tested": 4,
           "conformant": 0
         },
@@ -96,7 +96,7 @@
         },
         "verify": {
           "units": 10,
-          "implemented": 6,
+          "implemented": 7,
           "tested": 6,
           "conformant": 0
         },
@@ -601,6 +601,7 @@
     "auth:route:POST /auth/v1/admin/sso/providers": "tested",
     "auth:route:POST /auth/v1/admin/users": "tested",
     "auth:route:POST /auth/v1/logout": "tested",
+    "auth:route:POST /auth/v1/magiclink": "implemented",
     "auth:route:POST /auth/v1/recover": "implemented",
     "auth:route:POST /auth/v1/signup": "tested",
     "auth:route:POST /auth/v1/token": "tested",
@@ -645,6 +646,7 @@
     "auth:sql-table:auth.webauthn_credentials": "tested",
     "auth:verify-type:email_change": "tested",
     "auth:verify-type:invite": "tested",
+    "auth:verify-type:magiclink": "implemented",
     "auth:verify-type:recovery": "tested",
     "auth:verify-type:signup": "tested",
     "functions:route:* /functions/v1/{function_name}": "tested",

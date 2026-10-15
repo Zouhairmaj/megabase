@@ -1,29 +1,42 @@
-// Ported from supabase/auth internal/api/magic_link.go and internal/api/otp.go
-// (MIT), pin v2.197.0.
+// Ported from supabase/auth internal/api/magic_link.go, internal/api/otp.go,
+// internal/api/mail.go (sendMagicLink), and internal/crypto/password.go
+// (GeneratePassword) (MIT), pin v2.197.0.
 
-//! `POST /magiclink` and `POST /otp` up to the mail and SMS step.
+//! `POST /magiclink` and `POST /otp`.
 //!
 //! Provider gates, body decoding, validation, and the `create_user: false`
-//! lookup match GoTrue. Every request that passes them would sign the user up
-//! and send a magic link or an OTP; the mailer and SMS sender are not ported,
-//! so those requests stay 501 before any write or user lookup that could
-//! reveal whether the account exists.
+//! lookup match GoTrue. With autoconfirm on, the email flow is served: a new
+//! address is signed up, then the magic link goes through the same mail
+//! client as `POST /recover` (the no-op client when no SMTP host is set).
+//! With autoconfirm off, a new address would get the signup confirmation
+//! email, which is not ported, so those requests stay 501 before the user
+//! lookup. The SMS sender is not ported either: a phone OTP stays 501.
+
+use std::time::SystemTime;
 
 use axum::body::Body;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
+use axum::Json;
 use megabase_core::MegabaseNotImplemented;
 use serde::de::IgnoredAny;
 use serde::Deserialize;
+use serde_json::{json, Map, Value};
 
-use crate::error::GoTrueError;
+use crate::admin_batch2::random_bytes;
+use crate::error::{unexpected, GoTrueError};
 use crate::gojson;
+use crate::hooks::TokenHookCall;
+use crate::jsonutil::unix_secs;
+use crate::recover::{create_email_flow, send_recovery, RecoveryMail, Stop};
 use crate::routes::{
-    read_body, request_aud, valid_channel, validate_email, validate_pkce, INVALID_CHANNEL,
+    read_body, request_aud, signup_outcome, valid_channel, validate_email, validate_pkce,
+    INVALID_CHANNEL,
 };
 use crate::state::AuthState;
-use crate::store::LoginChannel;
+use crate::store::{LoginChannel, SignupCommand, UserRecord};
+use crate::token::unhandled;
 use crate::user::validate_phone;
 use crate::COMPONENT;
 
@@ -36,6 +49,8 @@ const DECODE_PREFIX: &str = "Could not read verification params: ";
 struct MagicLinkBody {
     #[serde(default)]
     email: String,
+    #[serde(default)]
+    data: Option<Map<String, Value>>,
     #[serde(default)]
     code_challenge_method: String,
     #[serde(default)]
@@ -77,7 +92,12 @@ fn create_user_default() -> bool {
     true
 }
 
-pub(crate) async fn magiclink(State(state): State<AuthState>, body: Body) -> Response {
+// megabase:unit auth:route:POST /auth/v1/magiclink
+pub(crate) async fn magiclink(
+    State(state): State<AuthState>,
+    headers: HeaderMap,
+    body: Body,
+) -> Response {
     if let Some(error) = magic_link_gate(&state) {
         return error.into_response();
     }
@@ -90,9 +110,172 @@ pub(crate) async fn magiclink(State(state): State<AuthState>, body: Body) -> Res
         Err(error) => return error.into_response(),
     };
     match magic_link_params(&bytes) {
-        Ok(()) => MegabaseNotImplemented::new(COMPONENT, UNIT_MAGICLINK).into_response(),
+        Ok(params) => send_magic_link(&state, &headers, params, UNIT_MAGICLINK).await,
         Err(error) => error.into_response(),
     }
+}
+
+/// `MagicLink` after its params are valid: an unknown or unconfirmed
+/// address is signed up first (`Signup` with a random password), then a
+/// confirmed user gets the magic link, a recovery token sent with the magic
+/// link template. The PKCE flow writes a `magiclink` flow state before the
+/// send, as `/recover` does.
+///
+/// With autoconfirm off, the signup sends a confirmation email instead,
+/// which is not ported. That request stays 501 before the user lookup, so
+/// the answer does not depend on whether the account exists.
+async fn send_magic_link(
+    state: &AuthState,
+    headers: &HeaderMap,
+    params: MagicLinkBody,
+    unit: &'static str,
+) -> Response {
+    if !state.config.mailer_autoconfirm {
+        return MegabaseNotImplemented::new(COMPONENT, unit).into_response();
+    }
+    let aud = request_aud(headers, &state.config);
+    let user = match find_confirmed(state, &params.email, &aud).await {
+        Ok(Some(user)) => user,
+        Ok(None) => {
+            if let Err(response) = signup_for_magic_link(state, headers, &params, aud.clone()).await
+            {
+                return *response;
+            }
+            // GoTrue calls `MagicLink` again on the same params; the user
+            // is confirmed now.
+            match find_confirmed(state, &params.email, &aud).await {
+                Ok(Some(user)) => user,
+                Ok(None) => return unhandled(),
+                Err(error) => return error.into_response(),
+            }
+        }
+        Err(error) => return error.into_response(),
+    };
+    let pkce = !params.code_challenge.is_empty();
+    if pkce {
+        if let Err(response) = create_email_flow(
+            state,
+            &user,
+            RecoveryMail::MagicLink,
+            &params.code_challenge,
+            &params.code_challenge_method,
+        )
+        .await
+        {
+            return *response;
+        }
+    }
+    match send_recovery(state, &user, pkce, RecoveryMail::MagicLink).await {
+        Ok(()) => (StatusCode::OK, Json(json!({}))).into_response(),
+        Err(Stop::Error(error)) => error.into_response(),
+        Err(Stop::NotPorted) => MegabaseNotImplemented::new(COMPONENT, unit).into_response(),
+    }
+}
+
+/// `FindUserByEmailAndAudience` followed by `IsConfirmed`: `None` is the
+/// `isNewUser` case (no row, or an unconfirmed email).
+async fn find_confirmed(
+    state: &AuthState,
+    email: &str,
+    aud: &str,
+) -> Result<Option<UserRecord>, GoTrueError> {
+    match state
+        .backend
+        .find_login_user(LoginChannel::Email, email, aud)
+        .await
+    {
+        Ok(user) => Ok(user.filter(|user| user.email_confirmed_at.is_some())),
+        Err(error) => {
+            tracing::error!(%error, "magic link user lookup failed");
+            Err(unexpected("Database error finding user"))
+        }
+    }
+}
+
+/// The `Signup` call `MagicLink` makes for a new address while autoconfirm is
+/// on: a 33-character random password (`crypto.GeneratePassword`), the
+/// request's `data`, and the session `Signup` issues, which is discarded.
+async fn signup_for_magic_link(
+    state: &AuthState,
+    headers: &HeaderMap,
+    params: &MagicLinkBody,
+    aud: String,
+) -> Result<(), Box<Response>> {
+    let config = &state.config;
+    if config.disable_signup {
+        return Err(Box::new(
+            GoTrueError::new(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "signup_disabled",
+                "Signups not allowed for this instance",
+            )
+            .into_response(),
+        ));
+    }
+    if GENERATED_PASSWORD_LENGTH < config.password_min_length {
+        return Err(Box::new(
+            GoTrueError::weak_password(
+                format!(
+                    "Password should be at least {} characters.",
+                    config.password_min_length
+                ),
+                vec!["length"],
+            )
+            .into_response(),
+        ));
+    }
+    if state.jwt.is_none() {
+        return Err(Box::new(
+            unexpected("Server lacks JWT secret").into_response(),
+        ));
+    }
+    let password = generate_password().map_err(|_| Box::new(unhandled()))?;
+    let now = unix_secs(SystemTime::now());
+    // `Signup` issues its session with `models.PasswordGrant`.
+    let hook = TokenHookCall::new(
+        config.custom_access_token_hook.as_ref(),
+        headers,
+        "password",
+        &config.jwt_issuer,
+        now,
+        config.jwt_exp_seconds,
+    );
+    let result = state
+        .backend
+        .signup_email(
+            SignupCommand {
+                email: params.email.clone(),
+                password,
+                aud,
+                role: config.jwt_default_group.clone(),
+                data: params.data.clone().unwrap_or_default(),
+            },
+            hook.as_ref(),
+        )
+        .await;
+    signup_outcome(result).map(drop)
+}
+
+const GENERATED_PASSWORD_LENGTH: usize = 33;
+
+/// `crypto.GeneratePassword(nil, 33)`: letters and digits. GoTrue's
+/// required-character groups are not configurable in Megabase yet.
+fn generate_password() -> Result<String, crate::http::AuthError> {
+    const ALL_CHARS: &[u8] = b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+    // 248 is the largest multiple of 62 below 256; higher bytes are skipped
+    // so every character is equally likely.
+    let mut password = String::with_capacity(GENERATED_PASSWORD_LENGTH);
+    while password.len() < GENERATED_PASSWORD_LENGTH {
+        for byte in random_bytes(GENERATED_PASSWORD_LENGTH)? {
+            if password.len() == GENERATED_PASSWORD_LENGTH {
+                break;
+            }
+            if byte < 248 {
+                password.push(char::from(ALL_CHARS[usize::from(byte) % ALL_CHARS.len()]));
+            }
+        }
+    }
+    Ok(password)
 }
 
 // The `/otp` decode and `create_user` lookup are served; delivery is not.
@@ -128,9 +311,17 @@ pub(crate) async fn otp(
         }
         Err(error) => return error.into_response(),
     }
-    let result = if !params.email.is_empty() {
-        magic_link_gate(&state).map_or_else(|| magic_link_params(&bytes), Err)
-    } else if !params.phone.is_empty() {
+    if !params.email.is_empty() {
+        // `Otp` hands the request to `MagicLink`, which decodes the body again.
+        if let Some(error) = magic_link_gate(&state) {
+            return error.into_response();
+        }
+        return match magic_link_params(&bytes) {
+            Ok(params) => send_magic_link(&state, &headers, params, UNIT_OTP).await,
+            Err(error) => error.into_response(),
+        };
+    }
+    let result = if !params.phone.is_empty() {
         sms_params(&state, &params)
     } else {
         Err(crate::error::validation(
@@ -207,9 +398,10 @@ fn magic_link_gate(state: &AuthState) -> Option<GoTrueError> {
     None
 }
 
-/// `MagicLink` decode and `MagicLinkParams.Validate`.
-fn magic_link_params(bytes: &[u8]) -> Result<(), GoTrueError> {
-    let params = decode_first(bytes)?;
+/// `MagicLink` decode and `MagicLinkParams.Validate`, which lowercases the
+/// email.
+fn magic_link_params(bytes: &[u8]) -> Result<MagicLinkBody, GoTrueError> {
+    let mut params = decode_first(bytes)?;
     if params.email.is_empty() {
         return Err(GoTrueError::new(
             StatusCode::UNPROCESSABLE_ENTITY,
@@ -217,8 +409,9 @@ fn magic_link_params(bytes: &[u8]) -> Result<(), GoTrueError> {
             "Password recovery requires an email",
         ));
     }
-    validate_email(&params.email)?;
-    validate_pkce(&params.code_challenge_method, &params.code_challenge)
+    params.email = validate_email(&params.email)?;
+    validate_pkce(&params.code_challenge_method, &params.code_challenge)?;
+    Ok(params)
 }
 
 /// `json.NewDecoder(r.Body).Decode`: only the first JSON value is read, so
@@ -298,8 +491,14 @@ mod tests {
 
     const CHALLENGE: &str = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQ";
 
+    const SECRET: &str = "your-super-secret-jwt-token-with-at-least-32-characters-long";
+
     fn app(config: AuthConfig, backend: Backend) -> Router {
-        crate::router_with_state(AuthState::new(config, None, backend))
+        let jwt = megabase_core::Hs256::new(SECRET.as_bytes()).unwrap();
+        let mut state = AuthState::new(config, Some(jwt), backend);
+        // No SMTP host: GoTrue's no-op mail client.
+        state.mail.smtp_host = String::new();
+        crate::router_with_state(state)
     }
 
     fn reference() -> Router {
@@ -362,16 +561,18 @@ mod tests {
             "validation_failed",
             "PKCE flow requires code_challenge_method and code_challenge",
         );
-        assert_501(
-            &post(&app, path, r#"{"email":"A@example.com"}"#).await,
-            UNIT_MAGICLINK,
-        );
+        assert_ok(&post(&app, path, r#"{"email":"A@example.com"}"#).await);
         let pkce = json_body(&[
-            ("email", "a@example.com"),
+            ("email", "b@example.com"),
             ("code_challenge", CHALLENGE),
             ("code_challenge_method", "s256"),
         ]);
-        assert_501(&post(&app, path, &pkce).await, UNIT_MAGICLINK);
+        assert_ok(&post(&app, path, &pkce).await);
+    }
+
+    fn assert_ok(result: &(StatusCode, Value)) {
+        assert_eq!(result.0, StatusCode::OK, "{}", result.1);
+        assert_eq!(result.1, serde_json::json!({}));
     }
 
     fn json_body(pairs: &[(&str, &str)]) -> String {
@@ -411,10 +612,7 @@ mod tests {
             "Could not read verification params: json: cannot unmarshal number into Go struct field MagicLinkParams.email of type string",
         );
         // The decoder stops after the first value.
-        assert_501(
-            &post(&app, path, r#"{"email":"a@example.com"} trailing"#).await,
-            UNIT_MAGICLINK,
-        );
+        assert_ok(&post(&app, path, r#"{"email":"a@example.com"} trailing"#).await);
     }
 
     #[tokio::test]
@@ -479,10 +677,7 @@ mod tests {
             "validation_failed",
             "Channel should only be specified with Phone OTP",
         );
-        assert_501(
-            &post(&app, path, r#"{"email":"a@example.com"}"#).await,
-            UNIT_OTP,
-        );
+        assert_ok(&post(&app, path, r#"{"email":"a@example.com"}"#).await);
         assert_error(
             &post(&app, path, r#"{"phone":"abc"}"#).await,
             400,
@@ -544,24 +739,185 @@ mod tests {
             "validation_failed",
             "Unable to validate email address: invalid format",
         );
-        assert_501(
+        // The unconfirmed user is confirmed by `MagicLink`'s signup, then
+        // gets the link.
+        assert_ok(
             &post(
                 &app,
                 path,
                 r#"{"email":"KNOWN@example.com","create_user":false}"#,
             )
             .await,
-            UNIT_OTP,
         );
         // `null` keeps Go's `CreateUser: true`.
-        assert_501(
+        assert_ok(
             &post(
                 &app,
                 path,
                 r#"{"email":"new@example.com","create_user":null}"#,
             )
             .await,
+        );
+    }
+
+    /// RFC 7636 appendix B.
+    const VERIFIER: &str = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
+    const S256_CHALLENGE: &str = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM";
+
+    async fn get_location(app: &Router, path: &str) -> (StatusCode, String) {
+        let request = Request::builder()
+            .method("GET")
+            .uri(path)
+            .body(Body::empty())
+            .unwrap();
+        let response = app.clone().oneshot(request).await.unwrap();
+        let location = response
+            .headers()
+            .get("location")
+            .map(|value| value.to_str().unwrap().to_string())
+            .unwrap_or_default();
+        (response.status(), location)
+    }
+
+    #[tokio::test]
+    async fn pkce_magic_link_signs_up_verifies_and_exchanges() {
+        let backend = Backend::memory();
+        let app = app(AuthConfig::reference_defaults(), backend.clone());
+        let body = serde_json::json!({
+            "email": "New@Example.com",
+            "data": { "name": "Ada" },
+            "code_challenge": S256_CHALLENGE,
+            "code_challenge_method": "S256",
+        })
+        .to_string();
+        assert_ok(&post(&app, "/auth/v1/magiclink", &body).await);
+        let token = backend.recovery_token_for_test("new@example.com").await;
+        assert!(token.starts_with("pkce_"), "{token}");
+
+        let link = format!("/auth/v1/verify?type=magiclink&token={token}");
+        let (status, location) = get_location(&app, &link).await;
+        assert_eq!(status, StatusCode::SEE_OTHER);
+        let code = location
+            .strip_prefix("http://localhost:3000?code=")
+            .unwrap_or_else(|| panic!("{location}"))
+            .to_string();
+
+        let exchange = serde_json::json!({ "auth_code": code, "code_verifier": VERIFIER });
+        let path = "/auth/v1/token?grant_type=pkce";
+        let (status, session) = post(&app, path, &exchange.to_string()).await;
+        assert_eq!(status, StatusCode::OK, "{session}");
+        assert_eq!(session["user"]["email"], "new@example.com");
+        assert_eq!(session["user"]["user_metadata"]["name"], "Ada");
+        assert!(session["user"]["email_confirmed_at"].is_string());
+
+        let (status, again) = post(&app, path, &exchange.to_string()).await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        assert_eq!(again["error_code"], "flow_state_not_found");
+    }
+
+    #[tokio::test]
+    async fn implicit_magic_link_redirects_with_a_session() {
+        let backend = Backend::memory();
+        let app = app(AuthConfig::reference_defaults(), backend.clone());
+        let signup = r#"{"email":"known@example.com","password":"known-password-1"}"#;
+        assert_eq!(
+            post(&app, "/auth/v1/signup", signup).await.0,
+            StatusCode::OK
+        );
+        assert_ok(
+            &post(
+                &app,
+                "/auth/v1/otp",
+                r#"{"email":"known@example.com","create_user":false}"#,
+            )
+            .await,
+        );
+        let token = backend.recovery_token_for_test("known@example.com").await;
+        assert!(!token.is_empty() && !token.starts_with("pkce_"), "{token}");
+        // The signup password is untouched.
+        let login = r#"{"email":"known@example.com","password":"known-password-1"}"#;
+        let (status, _) = post(&app, "/auth/v1/token?grant_type=password", login).await;
+        assert_eq!(status, StatusCode::OK);
+
+        let link = format!("/auth/v1/verify?type=magiclink&token={token}");
+        let (status, location) = get_location(&app, &link).await;
+        assert_eq!(status, StatusCode::SEE_OTHER);
+        assert!(
+            location.starts_with("http://localhost:3000#access_token="),
+            "{location}"
+        );
+        assert!(
+            location.ends_with("&token_type=bearer&type=magiclink"),
+            "{location}"
+        );
+        // The link is single-use.
+        let (_, location) = get_location(&app, &link).await;
+        assert!(location.contains("error_code=otp_expired"), "{location}");
+
+        // A second link within the frequency window is refused.
+        let result = post(
+            &app,
+            "/auth/v1/magiclink",
+            r#"{"email":"known@example.com"}"#,
+        )
+        .await;
+        assert_eq!(result.0, StatusCode::TOO_MANY_REQUESTS, "{}", result.1);
+        assert_eq!(result.1["error_code"], "over_email_send_rate_limit");
+    }
+
+    #[tokio::test]
+    async fn magic_link_signup_gates() {
+        let mut config = AuthConfig::reference_defaults();
+        config.mailer_autoconfirm = false;
+        let backend = Backend::memory();
+        let off = app(config, backend.clone());
+        // Without autoconfirm a new address needs the confirmation email, so
+        // every address stays 501 before the lookup.
+        assert_501(
+            &post(&off, "/auth/v1/magiclink", r#"{"email":"a@example.com"}"#).await,
+            UNIT_MAGICLINK,
+        );
+        assert_501(
+            &post(&off, "/auth/v1/otp", r#"{"email":"a@example.com"}"#).await,
             UNIT_OTP,
         );
+        assert_eq!(backend.recovery_token_for_test("a@example.com").await, "");
+
+        let mut config = AuthConfig::reference_defaults();
+        config.disable_signup = true;
+        let backend = Backend::memory();
+        backend
+            .insert_unconfirmed_for_test("known@example.com", "authenticated", "authenticated", "")
+            .await;
+        let closed = app(config, backend);
+        for email in ["new@example.com", "known@example.com"] {
+            let body = serde_json::json!({ "email": email }).to_string();
+            assert_error(
+                &post(&closed, "/auth/v1/magiclink", &body).await,
+                422,
+                "signup_disabled",
+                "Signups not allowed for this instance",
+            );
+        }
+
+        let mut config = AuthConfig::reference_defaults();
+        config.password_min_length = 40;
+        let strict = app(config, Backend::memory());
+        let result = post(
+            &strict,
+            "/auth/v1/magiclink",
+            r#"{"email":"a@example.com"}"#,
+        )
+        .await;
+        assert_eq!(result.0, StatusCode::UNPROCESSABLE_ENTITY, "{}", result.1);
+        assert_eq!(result.1["error_code"], "weak_password");
+    }
+
+    #[test]
+    fn generated_passwords_are_alphanumeric() {
+        let password = generate_password().unwrap();
+        assert_eq!(password.len(), GENERATED_PASSWORD_LENGTH);
+        assert!(password.bytes().all(|byte| byte.is_ascii_alphanumeric()));
+        assert_ne!(password, generate_password().unwrap());
     }
 }

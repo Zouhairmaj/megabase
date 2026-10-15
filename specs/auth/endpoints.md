@@ -177,15 +177,19 @@ until delivery is ported.
 Unit ids: `auth:route:GET /auth/v1/authorize`,
 `auth:route:GET /auth/v1/callback`, `auth:route:POST /auth/v1/callback`,
 `auth:route:POST /auth/v1/magiclink`, `auth:route:POST /auth/v1/otp`.
-None carries a `megabase:unit` marker yet: each success path needs an OAuth
-provider exchange, the mailer, or an SMS sender, and those stay 501.
+`POST /magiclink` carries a `megabase:unit` marker: with autoconfirm on (the
+judge stack sets `GOTRUE_MAILER_AUTOCONFIRM=true`) its email path goes
+through the same mail client as `POST /recover`. The others have none yet:
+their success paths need an OAuth provider exchange or an SMS sender, which
+stay 501. `POST /otp` serves its email path but not its phone path, which
+the reference stack enables.
 
 | Behavior | File:line (pin) |
 |---|---|
 | Route table | `vendor/auth/internal/api/api.go:210-216` (callback), `:226` (authorize), `:262` (magiclink), `:265` (otp) |
 | Authorize | `vendor/auth/internal/api/external.go:27-139` |
 | Callback | `vendor/auth/internal/api/external.go:142-283`, `:534-599` (state), `:821-897` (`redirectErrors`); `external_oauth.go:31-123` |
-| Magic link | `vendor/auth/internal/api/magic_link.go:25-150` |
+| Magic link | `vendor/auth/internal/api/magic_link.go:25-150`, `mail.go:480-521` (`sendMagicLink`), `crypto/password.go:394` (`GeneratePassword`) |
 | OTP | `vendor/auth/internal/api/otp.go:37-238` |
 
 ### GET /authorize
@@ -252,10 +256,34 @@ body and no `Content-Type`. In order:
    `http: request body too large`. Top-level `null` is an empty request.
 3. Empty email: 422 `validation_failed` / `Password recovery requires an email`.
    Then the signup email validator and PKCE checks.
-4. Every valid request is 501: GoTrue signs an unknown or unconfirmed user up
-   and sends the mail (with the stock stack's unreachable SMTP host that mail
-   fails with 500). No user lookup runs first, so the answer does not reveal
-   whether the account exists.
+4. Autoconfirm off: 501. GoTrue would sign a new address up and send the
+   signup confirmation email, which is not ported. No user lookup runs
+   first, so the answer does not reveal whether the account exists.
+5. The user is looked up by email in the request audience (a database error
+   is 500 `unexpected_failure` / `Database error finding user`). No row, or
+   an unconfirmed email, is a new user: GoTrue runs `Signup` with a
+   33-character random password (letters and digits) and the request's
+   `data`, then calls `MagicLink` again on the same params.
+   - Signups disabled: 422 `signup_disabled` /
+     `Signups not allowed for this instance`.
+   - `GOTRUE_PASSWORD_MIN_LENGTH` above 33: 422 `weak_password` /
+     `Password should be at least <n> characters.`
+   - The signup is the autoconfirm email signup (`token.md`, `POST /signup`):
+     a new user is created confirmed, an unconfirmed one is confirmed
+     without changing its password, and a session is issued and discarded.
+     Its errors are `Signup`'s.
+6. PKCE (`code_challenge` set): an `auth.flow_state` row with `provider_type`
+   and `authentication_method` `magiclink` is written and committed before
+   the email step, as for PKCE `/recover` (`recover.md` step 3a).
+7. `sendMagicLink` is `sendPasswordRecovery` with the magic link template
+   (`recover.md`): the `recovery_sent_at` frequency limit, a new OTP whose
+   hash (`pkce_`-prefixed for PKCE) is stored as `recovery_token` with a
+   `recovery_token` one-time token and a `user_recovery_requested` audit
+   entry, and the same mail client. The only difference is the failure
+   message: 500 `unexpected_failure` / `Error sending magic link email`.
+   A reachable SMTP host is 501, after the signup and flow state writes.
+8. Success: 200 `{}`. The link is `GET /verify?type=magiclink&token=<hash>`
+   (`verify.md`).
 
 ### POST /otp
 
@@ -268,7 +296,8 @@ body and no `Content-Type`. In order:
    the request audience; no row is 422 `otp_disabled` /
    `Signups not allowed for otp`. A database error lets the request through,
    like GoTrue.
-4. Email: the magic link checks above, then 501. Phone: phone provider off is
+4. Email: `MagicLink` on the same body, steps 1 to 8 above (its 501 names
+   unit `auth:route:POST /auth/v1/otp`). Phone: phone provider off is
    400 `phone_provider_disabled` / `Unsupported phone provider`; then E.164
    format and the channel check (`channel` defaults to `sms`), then 501.
    Neither: 400 `One of email or phone must be set`.

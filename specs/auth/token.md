@@ -3,12 +3,13 @@
 Status: partial. `id_token` and `web3` are served up to the provider
 check; they carry no `megabase:unit` marker until verification after an
 enabled provider or chain is ported (it is HTTP 501 today). `pkce` is
-served: PKCE `POST /recover` writes the flow state with its `auth_code`
-(`specs/auth/recover.md`), and `GET /verify` with the emailed `pkce_` link
-issues that code (`specs/auth/verify.md`). The other upstream producers
-(PKCE magic link, PKCE signup with autoconfirm off, `/callback`) are not
-ported; with autoconfirm on, signup creates no flow state
-(`internal/api/signup.go:229-250`).
+served: PKCE `POST /recover` (`specs/auth/recover.md`) and PKCE
+`POST /magiclink` or `POST /otp` with autoconfirm on
+(`specs/auth/endpoints.md`) write the flow state with its `auth_code`, and
+`GET /verify` with the emailed `pkce_` link issues that code
+(`specs/auth/verify.md`). The other upstream producers (PKCE signup with
+autoconfirm off, `/callback`) are not ported; with autoconfirm on, signup
+creates no flow state (`internal/api/signup.go:229-250`).
 Unit ids (`coverage/units.json`): `auth:route:POST /auth/v1/token`,
 `auth:grant-type:password`, `auth:grant-type:refresh_token` (Level 1);
 `auth:grant-type:pkce`, `auth:grant-type:id_token`,

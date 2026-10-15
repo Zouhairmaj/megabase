@@ -4,7 +4,8 @@ Status: complete
 Unit ids (`coverage/units.json`): `auth:route:GET /auth/v1/verify`,
 `auth:route:POST /auth/v1/verify`, `auth:verify-type:signup`,
 `auth:verify-type:invite`, `auth:verify-type:recovery`,
-`auth:verify-type:email_change`
+`auth:verify-type:email_change` (Level 1); `auth:verify-type:magiclink`
+(Level 2)
 Level: 1
 
 `GET` and `POST /auth/v1/verify` redeem a one-time email token and, when the
@@ -20,7 +21,7 @@ returns JSON, including the session.
 | Routes `GET`/`POST /verify` | [`internal/api/api.go:271`](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/api.go#L271) |
 | `Verify`, `verifyGet`, `verifyPost` | [`internal/api/verify.go:95`](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/verify.go#L95) |
 | signup / invite | [`internal/api/verify.go:152`](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/verify.go#L152) |
-| recovery | [`internal/api/verify.go:154`](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/verify.go#L154) |
+| recovery, magiclink | [`internal/api/verify.go:154`](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/verify.go#L154) |
 | email_change | [`internal/api/verify.go:156`](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/verify.go#L156) |
 | Token hash SHA-224 | [`internal/crypto/crypto.go:45`](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/crypto/crypto.go#L45) |
 | Redirect target | [`internal/utilities/request.go:75`](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/utilities/request.go#L75) |
@@ -30,7 +31,10 @@ the credit header required by AGENTS.md.
 
 ## Inputs
 
-Both methods take `type` (`signup`, `invite`, `recovery`, `email_change`).
+Both methods take `type` (`signup`, `invite`, `recovery`, `magiclink`,
+`email_change`). `magiclink` is `recovery` in every step (the
+`recovery_token`, its expiry, `recoverVerify`); only the `type` in the GET
+success fragment differs.
 
 GET reads `token` and `redirect_to` from the query. `token` is stored as the
 token hash (GoTrue copies it onto `token_hash`). The redirect target is the
@@ -114,14 +118,14 @@ A stored hash of `pkce_` plus the SHA-224 still matches an email OTP, and
 `verifyGet` and `issueAuthCode`
 ([`internal/api/verify.go:137`](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/verify.go#L137),
 [`internal/api/pkce.go:42`](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/pkce.go#L42)).
-Such tokens come from PKCE `POST /recover` ([`recover.md`](recover.md)).
+Such tokens come from PKCE `POST /recover` ([`recover.md`](recover.md)) and
+PKCE `POST /magiclink` or `POST /otp` ([`endpoints.md`](endpoints.md)).
 
 1. After the redirect target, `type` is parsed with
    `ParseAuthenticationMethod` (any value ending in `signup` is
    `email/signup`). A type it rejects (`sms`, `phone_change`, `email`, …) is
    a JSON 500 `unexpected_failure` / `Unexpected failure, please check server
-   logs for more information`, before the 501 checks. `magiclink` parses and
-   stays 501.
+   logs for more information`, before the 501 checks. `magiclink` parses.
 2. The token is verified and the user updated exactly as in the implicit
    flow, except that `last_sign_in_at` is not set and no session is issued.
    A missing `JWT_SECRET` does not matter, since nothing is signed.
@@ -159,8 +163,8 @@ invite password hash, which is the same order.
 
 ## Out of scope
 
-`auth:verify-type:email`, `auth:verify-type:magiclink`,
-`auth:verify-type:sms`, and `auth:verify-type:phone_change` return
+`auth:verify-type:email`, `auth:verify-type:sms`, and
+`auth:verify-type:phone_change` return
 HTTP 501 via
 `megabase_core::MegabaseNotImplemented`. Phone OTP on an in-scope type does
 too. Anything not served returns the body

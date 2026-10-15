@@ -38,7 +38,7 @@ use crate::gojson;
 use crate::hooks::TokenHookCall;
 use crate::jsonutil::{session_claims, session_json, unix_secs};
 use crate::state::AuthState;
-use crate::store::{LogoutScope, SignupCommand, SignupResult, StoreError};
+use crate::store::{IssuedSession, LogoutScope, SignupCommand, SignupResult, StoreError};
 use crate::token::null_as_default;
 use crate::COMPONENT;
 
@@ -365,27 +365,9 @@ async fn signup(State(state): State<AuthState>, headers: HeaderMap, body: Body) 
             hook.as_ref(),
         )
         .await;
-    let issued = match result {
-        Ok(SignupResult::Created(issued)) => issued,
-        Ok(SignupResult::AlreadyExists) => {
-            return GoTrueError::new(
-                StatusCode::UNPROCESSABLE_ENTITY,
-                "user_already_exists",
-                "User already registered",
-            )
-            .into_response();
-        }
-        Err(StoreError::Unavailable) => {
-            return unexpected("Database error saving new user").into_response();
-        }
-        Err(StoreError::Hash) => {
-            return unexpected("Database error creating user").into_response();
-        }
-        Err(StoreError::Hook(error)) => return (*error).into_response(),
-        Err(error) => {
-            tracing::error!(%error, "signup failed");
-            return unexpected("Database error saving new user").into_response();
-        }
+    let issued = match signup_outcome(result) {
+        Ok(issued) => issued,
+        Err(response) => return *response,
     };
     let claims = session_claims(
         &issued,
@@ -526,6 +508,30 @@ struct SignupBody {
     code_challenge: String,
     #[serde(default, deserialize_with = "null_as_default")]
     code_challenge_method: String,
+}
+
+/// The autoconfirm email signup's session, or the error response `Signup`
+/// returns for a store result. `POST /magiclink` runs the same signup for a
+/// new address.
+pub(crate) fn signup_outcome(
+    result: Result<SignupResult, StoreError>,
+) -> Result<Box<IssuedSession>, Box<Response>> {
+    let error = match result {
+        Ok(SignupResult::Created(issued)) => return Ok(issued),
+        Ok(SignupResult::AlreadyExists) => GoTrueError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "user_already_exists",
+            "User already registered",
+        ),
+        Err(StoreError::Unavailable) => unexpected("Database error saving new user"),
+        Err(StoreError::Hash) => unexpected("Database error creating user"),
+        Err(StoreError::Hook(error)) => return Err(Box::new((*error).into_response())),
+        Err(error) => {
+            tracing::error!(%error, "signup failed");
+            unexpected("Database error saving new user")
+        }
+    };
+    Err(Box::new(error.into_response()))
 }
 
 fn validate_signup(config: &AuthConfig, params: &SignupBody) -> Result<(), GoTrueError> {
