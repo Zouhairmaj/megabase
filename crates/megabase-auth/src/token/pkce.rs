@@ -35,9 +35,9 @@ struct PkceBody {
     code_verifier: String,
 }
 
-// No `auth:grant-type:pkce` marker yet: no ported route writes an
-// `auth.flow_state` row with an `auth_code`, so a client cannot obtain a
-// redeemable code (see `specs/auth/token.md`).
+// Codes come from PKCE `POST /recover` (the flow state) and `GET /verify`
+// with its `pkce_` link (the issued code).
+// megabase:unit auth:grant-type:pkce
 pub(super) async fn grant(state: AuthState, headers: HeaderMap, body: Body) -> Response {
     let params = match grant_json::<PkceBody>(body, &PKCE_GRANT_PARAMS).await {
         Ok(params) => params,
@@ -124,7 +124,7 @@ fn flow_state_not_found() -> Response {
 
 /// GoTrue's `handleResponseErrorDefault` for an error that is not an
 /// `HTTPError`.
-fn unhandled() -> Response {
+pub(crate) fn unhandled() -> Response {
     GoTrueError::new(
         StatusCode::INTERNAL_SERVER_ERROR,
         "unexpected_failure",
@@ -170,7 +170,7 @@ fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
 
 /// `ParseAuthenticationMethod` followed by `String()`: the AMR method the
 /// session records. Any value ending in `signup` is `email/signup`.
-fn authentication_method(raw: &str) -> Option<&'static str> {
+pub(crate) fn authentication_method(raw: &str) -> Option<&'static str> {
     if raw.ends_with("signup") {
         return Some("email/signup");
     }

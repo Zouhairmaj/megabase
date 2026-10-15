@@ -13,6 +13,8 @@ mod id_token;
 mod pkce;
 mod web3;
 
+pub(crate) use pkce::{authentication_method, unhandled};
+
 use std::time::SystemTime;
 
 use axum::body::Body;

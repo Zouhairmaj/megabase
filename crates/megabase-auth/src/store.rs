@@ -243,11 +243,18 @@ pub struct VerifyRequest {
     pub autoconfirm: bool,
     pub secure_email_change: bool,
     pub otp_exp_seconds: u64,
+    /// PKCE flow (a `pkce_` token on `GET /verify`): the parsed
+    /// `AuthenticationMethod` of the verification type. The verify then
+    /// issues the auth code of the user's latest flow state for that method
+    /// instead of a session (`issueAuthCode`).
+    pub pkce_method: Option<&'static str>,
 }
 
 /// Result of a verify that the database could answer.
 pub enum VerifyOutcome {
     Session(Box<IssuedSession>),
+    /// PKCE flow: the flow state's `auth_code`, now marked issued.
+    AuthCode(String),
     /// First half of a secure email change. No session.
     SingleConfirmation,
     Rejected {
@@ -3274,6 +3281,37 @@ fn user_banned() -> VerifyOutcome {
     }
 }
 
+/// `issueAuthCode` failures, wrapped by `verifyGet` in a 400
+/// `flow_state_not_found` whose message embeds the inner 422 error text.
+fn no_flow_state() -> VerifyOutcome {
+    VerifyOutcome::Rejected {
+        status: 400,
+        error_code: "flow_state_not_found",
+        message: "No associated flow state found. 422: No valid flow state found for user.",
+    }
+}
+
+fn flow_state_not_pkce() -> VerifyOutcome {
+    VerifyOutcome::Rejected {
+        status: 400,
+        error_code: "flow_state_not_found",
+        message: "No associated flow state found. 422: Flow state does not have an auth code (not a PKCE flow).",
+    }
+}
+
+/// `FindFlowStateByUserID`: pop's `Last`, ordered by `created_at DESC, id DESC`.
+fn latest_memory_flow<'a>(
+    flows: &'a mut HashMap<Uuid, FlowStateRecord>,
+    user_id: Uuid,
+    method: &str,
+) -> Option<&'a mut FlowStateRecord> {
+    flows
+        .iter_mut()
+        .filter(|(_, flow)| flow.user_id == Some(user_id) && flow.authentication_method == method)
+        .max_by_key(|(id, flow)| (flow.created_at, **id))
+        .map(|(_, flow)| flow)
+}
+
 fn otp_expired(sent_at: SystemTime, exp_seconds: u64, now: SystemTime) -> bool {
     sent_at
         .checked_add(Duration::from_secs(exp_seconds))
@@ -3509,21 +3547,38 @@ async fn memory_verify(
         return Ok(token_invalid());
     };
     let user_id = found.user_id;
+    // Work on copies so a rejected PKCE auth code leaves the user untouched,
+    // as GoTrue's transaction rollback does.
     let mut user = guard
         .users
-        .remove(&user_id)
+        .get(&user_id)
+        .cloned()
         .ok_or(StoreError::Unavailable)?;
-    let mut tokens = guard.tokens.remove(&user_id).unwrap_or_default();
+    let mut tokens = guard.tokens.get(&user_id).cloned().unwrap_or_default();
     let mut audits = Vec::new();
+    let now = SystemTime::now();
     let (mutated, clear) = mutate_user(
         &mut user,
         &mut tokens,
         found.side,
         request,
         password_hash.as_deref(),
-        SystemTime::now(),
+        now,
         &mut audits,
     )?;
+    let auth_code = match (&mutated, request.pkce_method) {
+        (Mutated::Session, Some(method)) => {
+            let Some(flow) = latest_memory_flow(&mut guard.flow_states, user_id, method) else {
+                return Ok(no_flow_state());
+            };
+            if !flow.is_pkce() {
+                return Ok(flow_state_not_pkce());
+            }
+            flow.auth_code_issued_at = Some(now);
+            Some(flow.auth_code.clone().unwrap_or_default())
+        }
+        _ => None,
+    };
     match clear {
         ClearOtt::All => guard.one_time.retain(|row| row.user_id != user_id),
         ClearOtt::Only(token_type) => guard
@@ -3533,9 +3588,13 @@ async fn memory_verify(
     for note in &audits {
         remember_audit(&user, note.action, note.log_type, note.traits.clone());
     }
-    let outcome = match mutated {
-        Mutated::Single => VerifyOutcome::SingleConfirmation,
-        Mutated::Session => {
+    let outcome = match (mutated, auth_code) {
+        (Mutated::Single, _) => VerifyOutcome::SingleConfirmation,
+        (Mutated::Session, Some(code)) => {
+            reload_confirmed_at(&mut user);
+            VerifyOutcome::AuthCode(code)
+        }
+        (Mutated::Session, None) => {
             user.last_sign_in_at = Some(SystemTime::now());
             user.updated_at = SystemTime::now();
             reload_confirmed_at(&mut user);
@@ -3737,7 +3796,9 @@ async fn postgres_verify(
         &mut audits,
     )?;
     if matches!(mutated, Mutated::Session) {
-        user.last_sign_in_at = Some(now);
+        if request.pkce_method.is_none() {
+            user.last_sign_in_at = Some(now);
+        }
         reload_confirmed_at(&mut user);
     }
     persist_user(&mut tx, &user, &tokens).await?;
@@ -3753,9 +3814,16 @@ async fn postgres_verify(
         )
         .await?;
     }
-    let outcome = match mutated {
-        Mutated::Single => VerifyOutcome::SingleConfirmation,
-        Mutated::Session => {
+    let outcome = match (mutated, request.pkce_method) {
+        (Mutated::Single, _) => VerifyOutcome::SingleConfirmation,
+        (Mutated::Session, Some(method)) => {
+            match issue_auth_code_postgres(&mut tx, user.id, method, now).await? {
+                Ok(code) => VerifyOutcome::AuthCode(code),
+                // Dropping the transaction rolls the verify back.
+                Err(rejected) => return Ok(rejected),
+            }
+        }
+        (Mutated::Session, None) => {
             let Some(mut stored) = find_user_by_id(&mut tx, user.id).await? else {
                 return Err(StoreError::Unavailable);
             };
@@ -3771,6 +3839,44 @@ async fn postgres_verify(
     };
     tx.commit().await?;
     Ok(outcome)
+}
+
+/// `issueAuthCode`: the user's latest flow state for `method` must be PKCE;
+/// its `auth_code_issued_at` is set and its `auth_code` returned.
+async fn issue_auth_code_postgres(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    user_id: Uuid,
+    method: &str,
+    now: SystemTime,
+) -> Result<Result<String, VerifyOutcome>, StoreError> {
+    use sqlx::Row;
+    let row = sqlx::query(
+        "SELECT id, auth_code, code_challenge FROM auth.flow_state
+         WHERE user_id = $1::uuid AND authentication_method = $2
+         ORDER BY created_at DESC, id DESC LIMIT 1",
+    )
+    .bind(user_id)
+    .bind(method)
+    .fetch_optional(&mut **tx)
+    .await?;
+    let Some(row) = row else {
+        return Ok(Err(no_flow_state()));
+    };
+    let challenge: Option<String> = row.try_get("code_challenge")?;
+    if challenge.is_none_or(|challenge| challenge.is_empty()) {
+        return Ok(Err(flow_state_not_pkce()));
+    }
+    let id: Uuid = row.try_get("id")?;
+    let code: Option<String> = row.try_get("auth_code")?;
+    sqlx::query(
+        "UPDATE auth.flow_state SET auth_code_issued_at = $2, updated_at = $2
+         WHERE id = $1::uuid",
+    )
+    .bind(id)
+    .bind(ts(now))
+    .execute(&mut **tx)
+    .await?;
+    Ok(Ok(code.unwrap_or_default()))
 }
 
 async fn locate_postgres(

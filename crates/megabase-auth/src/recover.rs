@@ -1,6 +1,7 @@
 // Ported from supabase/auth internal/api/recover.go, internal/api/mail.go
 // (sendPasswordRecovery, sendEmail, checkEmailAddressAuthorization,
-// validateSentWithinFrequencyLimit), internal/api/errors.go, and
+// validateSentWithinFrequencyLimit), internal/api/errors.go,
+// internal/api/pkce.go, internal/models/flow_state.go, and
 // internal/mailer/templatemailer/template.go (MIT), pin v2.197.0.
 
 //! `POST /recover`: start password recovery for an email address.
@@ -12,8 +13,9 @@
 //! token is stored for `POST /verify`. An SMTP host that cannot be reached
 //! fails the way GoTrue's dialer does (500, nothing stored). A reachable host
 //! would need the SMTP conversation, templates, and TLS, which are not
-//! ported, so that request stays 501. The PKCE flow (`code_challenge`) also
-//! stays 501.
+//! ported, so that request stays 501. The PKCE flow (`code_challenge`) first
+//! writes an `auth.flow_state` row with an auth code and stores the token
+//! with a `pkce_` prefix; `GET /verify` then redirects with that code.
 
 use std::time::{Duration, SystemTime};
 
@@ -31,9 +33,10 @@ use crate::admin_batch2::generate_otp;
 use crate::error::{bad_json, go_quote, unexpected, validation, GoTrueError};
 use crate::routes::{read_body, request_aud, validate_email, validate_pkce};
 use crate::state::{AuthState, MailConfig};
-use crate::store::{email_otp_hash, LoginChannel};
-use crate::token::null_as_default;
+use crate::store::{email_otp_hash, FlowStateRecord, LoginChannel, UserRecord};
+use crate::token::{null_as_default, unhandled};
 use crate::COMPONENT;
+use uuid::Uuid;
 
 const UNIT_RECOVER: &str = "auth:route:POST /auth/v1/recover";
 
@@ -116,12 +119,15 @@ pub(crate) async fn recover(
             return unexpected("Unable to process request").into_response();
         }
     };
-    if !params.code_challenge.is_empty() {
-        // PKCE recovery writes `auth.flow_state` and a `pkce_` token prefix
-        // that verify does not exchange yet.
-        return MegabaseNotImplemented::new(COMPONENT, UNIT_RECOVER).into_response();
+    let pkce = !params.code_challenge.is_empty();
+    if pkce {
+        // `generateFlowState` commits before the email transaction, so the
+        // flow state stays even when the send below fails.
+        if let Err(response) = create_recovery_flow(&state, &user, &params).await {
+            return response;
+        }
     }
-    match send_recovery(&state, &user).await {
+    match send_recovery(&state, &user, pkce).await {
         Ok(()) => empty_ok(),
         Err(Stop::Error(error)) => error.into_response(),
         Err(Stop::NotPorted) => {
@@ -134,8 +140,47 @@ fn empty_ok() -> Response {
     (StatusCode::OK, Json(json!({}))).into_response()
 }
 
-/// `sendPasswordRecovery` for the implicit flow.
-async fn send_recovery(state: &AuthState, user: &crate::store::UserRecord) -> Result<(), Stop> {
+/// `generateFlowState(db, "recovery", models.Recovery, ...)`: a PKCE flow
+/// state for the user with a fresh `auth_code`, which `GET /verify` issues
+/// and `grant_type=pkce` redeems.
+async fn create_recovery_flow(
+    state: &AuthState,
+    user: &UserRecord,
+    params: &RecoverBody,
+) -> Result<(), Response> {
+    // `ParseCodeChallengeMethod`; its plain error is GoTrue's default 500.
+    let method = params.code_challenge_method.to_ascii_lowercase();
+    if method != "s256" && method != "plain" {
+        return Err(unhandled());
+    }
+    let flow = FlowStateRecord {
+        provider_type: "recovery".into(),
+        auth_code: Some(Uuid::new_v4().to_string()),
+        code_challenge: Some(params.code_challenge.clone()),
+        code_challenge_method: Some(method),
+        user_id: Some(user.id),
+        authentication_method: "recovery".into(),
+        provider_access_token: String::new(),
+        provider_refresh_token: String::new(),
+        created_at: None,
+        auth_code_issued_at: None,
+        referrer: None,
+        linking_target_id: None,
+    };
+    state
+        .backend
+        .create_flow_state(&flow)
+        .await
+        .map_err(|error| {
+            tracing::error!(%error, "creating recovery flow state failed");
+            unhandled()
+        })?;
+    Ok(())
+}
+
+/// `sendPasswordRecovery`. The PKCE flow stores the token hash with a
+/// `pkce_` prefix (`addFlowPrefixToToken`).
+async fn send_recovery(state: &AuthState, user: &UserRecord, pkce: bool) -> Result<(), Stop> {
     let mail = &state.mail;
     let sent_at = state
         .backend
@@ -149,7 +194,10 @@ async fn send_recovery(state: &AuthState, user: &crate::store::UserRecord) -> Re
         return Err(over_email_limit(message).into());
     }
     let otp = generate_otp(state.otp_length).map_err(|_| unexpected(SEND_FAILED))?;
-    let token_hash = email_otp_hash(&user.email, &otp);
+    let mut token_hash = email_otp_hash(&user.email, &otp);
+    if pkce {
+        token_hash.insert_str(0, "pkce_");
+    }
     check_send_allowed(state, &user.email)?;
     deliver(mail).await?;
     state
@@ -480,8 +528,106 @@ mod tests {
         );
     }
 
+    /// RFC 7636 appendix B, as in upstream `internal/security/pkce_test.go`.
+    const VERIFIER: &str = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
+    const CHALLENGE: &str = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM";
+
+    async fn get_location(app: &Router, path: &str) -> (StatusCode, String) {
+        let request = Request::builder()
+            .method("GET")
+            .uri(path)
+            .body(Body::empty())
+            .unwrap();
+        let response = app.clone().oneshot(request).await.unwrap();
+        let location = response
+            .headers()
+            .get("location")
+            .map(|value| value.to_str().unwrap().to_string())
+            .unwrap_or_default();
+        (response.status(), location)
+    }
+
     #[tokio::test]
-    async fn reachable_smtp_host_and_pkce_stay_501() {
+    async fn pkce_recover_verify_then_exchange_the_code() {
+        let (app, backend) = app_with("", 0);
+        signup(&app, "real@example.com", &test_password()).await;
+        let body = json!({
+            "email": "real@example.com",
+            "code_challenge": CHALLENGE,
+            "code_challenge_method": "S256",
+        })
+        .to_string();
+        let (status, json) = call(&app, "POST", "/auth/v1/recover", &body, "").await;
+        assert_eq!(status, StatusCode::OK, "{json}");
+        assert_eq!(json, json!({}));
+        let token = backend.recovery_token_for_test("real@example.com").await;
+        assert!(token.starts_with("pkce_"), "{token}");
+        assert_eq!(token.len(), 5 + 56);
+
+        let link = format!("/auth/v1/verify?type=recovery&token={token}");
+        let (status, location) = get_location(&app, &link).await;
+        assert_eq!(status, StatusCode::SEE_OTHER);
+        let code = location
+            .strip_prefix("http://localhost:3000?code=")
+            .unwrap_or_else(|| panic!("{location}"))
+            .to_string();
+        assert_eq!(code.len(), 36, "a UUID auth code");
+
+        let exchange =
+            |verifier: &str| json!({ "auth_code": code, "code_verifier": verifier }).to_string();
+        let path = "/auth/v1/token?grant_type=pkce";
+        let (status, json) = call(&app, "POST", path, &exchange("wrong"), "").await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(json["error_code"], "bad_code_verifier");
+        let (status, session) = call(&app, "POST", path, &exchange(VERIFIER), "").await;
+        assert_eq!(status, StatusCode::OK, "{session}");
+        assert_eq!(session["user"]["email"], "real@example.com");
+        let access = session["access_token"].as_str().unwrap().to_string();
+        let (status, json) = call(
+            &app,
+            "PUT",
+            "/auth/v1/user",
+            r#"{"password":"brand-new-1"}"#,
+            &access,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{json}");
+
+        // The code and the link are both single-use.
+        let (status, json) = call(&app, "POST", path, &exchange(VERIFIER), "").await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        assert_eq!(json["error_code"], "flow_state_not_found");
+        let (status, location) = get_location(&app, &link).await;
+        assert_eq!(status, StatusCode::SEE_OTHER);
+        assert!(
+            location
+                .starts_with("http://localhost:3000?error=access_denied&error_code=otp_expired&"),
+            "{location}"
+        );
+        assert!(location.ends_with("&sb="), "{location}");
+    }
+
+    #[tokio::test]
+    async fn pkce_recover_rejects_an_unknown_challenge_method() {
+        let (app, backend) = app_with("", 0);
+        signup(&app, "real@example.com", &test_password()).await;
+        let body = json!({
+            "email": "real@example.com",
+            "code_challenge": CHALLENGE,
+            "code_challenge_method": "sha1",
+        })
+        .to_string();
+        let (status, json) = call(&app, "POST", "/auth/v1/recover", &body, "").await;
+        assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(json["error_code"], "unexpected_failure");
+        assert_eq!(
+            backend.recovery_token_for_test("real@example.com").await,
+            ""
+        );
+    }
+
+    #[tokio::test]
+    async fn reachable_smtp_host_stays_501_for_both_flows() {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = listener.local_addr().unwrap().port();
         let (app, backend) = app_with("127.0.0.1", port);

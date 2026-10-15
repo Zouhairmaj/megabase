@@ -1,12 +1,14 @@
 // Ported from supabase/auth internal/api/verify.go, internal/api/mail.go,
-// internal/api/errors.go, internal/utilities/request.go, and
-// internal/crypto/crypto.go (MIT), pin v2.197.0.
+// internal/api/errors.go, internal/api/pkce.go, internal/utilities/request.go,
+// and internal/crypto/crypto.go (MIT), pin v2.197.0.
 
 //! `GET` and `POST /auth/v1/verify` for signup, invite, recovery, and email change.
 //!
 //! GET validation failures stay JSON. Later GET failures are 303 redirects
-//! whose fragment matches GoTrue. POST failures stay JSON. Magic link, SMS,
-//! phone change, the `email` OTP type, and PKCE stay HTTP 501.
+//! whose fragment matches GoTrue. POST failures stay JSON. A GET `pkce_`
+//! token is the PKCE flow: success redirects with `?code=<auth_code>`
+//! instead of a session, and errors also go in the query. Magic link, SMS,
+//! phone change, and the `email` OTP type stay HTTP 501.
 
 use std::time::SystemTime;
 
@@ -25,14 +27,13 @@ use crate::routes::{insert_header, query_param, read_body, request_aud, validate
 use crate::state::AuthState;
 use crate::store::StoreError;
 use crate::store::{email_otp_hash, VerifyKind, VerifyOutcome, VerifyRequest, SINGLE_CONFIRMATION};
-use crate::token::null_as_default;
+use crate::token::{authentication_method, null_as_default, unhandled};
 use crate::COMPONENT;
 
 const UNIT_EMAIL: &str = "auth:verify-type:email";
 const UNIT_MAGICLINK: &str = "auth:verify-type:magiclink";
 const UNIT_SMS: &str = "auth:verify-type:sms";
 const UNIT_PHONE_CHANGE: &str = "auth:verify-type:phone_change";
-const UNIT_PKCE: &str = "auth:grant-type:pkce";
 
 #[derive(Debug, Deserialize)]
 struct VerifyBody {
@@ -90,19 +91,28 @@ pub(crate) async fn verify_get(
             return MegabaseNotImplemented::new(COMPONENT, "GOTRUE_URI_ALLOW_LIST").into_response();
         }
     };
-    if params.token.starts_with("pkce_") {
-        return MegabaseNotImplemented::new(COMPONENT, UNIT_PKCE).into_response();
-    }
+    // A `pkce_` token is the PKCE flow: the type must parse as an
+    // `AuthenticationMethod` (a plain error there is GoTrue's JSON 500), and
+    // a successful verify issues an auth code instead of a session.
+    let pkce_method = if params.token.starts_with("pkce_") {
+        match authentication_method(&params.kind) {
+            Some(method) => Some(method),
+            None => return unhandled(),
+        }
+    } else {
+        None
+    };
+    let pkce = pkce_method.is_some();
     if let Some(unit) = out_of_scope(&params.kind) {
         return MegabaseNotImplemented::new(COMPONENT, unit).into_response();
     }
+    let fail = |status: u16, error_code: &str, message: &str| {
+        see_other(&error_redirect(
+            &redirect, pkce, status, error_code, message,
+        ))
+    };
     let Some(kind) = known_kind(&params.kind) else {
-        return see_other(&error_redirect(
-            &redirect,
-            400,
-            "validation_failed",
-            "Invalid email verification type",
-        ));
+        return fail(400, "validation_failed", "Invalid email verification type");
     };
     let request = VerifyRequest {
         kind,
@@ -113,17 +123,14 @@ pub(crate) async fn verify_get(
         autoconfirm: state.config.mailer_autoconfirm,
         secure_email_change: state.config.secure_email_change,
         otp_exp_seconds: state.config.mailer_otp_exp_seconds,
+        pkce_method,
     };
     // Signing happens after the one-time token is cleared. GoTrue rolls that
     // write back when the signer is missing; reject here so the token stays.
-    if state.jwt.is_none() {
+    // The PKCE flow signs nothing.
+    if state.jwt.is_none() && !pkce {
         let error = unexpected("Server lacks JWT secret");
-        return see_other(&error_redirect(
-            &redirect,
-            error.status.as_u16(),
-            error.error_code,
-            &error.message,
-        ));
+        return fail(error.status.as_u16(), error.error_code, &error.message);
     }
     let now = unix_secs(SystemTime::now());
     let hook = otp_hook(&state, &headers, now);
@@ -132,33 +139,27 @@ pub(crate) async fn verify_get(
             status,
             error_code,
             message,
-        }) => see_other(&error_redirect(&redirect, status, error_code, message)),
+        }) => fail(status, error_code, message),
         Ok(VerifyOutcome::SingleConfirmation) => {
-            see_other(&message_redirect(&redirect, SINGLE_CONFIRMATION))
+            see_other(&message_redirect(&redirect, pkce, SINGLE_CONFIRMATION))
         }
         Err(StoreError::Hook(error)) => match error.redirect_parts() {
-            Some((status, error_code, message)) => {
-                see_other(&error_redirect(&redirect, status, error_code, &message))
-            }
+            Some((status, error_code, message)) => fail(status, error_code, &message),
             None => (*error).into_response(),
         },
+        // `prepPKCERedirectURL`.
+        Ok(VerifyOutcome::AuthCode(code)) => see_other(&with_query(&redirect, &[("code", &code)])),
         Ok(VerifyOutcome::Session(issued)) => match sign_session(&state, &issued, now) {
             Ok(signed) => see_other(&success_redirect(&redirect, &params.kind, &signed)),
-            Err(error) => see_other(&error_redirect(
-                &redirect,
-                error.status.as_u16(),
-                error.error_code,
-                &error.message,
-            )),
+            Err(error) => fail(error.status.as_u16(), error.error_code, &error.message),
         },
         Err(error) => {
             let failure = store_failure(true, &error);
-            see_other(&error_redirect(
-                &redirect,
+            fail(
                 failure.status.as_u16(),
                 failure.error_code,
                 &failure.message,
-            ))
+            )
         }
     }
 }
@@ -216,6 +217,8 @@ pub(crate) async fn verify_post(
         autoconfirm: state.config.mailer_autoconfirm,
         secure_email_change: state.config.secure_email_change,
         otp_exp_seconds: state.config.mailer_otp_exp_seconds,
+        // `verifyPost` always issues a session, whatever the token prefix.
+        pkce_method: None,
     };
     if state.jwt.is_none() {
         return unexpected("Server lacks JWT secret").into_response();
@@ -242,6 +245,8 @@ pub(crate) async fn verify_post(
             Ok(signed) => signed.response,
             Err(error) => error.into_response(),
         },
+        // Not produced without `pkce_method`.
+        Ok(VerifyOutcome::AuthCode(_)) => unhandled(),
         Err(StoreError::Hook(error)) => (*error).into_response(),
         Err(error) => store_failure(prepared.hash_path, &error).into_response(),
     }
@@ -411,7 +416,15 @@ fn see_other(url: &str) -> Response {
         .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
 }
 
-fn error_redirect(base: &str, status: u16, error_code: &str, description: &str) -> String {
+/// `prepErrorRedirectURL`: the error goes in the fragment, and for the PKCE
+/// flow also in the query.
+fn error_redirect(
+    base: &str,
+    pkce: bool,
+    status: u16,
+    error_code: &str,
+    description: &str,
+) -> String {
     let oauth = match status {
         400 => "invalid_request",
         401 => "unauthorized_client",
@@ -420,25 +433,104 @@ fn error_redirect(base: &str, status: u16, error_code: &str, description: &str) 
         503 => "temporarily_unavailable",
         _ => "",
     };
-    let fragment = if oauth.is_empty() {
-        form_encode(&[
-            ("error_code", error_code),
-            ("error_description", description),
-            ("sb", ""),
-        ])
+    let mut pairs = Vec::with_capacity(3);
+    if !oauth.is_empty() {
+        pairs.push(("error", oauth));
+    }
+    pairs.push(("error_code", error_code));
+    pairs.push(("error_description", description));
+    let base = if pkce {
+        with_query(base, &pairs)
     } else {
-        form_encode(&[
-            ("error", oauth),
-            ("error_code", error_code),
-            ("error_description", description),
-            ("sb", ""),
-        ])
+        base.to_string()
     };
-    set_fragment(base, &fragment)
+    pairs.push(("sb", ""));
+    set_fragment(&base, &form_encode(&pairs))
 }
 
-fn message_redirect(base: &str, message: &str) -> String {
-    set_fragment(base, &form_encode(&[("message", message), ("sb", "")]))
+/// `prepRedirectURL`: the message goes in the fragment, and for the PKCE
+/// flow also in the query.
+fn message_redirect(base: &str, pkce: bool, message: &str) -> String {
+    let base = if pkce {
+        with_query(base, &[("message", message)])
+    } else {
+        base.to_string()
+    };
+    set_fragment(&base, &form_encode(&[("message", message), ("sb", "")]))
+}
+
+/// Go `q := u.Query(); q.Set(...); u.RawQuery = q.Encode()`: the existing
+/// query is parsed (pairs Go rejects are dropped), `pairs` replace their
+/// keys, and the result is re-encoded with sorted keys. The fragment stays.
+fn with_query(url: &str, pairs: &[(&str, &str)]) -> String {
+    let (head, fragment) = match url.split_once('#') {
+        Some((head, fragment)) => (head, Some(fragment)),
+        None => (url, None),
+    };
+    let (path, query) = head.split_once('?').unwrap_or((head, ""));
+    let mut values: std::collections::BTreeMap<String, Vec<String>> =
+        std::collections::BTreeMap::new();
+    for pair in query.split('&') {
+        if pair.is_empty() || pair.contains(';') {
+            continue;
+        }
+        let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
+        if let (Some(key), Some(value)) = (query_unescape(key), query_unescape(value)) {
+            values.entry(key).or_default().push(value);
+        }
+    }
+    for (key, value) in pairs {
+        values.insert((*key).to_string(), vec![(*value).to_string()]);
+    }
+    let encoded = values
+        .iter()
+        .flat_map(|(key, list)| {
+            list.iter()
+                .map(move |value| format!("{}={}", query_escape(key), query_escape(value)))
+        })
+        .collect::<Vec<_>>()
+        .join("&");
+    let mut out = path.to_string();
+    if !encoded.is_empty() {
+        out.push('?');
+        out.push_str(&encoded);
+    }
+    if let Some(fragment) = fragment {
+        out.push('#');
+        out.push_str(fragment);
+    }
+    out
+}
+
+/// Go `url.QueryUnescape`: `+` is a space and a bad `%` escape fails. A
+/// value that decodes to invalid UTF-8 (which Go would keep as raw bytes)
+/// is dropped as well.
+fn query_unescape(input: &str) -> Option<String> {
+    let bytes = input.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        match bytes[index] {
+            b'+' => {
+                out.push(b' ');
+                index += 1;
+            }
+            b'%' => {
+                let hex = bytes.get(index + 1..index + 3)?;
+                if !hex.iter().all(u8::is_ascii_hexdigit) {
+                    return None;
+                }
+                let text = std::str::from_utf8(hex).ok()?;
+                out.push(u8::from_str_radix(text, 16).ok()?);
+                index += 3;
+            }
+            byte => {
+                out.push(byte);
+                index += 1;
+            }
+        }
+    }
+    String::from_utf8(out).ok()
 }
 
 fn success_redirect(base: &str, kind: &str, signed: &SignedSession) -> String {
@@ -594,11 +686,62 @@ mod tests {
 
     #[test]
     fn redirect_fragment_matches_gotrue() {
-        let url = error_redirect("http://localhost:3000", 403, "otp_expired", LINK_EXPIRED);
+        let url = error_redirect(
+            "http://localhost:3000",
+            false,
+            403,
+            "otp_expired",
+            LINK_EXPIRED,
+        );
         assert_eq!(url, expired_location());
         let html = format!("<a href=\"{}\">See Other</a>.\n\n", html_escape(&url));
         assert!(html.contains("&amp;"));
         assert!(html.ends_with(".\n\n"));
+    }
+
+    #[test]
+    fn pkce_redirects_rewrite_the_query_like_go() {
+        assert_eq!(
+            with_query(
+                "http://localhost:3000/cb?z=1&a=x+y&bad=%zz#keep",
+                &[("code", "c-1")]
+            ),
+            "http://localhost:3000/cb?a=x+y&code=c-1&z=1#keep"
+        );
+        assert_eq!(
+            with_query("http://localhost:3000?code=old", &[("code", "new")]),
+            "http://localhost:3000?code=new"
+        );
+        assert_eq!(
+            error_redirect("http://localhost:3000", true, 403, "otp_expired", LINK_EXPIRED),
+            "http://localhost:3000?error=access_denied&error_code=otp_expired&error_description=Email+link+is+invalid+or+has+expired#error=access_denied&error_code=otp_expired&error_description=Email+link+is+invalid+or+has+expired&sb="
+        );
+        assert_eq!(
+            message_redirect("http://localhost:3000", true, "hi there"),
+            "http://localhost:3000?message=hi+there#message=hi+there&sb="
+        );
+    }
+
+    #[tokio::test]
+    async fn pkce_verify_without_a_flow_state_rolls_back() {
+        let backend = Backend::memory();
+        backend
+            .plant_verification_for_test("pkce@example.com", "pkce_abc", PlantFlags::default())
+            .await;
+        let router = app(false, backend);
+        let expected = "http://localhost:3000?error=invalid_request&error_code=flow_state_not_found&error_description=No+associated+flow+state+found.+422%3A+No+valid+flow+state+found+for+user.#error=invalid_request&error_code=flow_state_not_found&error_description=No+associated+flow+state+found.+422%3A+No+valid+flow+state+found+for+user.&sb=";
+        // Twice: the rejected auth code leaves the token in place.
+        for _ in 0..2 {
+            let (status, _, headers, _) = call(
+                router.clone(),
+                "GET",
+                "/auth/v1/verify?type=signup&token=pkce_abc",
+                None,
+            )
+            .await;
+            assert_eq!(status, StatusCode::SEE_OTHER);
+            assert_eq!(headers[header::LOCATION], expected);
+        }
     }
 
     #[test]
@@ -1023,12 +1166,13 @@ mod tests {
         let (status, body, _, _) = call(
             router.clone(),
             "GET",
-            "/auth/v1/verify?type=signup&token=pkce_abc",
+            "/auth/v1/verify?type=sms&token=pkce_abc",
             None,
         )
         .await;
-        assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
-        assert_eq!(body["unit"], UNIT_PKCE);
+        // `ParseAuthenticationMethod("sms")` fails before the 501 checks.
+        assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(body["error_code"], "unexpected_failure");
 
         let router = app(true, Backend::none());
         let (status, body, _, _) = call(

@@ -1,8 +1,9 @@
 // Ported from supabase/auth internal/api/token.go (PKCE),
-// internal/models/flow_state.go, and internal/tokens/service.go (MIT),
+// internal/api/pkce.go, internal/models/flow_state.go, and internal/tokens/service.go (MIT),
 // pin v2.197.0.
 
-//! `auth.flow_state` reads and the session write for `grant_type=pkce`.
+//! `auth.flow_state` writes and reads, and the session write for
+//! `grant_type=pkce`.
 
 use std::time::SystemTime;
 
@@ -27,6 +28,56 @@ pub struct PkceRedemption<'a> {
 }
 
 impl Backend {
+    /// `generateFlowState`: insert an `auth.flow_state` row and return its
+    /// new id. `created_at` and `updated_at` are `flow.created_at`, or now.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] when the database is missing or the insert fails.
+    pub async fn create_flow_state(&self, flow: &FlowStateRecord) -> Result<Uuid, StoreError> {
+        let id = Uuid::new_v4();
+        let created_at = flow.created_at.unwrap_or_else(SystemTime::now);
+        match &self.inner {
+            BackendKind::None => Err(StoreError::Unavailable),
+            BackendKind::Memory(db) => {
+                let mut stored = flow.clone();
+                stored.created_at = Some(created_at);
+                db.lock().await.flow_states.insert(id, stored);
+                Ok(id)
+            }
+            BackendKind::Postgres(pg) => {
+                timed(async {
+                    sqlx::query(
+                        "INSERT INTO auth.flow_state
+                             (id, user_id, auth_code, code_challenge_method, code_challenge,
+                              provider_type, provider_access_token, provider_refresh_token,
+                              created_at, updated_at, authentication_method,
+                              auth_code_issued_at, referrer, linking_target_id)
+                         VALUES ($1::uuid, $2::uuid, $3, $4::auth.code_challenge_method, $5,
+                                 $6, $7, $8, $9, $9, $10, $11, $12, $13::uuid)",
+                    )
+                    .bind(id)
+                    .bind(flow.user_id)
+                    .bind(flow.auth_code.as_deref())
+                    .bind(flow.code_challenge_method.as_deref())
+                    .bind(flow.code_challenge.as_deref())
+                    .bind(&flow.provider_type)
+                    .bind(&flow.provider_access_token)
+                    .bind(&flow.provider_refresh_token)
+                    .bind(ts(created_at))
+                    .bind(&flow.authentication_method)
+                    .bind(flow.auth_code_issued_at.map(ts))
+                    .bind(flow.referrer.as_deref())
+                    .bind(flow.linking_target_id)
+                    .execute(&pg.pool)
+                    .await?;
+                    Ok(id)
+                })
+                .await
+            }
+        }
+    }
+
     /// `FindFlowStateByAuthCode`: the first `auth.flow_state` row whose
     /// `auth_code` matches, with its id.
     ///

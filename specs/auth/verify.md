@@ -106,8 +106,44 @@ Expiry is strict: the token is expired only when now is after `sent_at + GOTRUE_
 
 ## Edge cases
 
-A stored hash of `pkce_` plus the SHA-224 still matches an email OTP. GET
-`token` values that start with `pkce_` are the PKCE grant and return 501.
+A stored hash of `pkce_` plus the SHA-224 still matches an email OTP, and
+`POST` always issues a session, whatever the prefix.
+
+### PKCE flow (`GET` with a `pkce_` token)
+
+`verifyGet` and `issueAuthCode`
+([`internal/api/verify.go:137`](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/verify.go#L137),
+[`internal/api/pkce.go:42`](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/pkce.go#L42)).
+Such tokens come from PKCE `POST /recover` ([`recover.md`](recover.md)).
+
+1. After the redirect target, `type` is parsed with
+   `ParseAuthenticationMethod` (any value ending in `signup` is
+   `email/signup`). A type it rejects (`sms`, `phone_change`, `email`, …) is
+   a JSON 500 `unexpected_failure` / `Unexpected failure, please check server
+   logs for more information`, before the 501 checks. `magiclink` parses and
+   stays 501.
+2. The token is verified and the user updated exactly as in the implicit
+   flow, except that `last_sign_in_at` is not set and no session is issued.
+   A missing `JWT_SECRET` does not matter, since nothing is signed.
+3. In the same transaction, the user's latest `auth.flow_state` row for that
+   method (`user_id` and `authentication_method`, `created_at DESC, id
+   DESC`) must exist and have a code challenge. Its `auth_code_issued_at`
+   (and `updated_at`) becomes now. Otherwise the transaction rolls back
+   (the token stays usable) and the error is 400 `flow_state_not_found` /
+   `No associated flow state found. 422: No valid flow state found for
+   user.` or `… 422: Flow state does not have an auth code (not a PKCE
+   flow).`.
+4. Success: 303 to the redirect target with `code=<auth_code>` set in its
+   query (`prepPKCERedirectURL`). Go re-encodes the query: pairs are parsed
+   (a pair with `;` or a bad `%` escape is dropped), `code` replaces any
+   earlier one, and keys are sorted. The fragment is kept.
+5. Error redirects (`prepErrorRedirectURL`) and the email-change
+   single-confirmation message (`prepRedirectURL`) also set `error`,
+   `error_code`, `error_description` (or `message`) in the re-encoded
+   query, besides the usual fragment.
+
+The client then redeems the code with `POST /token?grant_type=pkce`
+([`token.md`](token.md)).
 The hash path reads `auth.one_time_tokens` (`confirmation_token`,
 `recovery_token`, or either email-change type). The email path reads the
 user's token columns. Email change with secure email change on tries the
@@ -124,8 +160,8 @@ invite password hash, which is the same order.
 ## Out of scope
 
 `auth:verify-type:email`, `auth:verify-type:magiclink`,
-`auth:verify-type:sms`, `auth:verify-type:phone_change`, and
-`auth:grant-type:pkce` return HTTP 501 via
+`auth:verify-type:sms`, and `auth:verify-type:phone_change` return
+HTTP 501 via
 `megabase_core::MegabaseNotImplemented`. Phone OTP on an in-scope type does
 too. Anything not served returns the body
 `{"code":"MEGABASE_NOT_IMPLEMENTED","component":"auth","message":"<unit> is not implemented by Megabase yet","unit":"<unit>"}`.
