@@ -3,7 +3,7 @@
   "totals": {
     "units": 1031,
     "implemented": 218,
-    "tested": 184,
+    "tested": 185,
     "conformant": 0
   },
   "percent": {
@@ -111,7 +111,7 @@
     "functions": {
       "units": 276,
       "implemented": 1,
-      "tested": 0,
+      "tested": 1,
       "conformant": 0,
       "groups": {
         "ai": {
@@ -135,7 +135,7 @@
         "invoke": {
           "units": 1,
           "implemented": 1,
-          "tested": 0,
+          "tested": 1,
           "conformant": 0
         },
         "node": {
@@ -646,7 +646,7 @@
     "auth:verify-type:invite": "tested",
     "auth:verify-type:recovery": "tested",
     "auth:verify-type:signup": "tested",
-    "functions:route:* /functions/v1/{function_name}": "implemented",
+    "functions:route:* /functions/v1/{function_name}": "tested",
     "meta:route:GET /pg/config/version": "tested",
     "meta:route:GET /pg/health": "tested",
     "realtime:route:GET /realtime/v1/api/ping": "tested",
