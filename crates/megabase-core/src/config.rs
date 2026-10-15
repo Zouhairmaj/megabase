@@ -36,6 +36,10 @@ pub struct Config {
     /// `PGRST_DB_AGGREGATES_ENABLED`, default `false` (PostgREST's default,
     /// and the pinned Supabase compose file does not set it).
     pub db_aggregates_enabled: bool,
+    /// `FILE_STORAGE_BACKEND_PATH`, the directory Storage keeps object bytes
+    /// in (storage-api's file backend setting). Unset or empty leaves the
+    /// object routes at 501.
+    pub storage_file_path: Option<std::path::PathBuf>,
 }
 
 impl fmt::Debug for Config {
@@ -54,6 +58,7 @@ impl fmt::Debug for Config {
             .field("http_timeout", &self.http_timeout)
             .field("request_body_limit", &self.request_body_limit)
             .field("db_aggregates_enabled", &self.db_aggregates_enabled)
+            .field("storage_file_path", &self.storage_file_path)
             .finish()
     }
 }
@@ -68,6 +73,7 @@ impl Default for Config {
             http_timeout: DEFAULT_HTTP_TIMEOUT,
             request_body_limit: DEFAULT_REQUEST_BODY_LIMIT,
             db_aggregates_enabled: false,
+            storage_file_path: None,
         }
     }
 }
@@ -119,6 +125,9 @@ impl Config {
             request_body_limit,
             db_aggregates_enabled: lookup("PGRST_DB_AGGREGATES_ENABLED")
                 .is_some_and(|raw| raw.trim().eq_ignore_ascii_case("true")),
+            storage_file_path: lookup("FILE_STORAGE_BACKEND_PATH")
+                .filter(|raw| !raw.is_empty())
+                .map(std::path::PathBuf::from),
         })
     }
 

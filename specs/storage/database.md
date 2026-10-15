@@ -153,8 +153,40 @@ matches the pin too. This follows the `auth.sso_sessions` precedent in
 `storage:sql-function:storage.can_insert_object()`
 (`0015-add-can-insert-object-function.sql:1`) inserts into
 `storage.objects` and then raises `PT200` `ROLLBACK` to undo the insert.
-`storage.objects` is not installed (PR 5), so the function would fail with
-`42P01` where upstream succeeds; it is not installed and carries no marker.
+It is not installed yet and carries no marker.
+
+## `storage:sql-table:storage.objects`
+
+File: `sql/objects.sql`. Final shape after the tenant migrations (see the
+file header for the list): columns `id uuid` (`gen_random_uuid()`, primary
+key), `bucket_id text` (FK `objects_bucketId_fkey` to `storage.buckets`),
+`name`, `owner uuid`, `created_at`, `updated_at`, `last_accessed_at`
+(`now()`), `metadata jsonb`, `path_tokens text[]` (generated from `name`),
+`version`, `owner_id`, `user_metadata jsonb`, `archived_at`,
+`is_delete_marker`, `is_versioned` (`false`). `level` is dropped by 0052,
+`bucketid_objname` by 0072. Indexes `name_prefix_search`,
+`idx_objects_bucket_id_name_lower`, `idx_objects_current_version`,
+`idx_objects_null_version`, `idx_objects_delete_markers` and
+`objects_bucket_id_name_version_key` (built without `CONCURRENTLY`, since the
+install is one transaction). RLS is enabled with no policies; grants as
+0046 and 0073. Trigger `update_objects_updated_at` runs
+`storage.update_updated_at_column()`. An existing older table gains the
+later columns through `ADD COLUMN IF NOT EXISTS`.
+
+## `storage:sql-function:storage.protect_delete()`
+
+Upstream: `0055-prevent-direct-deletes.sql:2`. Statement-level `BEFORE
+DELETE` triggers `protect_buckets_delete` and `protect_objects_delete`
+raise `42501` `Direct deletion from storage tables is not allowed. Use the
+Storage API instead.` unless `storage.allow_delete_query` is `true` (the
+request scope sets it).
+
+## `storage:sql-function:storage.foldername()` and `storage.filename()`
+
+Upstream: `0060-optimize-existing-functions-again.sql:22` and
+`0061-mark-filename-immutable.sql:7`. File: `sql/path_functions.sql`.
+`IMMUTABLE` plpgsql: `foldername('u1/a/b.png')` is `{u1,a}`,
+`filename('u1/a/b.png')` is `b.png`.
 
 ## Judge cases
 

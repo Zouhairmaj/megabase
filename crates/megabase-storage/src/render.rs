@@ -40,10 +40,10 @@ const FIND_PUBLIC_BUCKET_SQL: &str =
     "SELECT id FROM storage.buckets WHERE id = $1 AND public = $2 LIMIT 1";
 
 /// `SIGNED_URL_SCOPE_DOWNLOAD`.
-const SCOPE_DOWNLOAD: &str = "download";
+pub(super) const SCOPE_DOWNLOAD: &str = "download";
 
 /// The parsed query string; `None` when it does not decode.
-fn query_pairs(uri: &Uri) -> Option<Vec<(String, String)>> {
+pub(super) fn query_pairs(uri: &Uri) -> Option<Vec<(String, String)>> {
     Query::<Vec<(String, String)>>::try_from_uri(uri)
         .ok()
         .map(|Query(pairs)| pairs)
@@ -52,7 +52,7 @@ fn query_pairs(uri: &Uri) -> Option<Vec<(String, String)>> {
 /// The value of `key`: `Some(None)` when absent, `None` when repeated
 /// (Fastify parses a repeated key to an array, which a string or number
 /// property rejects).
-fn single<'a>(pairs: &'a [(String, String)], key: &str) -> Option<Option<&'a str>> {
+pub(super) fn single<'a>(pairs: &'a [(String, String)], key: &str) -> Option<Option<&'a str>> {
     let mut values = pairs
         .iter()
         .filter(|(name, _)| name == key)
@@ -316,7 +316,7 @@ pub(super) async fn render_signed_image(
 /// The payload of `token` when Megabase and jose's `jwtVerify` both accept
 /// it. Megabase's verifier allows a 30 second `exp` leeway and does not read
 /// `nbf` or `iat`, so those cases are left to the caller's 501.
-fn verified_signed_payload(
+pub(super) fn verified_signed_payload(
     state: &StorageState,
     token: &str,
 ) -> Option<serde_json::Map<String, Value>> {
@@ -333,7 +333,7 @@ fn verified_signed_payload(
 
 /// `isDownloadScopedToken`: `scope` is `download`, or absent on a token
 /// without `upsert` (a legacy download token).
-fn is_download_scoped(payload: &serde_json::Map<String, Value>) -> bool {
+pub(super) fn is_download_scoped(payload: &serde_json::Map<String, Value>) -> bool {
     match payload.get("scope") {
         Some(Value::String(scope)) => scope == SCOPE_DOWNLOAD,
         Some(_) => false,

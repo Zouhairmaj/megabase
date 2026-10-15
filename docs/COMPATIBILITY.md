@@ -119,10 +119,10 @@ Implemented and tested counts come from markers and `judge/cases/`. Live conform
 | Realtime | websocket | 3 | 1 | 0 | 0 |
 | Storage | bucket | 2 | 6 | 6 | 6 |
 | Storage | cdn | 2 | 3 | 3 | 0 |
-| Storage | database | 2 | 46 | 9 | 0 |
+| Storage | database | 2 | 46 | 13 | 0 |
 | Storage | health | 2 | 1 | 1 | 0 |
 | Storage | iceberg | 2 | 13 | 0 | 0 |
-| Storage | object | 2 | 22 | 0 | 0 |
+| Storage | object | 2 | 22 | 8 | 0 |
 | Storage | render | 2 | 3 | 3 | 3 |
 | Storage | resumable | 2 | 16 | 0 | 0 |
 | Storage | s3 | 2 | 26 | 0 | 0 |

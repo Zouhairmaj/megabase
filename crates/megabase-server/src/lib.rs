@@ -228,7 +228,8 @@ pub async fn run(config: Config) -> std::io::Result<()> {
         pool = Some(shared);
     }
     let meta = megabase_meta::MetaState::new(pool.clone(), config.jwt_hs256().ok());
-    let storage = megabase_storage::StorageState::new(pool, config.jwt_hs256().ok());
+    let storage = megabase_storage::StorageState::new(pool, config.jwt_hs256().ok())
+        .with_file_root(config.storage_file_path.as_deref());
     let functions = megabase_functions::FunctionsState::from_env(&config);
     if !functions.is_enabled() {
         info!("MEGABASE_FUNCTIONS_DIR unset; /functions/v1 answers 501");

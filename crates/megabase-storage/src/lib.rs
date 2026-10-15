@@ -10,7 +10,9 @@
 //! storage-api does without a CDN purge endpoint (`specs/storage/cdn.md`).
 //! The `GET /render/image` routes answer their signature, key, bucket and
 //! object errors; the transformation itself is a 501
-//! (`specs/storage/render.md`).
+//! (`specs/storage/render.md`). The `/object` upload, download, sign and
+//! remove routes run under the request's RLS scope and keep bytes under
+//! `FILE_STORAGE_BACKEND_PATH` (`specs/storage/object.md`).
 
 // Ported from supabase/storage src/http/routes/bucket/getAllBuckets.ts,
 // src/http/routes/bucket/getBucket.ts, src/http/routes/health/healthcheck.ts,
@@ -24,7 +26,7 @@ use axum::{
     extract::{OriginalUri, Path, State},
     http::{header, HeaderMap, Method, StatusCode},
     response::{IntoResponse, Response},
-    routing::{delete, get},
+    routing::{any, delete, get, post},
     Router,
 };
 use chrono::{DateTime, Utc};
@@ -35,6 +37,7 @@ mod bucket;
 mod cdn;
 mod limits;
 mod mime;
+mod object;
 mod render;
 mod schema;
 
@@ -55,6 +58,7 @@ const GET_COLUMNS: &str = "id, name, owner::text AS owner, public, created_at, u
 pub struct StorageState {
     pool: Option<sqlx::PgPool>,
     jwt: Option<Arc<Hs256>>,
+    files: Option<Arc<std::path::Path>>,
 }
 
 impl StorageState {
@@ -64,7 +68,16 @@ impl StorageState {
         Self {
             pool,
             jwt: jwt.map(Arc::new),
+            files: None,
         }
+    }
+
+    /// Keep object bytes under `root` (`FILE_STORAGE_BACKEND_PATH`). Without
+    /// it the object routes answer 501.
+    #[must_use]
+    pub fn with_file_root(mut self, root: Option<&std::path::Path>) -> Self {
+        self.files = root.map(Arc::from);
+        self
     }
 }
 
@@ -112,6 +125,53 @@ pub fn router_with_state(state: StorageState) -> Router {
         .route(
             "/storage/v1/render/image/sign/:bucket_name/*object_name",
             get(render::render_signed_image),
+        )
+        // `HEAD` is `getObjectInfo`, which is not ported; axum would answer
+        // it with the `GET` handler otherwise.
+        .route(
+            "/storage/v1/object/authenticated/:bucket_name/*object_name",
+            get(object::get_authenticated_object).head(not_implemented_head),
+        )
+        .route(
+            "/storage/v1/object/public/:bucket_name/*object_name",
+            get(object::get_public_object).head(not_implemented_head),
+        )
+        .route(
+            "/storage/v1/object/sign/:bucket_name/*object_name",
+            get(object::get_signed_object).post(object::sign_object),
+        )
+        // Unported upstream routes whose first segment the generic
+        // `:bucket_name/*object_name` route would take for a bucket name.
+        .route(
+            "/storage/v1/object/list/:bucket_name",
+            post(not_implemented_any),
+        )
+        .route(
+            "/storage/v1/object/list-v2/:bucket_name",
+            post(not_implemented_any),
+        )
+        .route(
+            "/storage/v1/object/sign/:bucket_name",
+            post(not_implemented_any),
+        )
+        .route(
+            "/storage/v1/object/info/:bucket_name/*object_name",
+            any(not_implemented_any),
+        )
+        .route(
+            "/storage/v1/object/upload/sign/:bucket_name/*object_name",
+            any(not_implemented_any),
+        )
+        .route(
+            "/storage/v1/object/:bucket_name",
+            delete(object::delete_objects),
+        )
+        .route(
+            "/storage/v1/object/:bucket_name/*object_name",
+            get(object::get_object_any)
+                .head(not_implemented_head)
+                .post(object::create_object)
+                .put(object::update_object),
         )
         .with_state(state)
         .merge(megabase_core::not_implemented_router(COMPONENT))
@@ -207,6 +267,14 @@ async fn healthcheck(
         }
     };
     fastify_json(StatusCode::OK, &json!({ "healthy": healthy }))
+}
+
+async fn not_implemented_any(method: Method, OriginalUri(uri): OriginalUri) -> Response {
+    not_implemented(&method, &uri)
+}
+
+async fn not_implemented_head(method: Method, OriginalUri(uri): OriginalUri) -> Response {
+    not_implemented(&method, &uri)
 }
 
 fn not_implemented(method: &Method, uri: &axum::http::Uri) -> Response {
@@ -330,6 +398,47 @@ impl StorageError {
             code: "InvalidSignature",
             error: "InvalidSignature",
             message,
+        }
+    }
+
+    /// `ERRORS.AccessDenied(message)`.
+    fn access_denied(message: Cow<'static, str>) -> Self {
+        Self {
+            status_code: "403",
+            code: "AccessDenied",
+            error: "Unauthorized",
+            message,
+        }
+    }
+
+    /// `ERRORS.KeyAlreadyExists`.
+    fn key_already_exists() -> Self {
+        Self {
+            status_code: "409",
+            code: "KeyAlreadyExists",
+            error: "Duplicate",
+            message: Cow::Borrowed("The resource already exists"),
+        }
+    }
+
+    /// `ERRORS.ResourceAlreadyExists`.
+    fn resource_already_exists() -> Self {
+        Self {
+            status_code: "409",
+            code: "ResourceAlreadyExists",
+            error: "Duplicate",
+            message: Cow::Borrowed("The resource already exists"),
+        }
+    }
+
+    /// `ERRORS.InvalidJWT` with jose's message. It sets no `error`, so the
+    /// global error handler repeats the code there.
+    fn invalid_jwt(message: &'static str) -> Self {
+        Self {
+            status_code: "400",
+            code: "InvalidJWT",
+            error: "InvalidJWT",
+            message: Cow::Borrowed(message),
         }
     }
 
