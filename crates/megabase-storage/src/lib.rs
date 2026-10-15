@@ -8,6 +8,9 @@
 //! bucket routes, and every other route return the structured
 //! `MEGABASE_NOT_IMPLEMENTED` 501. The `DELETE /cdn` purge routes answer as
 //! storage-api does without a CDN purge endpoint (`specs/storage/cdn.md`).
+//! The `GET /render/image` routes answer their signature, key, bucket and
+//! object errors; the transformation itself is a 501
+//! (`specs/storage/render.md`).
 
 // Ported from supabase/storage src/http/routes/bucket/getAllBuckets.ts,
 // src/http/routes/bucket/getBucket.ts, src/http/routes/health/healthcheck.ts,
@@ -32,6 +35,7 @@ mod bucket;
 mod cdn;
 mod limits;
 mod mime;
+mod render;
 mod schema;
 
 pub use schema::{install_schema, SchemaError};
@@ -96,6 +100,18 @@ pub fn router_with_state(state: StorageState) -> Router {
         .route(
             "/storage/v1/cdn/:bucket_name/*object_name",
             delete(cdn::purge_cache),
+        )
+        .route(
+            "/storage/v1/render/image/authenticated/:bucket_name/*object_name",
+            get(render::render_authenticated_image),
+        )
+        .route(
+            "/storage/v1/render/image/public/:bucket_name/*object_name",
+            get(render::render_public_image),
+        )
+        .route(
+            "/storage/v1/render/image/sign/:bucket_name/*object_name",
+            get(render::render_signed_image),
         )
         .with_state(state)
         .merge(megabase_core::not_implemented_router(COMPONENT))
@@ -282,6 +298,38 @@ impl StorageError {
             code: "NoSuchBucket",
             error: "Bucket not found",
             message: Cow::Borrowed("Bucket not found"),
+        }
+    }
+
+    /// `ERRORS.NoSuchKey`.
+    fn no_such_key() -> Self {
+        Self {
+            status_code: "404",
+            code: "NoSuchKey",
+            error: "not_found",
+            message: Cow::Borrowed("Object not found"),
+        }
+    }
+
+    /// `ERRORS.InvalidKey`. It sets no `error`, so the global error handler
+    /// repeats the code there.
+    fn invalid_key(key: &str) -> Self {
+        Self {
+            status_code: "400",
+            code: "InvalidKey",
+            error: "InvalidKey",
+            message: Cow::Owned(format!("Invalid key: {key}")),
+        }
+    }
+
+    /// `ERRORS.InvalidSignature`, with `Invalid signature` as the default
+    /// message and no `error`.
+    fn invalid_signature(message: Cow<'static, str>) -> Self {
+        Self {
+            status_code: "400",
+            code: "InvalidSignature",
+            error: "InvalidSignature",
+            message,
         }
     }
 
