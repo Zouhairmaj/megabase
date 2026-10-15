@@ -125,7 +125,8 @@ impl IntoResponse for OAuthError {
 /// Go `%q` (`strconv.Quote`): double quotes, Go escapes, and `\x`/`\u`/`\U`
 /// escapes for runes Go does not print. The non-printable set is the
 /// control, format, separator (other than space), private-use, and
-/// noncharacter ranges of `unicode.IsPrint`; unassigned code points print.
+/// noncharacter ranges of `unicode.IsPrint`, plus U+E0000 at the start of
+/// the tag block; other unassigned code points print.
 pub fn go_quote(value: &str) -> String {
     let mut out = String::from("\"");
     for ch in value.chars() {
@@ -165,6 +166,8 @@ fn go_printable(ch: char) -> bool {
         | 0x61c
         | 0x6dd
         | 0x70f
+        | 0x890..=0x891
+        | 0x8e2
         | 0x1680
         | 0x180e
         | 0x2000..=0x200f
@@ -176,7 +179,12 @@ fn go_printable(ch: char) -> bool {
         | 0xfeff
         | 0xfff9..=0xfffb
         | 0xfffe..=0xffff
-        | 0xe0001
+        | 0x110bd
+        | 0x110cd
+        | 0x13430..=0x1343f
+        | 0x1bca0..=0x1bca3
+        | 0x1d173..=0x1d17a
+        | 0xe0000..=0xe0001
         | 0xe0020..=0xe007f
         | 0xf0000..)
 }
@@ -191,6 +199,10 @@ mod tests {
         assert_eq!(go_quote("a\"b"), "\"a\\\"b\"");
         assert_eq!(go_quote("a\u{1}\u{7f}\u{7}"), "\"a\\x01\\x7f\\a\"");
         assert_eq!(go_quote("é\u{200b}\u{f0000}"), "\"é\\u200b\\U000f0000\"");
+        assert_eq!(
+            go_quote("\u{110bd}\u{1d173}\u{e0000}"),
+            "\"\\U000110bd\\U0001d173\\U000e0000\""
+        );
     }
 
     #[tokio::test]

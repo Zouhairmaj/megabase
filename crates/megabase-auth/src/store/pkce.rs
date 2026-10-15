@@ -10,12 +10,11 @@ use serde_json::json;
 use uuid::Uuid;
 
 use super::{
-    customize_memory, customize_pg, find_user_by_id, flow_state_from_row, grant_session,
-    insert_audit, insert_session_rows, reload_confirmed_at, remember_audit, timed, ts,
-    write_to_store, Backend, BackendKind, FlowStateRecord, IssuedSession, StoreError,
-    FLOW_STATE_COLUMNS,
+    customize_pg, find_user_by_id, flow_state_from_row, grant_session, insert_audit,
+    insert_session_rows, reload_confirmed_at, remember_audit, timed, ts, write_to_store, Backend,
+    BackendKind, FlowStateRecord, IssuedSession, StoreError, FLOW_STATE_COLUMNS,
 };
-use crate::hooks::TokenHookCall;
+use crate::hooks::{self, TokenHookCall};
 
 /// What [`Backend::redeem_pkce_flow`] needs from the flow state row.
 pub struct PkceRedemption<'a> {
@@ -89,24 +88,32 @@ impl Backend {
         match &self.inner {
             BackendKind::None => Err(StoreError::Unavailable),
             BackendKind::Memory(db_handle) => {
+                // Hold the lock throughout and run the hook before any write,
+                // so a rejected hook leaves the flow state redeemable, as the
+                // Postgres rollback does.
                 let mut db = db_handle.lock().await;
-                if !db.users.contains_key(&redemption.user_id)
-                    || db.flow_states.remove(&redemption.flow_id).is_none()
-                {
+                if !db.flow_states.contains_key(&redemption.flow_id) {
                     return Ok(None);
                 }
-                let Some(user) = db.users.get_mut(&redemption.user_id) else {
+                let Some(stored) = db.users.get(&redemption.user_id) else {
                     return Ok(None);
                 };
                 let now = SystemTime::now();
+                let mut user = stored.clone();
                 user.last_sign_in_at = Some(now);
-                let mut issued = grant_session(user, now);
+                let mut issued = grant_session(&mut user, now);
                 issued.amr_method = redemption.amr_method.into();
                 reload_confirmed_at(&mut issued.user);
+                if let Some(call) = hook {
+                    let function = db.access_token_hook.as_deref();
+                    let claims = hooks::run_memory(call, &issued, function)
+                        .map_err(|error| StoreError::Hook(Box::new(error)))?;
+                    issued.hook_claims = Some(claims);
+                }
+                db.flow_states.remove(&redemption.flow_id);
+                db.users.insert(redemption.user_id, user);
                 remember_audit(&issued.user, "login", "account", Some(traits));
                 db.track(&issued);
-                drop(db);
-                customize_memory(db_handle, hook, &mut issued).await?;
                 Ok(Some(issued))
             }
             BackendKind::Postgres(pg) => {

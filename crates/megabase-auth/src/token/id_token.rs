@@ -236,6 +236,15 @@ fn is_azure_issuer(issuer: &str) -> bool {
         .is_some_and(|tenant| !tenant.is_empty() && !tenant.contains('/'))
 }
 
+/// Go `base64.RawURLEncoding.DecodeString`, which skips CR and LF.
+pub(super) fn raw_url_decode(input: &str) -> Option<Vec<u8>> {
+    let cleaned: String = input
+        .chars()
+        .filter(|c| !matches!(c, '\r' | '\n'))
+        .collect();
+    RAW_URL.decode(cleaned).ok()
+}
+
 /// `DetectAppleIDTokenIssuer` / `DetectAzureIDTokenIssuer`: the unverified
 /// `iss` claim. `None` is the Go error (not three segments, bad base64, or a
 /// payload `json.Unmarshal` rejects).
@@ -244,12 +253,7 @@ fn detect_issuer(id_token: &str) -> Option<String> {
     let [_, payload, _] = parts.as_slice() else {
         return None;
     };
-    // Go's base64 decoder skips CR and LF.
-    let cleaned: String = payload
-        .chars()
-        .filter(|c| !matches!(c, '\r' | '\n'))
-        .collect();
-    let bytes = RAW_URL.decode(cleaned).ok()?;
+    let bytes = raw_url_decode(payload)?;
     if syntax_error(&bytes).is_some() {
         return None;
     }

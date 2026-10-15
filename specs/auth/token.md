@@ -278,7 +278,12 @@ Body (`Web3GrantParams`): `message`, `signature`, `chain`.
 | 3 | `chain` is neither `solana` nor `ethereum` | 400 | `web3_unsupported_chain` / `Unsupported chain` |
 | 4 | `solana` while Solana is off | 422 | `web3_provider_disabled` / `Solana Web3 provider is disabled` |
 | 4 | `ethereum` while Ethereum is off | 422 | `web3_provider_disabled` / `Ethereum Web3 provider is disabled` |
-| 5 | Chain enabled | 501 | `MEGABASE_NOT_IMPLEMENTED` / `auth:grant-type:web3` |
+| 5 | `message` under 64 bytes | 400 | `validation_failed` / `message is too short` |
+| 5 | `message` over 20 KiB | 400 | `validation_failed` / `message must not exceed 20KB` |
+| 6 | `solana`: `signature` length neither 86 nor 88 | 400 | `validation_failed` / `signature must be 64 bytes encoded as base64 with or without padding` |
+| 6 | `solana`: `signature` (trailing `=` trimmed, `+/` mapped to `-_`) is not raw base64url | 400 | `validation_failed` / `signature does not contain valid base64 characters` |
+| 6 | `ethereum`: `signature` without a `0x` prefix is not 130 bytes | 400 | `validation_failed` / `signature must be 65 bytes long, encoded as a 130 character-long hexadecimal string` |
+| 7 | Fields pass | 501 | `MEGABASE_NOT_IMPLEMENTED` / `auth:grant-type:web3` |
 
 The reference stack enables neither chain, so every `web3` request there
 is the first row. Sign in with Solana (ed25519) and Sign in with Ethereum

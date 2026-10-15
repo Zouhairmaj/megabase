@@ -305,6 +305,74 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn concurrent_redemptions_issue_one_session() {
+        let backend = Backend::memory();
+        let state = app(backend.clone());
+        let user_id = user(&state).await;
+        let flow_id = Uuid::new_v4();
+        backend
+            .plant_flow_state_for_test(flow_id, flow(Some(user_id), "race"))
+            .await;
+        // Both requests pass the lookup before either redeems.
+        let first = backend.find_flow_state_by_auth_code("race").await.unwrap();
+        let second = backend.find_flow_state_by_auth_code("race").await.unwrap();
+        assert!(first.is_some() && second.is_some());
+        let redemption = PkceRedemption {
+            flow_id,
+            user_id,
+            amr_method: "email/signup",
+            provider_type: "email",
+        };
+        let (a, b) = tokio::join!(
+            backend.redeem_pkce_flow(&redemption, None),
+            backend.redeem_pkce_flow(&redemption, None),
+        );
+        let issued = [a.unwrap(), b.unwrap()];
+        assert_eq!(issued.iter().filter(|s| s.is_some()).count(), 1);
+        let body = json!({ "auth_code": "race", "code_verifier": VERIFIER }).to_string();
+        let (status, again) = post(&state, &body).await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        assert_eq!(again["error_code"], "flow_state_not_found");
+    }
+
+    #[tokio::test]
+    async fn rejected_hook_keeps_the_code_redeemable() {
+        let backend = Backend::memory();
+        let mut config = AuthConfig::reference_defaults();
+        config.custom_access_token_hook =
+            crate::hooks::AccessTokenHook::from_lookup(&|key| match key {
+                "GOTRUE_HOOK_CUSTOM_ACCESS_TOKEN_ENABLED" => Some("true".into()),
+                "GOTRUE_HOOK_CUSTOM_ACCESS_TOKEN_URI" => {
+                    Some("pg-functions://postgres/public/custom_access_token_hook".into())
+                }
+                _ => None,
+            })
+            .unwrap();
+        let jwt = Hs256::new(SECRET.as_bytes()).unwrap();
+        let state = AuthState::new(config, Some(jwt), backend.clone());
+        // The hook accepts the signup session and rejects every later one.
+        let calls = std::sync::atomic::AtomicUsize::new(0);
+        backend
+            .set_access_token_hook_for_test(std::sync::Arc::new(move |event: &Value| {
+                let first = calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0;
+                first.then(|| json!({ "claims": event["claims"] }).to_string())
+            }))
+            .await;
+        let user_id = user(&state).await;
+        backend
+            .plant_flow_state_for_test(Uuid::new_v4(), flow(Some(user_id), "hooked"))
+            .await;
+        let body = json!({ "auth_code": "hooked", "code_verifier": VERIFIER }).to_string();
+        let (status, _) = post(&state, &body).await;
+        assert!(status.is_server_error(), "{status}");
+        assert!(backend
+            .find_flow_state_by_auth_code("hooked")
+            .await
+            .unwrap()
+            .is_some());
+    }
+
+    #[tokio::test]
     async fn validation_and_lookup_errors() {
         let backend = Backend::memory();
         let state = app(backend.clone());
