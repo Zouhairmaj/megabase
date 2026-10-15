@@ -1392,24 +1392,33 @@ async fn read_rows(
         .iter()
         .map(|(name, pg_type)| (name.as_str(), pg_type.as_str()))
         .collect();
-    let mut rels = HashMap::new();
+    let mut rels: HashMap<String, Relationship> = HashMap::new();
     let mut view_keys = None;
-    for (name, hint, key) in read.embed_targets() {
-        if rels.contains_key(&key) {
+    // Parents come first, so a nested embed is looked up from the table its
+    // parent embed resolved to (`addRels` in `Plan.hs`).
+    for target in read.embed_targets() {
+        if rels.contains_key(&target.key) {
             continue;
         }
+        let origin = match &target.parent {
+            Some(parent) => rels
+                .get(parent)
+                .map(|rel| rel.table.clone())
+                .unwrap_or_default(),
+            None => relation.to_string(),
+        };
         let mut rel = load_relationship(
             &mut tx,
             schema,
-            relation,
-            name,
-            hint,
+            &origin,
+            target.name,
+            target.hint,
             &mut view_keys,
             session.anon,
         )
         .await?;
         rel.column_types = load_columns(&mut tx, schema, &rel.table, session.anon).await?;
-        rels.insert(key, rel);
+        rels.insert(target.key, rel);
     }
     let built = build_read_sql_as(
         schema,
@@ -1706,9 +1715,8 @@ const FK_EDGES_SQL: &str = "SELECT DISTINCT c.relname::text, f.relname::text
 /// When `relation` or `target` is a view, the keys the view inherits from its
 /// tables are candidates too (`addViewM2OAndO2ORels`).
 ///
-/// No match is `PGRST200`; several matches are `PGRST201`. A
-/// self-reference, several view relationships, or a possible many-to-many
-/// link stays 501.
+/// No match is `PGRST200`; several matches are `PGRST201`. Several view
+/// relationships or a possible many-to-many link stays 501.
 async fn load_relationship(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     schema: &str,

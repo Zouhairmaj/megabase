@@ -69,6 +69,7 @@ impl ReadQuery {
         self.embeds().map(|embed| embed.name.as_str()).collect()
     }
 
+    /// The embeds directly under the root.
     fn embeds(&self) -> impl Iterator<Item = &Embed> {
         let entries = match &self.select {
             SelectList::Mixed(entries) => entries.as_slice(),
@@ -83,29 +84,19 @@ impl ReadQuery {
     /// `true` when a root filter or logic tree is `<key>=is.null` (or
     /// `not.is.null`) on the embed called `key`.
     fn has_null_embed_filter(&self, key: &str) -> bool {
-        self.filters.iter().any(|filter| {
-            filter.json.is_empty() && filter.column == key && is_null_filter(&filter.parsed)
-        }) || self.logic.iter().any(|node| logic_names_null(node, key))
+        names_null(&self.filters, &self.logic, key)
     }
 
-    /// The embeds the select list asks for: `(target, hint, relationship key)`.
+    /// Every embed of the select tree, each parent before its children.
     ///
-    /// The key is the target, or `target!hint` for a hinted embed; the
-    /// relationship map passed to [`build_read_sql_as`] uses it.
+    /// The relationship map passed to [`build_read_sql_as`] is keyed by
+    /// [`EmbedTarget::key`]; a nested embed is looked up from the table of
+    /// its parent's relationship ([`EmbedTarget::parent`]).
     #[must_use]
-    pub(crate) fn embed_targets(&self) -> Vec<(&str, Option<&str>, String)> {
-        match &self.select {
-            SelectList::Mixed(entries) => entries
-                .iter()
-                .filter_map(|entry| match entry {
-                    SelectEntry::Embed(embed) => {
-                        Some((embed.name.as_str(), embed.hint.as_deref(), embed.key()))
-                    }
-                    SelectEntry::Field(_) => None,
-                })
-                .collect(),
-            _ => Vec::new(),
-        }
+    pub(crate) fn embed_targets(&self) -> Vec<EmbedTarget<'_>> {
+        let mut out = Vec::new();
+        collect_targets(&self.select, None, &mut out);
+        out
     }
 
     /// `true` when `select` applies an aggregate function.
@@ -196,6 +187,60 @@ impl ReadQuery {
         }
         sql
     }
+}
+
+/// One embed of the select tree ([`ReadQuery::embed_targets`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct EmbedTarget<'a> {
+    /// Relationship key of the enclosing embed; `None` under the root.
+    pub parent: Option<String>,
+    /// The table, constraint or column the embed names.
+    pub name: &'a str,
+    /// The `!hint`, if any.
+    pub hint: Option<&'a str>,
+    /// Relationship map key: the path of embed keys from the root.
+    pub key: String,
+}
+
+fn collect_targets<'a>(
+    select: &'a SelectList,
+    parent: Option<&str>,
+    out: &mut Vec<EmbedTarget<'a>>,
+) {
+    let SelectList::Mixed(entries) = select else {
+        return;
+    };
+    for entry in entries {
+        let SelectEntry::Embed(embed) = entry else {
+            continue;
+        };
+        let key = path_key(parent, embed);
+        out.push(EmbedTarget {
+            parent: parent.map(str::to_string),
+            name: &embed.name,
+            hint: embed.hint.as_deref(),
+            key: key.clone(),
+        });
+        collect_targets(&embed.select, Some(&key), out);
+    }
+}
+
+/// The relationship key of `embed` under the embed keyed `parent`. A
+/// Postgres name never holds NUL, so the separator cannot be part of a key
+/// that resolves.
+fn path_key(parent: Option<&str>, embed: &Embed) -> String {
+    match parent {
+        Some(parent) => format!("{parent}\u{0}{}", embed.key()),
+        None => embed.key(),
+    }
+}
+
+/// `true` when a filter or logic tree is `<key>=is.null` (or `not.is.null`)
+/// on the embed called `key`.
+fn names_null(filters: &[FieldFilter], logic: &[LogicNode], key: &str) -> bool {
+    filters.iter().any(|filter| {
+        filter.json.is_empty() && filter.column == key && is_null_filter(&filter.parsed)
+    }) || logic.iter().any(|node| logic_names_null(node, key))
 }
 
 /// SQL for one read, plus the `Content-Range` offset.
@@ -561,18 +606,11 @@ pub(crate) fn parse_get_query(query: &str) -> Result<ReadQuery, QueryFail> {
             QueryFail::NotEmbedded { resource }
         });
     }
-    // Nested embeds are not served, so a related order inside an embed is
-    // `PGRST108` upstream only after the relationship lookup, and a legacy
-    // target name adds a `Warning` header: keep both 501.
-    if let SelectList::Mixed(entries) = &select {
-        let unserved = entries.iter().any(|entry| {
-            matches!(entry, SelectEntry::Embed(embed) if embed.params.legacy_target
-                || embed.params.orders.iter().any(|term|
-                    matches!(term, OrderTerm::Related { .. })))
-        });
-        if unserved {
-            return Err(QueryFail::Route);
-        }
+    // A related order inside an embed is checked upstream only after the
+    // relationship lookup, and a legacy target name adds a `Warning` header:
+    // keep both 501.
+    if has_unserved_params(&select) {
+        return Err(QueryFail::Route);
     }
     Ok(ReadQuery {
         select,
@@ -631,8 +669,7 @@ fn json_filter_path(key: &str) -> Option<(Vec<String>, String, Vec<JsonStep>)> {
 ///
 /// # Errors
 ///
-/// `PGRST108` when no embed in `select` matches. Nested embeds are not
-/// served, so a second path segment is never an embedded resource.
+/// `PGRST108` naming the first path segment no embed matches, at its level.
 fn embed_mut<'s>(select: &'s mut SelectList, path: &[String]) -> Result<&'s mut Embed, QueryFail> {
     let Some((first, rest)) = path.split_first() else {
         return Err(QueryFail::Route);
@@ -653,10 +690,25 @@ fn embed_mut<'s>(select: &'s mut SelectList, path: &[String]) -> Result<&'s mut 
     if embed.name == *first && embed.alias.as_ref().is_some_and(|alias| alias != first) {
         embed.params.legacy_target = true;
     }
-    match rest.first() {
-        Some(next) => Err(not_embedded(next)),
-        None => Ok(embed),
+    if rest.is_empty() {
+        Ok(embed)
+    } else {
+        embed_mut(&mut embed.select, rest)
     }
+}
+
+/// `true` when an embed at any depth has a legacy target parameter or a
+/// related order.
+fn has_unserved_params(select: &SelectList) -> bool {
+    let SelectList::Mixed(entries) = select else {
+        return false;
+    };
+    entries.iter().any(|entry| {
+        matches!(entry, SelectEntry::Embed(embed) if embed.params.legacy_target
+            || embed.params.orders.iter().any(|term|
+                matches!(term, OrderTerm::Related { .. }))
+            || has_unserved_params(&embed.select))
+    })
 }
 
 fn filter_fail(error: FilterParseError) -> QueryFail {
@@ -1046,8 +1098,7 @@ fn try_relation<'a>(at: &mut At<'a>) -> Result<Option<SelectItem>, PErr> {
         return Ok(Some(SelectItem::Defer(QueryFail::Route)));
     }
     let select = match parse_select(inner_text)? {
-        ParsedSelect::Ready(select) if !matches!(select, SelectList::Mixed(_)) => select,
-        ParsedSelect::Ready(_) => return Ok(Some(SelectItem::Defer(QueryFail::Route))),
+        ParsedSelect::Ready(select) => select,
         ParsedSelect::Deferred(fail) => return Ok(Some(SelectItem::Defer(fail))),
     };
     Ok(Some(SelectItem::Embed(Embed {
@@ -2002,43 +2053,29 @@ pub(crate) fn build_read_sql_as(
     // megabase:unit rest:query-param:select
     let select = expand_star(&query.select, column_types);
     push_select(&mut select_sql, &mut params, &relation_ident, &select);
-    let mut inner = format!("SELECT {select_sql} FROM {schema_ident}.{relation_ident}");
-    let mut exists = Vec::new();
-    let mut null_embeds = Vec::new();
+    let mut children = Children::default();
     if let SelectList::Mixed(entries) = &query.select {
-        let mut select_sql = String::new();
-        for (index, entry) in entries.iter().enumerate() {
-            if index > 0 {
-                select_sql.push_str(", ");
-            }
-            match entry {
-                SelectEntry::Field(field) => {
-                    push_select_field(&mut select_sql, &mut params, &relation_ident, field);
-                }
-                SelectEntry::Embed(embed) => {
-                    let Some(rel) = rels.get(&embed.key()) else {
-                        continue;
-                    };
-                    let rows = embed_rows(
-                        &mut params,
-                        &schema_ident,
-                        &relation_ident,
-                        embed,
-                        rel,
-                        true,
-                    )?;
-                    push_embed(&mut select_sql, &rows, embed, rel);
-                    // `INNER JOIN LATERAL … ON agg IS NOT NULL`: the parent
-                    // needs a row in the filtered, ordered and limited embed.
-                    if embed.inner {
-                        exists.push(format!("EXISTS ({rows})"));
-                    }
-                    null_embeds.push((embed.output_key().to_string(), rows));
-                }
-            }
-        }
-        inner = format!("SELECT {select_sql} FROM {schema_ident}.{relation_ident}");
+        let level = Level {
+            schema: &schema_ident,
+            ident: &relation_ident,
+            path: None,
+            depth: 0,
+            full: true,
+        };
+        children = push_level(
+            &mut select_sql,
+            &mut params,
+            &level,
+            entries,
+            rels,
+            &|_: &str| true,
+        )?;
     }
+    let Children {
+        exists,
+        null_embeds,
+    } = children;
+    let mut inner = format!("SELECT {select_sql} FROM {schema_ident}.{relation_ident}");
     if !query.filters.is_empty() || !query.logic.is_empty() || !exists.is_empty() {
         inner.push_str(" WHERE ");
         push_where(
@@ -2140,36 +2177,149 @@ fn join_condition(rel: &Relationship, root: &str, target: &str) -> String {
         .join(" AND ")
 }
 
-/// The embedded rows of one parent row: the join condition, then the embed's
-/// own filters and logic trees (`readPlanToQuery` for a child node).
+/// One level of the embed tree being rendered.
+struct Level<'a> {
+    /// Quoted schema of every table.
+    schema: &'a str,
+    /// Quoted name or alias the level's rows go by.
+    ident: &'a str,
+    /// Relationship key of the level; `None` at the root.
+    path: Option<&'a str>,
+    /// `depth` in `Plan.hs`: 0 for the root.
+    depth: usize,
+    /// `false` renders `readPlanToCountQuery`: no select list, order or page.
+    full: bool,
+}
+
+/// What the parent rows of one level need from its embeds.
+#[derive(Default)]
+struct Children {
+    /// `EXISTS (…)` per `!inner` embed.
+    exists: Vec<String>,
+    /// `(output key, rows)` per embed a null embed filter may name.
+    null_embeds: Vec<(String, String)>,
+}
+
+/// The select list of one level with its embeds appended to `sql`
+/// (`readPlanToQuery`), or, when the level is not `full`, only the
+/// subqueries its `!inner` embeds and its null embed filters (`named`)
+/// need (`readPlanToCountQuery`).
 ///
-/// `full` adds the select list, order and page. Without it the query is
-/// `SELECT 1 …` as `readPlanToCountQuery` builds it, which ignores the
-/// embed's order and range.
+/// # Errors
+///
+/// Returns [`UnsafeType`] when a filter's catalog type cannot be spliced.
+fn push_level(
+    sql: &mut String,
+    params: &mut Vec<String>,
+    level: &Level<'_>,
+    entries: &[SelectEntry],
+    rels: &HashMap<String, Relationship>,
+    named: &dyn Fn(&str) -> bool,
+) -> Result<Children, UnsafeType> {
+    let mut children = Children::default();
+    let mut first = true;
+    for entry in entries {
+        let item = match entry {
+            SelectEntry::Field(field) if level.full => {
+                let mut item = String::new();
+                push_select_field(&mut item, params, level.ident, field);
+                item
+            }
+            SelectEntry::Field(_) => continue,
+            SelectEntry::Embed(embed) => {
+                let key = path_key(level.path, embed);
+                let Some(rel) = rels.get(&key) else {
+                    continue;
+                };
+                let named = named(embed.output_key());
+                if !level.full && !embed.inner && !named {
+                    continue;
+                }
+                let rows = embed_rows(params, level, &key, embed, rel, rels)?;
+                // `INNER JOIN LATERAL … ON agg IS NOT NULL`: the parent
+                // needs a row in the filtered, ordered and limited embed.
+                if embed.inner {
+                    children.exists.push(format!("EXISTS ({rows})"));
+                }
+                let item = level.full.then(|| embed_item(&rows, embed, rel));
+                if named {
+                    children
+                        .null_embeds
+                        .push((embed.output_key().to_string(), rows));
+                }
+                match item {
+                    Some(item) => item,
+                    None => continue,
+                }
+            }
+        };
+        if !first {
+            sql.push_str(", ");
+        }
+        first = false;
+        sql.push_str(&item);
+    }
+    Ok(children)
+}
+
+/// The embedded rows of one parent row (`readPlanToQuery` for a child
+/// node): its select list with its own embeds, the join condition, its
+/// filters and logic trees, an `EXISTS` per nested `!inner` embed, then
+/// its order and page.
+///
+/// The embedded table is aliased `<table>_<depth>` as `addRels` does, so a
+/// self-reference or a table embedded at two depths joins the right rows.
+/// When `parent` is not `full`, the query is `SELECT 1 …` as
+/// `readPlanToCountQuery` builds it, which ignores order and range.
 ///
 /// # Errors
 ///
 /// Returns [`UnsafeType`] when a filter's catalog type cannot be spliced.
 fn embed_rows(
     params: &mut Vec<String>,
-    schema: &str,
-    root: &str,
+    parent: &Level<'_>,
+    key: &str,
     embed: &Embed,
     rel: &Relationship,
-    full: bool,
+    rels: &HashMap<String, Relationship>,
 ) -> Result<String, UnsafeType> {
-    let target = quote_ident(&rel.table);
-    let mut sql = String::from("SELECT ");
-    if full {
-        push_select(&mut sql, params, &target, &embed.select);
-    } else {
-        sql.push('1');
-    }
-    sql.push_str(&format!(
-        " FROM {schema}.{target} WHERE {}",
-        join_condition(rel, root, &target)
-    ));
+    let depth = parent.depth + 1;
+    let alias = format!("{}_{depth}", rel.table);
+    let alias_ident = quote_ident(&alias);
     let own = &embed.params;
+    let level = Level {
+        schema: parent.schema,
+        ident: &alias_ident,
+        path: Some(key),
+        depth,
+        full: parent.full,
+    };
+    let mut select_sql = String::new();
+    let children = match &embed.select {
+        SelectList::Mixed(entries) => push_level(
+            &mut select_sql,
+            params,
+            &level,
+            entries,
+            rels,
+            &|name: &str| parent.full || names_null(&own.filters, &own.logic, name),
+        )?,
+        select => {
+            if parent.full {
+                push_select(&mut select_sql, params, &alias_ident, select);
+            }
+            Children::default()
+        }
+    };
+    if !parent.full {
+        select_sql = String::from("1");
+    }
+    let mut sql = format!(
+        "SELECT {select_sql} FROM {}.{} AS {alias_ident} WHERE {}",
+        parent.schema,
+        quote_ident(&rel.table),
+        join_condition(rel, parent.ident, &alias_ident)
+    );
     if !own.filters.is_empty() || !own.logic.is_empty() {
         let column_types: Vec<(&str, &str)> = rel
             .column_types
@@ -2180,18 +2330,22 @@ fn embed_rows(
         push_where(
             &mut sql,
             params,
-            &rel.table,
+            &alias,
             &own.filters,
             &own.logic,
             &column_types,
-            &[],
+            &children.null_embeds,
         )?;
     }
-    if full && !own.orders.is_empty() {
-        sql.push(' ');
-        push_order(&mut sql, params, &target, &own.orders);
+    for exists in &children.exists {
+        sql.push_str(" AND ");
+        sql.push_str(exists);
     }
-    if full && own.page.active {
+    if parent.full && !own.orders.is_empty() {
+        sql.push(' ');
+        push_order(&mut sql, params, &alias_ident, &own.orders);
+    }
+    if parent.full && own.page.active {
         sql.push(' ');
         push_page(&mut sql, params, &own.page);
     }
@@ -2199,22 +2353,20 @@ fn embed_rows(
 }
 
 /// Correlated subquery for one embed: an array for a to-many link, an object or `null` otherwise.
-fn push_embed(sql: &mut String, rows: &str, embed: &Embed, rel: &Relationship) {
-    if rel.to_many {
-        sql.push_str(&format!(
-            "COALESCE((SELECT json_agg(_t) FROM ({rows}) _t), '[]'::json)"
-        ));
+fn embed_item(rows: &str, embed: &Embed, rel: &Relationship) -> String {
+    let value = if rel.to_many {
+        format!("COALESCE((SELECT json_agg(_t) FROM ({rows}) _t), '[]'::json)")
     } else {
-        sql.push_str(&format!("(SELECT to_json(_t) FROM ({rows}) _t)"));
-    }
-    sql.push_str(" AS ");
-    sql.push_str(&quote_ident(embed.output_key()));
+        format!("(SELECT to_json(_t) FROM ({rows}) _t)")
+    };
+    format!("{value} AS {}", quote_ident(embed.output_key()))
 }
 
 /// `WHERE` fragment for `Prefer: count`, without the `WHERE` keyword
 /// (`readPlanToCountQuery`): the root filters, with a null embed filter as
-/// `[NOT] EXISTS`, and an `EXISTS` per `!inner` embed. Embedded order and
-/// range do not apply. `None` when nothing restricts the parent rows.
+/// `[NOT] EXISTS`, and an `EXISTS` per `!inner` embed, nested ones
+/// included. Embedded order and range do not apply. `None` when nothing
+/// restricts the parent rows.
 ///
 /// # Errors
 ///
@@ -2229,31 +2381,28 @@ pub(crate) fn count_where(
     let schema_ident = quote_ident(schema);
     let relation_ident = quote_ident(relation);
     let mut params = Vec::new();
-    let mut exists = Vec::new();
-    let mut null_embeds = Vec::new();
-    for embed in query.embeds() {
-        let Some(rel) = rels.get(&embed.key()) else {
-            continue;
+    let mut children = Children::default();
+    if let SelectList::Mixed(entries) = &query.select {
+        let level = Level {
+            schema: &schema_ident,
+            ident: &relation_ident,
+            path: None,
+            depth: 0,
+            full: false,
         };
-        let named = query.has_null_embed_filter(embed.output_key());
-        if !embed.inner && !named {
-            continue;
-        }
-        let rows = embed_rows(
+        children = push_level(
+            &mut String::new(),
             &mut params,
-            &schema_ident,
-            &relation_ident,
-            embed,
-            rel,
-            false,
+            &level,
+            entries,
+            rels,
+            &|name: &str| names_null(&query.filters, &query.logic, name),
         )?;
-        if embed.inner {
-            exists.push(format!("EXISTS ({rows})"));
-        }
-        if named {
-            null_embeds.push((embed.output_key().to_string(), rows));
-        }
     }
+    let Children {
+        exists,
+        null_embeds,
+    } = children;
     let filtered = !query.filters.is_empty() || !query.logic.is_empty();
     if !filtered && exists.is_empty() {
         return Ok(None);
@@ -2858,10 +3007,13 @@ mod tests {
                 QueryFail::Route
             ));
         }
-        assert!(matches!(
-            parse_get_query("select=notes(a(b))").unwrap_err(),
-            QueryFail::Route
-        ));
+        // A spread or an empty embed inside an embed still defers.
+        for nested in ["select=notes(a(b),...c(d))", "select=notes(a())"] {
+            assert!(matches!(
+                parse_get_query(nested).unwrap_err(),
+                QueryFail::Route
+            ));
+        }
         assert!(parse_get_query("select=id.count()")
             .unwrap()
             .has_aggregate());
@@ -2887,7 +3039,10 @@ mod tests {
             .sql;
         assert!(sql.contains("json_agg(_t)"), "{sql}");
         assert!(
-            sql.contains("\"notes\".\"user_id\" = \"profiles\".\"id\""),
+            sql.contains(
+                "FROM \"public\".\"notes\" AS \"notes_1\" \
+                 WHERE \"notes_1\".\"user_id\" = \"profiles\".\"id\""
+            ),
             "{sql}"
         );
         assert!(
@@ -2911,7 +3066,12 @@ mod tests {
             let query = parse_get_query(select).unwrap();
             assert_eq!(
                 query.embed_targets(),
-                vec![("users", Some(hint), format!("users!{hint}"))],
+                vec![EmbedTarget {
+                    parent: None,
+                    name: "users",
+                    hint: Some(hint),
+                    key: format!("users!{hint}"),
+                }],
                 "{select}"
             );
         }
@@ -2948,11 +3108,11 @@ mod tests {
             .unwrap()
             .sql;
         assert!(
-            sql.contains("WHERE \"users\".\"id\" = \"posts\".\"author_id\") _t) AS \"author\""),
+            sql.contains("WHERE \"users_1\".\"id\" = \"posts\".\"author_id\") _t) AS \"author\""),
             "{sql}"
         );
         assert!(
-            sql.contains("WHERE \"users\".\"id\" = \"posts\".\"editor_id\") _t) AS \"editor\""),
+            sql.contains("WHERE \"users_1\".\"id\" = \"posts\".\"editor_id\") _t) AS \"editor\""),
             "{sql}"
         );
     }
@@ -2976,13 +3136,15 @@ mod tests {
             .sql;
         assert!(
             sql.contains(
-                "(SELECT to_json(_t) FROM (SELECT \"users\".\"name\" FROM \"public\".\"users\" \
-                 WHERE \"users\".\"id\" = \"messages\".\"user_id\") _t) AS \"author\""
+                "(SELECT to_json(_t) FROM (SELECT \"users_1\".\"name\" FROM \"public\".\"users\" \
+                 AS \"users_1\" WHERE \"users_1\".\"id\" = \"messages\".\"user_id\") _t) AS \"author\""
             ),
             "{sql}"
         );
         assert!(
-            sql.contains("WHERE EXISTS (SELECT \"users\".\"name\" FROM \"public\".\"users\" WHERE"),
+            sql.contains(
+                "WHERE EXISTS (SELECT \"users_1\".\"name\" FROM \"public\".\"users\" AS \"users_1\" WHERE"
+            ),
             "{sql}"
         );
         assert!(!sql.contains("\"user_id\" AS"), "{sql}");
@@ -3345,12 +3507,13 @@ mod tests {
         let sql = build_read_sql("public", "authors", &query, &[], &books_rel()).unwrap();
         assert!(
             sql.sql.contains(
-                "COALESCE((SELECT json_agg(_t) FROM (SELECT \"books\".\"title\" \
-                 FROM \"public\".\"books\" WHERE \"books\".\"author_id\" = \"authors\".\"id\" \
-                 AND \"books\".\"published\" = ($1::text)::boolean \
-                 AND (\"books\".\"title\" = ($2::text)::text \
-                 OR \"books\".\"title\" = ($3::text)::text) \
-                 ORDER BY \"books\".\"title\" DESC LIMIT ($4::bigint) OFFSET ($5::bigint)) _t), \
+                "COALESCE((SELECT json_agg(_t) FROM (SELECT \"books_1\".\"title\" \
+                 FROM \"public\".\"books\" AS \"books_1\" \
+                 WHERE \"books_1\".\"author_id\" = \"authors\".\"id\" \
+                 AND \"books_1\".\"published\" = ($1::text)::boolean \
+                 AND (\"books_1\".\"title\" = ($2::text)::text \
+                 OR \"books_1\".\"title\" = ($3::text)::text) \
+                 ORDER BY \"books_1\".\"title\" DESC LIMIT ($4::bigint) OFFSET ($5::bigint)) _t), \
                  '[]'::json) AS \"books\""
             ),
             "{}",
@@ -3372,9 +3535,9 @@ mod tests {
         let query =
             parse_get_query("select=name,books!inner(title)&books.published=eq.true").unwrap();
         let sql = build_read_sql("public", "authors", &query, &[], &books_rel()).unwrap();
-        let rows = "SELECT \"books\".\"title\" FROM \"public\".\"books\" \
-                    WHERE \"books\".\"author_id\" = \"authors\".\"id\" \
-                    AND \"books\".\"published\" = ($1::text)::boolean";
+        let rows = "SELECT \"books_1\".\"title\" FROM \"public\".\"books\" AS \"books_1\" \
+                    WHERE \"books_1\".\"author_id\" = \"authors\".\"id\" \
+                    AND \"books_1\".\"published\" = ($1::text)::boolean";
         assert!(
             sql.sql.contains(&format!("WHERE EXISTS ({rows})")),
             "{}",
@@ -3386,9 +3549,9 @@ mod tests {
             .unwrap();
         assert_eq!(
             count.sql,
-            "EXISTS (SELECT 1 FROM \"public\".\"books\" \
-             WHERE \"books\".\"author_id\" = \"authors\".\"id\" \
-             AND \"books\".\"published\" = ($1::text)::boolean)"
+            "EXISTS (SELECT 1 FROM \"public\".\"books\" AS \"books_1\" \
+             WHERE \"books_1\".\"author_id\" = \"authors\".\"id\" \
+             AND \"books_1\".\"published\" = ($1::text)::boolean)"
         );
         assert_eq!(count.params, ["true"]);
     }
@@ -3399,8 +3562,8 @@ mod tests {
         let sql = build_read_sql("public", "authors", &query, &[], &books_rel()).unwrap();
         assert!(
             sql.sql.contains(
-                "WHERE NOT EXISTS (SELECT \"books\".\"title\" FROM \"public\".\"books\" \
-                 WHERE \"books\".\"author_id\" = \"authors\".\"id\") AND \"authors\".\"name\" = $1"
+                "WHERE NOT EXISTS (SELECT \"books_1\".\"title\" FROM \"public\".\"books\" \
+                 AS \"books_1\" WHERE \"books_1\".\"author_id\" = \"authors\".\"id\") AND \"authors\".\"name\" = $1"
             ),
             "{}",
             sql.sql
@@ -3411,7 +3574,7 @@ mod tests {
         let sql = build_read_sql("public", "authors", &query, &[], &rels).unwrap();
         assert!(
             sql.sql
-                .contains("WHERE (EXISTS (SELECT \"books\".\"title\""),
+                .contains("WHERE (EXISTS (SELECT \"books_1\".\"title\""),
             "{}",
             sql.sql
         );
@@ -3448,8 +3611,8 @@ mod tests {
             .unwrap();
         assert_eq!(
             count.sql,
-            "EXISTS (SELECT 1 FROM \"public\".\"books\" \
-             WHERE \"books\".\"author_id\" = \"authors\".\"id\")"
+            "EXISTS (SELECT 1 FROM \"public\".\"books\" AS \"books_1\" \
+             WHERE \"books_1\".\"author_id\" = \"authors\".\"id\")"
         );
     }
 
@@ -3461,8 +3624,8 @@ mod tests {
             .unwrap();
         assert_eq!(
             count.sql,
-            "NOT EXISTS (SELECT 1 FROM \"public\".\"books\" \
-             WHERE \"books\".\"author_id\" = \"authors\".\"id\")"
+            "NOT EXISTS (SELECT 1 FROM \"public\".\"books\" AS \"books_1\" \
+             WHERE \"books_1\".\"author_id\" = \"authors\".\"id\")"
         );
     }
 
@@ -3485,6 +3648,15 @@ mod tests {
             ("select=id,books(title)&authors.or=(id.eq.1)", "authors"),
             // Filters are placed before orders, right to left.
             ("select=id,books(title)&x.order=id&y.a=eq.1&z.a=eq.1", "z"),
+            // A nested path names its missing segment.
+            (
+                "select=id,books(reviews(rating))&books.tags.limit=1",
+                "tags",
+            ),
+            (
+                "select=id,books(reviews(rating))&books.reviews.x.a=eq.1",
+                "x",
+            ),
         ] {
             assert_eq!(
                 parse_get_query(query).unwrap_err(),
@@ -3494,6 +3666,198 @@ mod tests {
                 "{query}"
             );
         }
+        // A related order or a legacy target inside a nested embed stays 501.
+        for query in [
+            "select=id,books(reviews(rating))&books.reviews.order=users(id)",
+            "select=id,books(r:reviews(rating))&books.reviews.rating=eq.1",
+        ] {
+            assert_eq!(
+                parse_get_query(query).unwrap_err(),
+                QueryFail::Route,
+                "{query}"
+            );
+        }
+    }
+
+    fn rel(table: &str, to_many: bool, root: &str, target: &str) -> Relationship {
+        Relationship {
+            table: table.into(),
+            to_many,
+            root_columns: vec![root.into()],
+            target_columns: vec![target.into()],
+            column_types: vec![("rating".into(), "integer".into())],
+        }
+    }
+
+    /// `authors` → `books` → `reviews` → `users`, keyed by embed path.
+    fn library_rels() -> HashMap<String, Relationship> {
+        HashMap::from([
+            ("books".into(), rel("books", true, "id", "author_id")),
+            (
+                "books\u{0}reviews".into(),
+                rel("reviews", true, "id", "book_id"),
+            ),
+            (
+                "books\u{0}reviews\u{0}user_id".into(),
+                rel("users", false, "user_id", "id"),
+            ),
+        ])
+    }
+
+    #[test]
+    fn nested_embed_targets_list_parents_first() {
+        let query =
+            parse_get_query("select=name,books(title,reviews(rating,user_id(name))),x:books(id)")
+                .unwrap();
+        let targets: Vec<(Option<String>, &str, String)> = query
+            .embed_targets()
+            .into_iter()
+            .map(|target| (target.parent, target.name, target.key))
+            .collect();
+        assert_eq!(
+            targets,
+            vec![
+                (None, "books", "books".to_string()),
+                (Some("books".into()), "reviews", "books\u{0}reviews".into()),
+                (
+                    Some("books\u{0}reviews".into()),
+                    "user_id",
+                    "books\u{0}reviews\u{0}user_id".into()
+                ),
+                (None, "books", "books".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn nested_to_many_embeds_render_one_subquery_per_level() {
+        let query = parse_get_query("select=name,books(title,reviews(rating))").unwrap();
+        let sql = build_read_sql("public", "authors", &query, &[], &library_rels()).unwrap();
+        assert!(
+            sql.sql.contains(
+                "SELECT \"authors\".\"name\", COALESCE((SELECT json_agg(_t) FROM (\
+                 SELECT \"books_1\".\"title\", COALESCE((SELECT json_agg(_t) FROM (\
+                 SELECT \"reviews_2\".\"rating\" FROM \"public\".\"reviews\" AS \"reviews_2\" \
+                 WHERE \"reviews_2\".\"book_id\" = \"books_1\".\"id\") _t), '[]'::json) \
+                 AS \"reviews\" FROM \"public\".\"books\" AS \"books_1\" \
+                 WHERE \"books_1\".\"author_id\" = \"authors\".\"id\") _t), '[]'::json) \
+                 AS \"books\" FROM \"public\".\"authors\""
+            ),
+            "{}",
+            sql.sql
+        );
+        // Three levels: the to-one `user_id` embed joins the `reviews_2` rows.
+        let query =
+            parse_get_query("select=name,books(title,reviews(rating,user_id(name)))").unwrap();
+        let sql = build_read_sql("public", "authors", &query, &[], &library_rels()).unwrap();
+        assert!(
+            sql.sql.contains(
+                "(SELECT to_json(_t) FROM (SELECT \"users_3\".\"name\" \
+                 FROM \"public\".\"users\" AS \"users_3\" \
+                 WHERE \"users_3\".\"id\" = \"reviews_2\".\"user_id\") _t) AS \"user_id\""
+            ),
+            "{}",
+            sql.sql
+        );
+    }
+
+    #[test]
+    fn nested_parameters_inner_and_null_filters_apply_at_their_level() {
+        let query = parse_get_query(
+            "select=name,books!inner(title,reviews!inner(rating))\
+             &books.reviews.rating=gte.4&books.reviews.order=rating.desc&books.reviews.limit=2",
+        )
+        .unwrap();
+        let rels = library_rels();
+        let sql = build_read_sql("public", "authors", &query, &[], &rels).unwrap();
+        let reviews = "SELECT \"reviews_2\".\"rating\" FROM \"public\".\"reviews\" AS \"reviews_2\" \
+                       WHERE \"reviews_2\".\"book_id\" = \"books_1\".\"id\" \
+                       AND \"reviews_2\".\"rating\" >= ($1::text)::integer \
+                       ORDER BY \"reviews_2\".\"rating\" DESC LIMIT ($2::bigint) OFFSET ($3::bigint)";
+        // The nested `!inner` filters the books; the books `!inner` the authors.
+        assert!(
+            sql.sql.contains(&format!(
+                "WHERE \"books_1\".\"author_id\" = \"authors\".\"id\" AND EXISTS ({reviews})"
+            )),
+            "{}",
+            sql.sql
+        );
+        assert!(
+            sql.sql
+                .contains("FROM \"public\".\"authors\" WHERE EXISTS (SELECT \"books_1\""),
+            "{}",
+            sql.sql
+        );
+        assert_eq!(sql.params, ["4", "2", "0"]);
+        // The count follows both `!inner` levels without order or page.
+        let count = count_where("public", "authors", &query, &[], &rels)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            count.sql,
+            "EXISTS (SELECT 1 FROM \"public\".\"books\" AS \"books_1\" \
+             WHERE \"books_1\".\"author_id\" = \"authors\".\"id\" \
+             AND EXISTS (SELECT 1 FROM \"public\".\"reviews\" AS \"reviews_2\" \
+             WHERE \"reviews_2\".\"book_id\" = \"books_1\".\"id\" \
+             AND \"reviews_2\".\"rating\" >= ($1::text)::integer))"
+        );
+        assert_eq!(count.params, ["4"]);
+        // `books.reviews=is.null` keeps the books without a review.
+        let query =
+            parse_get_query("select=name,books(title,reviews(rating))&books.reviews=is.null")
+                .unwrap();
+        let sql = build_read_sql("public", "authors", &query, &[], &rels).unwrap();
+        assert!(
+            sql.sql.contains(
+                "WHERE \"books_1\".\"author_id\" = \"authors\".\"id\" AND NOT EXISTS (\
+                 SELECT \"reviews_2\".\"rating\""
+            ),
+            "{}",
+            sql.sql
+        );
+        // A left nested embed restricts nothing for the root count.
+        assert_eq!(
+            count_where("public", "authors", &query, &[], &rels).unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn self_reference_aliases_the_embedded_table() {
+        let query = parse_get_query(
+            "select=id,name,parent:parent_id(name),children:categories!parent_id(name)",
+        )
+        .unwrap();
+        let rels = HashMap::from([
+            (
+                "parent_id".to_string(),
+                rel("categories", false, "parent_id", "id"),
+            ),
+            (
+                "categories!parent_id".to_string(),
+                rel("categories", true, "id", "parent_id"),
+            ),
+        ]);
+        let sql = build_read_sql("public", "categories", &query, &[], &rels).unwrap();
+        assert!(
+            sql.sql.contains(
+                "(SELECT to_json(_t) FROM (SELECT \"categories_1\".\"name\" \
+                 FROM \"public\".\"categories\" AS \"categories_1\" \
+                 WHERE \"categories_1\".\"id\" = \"categories\".\"parent_id\") _t) AS \"parent\""
+            ),
+            "{}",
+            sql.sql
+        );
+        assert!(
+            sql.sql.contains(
+                "COALESCE((SELECT json_agg(_t) FROM (SELECT \"categories_1\".\"name\" \
+                 FROM \"public\".\"categories\" AS \"categories_1\" \
+                 WHERE \"categories_1\".\"parent_id\" = \"categories\".\"id\") _t), '[]'::json) \
+                 AS \"children\""
+            ),
+            "{}",
+            sql.sql
+        );
     }
 
     #[test]
