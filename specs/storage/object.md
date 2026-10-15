@@ -11,8 +11,13 @@ Unit ids (`coverage/units.json`):
 - `storage:route:POST /storage/v1/object/sign/{bucketName}/{*}`
 - `storage:route:GET /storage/v1/object/sign/{bucketName}/{*}`
 - `storage:route:DELETE /storage/v1/object/{bucketName}`
+- `storage:route:DELETE /storage/v1/object/{bucketName}/{*}` (issue 61)
+- `storage:route:HEAD /storage/v1/object/authenticated/{bucketName}/{*}` (issue 61)
+- `storage:route:GET /storage/v1/object/info/authenticated/{bucketName}/{*}` (issue 61)
+- `storage:route:GET /storage/v1/object/info/{bucketName}/{*}` (issue 61)
+- `storage:route:GET /storage/v1/object/info/public/{bucketName}/{*}` (issue 61)
 
-supabase-js `storage.from(b).upload/update/download/remove/createSignedUrl/getPublicUrl`.
+supabase-js `storage.from(b).upload/update/download/remove/createSignedUrl/getPublicUrl/info/exists`.
 The table these routes write is in [`database.md`](database.md).
 
 Pins: storage `v1.80.2`, supabase `v1.26.08` (`vendor.toml`).
@@ -38,19 +43,23 @@ Pins: storage `v1.80.2`, supabase `v1.26.08` (`vendor.toml`).
 | Sign: body, `signObjectUrl`, token payload `{url, scope: "download", iat, exp}` | `vendor/storage/src/http/routes/object/getSignedURL.ts:19`, `vendor/storage/src/storage/object.ts:825`, `vendor/storage/src/internal/auth/jwt.ts:509` |
 | `verifyObjectSignature` | `vendor/storage/src/storage/object.ts:979` |
 | Delete: body, `deleteObjects` SQL, `objectSchema` response | `vendor/storage/src/http/routes/object/deleteObjects.ts:16`, `vendor/storage/src/storage/object.ts:193`, `vendor/storage/src/storage/database/pg.ts:1276`, `vendor/storage/src/storage/schemas/object.ts:4` |
+| Single delete: superuser `findObject ... FOR UPDATE`, `deleteObject` as the request role, `AccessDenied` when nothing was deleted, `{"message":"Successfully deleted"}` | `vendor/storage/src/http/routes/object/deleteObject.ts:42`, `vendor/storage/src/storage/object.ts:144`, `vendor/storage/src/storage/database/pg.ts:1247` |
+| Object info: bucket, auth and lookup order; operations per route | `vendor/storage/src/http/routes/object/getObjectInfo.ts:37`, `:96`, `:140` |
+| `head` and `info` renderers: metadata parsing, headers, JSON body | `vendor/storage/src/storage/renderer/head.ts:11`, `:60`, `vendor/storage/src/storage/renderer/info.ts:11`, `vendor/storage/src/storage/renderer/renderer.ts:123` |
 
 ## Configuration
 
 Object bytes live under `FILE_STORAGE_BACKEND_PATH` (the self-hosted
 compose sets `/var/lib/storage`). Without it, or without `DATABASE_URL`,
 every object route is a 501. Without `JWT_SECRET`, the routes that need a
-verified JWT (upload, authenticated download, sign, signed download, delete)
-are a 501; public downloads and `GET /object/:bucket/*` on a public bucket
+verified JWT (upload, authenticated download and info, sign, signed
+download, delete) are a 501; public downloads and info, and
+`GET /object/:bucket/*` and `GET /object/info/:bucket/*` on a public bucket
 (anonymous fallback) still work.
 
 `list` is served by [`object-list.md`](object-list.md). The unported
-prefixes `list-v2`, `info`, `sign/:bucket` (sign many) and `upload/sign`
-are explicit 501s, so they never reach the generic `:bucket/*` handlers.
+prefixes `list-v2`, `sign/:bucket` (sign many) and `upload/sign` are
+explicit 501s, so they never reach the generic `:bucket/*` handlers.
 
 ## Request scope
 
@@ -138,6 +147,43 @@ their files. Response `200` with the deleted rows in `objectSchema` order:
 `is_versioned`. Names that match nothing are left out; an empty result is
 `[]`.
 
+## Remove one — `DELETE /object/:bucket/*`
+
+JWT required. In one transaction: the current row as superuser
+`FOR UPDATE` (none is `NoSuchKey`), then `DELETE` of the current row as the
+request role; when RLS leaves nothing to delete the answer is
+`AccessDenied` with message `Access denied` (status 400, `statusCode`
+`403`) and the transaction rolls back. After the commit the version's file
+is removed. Response `200 {"message":"Successfully deleted"}`. Unlike the
+other object routes there is no `InvalidKey` check.
+
+## Object info — `HEAD /object/authenticated/:bucket/*`, `GET /object/info/...`
+
+| Route | JWT | Operation | Renderer |
+|---|---|---|---|
+| `HEAD /object/authenticated/:bucket/*` | required | `object.head_authenticated_info` | `head` |
+| `GET /object/info/authenticated/:bucket/*` | required | `object.get_authenticated_info` | `info` |
+| `GET /object/info/:bucket/*` | `allowInvalidJwt` (`anon`) | `object.get_authenticated_info` | `info` |
+| `GET /object/info/public/:bucket/*` | none (superuser) | `storage.object.info_public` | `info` |
+
+Order: bucket as superuser; missing, or private without a JWT (always on
+the public route), is `NoSuchBucket`. Then `InvalidKey`; the row is read as
+superuser for a public bucket or the public route, under RLS otherwise; no
+row is `NoSuchKey`. Neither renderer reads the file.
+
+Headers come from the row's `metadata` (`createAssetMetadata`: numbers are
+safe integers or digit strings, `lastModified` goes through `new Date`):
+`ETag`, `Last-Modified` (`toUTCString`), `Cache-Control` (the stored value
+when non-empty). `head` adds `Accept-Ranges: bytes`, `Content-Type` (the
+stored mimetype, `text/html` becomes `text/plain`), `X-Robots-Tag: none`,
+`Content-Encoding` when stored, and `Content-Length` (the stored
+`contentLength`), with no body. `info` answers
+`Content-Type: application/json; charset=utf-8` and
+`{id, name, version, bucket_id, size, content_type, cache_control,
+content_encoding, etag, metadata (user_metadata), last_modified
+(updated_at), created_at, archived_at, is_delete_marker, is_versioned}`;
+missing metadata values are `null`, timestamps are ISO with milliseconds.
+
 ## Out of scope (501)
 
 - A missing or invalid JWT where a JWT is required (`AccessDenied` with
@@ -161,9 +207,17 @@ their files. Response `200` with the deleted rows in `objectSchema` order:
 - Delete entries with `versionId`, more than 500 names, validation messages.
 - Other jose failures on signed URLs; database errors other than `42501`
   and `23505`; object keys with `.`/`..`/empty segments.
-- `HEAD` (object info), `/object/list-v2`, `/object/info`,
-  copy, move, single `DELETE`, `POST /object/sign/:bucket` (many) and
-  signed uploads.
+- Single delete with `versionId`.
+- Object info with any query string (`versionId`, transformation options
+  and `X-Transformations`), with `If-None-Match` (revalidation
+  directives), or for a row whose metadata has `contentRange`, an
+  `httpStatusCode` other than 200, no `eTag`, or a `lastModified` that is
+  not RFC 3339 or epoch milliseconds; `HEAD` also needs a stored
+  `mimetype` and `contentLength`. Fastify's automatic `HEAD` on the
+  `/object/info` routes.
+- `HEAD /object/public/:bucket/*` and `HEAD /object/:bucket/*` (the same
+  handler; issue 61 PR 2), `/object/list-v2`, copy, move,
+  `POST /object/sign/:bucket` (many) and signed uploads.
 
 ## Judge cases
 
@@ -176,5 +230,10 @@ different object (`Invalid signature`), remove, and an upload with the
 (issue 398, on `review/issue-398-cases`): a small PNG as a supabase-js
 `Blob` form, a form with `cacheControl`, and a form upsert
 (`x-upsert: true`) over an existing object, each downloaded to compare the
-bytes, `Content-Type` and `Cache-Control`. Timestamps,
+bytes, `Content-Type` and `Cache-Control`. Object info and single delete
+(issue 61, on `review/issue-61-cases`): `info()` and `exists()` on a
+private and a public bucket, info for a missing object (`NoSuchKey`) and
+bucket (`NoSuchBucket`), anonymous info on a private bucket, single
+`DELETE` then a download (`NoSuchKey`), and a single `DELETE` with the
+`anon` key under RLS (`AccessDenied`). Timestamps,
 `Id`, `ETag`/`Last-Modified` and the token need the harness normalizer.

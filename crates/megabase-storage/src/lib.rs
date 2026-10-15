@@ -10,7 +10,7 @@
 //! storage-api does without a CDN purge endpoint (`specs/storage/cdn.md`).
 //! The `GET /render/image` routes answer their signature, key, bucket and
 //! object errors; the transformation itself is a 501
-//! (`specs/storage/render.md`). The `/object` upload, download, sign,
+//! (`specs/storage/render.md`). The `/object` upload, download, info, sign,
 //! remove and list routes run under the request's RLS scope and keep bytes
 //! under `FILE_STORAGE_BACKEND_PATH` (`specs/storage/object.md`,
 //! `specs/storage/object-list.md`).
@@ -128,11 +128,11 @@ pub fn router_with_state(state: StorageState) -> Router {
             "/storage/v1/render/image/sign/:bucket_name/*object_name",
             get(render::render_signed_image),
         )
-        // `HEAD` is `getObjectInfo`, which is not ported; axum would answer
-        // it with the `GET` handler otherwise.
+        // `HEAD` is `getObjectInfo`; where it is not ported, axum would
+        // answer it with the `GET` handler otherwise.
         .route(
             "/storage/v1/object/authenticated/:bucket_name/*object_name",
-            get(object::get_authenticated_object).head(not_implemented_head),
+            get(object::get_authenticated_object).head(object::head_authenticated_object),
         )
         .route(
             "/storage/v1/object/public/:bucket_name/*object_name",
@@ -156,9 +156,18 @@ pub fn router_with_state(state: StorageState) -> Router {
             "/storage/v1/object/sign/:bucket_name",
             post(not_implemented_any),
         )
+        // Fastify's automatic `HEAD` for the info routes is not ported.
+        .route(
+            "/storage/v1/object/info/authenticated/:bucket_name/*object_name",
+            get(object::get_object_info_authenticated).head(not_implemented_head),
+        )
+        .route(
+            "/storage/v1/object/info/public/:bucket_name/*object_name",
+            get(object::get_public_object_info).head(not_implemented_head),
+        )
         .route(
             "/storage/v1/object/info/:bucket_name/*object_name",
-            any(not_implemented_any),
+            get(object::get_object_info_any).head(not_implemented_head),
         )
         .route(
             "/storage/v1/object/upload/sign/:bucket_name/*object_name",
@@ -173,7 +182,8 @@ pub fn router_with_state(state: StorageState) -> Router {
             get(object::get_object_any)
                 .head(not_implemented_head)
                 .post(object::create_object)
-                .put(object::update_object),
+                .put(object::update_object)
+                .delete(object::delete_object),
         )
         .with_state(state)
         .merge(megabase_core::not_implemented_router(COMPONENT))

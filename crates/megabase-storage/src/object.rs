@@ -1,5 +1,5 @@
 //! `/object` routes: upload, download, remove and signed URLs
-//! (`specs/storage/object.md`).
+//! (`specs/storage/object.md`); object info lives in [`info`].
 //!
 //! Object bytes live under `FILE_STORAGE_BACKEND_PATH` as
 //! `<bucket>/<name>/<version>`, like storage-api's file backend; rows live in
@@ -9,7 +9,7 @@
 
 // Ported from supabase/storage src/http/routes/object/createObject.ts,
 // updateObject.ts, getObject.ts, getPublicObject.ts, getSignedObject.ts,
-// getSignedURL.ts, deleteObjects.ts, src/storage/object.ts,
+// getSignedURL.ts, deleteObject.ts, deleteObjects.ts, src/storage/object.ts,
 // src/storage/uploader.ts, src/storage/database/pg.ts,
 // src/storage/database/errors.ts, src/storage/backend/file.ts,
 // src/storage/renderer/renderer.ts,
@@ -33,6 +33,13 @@ use megabase_core::{JwtClaims, JwtError};
 use serde_json::{json, Map, Value};
 use sqlx::{Postgres, Row, Transaction};
 
+mod info;
+
+pub(super) use info::{
+    get_object_info_any, get_object_info_authenticated, get_public_object_info,
+    head_authenticated_object,
+};
+
 use super::{
     database_error, fastify_json, iso,
     limits::{is_uuid, is_valid_bucket_name, is_valid_key, UPLOAD_FILE_SIZE_LIMIT},
@@ -49,6 +56,7 @@ const OP_GET_AUTHENTICATED: &str = "storage.object.get_authenticated";
 const OP_GET_PUBLIC: &str = "storage.object.get_public";
 const OP_GET_SIGNED: &str = "storage.object.get_signed";
 const OP_SIGN: &str = "storage.object.sign";
+const OP_DELETE: &str = "storage.object.delete";
 const OP_DELETE_MANY: &str = "storage.object.delete_many";
 const OP_LIST: &str = "storage.object.list";
 
@@ -102,6 +110,11 @@ const UPSERT_OBJECT_SQL: &str = "INSERT INTO storage.objects \
      DO UPDATE SET metadata = EXCLUDED.metadata, version = EXCLUDED.version, \
      owner = EXCLUDED.owner, owner_id = EXCLUDED.owner_id \
      RETURNING id::text AS id";
+
+/// `deleteObject(bucket, name)` on the current version.
+const DELETE_OBJECT_SQL: &str = "DELETE FROM storage.objects \
+     WHERE name COLLATE \"C\" = $1 AND bucket_id = $2 AND archived_at IS NULL \
+     RETURNING id";
 
 /// `deleteObjects(bucket, names, 'name')`.
 const DELETE_OBJECTS_SQL: &str = "DELETE FROM storage.objects \
@@ -158,6 +171,13 @@ impl Scope<'_> {
         &self,
         pool: &sqlx::PgPool,
     ) -> Result<Transaction<'static, Postgres>, sqlx::Error> {
+        let mut tx = pool.begin().await?;
+        self.apply(&mut tx).await?;
+        Ok(tx)
+    }
+
+    /// Switch an open transaction to this scope.
+    async fn apply(&self, tx: &mut Transaction<'static, Postgres>) -> Result<(), sqlx::Error> {
         let (role, jwt, sub, claims) = match &self.actor {
             Actor::Request { claims, jwt } => (
                 claims.role.as_deref().unwrap_or("anon"),
@@ -172,7 +192,6 @@ impl Scope<'_> {
                 json!({ "role": "service_role" }).to_string(),
             ),
         };
-        let mut tx = pool.begin().await?;
         sqlx::query(SCOPE_SQL)
             .bind(role)
             .bind(role)
@@ -183,9 +202,9 @@ impl Scope<'_> {
             .bind(self.method.as_str())
             .bind(self.request_path())
             .bind(self.operation)
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await?;
-        Ok(tx)
+        Ok(())
     }
 
     fn as_super_user(&self) -> Scope<'_> {
@@ -892,6 +911,16 @@ pub(super) async fn get_object_any(
     get_object(&state, path, &method, &uri, &headers, jwt).await
 }
 
+/// `allowInvalidJwt`'s fallback payload `{role: anon}`.
+fn anon_claims() -> JwtClaims {
+    JwtClaims {
+        role: Some("anon".into()),
+        sub: None,
+        exp: None,
+        raw: Map::new(),
+    }
+}
+
 /// `getObject.ts` `requestHandler`.
 async fn get_object(
     state: &StorageState,
@@ -910,12 +939,7 @@ async fn get_object(
     if has_conditional_headers(headers) {
         return not_implemented(method, uri);
     }
-    let anon = JwtClaims {
-        role: Some("anon".into()),
-        sub: None,
-        exp: None,
-        raw: Map::new(),
-    };
+    let anon = anon_claims();
     let authenticated = jwt.is_some();
     let (claims, token) = match &jwt {
         Some((claims, token)) => (claims, *token),
@@ -1325,6 +1349,92 @@ pub(super) async fn delete_objects(
     }
 }
 
+/// `DELETE /object/:bucketName/*`: in one transaction, lock the current row
+/// as the superuser (`NoSuchKey`), delete it as the request role (nothing
+/// deleted is `AccessDenied`), then remove its file. There is no
+/// `mustBeValidKey` here.
+// megabase:unit storage:route:DELETE /storage/v1/object/{bucketName}/{*}
+pub(super) async fn delete_object(
+    State(state): State<StorageState>,
+    path: Result<Path<(String, String)>, PathRejection>,
+    method: Method,
+    OriginalUri(uri): OriginalUri,
+    headers: HeaderMap,
+) -> Response {
+    let Ok(Path((bucket_id, object_name))) = path else {
+        return not_implemented(&method, &uri);
+    };
+    // `versionId` is not ported.
+    if query_pairs(&uri).and_then(|pairs| single(&pairs, "versionId").map(|v| v.is_none()))
+        != Some(true)
+    {
+        return not_implemented(&method, &uri);
+    }
+    let Some((pool, root)) = backend(&state) else {
+        return not_implemented(&method, &uri);
+    };
+    let Some((claims, jwt)) = request_jwt(&state, &headers) else {
+        return not_implemented(&method, &uri);
+    };
+    let scope = Scope {
+        actor: Actor::Request {
+            claims: &claims,
+            jwt,
+        },
+        method: &method,
+        uri: &uri,
+        headers: &headers,
+        operation: OP_DELETE,
+    };
+    let attempt = async {
+        let mut tx = scope.as_super_user().begin(pool).await?;
+        let Some(current) = sqlx::query(FIND_OBJECT_FOR_UPDATE_SQL)
+            .bind(&object_name)
+            .bind(&bucket_id)
+            .fetch_optional(&mut *tx)
+            .await?
+        else {
+            return Ok(Err(StorageError::no_such_key().into_response()));
+        };
+        let version: Option<String> = current.try_get("version")?;
+        // A row Megabase could not have stored a file for.
+        let file = match version {
+            Some(version) => match object_file(root, &bucket_id, &object_name, &version) {
+                Some(file) => Some(file),
+                None => return Ok(Err(not_implemented(&method, &uri))),
+            },
+            None => None,
+        };
+        scope.apply(&mut tx).await?;
+        let deleted = sqlx::query(DELETE_OBJECT_SQL)
+            .bind(&object_name)
+            .bind(&bucket_id)
+            .fetch_optional(&mut *tx)
+            .await?;
+        if deleted.is_none() {
+            return Ok(Err(StorageError::access_denied(Cow::Borrowed(
+                "Access denied",
+            ))
+            .into_response()));
+        }
+        tx.commit().await?;
+        Ok::<_, sqlx::Error>(Ok(file))
+    };
+    match attempt.await {
+        Ok(Ok(file)) => {
+            if let Some(file) = file {
+                remove_file(&file).await;
+            }
+            fastify_json(
+                StatusCode::OK,
+                &json!({ "message": "Successfully deleted" }),
+            )
+        }
+        Ok(Err(response)) => response,
+        Err(error) => pg_error(&error, StorageError::resource_already_exists),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // List
 // ---------------------------------------------------------------------------
@@ -1619,7 +1729,30 @@ mod tests {
             ),
             (Method::POST, "/storage/v1/object/sign/avatars/a.png", true),
             (Method::DELETE, "/storage/v1/object/avatars", true),
+            (Method::DELETE, "/storage/v1/object/avatars/u1/a.png", true),
             (Method::POST, "/storage/v1/object/list/avatars", true),
+            (
+                Method::HEAD,
+                "/storage/v1/object/authenticated/avatars/a.png",
+                true,
+            ),
+            (
+                Method::HEAD,
+                "/storage/v1/object/authenticated/avatars/a.png",
+                false,
+            ),
+            (
+                Method::GET,
+                "/storage/v1/object/info/authenticated/avatars/a.png",
+                true,
+            ),
+            (
+                Method::GET,
+                "/storage/v1/object/info/public/avatars/a.png",
+                false,
+            ),
+            (Method::GET, "/storage/v1/object/info/avatars/a.png", false),
+            (Method::HEAD, "/storage/v1/object/info/avatars/a.png", true),
         ] {
             let mut request = axum::http::Request::builder()
                 .method(&method)
