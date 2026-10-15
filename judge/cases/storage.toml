@@ -131,3 +131,35 @@ method = "PUT"
 path = "/storage/v1/bucket/judge-does-not-exist/lifecycle"
 key = "service_role"
 json = { rules = [{ status = "Enabled", filter = {}, noncurrentVersionExpiration = { noncurrentDays = 30 } }] }
+
+# Image render pre-render errors (specs/storage/render.md). The static token
+# is HS256 over the public JWT_SECRET from `.env.example`, with claims
+# `url = "judge-render/other.png"`, `iat`, and `exp` in 2100 and no `scope`
+# (a legacy download token). Fixture data only.
+
+[[case]]
+id = "storage.render.sign_wrong_url"
+description = "A download token signed for another object is InvalidSignature"
+units = ["storage:route:GET /storage/v1/render/image/sign/{bucketName}/{*}"]
+[[case.step]]
+method = "GET"
+path = "/storage/v1/render/image/sign/judge-render/judge-render.png?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjQxMDI0NDQ4MDAsImlhdCI6MTcwMDAwMDAwMCwidXJsIjoianVkZ2UtcmVuZGVyL290aGVyLnBuZyJ9.UpEn1BNC5q1iRGwC9Nsl8HJYWFzwx7eBQaqrO2BCll8"
+key = "none"
+
+[[case]]
+id = "storage.render.public_invalid_key"
+description = "An object name with %23 fails the key check before any lookup"
+units = ["storage:route:GET /storage/v1/render/image/public/{bucketName}/{*}"]
+[[case.step]]
+method = "GET"
+path = "/storage/v1/render/image/public/judge-render/bad%23name.png"
+key = "none"
+
+[[case]]
+id = "storage.render.authenticated_invalid_key"
+description = "With the service_role key, an object name with %23 is InvalidKey"
+units = ["storage:route:GET /storage/v1/render/image/authenticated/{bucketName}/{*}"]
+[[case.step]]
+method = "GET"
+path = "/storage/v1/render/image/authenticated/judge-render/bad%23name.png"
+key = "service_role"

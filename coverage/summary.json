@@ -3,7 +3,7 @@
   "totals": {
     "units": 1031,
     "implemented": 198,
-    "tested": 181,
+    "tested": 184,
     "conformant": 0
   },
   "percent": {
@@ -12,7 +12,7 @@
     "done": 0.0
   },
   "judge": {
-    "cases": 392,
+    "cases": 395,
     "passing": 0
   },
   "components": {
@@ -391,7 +391,7 @@
     "storage": {
       "units": 149,
       "implemented": 22,
-      "tested": 6,
+      "tested": 9,
       "conformant": 0,
       "groups": {
         "bucket": {
@@ -433,7 +433,7 @@
         "render": {
           "units": 3,
           "implemented": 3,
-          "tested": 0,
+          "tested": 3,
           "conformant": 0
         },
         "resumable": {
@@ -745,9 +745,9 @@
     "storage:route:GET /storage/v1/bucket/{bucketId}": "tested",
     "storage:route:GET /storage/v1/bucket/{bucketId}/lifecycle": "tested",
     "storage:route:GET /storage/v1/health": "implemented",
-    "storage:route:GET /storage/v1/render/image/authenticated/{bucketName}/{*}": "implemented",
-    "storage:route:GET /storage/v1/render/image/public/{bucketName}/{*}": "implemented",
-    "storage:route:GET /storage/v1/render/image/sign/{bucketName}/{*}": "implemented",
+    "storage:route:GET /storage/v1/render/image/authenticated/{bucketName}/{*}": "tested",
+    "storage:route:GET /storage/v1/render/image/public/{bucketName}/{*}": "tested",
+    "storage:route:GET /storage/v1/render/image/sign/{bucketName}/{*}": "tested",
     "storage:route:POST /storage/v1/bucket": "tested",
     "storage:route:PUT /storage/v1/bucket/{bucketId}": "tested",
     "storage:route:PUT /storage/v1/bucket/{bucketId}/lifecycle": "tested",
