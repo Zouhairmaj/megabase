@@ -4,6 +4,15 @@ All notable changes to Megabase are documented in this file.
 The format is produced by [release-please](https://github.com/googleapis/release-please).
 Sections: Features, Bug Fixes, Performance, Conformance/judge, Documentation.
 
+## [0.1.32](https://github.com/Zouhairmaj/megabase/compare/v0.1.31...v0.1.32) (2026-10-15)
+
+
+### Features
+
+* **auth:** serve post /recover password recovery ([#391](https://github.com/Zouhairmaj/megabase/issues/391)) ([efca1ad](https://github.com/Zouhairmaj/megabase/commit/efca1adfc5a0c90348784b91166c9328df38b403))
+* **rest:** serve json path filters and raw arrows in the request target ([#390](https://github.com/Zouhairmaj/megabase/issues/390)) ([6c6d55d](https://github.com/Zouhairmaj/megabase/commit/6c6d55d37aa4a20b4ec57162635ed84db352f07e))
+* **storage:** serve object upload, download, sign and remove with storage.objects ([#392](https://github.com/Zouhairmaj/megabase/issues/392)) ([88b49d8](https://github.com/Zouhairmaj/megabase/commit/88b49d8657b3031834354c8ce271089880a94a9d))
+
 ## [0.1.31](https://github.com/Zouhairmaj/megabase/compare/v0.1.30...v0.1.31) (2026-10-15)
 
 
