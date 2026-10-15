@@ -104,6 +104,7 @@ other shard checks succeed without starting the reference stack:
 | `crates/megabase-storage` | `Judge (storage)` |
 | `crates/megabase-realtime` | `Judge (realtime)` |
 | `crates/megabase-meta` | `Judge (meta)` |
+| `crates/megabase-functions` | `Judge (functions)` |
 
 Two component crates run those two shards. Shared inputs run every
 shard: `crates/megabase-server` (the gateway), `crates/megabase-core`,
@@ -115,7 +116,7 @@ none of those and is not site content, `docs/**`, `coverage/**`,
 shard. No component crate and no shared input (for example a site-only
 diff, or `docs/decisions/` alone) skips the Judge build. The mapping
 is the `COMPONENT_SHARDS` list in `.github/actions/pr-paths`. Add a
-line when `functions`, `studio`, or `pooler` gets
+line when `studio` or `pooler` gets
 `judge/cases/<shard>.toml`. Until that file exists, those crates run
 every shard.
 
