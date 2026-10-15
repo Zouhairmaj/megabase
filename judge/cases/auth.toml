@@ -1780,3 +1780,53 @@ capture = { token = "/access_token" }
 method = "POST"
 path = "/auth/v1/logout?scope=bogus"
 headers = { Authorization = "Bearer {{token}}" }
+
+# Issue #413: POST /auth/v1/invite (supabase-js `auth.admin.inviteUserByEmail`,
+# served in #412). The stock reference stack points GOTRUE_SMTP_HOST at a mail
+# host that does not run, so inviting a new email returns 500 there. Only the
+# credential, validation and existing-user paths, which send no mail, are cases.
+
+[[case]]
+id = "auth.invite.anon"
+description = "Invite with the anon key is forbidden"
+units = ["auth:route:POST /auth/v1/invite"]
+[[case.step]]
+method = "POST"
+path = "/auth/v1/invite"
+json = { email = "judge-invite-anon-{{run}}@example.com" }
+
+# Kong copies a missing Authorization from the raw apikey (no `Bearer `
+# prefix), so a non-Bearer scheme is the portable way to send no bearer.
+[[case]]
+id = "auth.invite.no-bearer"
+description = "Invite without a Bearer token is unauthorized"
+units = ["auth:route:POST /auth/v1/invite"]
+[[case.step]]
+method = "POST"
+path = "/auth/v1/invite"
+headers = { Authorization = "Basic anVkZ2U6anVkZ2U=" }
+json = { email = "judge-invite-nobearer-{{run}}@example.com" }
+
+[[case]]
+id = "auth.invite.invalid-email"
+description = "Invite rejects a malformed email before touching users"
+units = ["auth:route:POST /auth/v1/invite"]
+[[case.step]]
+method = "POST"
+path = "/auth/v1/invite"
+key = "service_role"
+json = { email = "not-an-email" }
+
+[[case]]
+id = "auth.invite.email-exists"
+description = "Invite of an already-confirmed user is a 422 email_exists"
+units = ["auth:route:POST /auth/v1/invite"]
+[[case.step]]
+method = "POST"
+path = "/auth/v1/signup"
+json = { email = "judge-invite-exists-{{run}}@example.com", password = "judge-password-1" }
+[[case.step]]
+method = "POST"
+path = "/auth/v1/invite"
+key = "service_role"
+json = { email = "judge-invite-exists-{{run}}@example.com" }
