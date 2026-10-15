@@ -15,6 +15,8 @@ Resource embedding in `select=`. Template:
 - `vendor/postgrest/src/library/PostgREST/SchemaCache.hs:212-229,585-609,783-829`
   (`getOverrideRelationshipsMap` sort, `addInverseRels`, `addM2MRels`,
   `allM2OandO2ORels`).
+- `vendor/postgrest/src/library/PostgREST/SchemaCache.hs:142-160,530-583,877-1079`
+  (`ViewKeyDependency`, `addViewM2OAndO2ORels`, `allViewsKeyDependencies`).
 - `vendor/postgrest/src/library/PostgREST/Error.hs:245,257-258,280,409-445`
   (`NoRelBetween`, `AmbiguousRelBetween`, `compressedRel`, `relHint`).
 - Pin: `postgrest v16.4` (`vendor.toml`).
@@ -27,7 +29,8 @@ optional `alias:` prefix and up to two `!` params on `<name>`: a join type
 order. With two of a kind the first wins (`pEmbedParams`). `<name>` is one
 of:
 
-- the embedded table, in the same schema (`notes(body)`);
+- the embedded table or view, in the same schema (`notes(body)`,
+  `authors?select=books_view(title)`);
 - a foreign key constraint name (`note_comments_note_id_fkey(body)`);
 - a column hint: the single column of a foreign key, as seen from the
   requested table (`messages?select=author:user_id(*)`). From the
@@ -41,9 +44,18 @@ of:
   gives a relationship from the referencing side (many-to-one, or
   one-to-one when the key columns are a primary key or unique constraint)
   and one from the referenced side (one-to-many, or one-to-one).
-- `<name>` matches a relationship when it equals the other table, the
-  constraint name, or the relationship's single column on the requested
-  table. Multi-column keys never match a column hint.
+- Views and materialized views inherit the keys of the tables they select.
+  A view that selects every column of one end of a key (followed through
+  nested views in the request schema and `public`, the extra search path)
+  gets that key with its own column names: view to table, table to view,
+  and view to view, with the base key's cardinality. A key column the view
+  selects twice gives one relationship per view column. The view
+  definition is read from `pg_rewrite.ev_action` as upstream does.
+- `<name>` matches a relationship when it equals the other table or view,
+  the constraint name, or the relationship's single column on the
+  requested relation. A constraint name or column never matches a
+  relationship whose other end is a view. Multi-column keys never match a
+  column hint.
 - With a hint, `<name>` must equal the other table, and the hint must equal
   the constraint name, the single column on the requested table, or the
   single column on the other table
@@ -51,6 +63,8 @@ of:
   `users!editor_id(name)`, `users!id(name)`). Two hinted embeds of one
   table resolve separately
   (`author:users!author_id(name),editor:users!editor_id(name)`).
+- Several relationships matched by a table name are `PGRST201`, except when
+  a view is one end (501).
 - One-to-many: the embed is a JSON array, `[]` when empty. Many-to-one and
   one-to-one: a JSON object, or `null` when no row matches.
 - `!left` (the default) keeps every parent row.
@@ -84,12 +98,13 @@ of:
 
 Spread (`...name(...)`), nested
 embeds, empty embeds (`notes()`, filter-only upstream), filters/order/limit on embedded resources (`notes.order=body` is 501, not
-`PGRST108`), embedding a view, materialized view or foreign table,
-self-references, and embeds in write responses. Many-to-many through a
-junction table is 501 too: whenever a junction exists (a table with two
-distinct many-to-one keys, one to each side, both inside its primary key,
-as `addM2MRels` builds), an unhinted table target or a hint naming that
-junction is 501, since upstream would list the many-to-many candidate.
+`PGRST108`), embedding to or from a foreign table, self-references,
+several view relationships matched by a table name, and embeds in write
+responses. Many-to-many through a junction table is 501 too: whenever a
+junction exists (a table with two distinct many-to-one keys, one to each
+side, both inside its primary key, as `addM2MRels` builds), an unhinted
+table target or a hint naming that junction is 501, since upstream would
+list the many-to-many candidate.
 
 ## Judge cases
 

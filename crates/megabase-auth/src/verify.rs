@@ -471,7 +471,7 @@ fn form_encode(pairs: &[(&str, &str)]) -> String {
         .join("&")
 }
 
-fn query_escape(input: &str) -> String {
+pub(crate) fn query_escape(input: &str) -> String {
     const HEX: &[u8] = b"0123456789ABCDEF";
     let mut out = String::new();
     for &byte in input.as_bytes() {
@@ -488,7 +488,7 @@ fn query_escape(input: &str) -> String {
     out
 }
 
-fn html_escape(input: &str) -> String {
+pub(crate) fn html_escape(input: &str) -> String {
     let mut out = String::new();
     for ch in input.chars() {
         match ch {
