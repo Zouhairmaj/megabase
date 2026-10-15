@@ -10,9 +10,10 @@
 //! storage-api does without a CDN purge endpoint (`specs/storage/cdn.md`).
 //! The `GET /render/image` routes answer their signature, key, bucket and
 //! object errors; the transformation itself is a 501
-//! (`specs/storage/render.md`). The `/object` upload, download, sign and
-//! remove routes run under the request's RLS scope and keep bytes under
-//! `FILE_STORAGE_BACKEND_PATH` (`specs/storage/object.md`).
+//! (`specs/storage/render.md`). The `/object` upload, download, sign,
+//! remove and list routes run under the request's RLS scope and keep bytes
+//! under `FILE_STORAGE_BACKEND_PATH` (`specs/storage/object.md`,
+//! `specs/storage/object-list.md`).
 
 // Ported from supabase/storage src/http/routes/bucket/getAllBuckets.ts,
 // src/http/routes/bucket/getBucket.ts, src/http/routes/health/healthcheck.ts,
@@ -140,12 +141,12 @@ pub fn router_with_state(state: StorageState) -> Router {
             "/storage/v1/object/sign/:bucket_name/*object_name",
             get(object::get_signed_object).post(object::sign_object),
         )
-        // Unported upstream routes whose first segment the generic
-        // `:bucket_name/*object_name` route would take for a bucket name.
         .route(
             "/storage/v1/object/list/:bucket_name",
-            post(not_implemented_any),
+            post(object::list_objects),
         )
+        // Unported upstream routes whose first segment the generic
+        // `:bucket_name/*object_name` route would take for a bucket name.
         .route(
             "/storage/v1/object/list-v2/:bucket_name",
             post(not_implemented_any),

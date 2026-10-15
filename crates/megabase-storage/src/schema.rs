@@ -51,6 +51,10 @@ const EXTENSION: &str = include_str!("../sql/extension.sql");
 // megabase:unit storage:sql-function:storage.delete_leaf_prefixes()
 const DROPPED_PREFIX_FUNCTIONS: &str = include_str!("../sql/dropped_prefix_functions.sql");
 
+// megabase:unit storage:sql-function:storage.get_common_prefix()
+// megabase:unit storage:sql-function:storage.search()
+const SEARCH: &str = include_str!("../sql/search.sql");
+
 /// Install order: the table before its triggers, `storage.operation()`
 /// before the `LANGUAGE sql` helpers that call it.
 const OBJECTS: &[&str] = &[
@@ -64,6 +68,7 @@ const OBJECTS: &[&str] = &[
     ENFORCE_BUCKET_LIFECYCLE_SERVICE_ROLE,
     EXTENSION,
     DROPPED_PREFIX_FUNCTIONS,
+    SEARCH,
 ];
 
 /// Failure installing the storage schema. Display text does not include the URL.
