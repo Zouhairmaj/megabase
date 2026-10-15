@@ -35,7 +35,9 @@ struct PkceBody {
     code_verifier: String,
 }
 
-// megabase:unit auth:grant-type:pkce
+// No `auth:grant-type:pkce` marker yet: no ported route writes an
+// `auth.flow_state` row with an `auth_code`, so a client cannot obtain a
+// redeemable code (see `specs/auth/token.md`).
 pub(super) async fn grant(state: AuthState, headers: HeaderMap, body: Body) -> Response {
     let params = match grant_json::<PkceBody>(body, &PKCE_GRANT_PARAMS).await {
         Ok(params) => params,

@@ -2,7 +2,12 @@
 
 Status: partial. `id_token` and `web3` are served up to the provider
 check; they carry no `megabase:unit` marker until verification after an
-enabled provider or chain is ported (it is HTTP 501 today).
+enabled provider or chain is ported (it is HTTP 501 today). The `pkce`
+exchange itself is complete, but nothing in Megabase writes an `auth.flow_state` row
+with an `auth_code` yet. Upstream issues codes from `/verify`, `/callback`
+and PKCE recovery or magic links; with autoconfirm on, signup creates no
+flow state (`internal/api/signup.go:229-250`). So `pkce` has no marker
+until one of those producers is ported.
 Unit ids (`coverage/units.json`): `auth:route:POST /auth/v1/token`,
 `auth:grant-type:password`, `auth:grant-type:refresh_token` (Level 1);
 `auth:grant-type:pkce`, `auth:grant-type:id_token`,
