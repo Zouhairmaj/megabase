@@ -235,22 +235,40 @@ pub enum VerifyKind {
     /// as a recovery token, and the verify continues as `signup` or
     /// `magiclink` accordingly.
     Email,
+    /// `type=sms`: phone plus OTP against the confirmation token; confirms
+    /// the phone.
+    Sms,
+    /// `type=phone_change`: phone plus OTP against the phone change token;
+    /// moves `phone_change` onto `phone`.
+    PhoneChange,
     /// Email plus OTP for a type this crate does not confirm.
     Other,
 }
 
+impl VerifyKind {
+    /// `sms` or `phone_change`: only the phone plus OTP path accepts them.
+    pub fn is_phone(self) -> bool {
+        matches!(self, Self::Sms | Self::PhoneChange)
+    }
+}
+
 /// One verify attempt. `token_hash` is already the stored hash: the raw
-/// `token_hash` field, the GET `token` query value, or SHA-224 of email+OTP.
+/// `token_hash` field, the GET `token` query value, or SHA-224 of
+/// email+OTP or phone+OTP.
 pub struct VerifyRequest {
     pub kind: VerifyKind,
     pub token_hash: String,
     /// True for GET and for POST that sent only `token_hash`.
     pub hash_path: bool,
     pub email: String,
+    /// E.164 without the leading `+`; empty unless POST sent `phone`.
+    pub phone: String,
     pub aud: String,
     pub autoconfirm: bool,
     pub secure_email_change: bool,
     pub otp_exp_seconds: u64,
+    /// `GOTRUE_SMS_OTP_EXP`, the window for `sms` and `phone_change`.
+    pub sms_otp_exp_seconds: u64,
     /// PKCE flow (a `pkce_` token on `GET /verify`): the parsed
     /// `AuthenticationMethod` of the verification type. The verify then
     /// issues the auth code of the user's latest flow state for that method
@@ -1299,7 +1317,7 @@ impl Backend {
                     tokens.email_change_token_new = request_hash.to_string();
                 }
             }
-            VerifyKind::Email | VerifyKind::Other => {}
+            VerifyKind::Email | VerifyKind::Sms | VerifyKind::PhoneChange | VerifyKind::Other => {}
         }
         let mut db = db.lock().await;
         db.one_time.push(OneTimeToken {
@@ -1309,6 +1327,77 @@ impl Backend {
         });
         db.tokens.insert(id, tokens);
         db.users.insert(id, user);
+    }
+}
+
+#[cfg(test)]
+impl Backend {
+    /// Insert a user with a pending phone OTP. With `phone_change` empty it
+    /// is an unconfirmed phone signup (`sms`, confirmation token); otherwise
+    /// an email user with a pending change to `phone_change`.
+    pub async fn plant_phone_verification_for_test(
+        &self,
+        phone: &str,
+        phone_change: &str,
+        request_hash: &str,
+        sent_at: SystemTime,
+    ) -> Uuid {
+        let BackendKind::Memory(db) = &self.inner else {
+            panic!("verify fixture is memory-only");
+        };
+        let id = Uuid::new_v4();
+        let (email, identity) = if phone_change.is_empty() {
+            let mut identity = phone_identity(id, phone, sent_at);
+            let mut patch = Map::new();
+            patch.insert("phone_verified".into(), json!(false));
+            merge_meta(&mut identity.identity_data, &patch);
+            (String::new(), identity)
+        } else {
+            let email = format!("{id}@example.com");
+            let identity = new_identity(id, &email, &Map::new(), sent_at);
+            (email, identity)
+        };
+        let mut user = UserRecord {
+            id,
+            aud: "authenticated".into(),
+            role: "authenticated".into(),
+            email,
+            phone: phone.to_string(),
+            email_confirmed_at: None,
+            last_sign_in_at: None,
+            app_metadata: app_metadata(),
+            user_metadata: json!({}),
+            identities: vec![identity],
+            created_at: sent_at,
+            updated_at: sent_at,
+            is_anonymous: false,
+            banned_until: None,
+            is_sso_user: false,
+            password_hash: String::new(),
+            phone_confirmed_at: None,
+            confirmed_at: None,
+        };
+        refresh_providers(&mut user);
+        let mut tokens = UserTokens::default();
+        let kind = if phone_change.is_empty() {
+            tokens.confirmation_token = request_hash.to_string();
+            tokens.confirmation_sent_at = Some(sent_at);
+            VerifyKind::Sms
+        } else {
+            tokens.phone_change = phone_change.to_string();
+            tokens.phone_change_token = request_hash.to_string();
+            tokens.phone_change_sent_at = Some(sent_at);
+            VerifyKind::PhoneChange
+        };
+        let mut db = db.lock().await;
+        db.one_time.push(OneTimeToken {
+            user_id: id,
+            token_type: ott_name(kind, false).into(),
+            token_hash: request_hash.to_string(),
+        });
+        db.tokens.insert(id, tokens);
+        db.users.insert(id, user);
+        id
     }
 }
 
@@ -3175,6 +3264,9 @@ const OTT_CONFIRMATION: &str = "confirmation_token";
 const OTT_RECOVERY: &str = "recovery_token";
 const OTT_EMAIL_CURRENT: &str = "email_change_token_current";
 const OTT_EMAIL_NEW: &str = "email_change_token_new";
+#[cfg(test)]
+const OTT_PHONE_CHANGE: &str = "phone_change_token";
+const PHONE_PROVIDER: &str = "phone";
 pub(crate) const SINGLE_CONFIRMATION: &str =
     "Confirmation link accepted. Please proceed to confirm link sent to the other email";
 
@@ -3190,6 +3282,9 @@ struct UserTokens {
     email_change_sent_at: Option<SystemTime>,
     email_change_confirm_status: i16,
     invited_at: Option<SystemTime>,
+    phone_change: String,
+    phone_change_token: String,
+    phone_change_sent_at: Option<SystemTime>,
 }
 
 struct OneTimeToken {
@@ -3204,6 +3299,8 @@ enum MatchedSide {
     Recovery,
     EmailCurrent,
     EmailNew,
+    /// `sms` or `phone_change`: the user row's own phone token column.
+    Phone,
 }
 
 struct Found {
@@ -3235,22 +3332,27 @@ enum Mutated {
 #[cfg(test)]
 fn ott_name(kind: VerifyKind, current: bool) -> &'static str {
     match kind {
-        VerifyKind::Signup | VerifyKind::Invite | VerifyKind::Email | VerifyKind::Other => {
-            OTT_CONFIRMATION
-        }
+        VerifyKind::Signup
+        | VerifyKind::Invite
+        | VerifyKind::Email
+        | VerifyKind::Sms
+        | VerifyKind::Other => OTT_CONFIRMATION,
         VerifyKind::Recovery => OTT_RECOVERY,
         VerifyKind::EmailChange if current => OTT_EMAIL_CURRENT,
         VerifyKind::EmailChange => OTT_EMAIL_NEW,
+        VerifyKind::PhoneChange => OTT_PHONE_CHANGE,
     }
 }
 
+/// `verifyTokenHash` knows only email types; `sms` and `phone_change` fall
+/// to its `Invalid email verification type` default.
 fn hash_types(kind: VerifyKind) -> (&'static str, &'static str) {
     match kind {
         VerifyKind::Signup | VerifyKind::Invite => (OTT_CONFIRMATION, ""),
         VerifyKind::Recovery => (OTT_RECOVERY, ""),
         VerifyKind::EmailChange => (OTT_EMAIL_CURRENT, OTT_EMAIL_NEW),
         VerifyKind::Email => (OTT_CONFIRMATION, OTT_RECOVERY),
-        VerifyKind::Other => ("", ""),
+        VerifyKind::Sms | VerifyKind::PhoneChange | VerifyKind::Other => ("", ""),
     }
 }
 
@@ -3413,7 +3515,7 @@ fn sent_at_for(kind: VerifyKind, tokens: &UserTokens) -> Option<SystemTime> {
         VerifyKind::Signup | VerifyKind::Invite => tokens.confirmation_sent_at,
         VerifyKind::Recovery => tokens.recovery_sent_at,
         VerifyKind::EmailChange => tokens.email_change_sent_at,
-        VerifyKind::Email | VerifyKind::Other => None,
+        VerifyKind::Email | VerifyKind::Sms | VerifyKind::PhoneChange | VerifyKind::Other => None,
     }
 }
 
@@ -3436,6 +3538,8 @@ fn needs_invite_password(user: &UserRecord, tokens: &UserTokens, kind: VerifyKin
 fn locate_memory(db: &MemoryDb, request: &VerifyRequest) -> Located {
     if request.hash_path {
         locate_hash_memory(db, request)
+    } else if request.kind.is_phone() {
+        locate_phone_memory(db, request)
     } else if request.kind == VerifyKind::EmailChange {
         locate_email_change_memory(db, request)
     } else {
@@ -3481,6 +3585,11 @@ fn locate_hash_memory(db: &MemoryDb, request: &VerifyRequest) -> Located {
 }
 
 fn locate_email_memory(db: &MemoryDb, request: &VerifyRequest) -> Located {
+    // Phone plus OTP on an email type: GoTrue looks the empty email up and
+    // finds nobody (a phone-only user's email is NULL).
+    if request.email.is_empty() {
+        return Located::Reject(token_invalid());
+    }
     let Some(user) = db.find_email(&request.email, &request.aud) else {
         return Located::Reject(token_invalid());
     };
@@ -3542,6 +3651,55 @@ fn locate_email_change_memory(db: &MemoryDb, request: &VerifyRequest) -> Located
         return Located::Reject(token_invalid());
     };
     Located::Found(Found { user_id, side })
+}
+
+/// `verifyUserAndToken` for `sms` (`FindUserByPhoneAndAudience`) and
+/// `phone_change` (`FindUserByPhoneChangeAndAudience`).
+fn locate_phone_memory(db: &MemoryDb, request: &VerifyRequest) -> Located {
+    let user = if request.phone.is_empty() {
+        None
+    } else if request.kind == VerifyKind::PhoneChange {
+        db.users.values().find(|user| {
+            !user.is_sso_user
+                && user.aud == request.aud
+                && db
+                    .tokens
+                    .get(&user.id)
+                    .is_some_and(|tokens| tokens.phone_change == request.phone)
+        })
+    } else {
+        db.find_phone(&request.phone, &request.aud)
+    };
+    let Some(user) = user else {
+        return Located::Reject(token_invalid());
+    };
+    if login_banned(user.banned_until) {
+        return Located::Reject(user_banned());
+    }
+    let tokens = db.tokens.get(&user.id).cloned().unwrap_or_default();
+    if !phone_otp_valid(request, &tokens) {
+        return Located::Reject(token_invalid());
+    }
+    Located::Found(Found {
+        user_id: user.id,
+        side: MatchedSide::Phone,
+    })
+}
+
+/// The SMS OTP check: the confirmation token for `sms`, the phone change
+/// token for `phone_change`, both within `GOTRUE_SMS_OTP_EXP`.
+fn phone_otp_valid(request: &VerifyRequest, tokens: &UserTokens) -> bool {
+    let (expected, sent_at) = if request.kind == VerifyKind::PhoneChange {
+        (&tokens.phone_change_token, tokens.phone_change_sent_at)
+    } else {
+        (&tokens.confirmation_token, tokens.confirmation_sent_at)
+    };
+    otp_valid(
+        &request.token_hash,
+        expected,
+        sent_at,
+        request.sms_otp_exp_seconds,
+    )
 }
 
 fn find_ott<'a>(db: &'a MemoryDb, hash: &str, token_type: &str) -> Option<&'a OneTimeToken> {
@@ -3744,6 +3902,33 @@ fn mutate_user(
             apply_email_change(user, tokens, now);
             Ok((Mutated::Session, ClearOtt::All))
         }
+        // `smsVerify` then `ConfirmPhone`.
+        VerifyKind::Sms => {
+            audits.push(AuditNote {
+                action: "user_signedup",
+                log_type: "team",
+                traits: Some(json!({ "provider": PHONE_PROVIDER })),
+            });
+            tokens.confirmation_token.clear();
+            user.phone_confirmed_at = Some(now);
+            user.is_anonymous = false;
+            refresh_providers(user);
+            Ok((Mutated::Session, ClearOtt::All))
+        }
+        // `smsVerify` then `ConfirmPhoneChange`: the phone identity gets the
+        // new number (or is created), and `phone_change` becomes `phone`.
+        VerifyKind::PhoneChange => {
+            audits.push(AuditNote {
+                action: "user_modified",
+                log_type: "user",
+                traits: None,
+            });
+            let phone = std::mem::take(&mut tokens.phone_change);
+            tokens.phone_change_token.clear();
+            apply_phone(user, &phone, now);
+            refresh_providers(user);
+            Ok((Mutated::Session, ClearOtt::All))
+        }
         // `effective_kind` never returns `Email`.
         VerifyKind::Email | VerifyKind::Other => Err(StoreError::Unavailable),
     }
@@ -3844,6 +4029,9 @@ async fn postgres_verify(
         });
     };
     let mut tokens = load_user_tokens(&mut tx, found.user_id).await?;
+    if request.kind.is_phone() {
+        load_phone_tokens(&mut tx, found.user_id, &mut tokens).await?;
+    }
     let password_hash =
         if needs_invite_password(&user, &tokens, effective_kind(request.kind, found.side)) {
             Some(hash_password(secure_alphanumeric(64)).await?)
@@ -3868,6 +4056,9 @@ async fn postgres_verify(
         reload_confirmed_at(&mut user);
     }
     persist_user(&mut tx, &user, &tokens).await?;
+    if request.kind.is_phone() {
+        persist_phone(&mut tx, &user, &tokens).await?;
+    }
     persist_identities(&mut tx, &user).await?;
     clear_ott_postgres(&mut tx, user.id, &clear).await?;
     for note in &audits {
@@ -3954,6 +4145,8 @@ async fn locate_postgres(
 ) -> Result<Located, StoreError> {
     if request.hash_path {
         locate_hash_postgres(tx, request).await
+    } else if request.kind.is_phone() {
+        locate_phone_postgres(tx, request).await
     } else if request.kind == VerifyKind::EmailChange {
         locate_email_change_postgres(tx, request).await
     } else {
@@ -4094,6 +4287,106 @@ async fn locate_email_change_postgres(
     Ok(Located::Found(Found { user_id, side }))
 }
 
+/// `verifyUserAndToken` for `sms` and `phone_change`; see
+/// [`locate_phone_memory`].
+async fn locate_phone_postgres(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    request: &VerifyRequest,
+) -> Result<Located, StoreError> {
+    use sqlx::Row;
+    if request.phone.is_empty() {
+        return Ok(Located::Reject(token_invalid()));
+    }
+    let sql = if request.kind == VerifyKind::PhoneChange {
+        "SELECT id FROM auth.users
+         WHERE instance_id = $1::uuid AND phone_change = $2 AND aud = $3
+           AND is_sso_user = false
+         LIMIT 1"
+    } else {
+        "SELECT id FROM auth.users
+         WHERE instance_id = $1::uuid AND phone = $2 AND aud = $3
+           AND is_sso_user = false
+         LIMIT 1"
+    };
+    let row = sqlx::query(sql)
+        .bind(Uuid::nil())
+        .bind(&request.phone)
+        .bind(&request.aud)
+        .fetch_optional(&mut **tx)
+        .await?;
+    let Some(row) = row else {
+        return Ok(Located::Reject(token_invalid()));
+    };
+    let user_id: Uuid = row.try_get("id")?;
+    let Some(user) = find_user_by_id(&mut *tx, user_id).await? else {
+        return Ok(Located::Reject(token_invalid()));
+    };
+    if login_banned(user.banned_until) {
+        return Ok(Located::Reject(user_banned()));
+    }
+    let mut tokens = load_user_tokens(&mut *tx, user_id).await?;
+    load_phone_tokens(&mut *tx, user_id, &mut tokens).await?;
+    if !phone_otp_valid(request, &tokens) {
+        return Ok(Located::Reject(token_invalid()));
+    }
+    Ok(Located::Found(Found {
+        user_id,
+        side: MatchedSide::Phone,
+    }))
+}
+
+/// The phone change columns [`load_user_tokens`] leaves at their defaults.
+async fn load_phone_tokens(
+    conn: &mut sqlx::PgConnection,
+    user_id: Uuid,
+    tokens: &mut UserTokens,
+) -> Result<(), StoreError> {
+    use sqlx::Row;
+    let row = sqlx::query(
+        "SELECT phone_change, phone_change_token, phone_change_sent_at
+         FROM auth.users WHERE id = $1::uuid",
+    )
+    .bind(user_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+    if let Some(row) = row {
+        let sent_at: Option<chrono::DateTime<chrono::Utc>> = row.try_get("phone_change_sent_at")?;
+        tokens.phone_change = row
+            .try_get::<Option<String>, _>("phone_change")?
+            .unwrap_or_default();
+        tokens.phone_change_token = row
+            .try_get::<Option<String>, _>("phone_change_token")?
+            .unwrap_or_default();
+        tokens.phone_change_sent_at = sent_at.map(from_ts);
+    }
+    Ok(())
+}
+
+/// `ConfirmPhone` / `ConfirmPhoneChange` columns.
+async fn persist_phone(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    user: &UserRecord,
+    tokens: &UserTokens,
+) -> Result<(), StoreError> {
+    sqlx::query(
+        "UPDATE auth.users SET
+            phone = NULLIF($1, ''),
+            phone_confirmed_at = $2,
+            phone_change = $3,
+            phone_change_token = $4
+         WHERE instance_id = $5::uuid AND id = $6::uuid",
+    )
+    .bind(&user.phone)
+    .bind(user.phone_confirmed_at.map(ts))
+    .bind(&tokens.phone_change)
+    .bind(&tokens.phone_change_token)
+    .bind(Uuid::nil())
+    .bind(user.id)
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
+}
+
 async fn ott_user_id(
     conn: &mut sqlx::PgConnection,
     token_hash: &str,
@@ -4140,6 +4433,7 @@ async fn load_user_tokens(
         email_change_sent_at: row.email_change_sent_at.map(from_ts),
         email_change_confirm_status: row.email_change_confirm_status.unwrap_or(0),
         invited_at: row.invited_at.map(from_ts),
+        ..UserTokens::default()
     })
 }
 
