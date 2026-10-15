@@ -1,3 +1,5 @@
+// Ported from supabase/edge-runtime ext/runtime/js/denoOverrides.js and ext/runtime/js/http.js (MIT), pin v1.77.4.
+
 //! Worker bootstrap: makes every TCP server a function starts reach the
 //! worker's own port, like an edge-runtime user worker.
 //!
