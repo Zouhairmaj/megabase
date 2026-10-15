@@ -567,6 +567,14 @@ mod tests {
     }
 
     async fn status_of(method: Method, path: &str, bearer: Option<&str>) -> StatusCode {
+        response_of(method, path, bearer).await.0
+    }
+
+    async fn response_of(
+        method: Method,
+        path: &str,
+        bearer: Option<&str>,
+    ) -> (StatusCode, Vec<u8>) {
         let app = router_with_state(StorageState::new(None, Some(Hs256::new(SECRET).unwrap())));
         let mut request = axum::http::Request::builder()
             .method(method)
@@ -580,8 +588,18 @@ mod tests {
             .await
             .unwrap();
         let status = response.status();
-        let _ = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-        status
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        (status, body.to_vec())
+    }
+
+    async fn assert_not_implemented(method: Method, path: &str, bearer: Option<&str>) {
+        let (status, body) = response_of(method.clone(), path, bearer).await;
+        assert_eq!(status, StatusCode::NOT_IMPLEMENTED, "{method} {path}");
+        // HEAD and OPTIONS responses may carry no body.
+        if !body.is_empty() {
+            let value: Value = serde_json::from_slice(&body).unwrap();
+            assert_eq!(value["code"], "MEGABASE_NOT_IMPLEMENTED", "{method} {path}");
+        }
     }
 
     #[tokio::test]
@@ -606,6 +624,40 @@ mod tests {
                     StatusCode::NOT_IMPLEMENTED,
                     "{path}"
                 );
+            }
+        }
+    }
+
+    /// The TUS server these routes delegate to is not vendored
+    /// (`specs/storage/resumable.md`), so no resumable answer is guessed.
+    #[tokio::test]
+    async fn resumable_upload_routes_stay_501() {
+        let service = token("service_role");
+        for bearer in [Some(service.as_str()), None] {
+            for (method, path) in [
+                (Method::POST, "/storage/v1/upload/resumable"),
+                (Method::POST, "/storage/v1/upload/resumable/"),
+                (Method::POST, "/storage/v1/upload/resumable/sign"),
+                (Method::OPTIONS, "/storage/v1/upload/resumable"),
+                (Method::OPTIONS, "/storage/v1/upload/resumable/sign"),
+            ] {
+                assert_not_implemented(method, path, bearer).await;
+            }
+            for prefix in [
+                "/storage/v1/upload/resumable/",
+                "/storage/v1/upload/resumable/sign/",
+            ] {
+                let path = format!("{prefix}YXZhdGFycy9hLnR4dC92MQ");
+                for method in [
+                    Method::POST,
+                    Method::PUT,
+                    Method::PATCH,
+                    Method::HEAD,
+                    Method::DELETE,
+                    Method::OPTIONS,
+                ] {
+                    assert_not_implemented(method, &path, bearer).await;
+                }
             }
         }
     }
