@@ -27,7 +27,7 @@ use axum::{
     extract::{OriginalUri, Path, State},
     http::{header, HeaderMap, Method, StatusCode},
     response::{IntoResponse, Response},
-    routing::{any, delete, get, post},
+    routing::{delete, get, post},
     Router,
 };
 use chrono::{DateTime, Utc};
@@ -146,14 +146,18 @@ pub fn router_with_state(state: StorageState) -> Router {
             "/storage/v1/object/list/:bucket_name",
             post(object::list_objects),
         )
+        .route(
+            "/storage/v1/object/sign/:bucket_name",
+            post(object::sign_objects),
+        )
+        .route(
+            "/storage/v1/object/upload/sign/:bucket_name/*object_name",
+            post(object::sign_upload_object),
+        )
         // Unported upstream routes whose first segment the generic
         // `:bucket_name/*object_name` route would take for a bucket name.
         .route(
             "/storage/v1/object/list-v2/:bucket_name",
-            post(not_implemented_any),
-        )
-        .route(
-            "/storage/v1/object/sign/:bucket_name",
             post(not_implemented_any),
         )
         // Fastify's automatic `HEAD` for the info routes is not ported.
@@ -168,10 +172,6 @@ pub fn router_with_state(state: StorageState) -> Router {
         .route(
             "/storage/v1/object/info/:bucket_name/*object_name",
             get(object::get_object_info_any).head(not_implemented_head),
-        )
-        .route(
-            "/storage/v1/object/upload/sign/:bucket_name/*object_name",
-            any(not_implemented_any),
         )
         .route(
             "/storage/v1/object/:bucket_name",

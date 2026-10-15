@@ -2,12 +2,12 @@
   "schema": 1,
   "totals": {
     "units": 1031,
-    "implemented": 241,
+    "implemented": 243,
     "tested": 186,
     "conformant": 0
   },
   "percent": {
-    "coverage": 23.4,
+    "coverage": 23.6,
     "conformance": 0.0,
     "done": 0.0
   },
@@ -390,7 +390,7 @@
     },
     "storage": {
       "units": 149,
-      "implemented": 42,
+      "implemented": 44,
       "tested": 9,
       "conformant": 0,
       "groups": {
@@ -426,7 +426,7 @@
         },
         "object": {
           "units": 22,
-          "implemented": 14,
+          "implemented": 16,
           "tested": 0,
           "conformant": 0
         },
@@ -783,7 +783,9 @@
     "storage:route:HEAD /storage/v1/object/authenticated/{bucketName}/{*}": "implemented",
     "storage:route:POST /storage/v1/bucket": "tested",
     "storage:route:POST /storage/v1/object/list/{bucketName}": "implemented",
+    "storage:route:POST /storage/v1/object/sign/{bucketName}": "implemented",
     "storage:route:POST /storage/v1/object/sign/{bucketName}/{*}": "implemented",
+    "storage:route:POST /storage/v1/object/upload/sign/{bucketName}/{*}": "implemented",
     "storage:route:POST /storage/v1/object/{bucketName}/{*}": "implemented",
     "storage:route:PUT /storage/v1/bucket/{bucketId}": "tested",
     "storage:route:PUT /storage/v1/bucket/{bucketId}/lifecycle": "tested",

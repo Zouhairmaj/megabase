@@ -1,5 +1,6 @@
 //! `/object` routes: upload, download, remove and signed URLs
-//! (`specs/storage/object.md`); object info lives in [`info`].
+//! (`specs/storage/object.md`); batch and upload signing live in [`sign`] and
+//! object info in [`info`].
 //!
 //! Object bytes live under `FILE_STORAGE_BACKEND_PATH` as
 //! `<bucket>/<name>/<version>`, like storage-api's file backend; rows live in
@@ -34,11 +35,13 @@ use serde_json::{json, Map, Value};
 use sqlx::{Postgres, Row, Transaction};
 
 mod info;
+mod sign;
 
 pub(super) use info::{
     get_object_info_any, get_object_info_authenticated, get_public_object_info,
     head_authenticated_object,
 };
+pub(super) use sign::{sign_objects, sign_upload_object};
 
 use super::{
     database_error, fastify_json, iso,
@@ -1742,6 +1745,17 @@ mod tests {
             (Method::DELETE, "/storage/v1/object/avatars", true),
             (Method::DELETE, "/storage/v1/object/avatars/u1/a.png", true),
             (Method::POST, "/storage/v1/object/list/avatars", true),
+            (Method::POST, "/storage/v1/object/sign/avatars", true),
+            (
+                Method::POST,
+                "/storage/v1/object/upload/sign/avatars/a.png",
+                true,
+            ),
+            (
+                Method::PUT,
+                "/storage/v1/object/upload/sign/avatars/a.png",
+                true,
+            ),
             (
                 Method::HEAD,
                 "/storage/v1/object/authenticated/avatars/a.png",
