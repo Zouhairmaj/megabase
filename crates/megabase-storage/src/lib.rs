@@ -3,9 +3,10 @@
 //! Target behavior: Supabase Storage, vendor/storage (Apache-2.0), pinned in `vendor/`.
 //! `GET /bucket` and `GET /bucket/{bucketId}` are served for the service
 //! role (`specs/storage/buckets.md`), and `GET /health` for any valid JWT
-//! (`specs/storage/health.md`). A missing or invalid JWT, other roles on the
-//! bucket routes, and every other route return the structured
-//! `MEGABASE_NOT_IMPLEMENTED` 501.
+//! (`specs/storage/health.md`). The `DELETE /cdn` purge routes answer as
+//! storage-api does without a CDN purge endpoint (`specs/storage/cdn.md`).
+//! A missing or invalid JWT, other roles on the bucket routes, and every
+//! other route return the structured `MEGABASE_NOT_IMPLEMENTED` 501.
 
 // Ported from supabase/storage src/http/routes/bucket/getAllBuckets.ts,
 // src/http/routes/bucket/getBucket.ts, src/http/routes/health/healthcheck.ts,
@@ -19,13 +20,14 @@ use axum::{
     extract::{OriginalUri, Path, State},
     http::{header, HeaderMap, Method, StatusCode},
     response::{IntoResponse, Response},
-    routing::get,
+    routing::{delete, get},
     Router,
 };
 use chrono::{DateTime, Utc};
 use megabase_core::{bearer_token, Hs256, MegabaseNotImplemented};
 use serde_json::{json, Map, Value};
 
+mod cdn;
 mod schema;
 
 pub use schema::{install_schema, SchemaError};
@@ -71,6 +73,13 @@ pub fn router_with_state(state: StorageState) -> Router {
         .route("/storage/v1/bucket/:bucket_id", get(get_bucket))
         .route("/storage/v1/health", get(healthcheck))
         .route("/storage/v1/health/", get(healthcheck))
+        .route("/storage/v1/cdn", delete(cdn::purge_cache))
+        .route("/storage/v1/cdn/", delete(cdn::purge_cache))
+        .route("/storage/v1/cdn/:bucket_name", delete(cdn::purge_cache))
+        .route(
+            "/storage/v1/cdn/:bucket_name/*object_name",
+            delete(cdn::purge_cache),
+        )
         .with_state(state)
         .merge(megabase_core::not_implemented_router(COMPONENT))
         .method_not_allowed_fallback(megabase_core::not_implemented_handler(COMPONENT))
