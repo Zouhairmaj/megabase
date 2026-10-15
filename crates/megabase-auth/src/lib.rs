@@ -10,6 +10,8 @@
 //! change. Issue #19 serves `GET` and `PUT /user`, identity authorize and
 //! unlink, and the OAuth grant list and revoke. Issue #339 runs the
 //! `pg-functions://` custom access token hook at every token issuance.
+//! Issue #47 serves the `/factors` authentication, configuration, and AAL
+//! gates, factor unenroll, and the recovery-code status and delete routes.
 //! Every other Auth path returns `MEGABASE_NOT_IMPLEMENTED`. Database objects
 //! listed in `specs/auth/database.md` are installed when `DATABASE_URL` is
 //! set, after the standard API roles in `specs/core/roles.md`.
@@ -18,6 +20,7 @@ mod admin;
 mod admin_batch2;
 mod config;
 mod error;
+mod factors;
 mod gojson;
 mod hooks;
 mod http;
@@ -52,6 +55,7 @@ pub fn router() -> Router {
 
 pub fn router_with_state(state: AuthState) -> Router {
     admin::router(state.clone())
+        .merge(factors::router(state.clone()))
         .merge(routes::router(state))
         // Path match without a method handler is Axum 405; send those to the
         // same 501 as unknown paths (GOAL.md §3 rule 5).

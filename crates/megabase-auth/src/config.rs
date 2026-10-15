@@ -50,6 +50,70 @@ pub struct AuthConfig {
     pub secure_email_change: bool,
     /// `GOTRUE_HOOK_CUSTOM_ACCESS_TOKEN_*`. `None` when the hook is disabled.
     pub(crate) custom_access_token_hook: Option<AccessTokenHook>,
+    /// `GOTRUE_MFA_*` enroll and verify switches.
+    pub mfa: MfaConfig,
+}
+
+/// `MFAConfiguration` enroll and verify switches for each factor type.
+///
+/// GoTrue turns TOTP on by default and leaves phone, WebAuthn, and recovery
+/// codes opt-in. The reference stack sets none of these variables.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MfaConfig {
+    pub totp_enroll: bool,
+    pub totp_verify: bool,
+    pub phone_enroll: bool,
+    pub phone_verify: bool,
+    pub webauthn_enroll: bool,
+    pub webauthn_verify: bool,
+    pub recovery_codes_enroll: bool,
+    pub recovery_codes_verify: bool,
+}
+
+impl Default for MfaConfig {
+    fn default() -> Self {
+        Self {
+            totp_enroll: true,
+            totp_verify: true,
+            phone_enroll: false,
+            phone_verify: false,
+            webauthn_enroll: false,
+            webauthn_verify: false,
+            recovery_codes_enroll: false,
+            recovery_codes_verify: false,
+        }
+    }
+}
+
+impl MfaConfig {
+    fn from_lookup(lookup: &impl Fn(&str) -> Option<String>) -> Result<Self, ConfigError> {
+        let defaults = Self::default();
+        let read = |key: &str, default: bool| -> Result<bool, ConfigError> {
+            Ok(optional_bool(lookup, key)?.unwrap_or(default))
+        };
+        Ok(Self {
+            totp_enroll: read("GOTRUE_MFA_TOTP_ENROLL_ENABLED", defaults.totp_enroll)?,
+            totp_verify: read("GOTRUE_MFA_TOTP_VERIFY_ENABLED", defaults.totp_verify)?,
+            phone_enroll: read("GOTRUE_MFA_PHONE_ENROLL_ENABLED", defaults.phone_enroll)?,
+            phone_verify: read("GOTRUE_MFA_PHONE_VERIFY_ENABLED", defaults.phone_verify)?,
+            webauthn_enroll: read(
+                "GOTRUE_MFA_WEB_AUTHN_ENROLL_ENABLED",
+                defaults.webauthn_enroll,
+            )?,
+            webauthn_verify: read(
+                "GOTRUE_MFA_WEB_AUTHN_VERIFY_ENABLED",
+                defaults.webauthn_verify,
+            )?,
+            recovery_codes_enroll: read(
+                "GOTRUE_MFA_RECOVERY_CODES_ENROLL_ENABLED",
+                defaults.recovery_codes_enroll,
+            )?,
+            recovery_codes_verify: read(
+                "GOTRUE_MFA_RECOVERY_CODES_VERIFY_ENABLED",
+                defaults.recovery_codes_verify,
+            )?,
+        })
+    }
 }
 
 /// `external` object on `GET /settings`. Email and phone are separate fields
@@ -109,6 +173,7 @@ impl AuthConfig {
             mailer_otp_exp_seconds: 86_400,
             secure_email_change: true,
             custom_access_token_hook: None,
+            mfa: MfaConfig::default(),
         }
     }
 
@@ -206,6 +271,7 @@ impl AuthConfig {
             )?
             .unwrap_or(defaults.secure_email_change),
             custom_access_token_hook: AccessTokenHook::from_lookup(&lookup)?,
+            mfa: MfaConfig::from_lookup(&lookup)?,
         })
     }
 }
