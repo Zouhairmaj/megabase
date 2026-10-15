@@ -1391,11 +1391,20 @@ async fn read_rows(
         .map(|(name, pg_type)| (name.as_str(), pg_type.as_str()))
         .collect();
     let mut rels = HashMap::new();
+    let mut view_keys = None;
     for name in read.embed_names() {
         if rels.contains_key(name) {
             continue;
         }
-        let rel = load_relationship(&mut tx, schema, relation, name, session.anon).await?;
+        let rel = load_relationship(
+            &mut tx,
+            schema,
+            relation,
+            name,
+            &mut view_keys,
+            session.anon,
+        )
+        .await?;
         rels.insert(name.to_string(), rel);
     }
     let built = build_read_sql_as(
@@ -1673,6 +1682,7 @@ async fn load_relationship(
     schema: &str,
     relation: &str,
     target: &str,
+    view_keys: &mut Option<Vec<ForeignKey>>,
     anon: bool,
 ) -> Result<Relationship, Box<Response>> {
     // Foreign tables carry no foreign keys here.
@@ -1695,53 +1705,21 @@ async fn load_relationship(
         ));
     }
     let with_views = kinds.iter().any(|kind| kind == "v" || kind == "m");
-    type KeyRow = (
-        String,
-        String,
-        String,
-        String,
-        String,
-        Vec<String>,
-        Vec<String>,
-        Option<bool>,
-    );
-    let rows: Vec<KeyRow> = sqlx::query_as(RELATIONSHIPS_SQL)
-        .bind(schema)
-        .bind(relation)
-        .bind(with_views)
-        .fetch_all(&mut **tx)
-        .await
-        .map_err(|error| Box::new(query_failure(&error, anon)))?;
-    let mut keys: Vec<ForeignKey> = rows
-        .into_iter()
-        .map(
-            |(
-                name,
-                schema,
-                table,
-                foreign_schema,
-                foreign_table,
-                columns,
-                referenced,
-                one_to_one,
-            )| ForeignKey {
-                name,
-                schema,
-                table,
-                foreign_schema,
-                foreign_table,
-                columns: columns.into_iter().zip(referenced).collect(),
-                one_to_one: one_to_one.unwrap_or(false),
-                table_is_view: false,
-                foreign_is_view: false,
-            },
-        )
-        .collect();
-    if with_views {
-        let deps = load_view_key_deps(tx, schema, anon).await?;
-        keys = add_view_keys(keys, &deps);
-    }
-    match find_relationship(schema, relation, target, &keys) {
+    let narrow;
+    let keys: &[ForeignKey] = if with_views {
+        // Keys of every schema plus the view-inherited ones do not depend on
+        // `relation`, so one request loads them once for all its embeds.
+        if view_keys.is_none() {
+            let keys = load_foreign_keys(tx, schema, relation, true, anon).await?;
+            let deps = load_view_key_deps(tx, schema, anon).await?;
+            *view_keys = Some(add_view_keys(keys, &deps));
+        }
+        view_keys.as_deref().unwrap_or_default()
+    } else {
+        narrow = load_foreign_keys(tx, schema, relation, false, anon).await?;
+        &narrow
+    };
+    match find_relationship(schema, relation, target, keys) {
         Ok(rel) => Ok(rel),
         Err(FindError::NotFound) => {
             // The hint is optional: a failed lookup must not replace PGRST200.
@@ -1787,6 +1765,59 @@ async fn load_relationship(
     }
 }
 
+/// Foreign keys of `schema` touching `relation`, or of every schema when
+/// `all_schemas` (a view may select tables elsewhere).
+async fn load_foreign_keys(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    schema: &str,
+    relation: &str,
+    all_schemas: bool,
+    anon: bool,
+) -> Result<Vec<ForeignKey>, Box<Response>> {
+    type KeyRow = (
+        String,
+        String,
+        String,
+        String,
+        String,
+        Vec<String>,
+        Vec<String>,
+        Option<bool>,
+    );
+    let rows: Vec<KeyRow> = sqlx::query_as(RELATIONSHIPS_SQL)
+        .bind(schema)
+        .bind(relation)
+        .bind(all_schemas)
+        .fetch_all(&mut **tx)
+        .await
+        .map_err(|error| Box::new(query_failure(&error, anon)))?;
+    Ok(rows
+        .into_iter()
+        .map(
+            |(
+                name,
+                schema,
+                table,
+                foreign_schema,
+                foreign_table,
+                columns,
+                referenced,
+                one_to_one,
+            )| ForeignKey {
+                name,
+                schema,
+                table,
+                foreign_schema,
+                foreign_table,
+                columns: columns.into_iter().zip(referenced).collect(),
+                one_to_one: one_to_one.unwrap_or(false),
+                table_is_view: false,
+                foreign_is_view: false,
+            },
+        )
+        .collect())
+}
+
 /// Foreign key ends selected in full by the views of `schema`
 /// ([`VIEW_KEY_DEPS_SQL`]).
 async fn load_view_key_deps(
@@ -1806,17 +1837,24 @@ async fn load_view_key_deps(
         .fetch_all(&mut **tx)
         .await
         .map_err(|error| Box::new(query_failure(&error, anon)))?;
-    Ok(rows
-        .into_iter()
-        .filter_map(
+    rows.into_iter()
+        .map(
             |(table_schema, table, view_schema, view, constraint, kind, columns)| {
+                // A dropped row would remove a relationship and turn into a
+                // wrong PGRST200, so an unreadable one is a 501.
+                let unreadable = || {
+                    Box::new(
+                        MegabaseNotImplemented::new(crate::COMPONENT, "rest:embed-join:left")
+                            .into_response(),
+                    )
+                };
                 let kind = match kind.as_str() {
                     "f" => KeyDepKind::Referencing,
                     "f_ref" => KeyDepKind::Referenced,
-                    _ => return None,
+                    _ => return Err(unreadable()),
                 };
-                let columns = serde_json::from_str(&columns).ok()?;
-                Some(ViewKeyDep {
+                let columns = serde_json::from_str(&columns).map_err(|_| unreadable())?;
+                Ok(ViewKeyDep {
                     table_schema,
                     table,
                     view_schema,
@@ -1827,7 +1865,7 @@ async fn load_view_key_deps(
                 })
             },
         )
-        .collect())
+        .collect()
 }
 
 /// Column names and base types. `NULL` typmod matches an unknown literal:
