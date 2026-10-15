@@ -3,7 +3,7 @@
   "totals": {
     "units": 1031,
     "implemented": 195,
-    "tested": 177,
+    "tested": 181,
     "conformant": 0
   },
   "percent": {
@@ -12,7 +12,7 @@
     "done": 0.0
   },
   "judge": {
-    "cases": 383,
+    "cases": 392,
     "passing": 0
   },
   "components": {
@@ -391,13 +391,13 @@
     "storage": {
       "units": 149,
       "implemented": 19,
-      "tested": 2,
+      "tested": 6,
       "conformant": 0,
       "groups": {
         "bucket": {
           "units": 6,
           "implemented": 6,
-          "tested": 2,
+          "tested": 6,
           "conformant": 0
         },
         "cdn": {
@@ -743,11 +743,11 @@
     "storage:route:DELETE /storage/v1/cdn/{bucketName}/{*}": "implemented",
     "storage:route:GET /storage/v1/bucket": "tested",
     "storage:route:GET /storage/v1/bucket/{bucketId}": "tested",
-    "storage:route:GET /storage/v1/bucket/{bucketId}/lifecycle": "implemented",
+    "storage:route:GET /storage/v1/bucket/{bucketId}/lifecycle": "tested",
     "storage:route:GET /storage/v1/health": "implemented",
-    "storage:route:POST /storage/v1/bucket": "implemented",
-    "storage:route:PUT /storage/v1/bucket/{bucketId}": "implemented",
-    "storage:route:PUT /storage/v1/bucket/{bucketId}/lifecycle": "implemented",
+    "storage:route:POST /storage/v1/bucket": "tested",
+    "storage:route:PUT /storage/v1/bucket/{bucketId}": "tested",
+    "storage:route:PUT /storage/v1/bucket/{bucketId}/lifecycle": "tested",
     "storage:sql-function:storage.add_prefixes()": "implemented",
     "storage:sql-function:storage.allow_any_operation()": "implemented",
     "storage:sql-function:storage.allow_only_operation()": "implemented",
