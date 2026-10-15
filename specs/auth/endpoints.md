@@ -58,7 +58,7 @@ Logout reads `Authorization: Bearer <access token>` and optional query
 |---|---|---|
 | `GET /auth/v1/health` | yes | 200 `{"version":"v2.197.0","name":"GoTrue","description":"GoTrue is a user registration and authentication API"}` |
 | `GET /auth/v1/settings` | yes | 200 provider booleans plus `disable_signup`, `mailer_autoconfirm`, `phone_autoconfirm`, `sms_provider`, `saml_enabled`, `saml_private_key_next_configured`, `passkeys_enabled`. `saml_private_key_next_configured` is `true` while SAML is disabled: envconfig allocates `SAML.CertificateNext`, and only `PopulateFields` (called by `ApplyDefaults` when SAML is enabled) resets it to nil (`internal/conf/configuration.go:1094`, `internal/conf/saml.go:115`) |
-| `POST /auth/v1/signup` | email autoconfirm | 200 access-token response: `access_token`, `token_type` `bearer`, `expires_in` (JWT expiry, 3600 by default), `expires_at`, `refresh_token`, `user` |
+| `POST /auth/v1/signup` | email | Autoconfirm on: 200 access-token response: `access_token`, `token_type` `bearer`, `expires_in` (JWT expiry, 3600 by default), `expires_at`, `refresh_token`, `user`. Autoconfirm off: 200 user object (see [Email signup without autoconfirm](#email-signup-without-autoconfirm)) |
 | `POST /auth/v1/logout` | yes | 204 empty body |
 | `POST /auth/v1/recover` | see [`recover.md`](recover.md) | 200 `{}` |
 | `POST /auth/v1/invite` | see [`invite.md`](invite.md) | 200 user object |
@@ -102,7 +102,7 @@ GoTrue's default API shape (no `X-Supabase-Api-Version: 2024-01-01`):
 | Bad email | 400 | `validation_failed` / `Unable to validate email address: invalid format` |
 | Email provider off | 400 | `email_provider_disabled` |
 | Phone provider off | 400 | `phone_provider_disabled` |
-| Confirmed duplicate email | 422 | `user_already_exists` / `User already registered` |
+| Confirmed duplicate email, autoconfirm on | 422 | `user_already_exists` / `User already registered` |
 | No `JWT_SECRET` | 500 | `unexpected_failure` / `Server lacks JWT secret` |
 | No database | 500 | `unexpected_failure` / `Database error saving new user` |
 | Logout without Bearer | 401 | `no_authorization` / `This endpoint requires a valid Bearer token` |
@@ -128,11 +128,61 @@ GoTrue's default API shape (no `X-Supabase-Api-Version: 2024-01-01`):
   A second global logout with the same token is `session_not_found`.
 - `session_id` missing, empty, or the nil UUID means there is no session
   to check; `local` and `others` then log out everywhere.
-- Phone signup, anonymous signup when that provider is enabled, and email
-  signup when `mailer_autoconfirm` is false return 501 before any write.
+- Phone signup and anonymous signup when that provider is enabled return
+  501 before any write.
 - A wrong method on a registered path is 405. `GET`/`POST /verify` is
   specified in [`verify.md`](verify.md). Any other `/auth/v1` path is 501
   with unit `"<METHOD> <path>"`.
+
+## Email signup without autoconfirm
+
+Source: `internal/api/signup.go:109-345` (`Signup`, `sanitizeUser`),
+`internal/api/mail.go:319-358` (`sendConfirmation`), and
+`internal/api/pkce.go` (`generateFlowState`, `addFlowPrefixToToken`), pin
+v2.197.0. With `GOTRUE_MAILER_AUTOCONFIRM=false`, after the checks in
+[Errors](#errors):
+
+1. The user is looked up by email in the request audience
+   (`IsDuplicatedEmail`, non-SSO users). A database error is 500
+   `Database error finding user`.
+2. A confirmed user: one `user_repeated_signup` audit entry and 200 with
+   `sanitizeUser`: a random `id`, `role` `""`, `phone` `""`, `created_at`,
+   `updated_at` and `confirmation_sent_at` now, no confirmation or sign-in
+   timestamps, `identities` `[]`, the request `data` as `user_metadata`,
+   and `app_metadata` `{"provider":"email","providers":["email"]}`. No
+   email is sent and nothing else changes.
+3. A new address: the password is bcrypt-hashed and the user is created
+   unconfirmed with an email identity. As `RemoveUnconfirmedIdentities`
+   does, `user_metadata` is the identity data: `sub`, `email`,
+   `email_verified: false`, `phone_verified: false`, then the `data` keys
+   that do not collide. An unconfirmed user is reused as it is (password and
+   data unchanged); only a missing email identity is created, which then
+   replaces its other identities, `user_metadata`, and `providers`.
+4. A `user_confirmation_requested` audit entry (`traits.provider` `email`).
+5. PKCE (`code_challenge`): an `auth.flow_state` row with `provider_type`
+   `email`, `authentication_method` `email/signup`, the user id, the
+   challenge, the lowercased method, and a fresh UUID `auth_code`. A method
+   other than `s256` or `plain` is GoTrue's default 500 and nothing is kept.
+6. `sendConfirmation`: the `GOTRUE_SMTP_MAX_FREQUENCY` limit on
+   `confirmation_sent_at` (429 `over_email_send_rate_limit` /
+   `For security purposes, you can only request this after N seconds.`),
+   a new OTP, and the token SHA-224(email + OTP), prefixed `pkce_` in the
+   PKCE flow. Then the mail client as in [`recover.md`](recover.md): the
+   authorized-address list, the email limiter, no SMTP host is the no-op
+   client, an unreachable host is 500 `Error sending confirmation email`,
+   and a reachable host is 501 because the SMTP exchange is not ported.
+7. One transaction stores steps 3 to 6: `confirmation_token`,
+   `confirmation_sent_at`, and a `confirmation_token` one-time token that
+   replaces the previous one. A mail or write failure keeps nothing; a
+   write failure is 500 `Database error saving new user`.
+8. 200 with the user object (no session), its email identity, and
+   `confirmation_sent_at`. An invited user (`invited_at` set) is shown with
+   `invited_at`, `user_metadata` `{}`, and `identities` `[]`.
+
+`POST /verify` or `GET /verify` with `type=signup` redeems the token
+([`verify.md`](verify.md)); a `pkce_` link redirects with the auth code
+that `grant_type=pkce` exchanges ([`token.md`](token.md)). The judge stack
+sets autoconfirm on, so it never takes this path.
 
 ## Partial: POST /resend
 
@@ -177,15 +227,19 @@ until delivery is ported.
 Unit ids: `auth:route:GET /auth/v1/authorize`,
 `auth:route:GET /auth/v1/callback`, `auth:route:POST /auth/v1/callback`,
 `auth:route:POST /auth/v1/magiclink`, `auth:route:POST /auth/v1/otp`.
-None carries a `megabase:unit` marker yet: each success path needs an OAuth
-provider exchange, the mailer, or an SMS sender, and those stay 501.
+`POST /magiclink` carries a `megabase:unit` marker: its email path goes
+through the same mail client as `POST /recover`, with autoconfirm on (the
+judge stack sets `GOTRUE_MAILER_AUTOCONFIRM=true`) or off. The others have none yet:
+their success paths need an OAuth provider exchange or an SMS sender, which
+stay 501. `POST /otp` serves its email path but not its phone path, which
+the reference stack enables.
 
 | Behavior | File:line (pin) |
 |---|---|
 | Route table | `vendor/auth/internal/api/api.go:210-216` (callback), `:226` (authorize), `:262` (magiclink), `:265` (otp) |
 | Authorize | `vendor/auth/internal/api/external.go:27-139` |
 | Callback | `vendor/auth/internal/api/external.go:142-283`, `:534-599` (state), `:821-897` (`redirectErrors`); `external_oauth.go:31-123` |
-| Magic link | `vendor/auth/internal/api/magic_link.go:25-150` |
+| Magic link | `vendor/auth/internal/api/magic_link.go:25-150`, `mail.go:480-521` (`sendMagicLink`), `crypto/password.go:394` (`GeneratePassword`) |
 | OTP | `vendor/auth/internal/api/otp.go:37-238` |
 
 ### GET /authorize
@@ -252,10 +306,40 @@ body and no `Content-Type`. In order:
    `http: request body too large`. Top-level `null` is an empty request.
 3. Empty email: 422 `validation_failed` / `Password recovery requires an email`.
    Then the signup email validator and PKCE checks.
-4. Every valid request is 501: GoTrue signs an unknown or unconfirmed user up
-   and sends the mail (with the stock stack's unreachable SMTP host that mail
-   fails with 500). No user lookup runs first, so the answer does not reveal
-   whether the account exists.
+4. The user is looked up by email in the request audience (a database error
+   is 500 `unexpected_failure` / `Database error finding user`). A
+   confirmed user goes on to step 5. No row, or an unconfirmed email, is a
+   new user: GoTrue runs `Signup` with a 33-character random password
+   (letters and digits), the request's `data`, and its PKCE params.
+   - Signups disabled: 422 `signup_disabled` /
+     `Signups not allowed for this instance`.
+   - `GOTRUE_PASSWORD_MIN_LENGTH` above 33: 422 `weak_password` /
+     `Password should be at least <n> characters.`
+   - Autoconfirm on: the signup is the autoconfirm email signup (`token.md`,
+     `POST /signup`): a new user is created confirmed, an unconfirmed one is
+     confirmed without changing its password, and a session is issued and
+     discarded. GoTrue then calls `MagicLink` again on the same params.
+   - Autoconfirm off: the signup is
+     [Email signup without autoconfirm](#email-signup-without-autoconfirm). A new user is created unconfirmed, an unconfirmed one keeps its
+     password and data, and the confirmation email (an `email/signup` flow
+     state and a `pkce_` token for PKCE) is the link. `Signup`'s 200 body is
+     discarded and the answer is step 7's `{}`; no magic link is sent.
+   - Errors are `Signup`'s, for example the
+     `GOTRUE_SMTP_MAX_FREQUENCY` 429 on `confirmation_sent_at`, 500
+     `Error sending confirmation email`, the 500 for an unknown challenge
+     method, and a reachable SMTP host 501 (unit of the route called).
+5. PKCE (`code_challenge` set): an `auth.flow_state` row with `provider_type`
+   and `authentication_method` `magiclink` is written and committed before
+   the email step, as for PKCE `/recover` (`recover.md` step 3a).
+6. `sendMagicLink` is `sendPasswordRecovery` with the magic link template
+   (`recover.md`): the `recovery_sent_at` frequency limit, a new OTP whose
+   hash (`pkce_`-prefixed for PKCE) is stored as `recovery_token` with a
+   `recovery_token` one-time token and a `user_recovery_requested` audit
+   entry, and the same mail client. The only difference is the failure
+   message: 500 `unexpected_failure` / `Error sending magic link email`.
+   A reachable SMTP host is 501, after the signup and flow state writes.
+7. Success: 200 `{}`. The link is `GET /verify?type=magiclink&token=<hash>`
+   (`verify.md`).
 
 ### POST /otp
 
@@ -268,7 +352,8 @@ body and no `Content-Type`. In order:
    the request audience; no row is 422 `otp_disabled` /
    `Signups not allowed for otp`. A database error lets the request through,
    like GoTrue.
-4. Email: the magic link checks above, then 501. Phone: phone provider off is
+4. Email: `MagicLink` on the same body, steps 1 to 7 above (its 501 names
+   unit `auth:route:POST /auth/v1/otp`). Phone: phone provider off is
    400 `phone_provider_disabled` / `Unsupported phone provider`; then E.164
    format and the channel check (`channel` defaults to `sms`), then 501.
    Neither: 400 `One of email or phone must be set`.

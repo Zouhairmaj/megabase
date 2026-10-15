@@ -98,6 +98,36 @@ pub(crate) const REFRESH_TOKEN_GRANT_PARAMS: GoStruct = GoStruct {
     fields: &[("refresh_token", Kind::Str)],
 };
 
+/// `PKCEGrantParams` in `internal/api/token.go`.
+pub(crate) const PKCE_GRANT_PARAMS: GoStruct = GoStruct {
+    name: "PKCEGrantParams",
+    fields: &[("auth_code", Kind::Str), ("code_verifier", Kind::Str)],
+};
+
+/// `IdTokenGrantParams` in `internal/api/token_oidc.go`.
+pub(crate) const ID_TOKEN_GRANT_PARAMS: GoStruct = GoStruct {
+    name: "IdTokenGrantParams",
+    fields: &[
+        ("id_token", Kind::Str),
+        ("access_token", Kind::Str),
+        ("nonce", Kind::Str),
+        ("provider", Kind::Str),
+        ("client_id", Kind::Str),
+        ("issuer", Kind::Str),
+        ("link_identity", Kind::Bool),
+    ],
+};
+
+/// `Web3GrantParams` in `internal/api/web3.go`.
+pub(crate) const WEB3_GRANT_PARAMS: GoStruct = GoStruct {
+    name: "Web3GrantParams",
+    fields: &[
+        ("message", Kind::Str),
+        ("signature", Kind::Str),
+        ("chain", Kind::Str),
+    ],
+};
+
 /// Decode `bytes` as `T`; on failure return GoTrue's `bad_json` error with
 /// the text Go's `json.Unmarshal` would have produced for `target`.
 ///
@@ -164,7 +194,7 @@ fn go_message(bytes: &[u8], target: &GoStruct, serde_error: &serde_json::Error) 
 
 /// Ordered key/value pairs of a JSON object (Go reports the first mismatch in
 /// document order).
-struct Pairs(Vec<(String, Value)>);
+pub(crate) struct Pairs(pub(crate) Vec<(String, Value)>);
 
 impl<'de> Deserialize<'de> for Pairs {
     fn deserialize<D: Deserializer<'de>>(de: D) -> Result<Self, D::Error> {

@@ -3,10 +3,17 @@
 // internal/models/refresh_token.go, and internal/tokens/service.go (MIT),
 // pin v2.197.0.
 
-//! `POST /auth/v1/token` for the password and refresh-token grants.
+//! `POST /auth/v1/token`: grant dispatch, the password and refresh-token
+//! grants, and the session response every grant shares.
 //!
-//! `id_token`, `pkce`, and `web3` stay HTTP 501. An unknown `grant_type` is
-//! the upstream 400, because that branch is part of this route.
+//! `pkce`, `id_token`, and `web3` live in the submodules. An unknown
+//! `grant_type` is the upstream 400, because that branch is part of this route.
+
+mod id_token;
+mod pkce;
+mod web3;
+
+pub(crate) use pkce::{authentication_method, unhandled};
 
 use std::time::SystemTime;
 
@@ -14,7 +21,6 @@ use axum::body::Body;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
-use megabase_core::MegabaseNotImplemented;
 use serde::Deserialize;
 
 use crate::error::{unexpected, validation, GoTrueError};
@@ -25,11 +31,6 @@ use crate::ratelimit::limit_by_header;
 use crate::routes::{insert_header, query_param, read_body, request_aud, JsonOk};
 use crate::state::AuthState;
 use crate::store::{LoginChannel, RefreshStatus, StoreError};
-use crate::COMPONENT;
-
-const UNIT_ID_TOKEN: &str = "auth:grant-type:id_token";
-const UNIT_PKCE: &str = "auth:grant-type:pkce";
-const UNIT_WEB3: &str = "auth:grant-type:web3";
 
 const INVALID_LOGIN: &str = "Invalid login credentials";
 const MAX_PASSWORD_LENGTH: usize = 72;
@@ -44,29 +45,29 @@ pub(crate) async fn token(
     // Go `Request.FormValue`: query for JSON bodies. Body parameters win only
     // for form posts, and this handler still requires a JSON body afterwards.
     let grant_type = query_param(uri.query(), "grant_type").unwrap_or_default();
-    match grant_type.as_str() {
-        "password" | "refresh_token" | "id_token" | "pkce" => {
-            // Go `Token` applies the limiter once the grant type is known and
-            // before the handler reads the body.
-            if let Err(error) =
-                limit_by_header(&state.token_limiter, &state.rate_limit_header, &headers)
-            {
-                return error.into_response();
-            }
-            match grant_type.as_str() {
-                "password" => password_grant(state, headers, body).await,
-                "refresh_token" => refresh_grant(state, headers, body).await,
-                "id_token" => MegabaseNotImplemented::new(COMPONENT, UNIT_ID_TOKEN).into_response(),
-                _ => MegabaseNotImplemented::new(COMPONENT, UNIT_PKCE).into_response(),
-            }
+    let limiter = match grant_type.as_str() {
+        "password" | "refresh_token" | "id_token" | "pkce" => &state.token_limiter,
+        "web3" => &state.web3_limiter,
+        _ => {
+            return GoTrueError::new(
+                StatusCode::BAD_REQUEST,
+                "invalid_credentials",
+                "unsupported_grant_type",
+            )
+            .into_response();
         }
-        "web3" => MegabaseNotImplemented::new(COMPONENT, UNIT_WEB3).into_response(),
-        _ => GoTrueError::new(
-            StatusCode::BAD_REQUEST,
-            "invalid_credentials",
-            "unsupported_grant_type",
-        )
-        .into_response(),
+    };
+    // Go `Token` applies the limiter once the grant type is known and before
+    // the handler reads the body.
+    if let Err(error) = limit_by_header(limiter, &state.rate_limit_header, &headers) {
+        return error.into_response();
+    }
+    match grant_type.as_str() {
+        "password" => password_grant(state, headers, body).await,
+        "refresh_token" => refresh_grant(state, headers, body).await,
+        "id_token" => id_token::grant(state, headers, body).await,
+        "pkce" => pkce::grant(state, headers, body).await,
+        _ => web3::grant(state, body).await,
     }
 }
 
@@ -172,7 +173,8 @@ async fn password_grant(state: AuthState, headers: HeaderMap, body: Body) -> Res
         Ok(None) => return invalid_login(),
         Err(error) => return store_failure(error),
     };
-    session_response(&state, &issued, now, false, weak, true)
+    let extra = weak.map_or(Extra::NullWeak, Extra::Weak);
+    session_response(&state, &issued, now, false, extra)
 }
 
 // megabase:unit auth:grant-type:refresh_token
@@ -236,7 +238,7 @@ async fn refresh_grant(state: AuthState, headers: HeaderMap, body: Body) -> Resp
             .into_response();
         }
     };
-    session_response(&state, &issued, now, rotated, None, false)
+    session_response(&state, &issued, now, rotated, Extra::None)
 }
 
 #[derive(Deserialize)]
@@ -407,16 +409,28 @@ fn bcrypt_password(password: &str) -> String {
     password[..end].to_string()
 }
 
+/// Grant-specific `AccessTokenResponse` fields.
+enum Extra {
+    /// Refresh and PKCE without provider tokens: `omitempty` drops them all.
+    None,
+    /// Password grant: Go assigns a nil `*WeakPasswordError` into an
+    /// `interface{}`, so encoding/json emits `weak_password: null`.
+    NullWeak,
+    Weak(WeakPassword),
+    /// PKCE: `provider_token` and `provider_refresh_token` from the flow
+    /// state, each dropped when empty.
+    Provider {
+        access: String,
+        refresh: String,
+    },
+}
+
 fn session_response(
     state: &AuthState,
     issued: &crate::store::IssuedSession,
     now: i64,
     rotated: bool,
-    weak: Option<WeakPassword>,
-    // Password grant assigns a nil `*WeakPasswordError` into an `interface{}`,
-    // so encoding/json emits `weak_password: null`. Refresh leaves the field
-    // unset and `omitempty` drops it.
-    emit_null_weak: bool,
+    extra: Extra,
 ) -> Response {
     let Some(jwt) = state.jwt.clone() else {
         return unexpected("Server lacks JWT secret").into_response();
@@ -431,13 +445,23 @@ fn session_response(
         }
     };
     let mut body = session_json(issued, &access_token, expires_in, now);
-    if let Some(weak) = weak {
-        body["weak_password"] = serde_json::json!({
-            "message": weak.message,
-            "reasons": weak.reasons,
-        });
-    } else if emit_null_weak {
-        body["weak_password"] = serde_json::Value::Null;
+    match extra {
+        Extra::None => {}
+        Extra::NullWeak => body["weak_password"] = serde_json::Value::Null,
+        Extra::Weak(weak) => {
+            body["weak_password"] = serde_json::json!({
+                "message": weak.message,
+                "reasons": weak.reasons,
+            });
+        }
+        Extra::Provider { access, refresh } => {
+            if !access.is_empty() {
+                body["provider_token"] = serde_json::Value::String(access);
+            }
+            if !refresh.is_empty() {
+                body["provider_refresh_token"] = serde_json::Value::String(refresh);
+            }
+        }
     }
     let mut response = JsonOk(body).into_response();
     insert_header(
@@ -728,7 +752,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn unknown_grant_and_unimplemented_grants() {
+    async fn unknown_grant_and_reference_stack_grants() {
         let app = state(AuthConfig::reference_defaults(), true, Backend::memory());
         let (status, body, _) = call(
             &app,
@@ -743,17 +767,40 @@ mod tests {
         assert_eq!(body["msg"], "unsupported_grant_type");
 
         let (status, body, _) = call(&app, "/auth/v1/token?grant_type=id_token", Some("{}")).await;
-        assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
-        assert_eq!(body["code"], "MEGABASE_NOT_IMPLEMENTED");
-        assert_eq!(body["unit"], UNIT_ID_TOKEN);
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(body["error_description"], "id_token required");
 
         let (status, body, _) = call(&app, "/auth/v1/token?grant_type=pkce", Some("{}")).await;
-        assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
-        assert_eq!(body["unit"], UNIT_PKCE);
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(body["error_code"], "validation_failed");
 
         let (status, body, _) = call(&app, "/auth/v1/token?grant_type=web3", Some("{}")).await;
-        assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
-        assert_eq!(body["unit"], UNIT_WEB3);
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(body["error_code"], "web3_provider_disabled");
+    }
+
+    #[tokio::test]
+    async fn web3_has_its_own_limiter() {
+        let mut app = state(AuthConfig::reference_defaults(), true, Backend::memory());
+        app.rate_limit_header = "x-rate-key".into();
+        let send = |grant: &'static str| {
+            let app = app.clone();
+            async move {
+                let request = Request::builder()
+                    .method("POST")
+                    .uri(format!("/auth/v1/token?grant_type={grant}"))
+                    .header("content-type", "application/json")
+                    .header("x-rate-key", "k")
+                    .body(Body::from("{}"))
+                    .unwrap();
+                router(app).oneshot(request).await.unwrap().status()
+            }
+        };
+        for _ in 0..30 {
+            assert_eq!(send("pkce").await, StatusCode::BAD_REQUEST);
+        }
+        assert_eq!(send("pkce").await, StatusCode::TOO_MANY_REQUESTS);
+        assert_eq!(send("web3").await, StatusCode::UNPROCESSABLE_ENTITY);
     }
 
     #[tokio::test]

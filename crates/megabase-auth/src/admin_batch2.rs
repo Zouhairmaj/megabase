@@ -861,7 +861,7 @@ pub(crate) fn token_hash(email: &str, otp: &str) -> String {
     format!("{:x}", hasher.finalize())
 }
 
-fn random_bytes(len: usize) -> Result<Vec<u8>, AuthError> {
+pub(crate) fn random_bytes(len: usize) -> Result<Vec<u8>, AuthError> {
     let mut buf = vec![0u8; len];
     let mut file = std::fs::File::open("/dev/urandom")
         .map_err(|_| AuthError::internal("failed to generate random bytes"))?;

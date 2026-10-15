@@ -4,7 +4,8 @@ Status: complete
 Unit ids (`coverage/units.json`): `auth:route:GET /auth/v1/verify`,
 `auth:route:POST /auth/v1/verify`, `auth:verify-type:signup`,
 `auth:verify-type:invite`, `auth:verify-type:recovery`,
-`auth:verify-type:email_change`
+`auth:verify-type:email_change` (Level 1); `auth:verify-type:magiclink`,
+`auth:verify-type:email` (Level 2)
 Level: 1
 
 `GET` and `POST /auth/v1/verify` redeem a one-time email token and, when the
@@ -20,8 +21,9 @@ returns JSON, including the session.
 | Routes `GET`/`POST /verify` | [`internal/api/api.go:271`](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/api.go#L271) |
 | `Verify`, `verifyGet`, `verifyPost` | [`internal/api/verify.go:95`](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/verify.go#L95) |
 | signup / invite | [`internal/api/verify.go:152`](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/verify.go#L152) |
-| recovery | [`internal/api/verify.go:154`](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/verify.go#L154) |
+| recovery, magiclink | [`internal/api/verify.go:154`](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/verify.go#L154) |
 | email_change | [`internal/api/verify.go:156`](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/verify.go#L156) |
+| `email` OTP type (`verifyTokenHash`, `verifyUserAndToken`) | [`internal/api/verify.go:650`](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/verify.go#L650), [`:676`](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/verify.go#L676), [`:735`](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/verify.go#L735) |
 | Token hash SHA-224 | [`internal/crypto/crypto.go:45`](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/crypto/crypto.go#L45) |
 | Redirect target | [`internal/utilities/request.go:75`](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/utilities/request.go#L75) |
 
@@ -30,7 +32,24 @@ the credit header required by AGENTS.md.
 
 ## Inputs
 
-Both methods take `type` (`signup`, `invite`, `recovery`, `email_change`).
+Both methods take `type` (`signup`, `invite`, `recovery`, `magiclink`,
+`email_change`, `email`). `magiclink` is `recovery` in every step (the
+`recovery_token`, its expiry, `recoverVerify`); only the `type` in the GET
+success fragment differs.
+
+`email` (`EmailOTPVerification`, what supabase-js `verifyOtp({ type:
+'email' })` sends after `signInWithOtp`) resolves to one of those types and
+then continues as it:
+
+- Hash path (GET, or POST with `token_hash`): the `auth.one_time_tokens` row
+  may be a `confirmation_token` or a `recovery_token`. When the user's
+  `recovery_token` equals the hash, the type becomes `magiclink` and expiry
+  uses `recovery_sent_at`; otherwise `signup` with `confirmation_sent_at`.
+- Email path (POST with `email` and `token`): the confirmation token is
+  checked first (`signup`), then the recovery token (`magiclink`).
+
+The GET success fragment carries the resolved type (`signup` or
+`magiclink`), not `email`.
 
 GET reads `token` and `redirect_to` from the query. `token` is stored as the
 token hash (GoTrue copies it onto `token_hash`). The redirect target is the
@@ -106,8 +125,44 @@ Expiry is strict: the token is expired only when now is after `sent_at + GOTRUE_
 
 ## Edge cases
 
-A stored hash of `pkce_` plus the SHA-224 still matches an email OTP. GET
-`token` values that start with `pkce_` are the PKCE grant and return 501.
+A stored hash of `pkce_` plus the SHA-224 still matches an email OTP, and
+`POST` always issues a session, whatever the prefix.
+
+### PKCE flow (`GET` with a `pkce_` token)
+
+`verifyGet` and `issueAuthCode`
+([`internal/api/verify.go:137`](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/verify.go#L137),
+[`internal/api/pkce.go:42`](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/pkce.go#L42)).
+Such tokens come from PKCE `POST /recover` ([`recover.md`](recover.md)) and
+PKCE `POST /magiclink` or `POST /otp` ([`endpoints.md`](endpoints.md)).
+
+1. After the redirect target, `type` is parsed with
+   `ParseAuthenticationMethod` (any value ending in `signup` is
+   `email/signup`). A type it rejects (`sms`, `phone_change`, `email`, …) is
+   a JSON 500 `unexpected_failure` / `Unexpected failure, please check server
+   logs for more information`, before the 501 checks. `magiclink` parses.
+2. The token is verified and the user updated exactly as in the implicit
+   flow, except that `last_sign_in_at` is not set and no session is issued.
+   A missing `JWT_SECRET` does not matter, since nothing is signed.
+3. In the same transaction, the user's latest `auth.flow_state` row for that
+   method (`user_id` and `authentication_method`, `created_at DESC, id
+   DESC`) must exist and have a code challenge. Its `auth_code_issued_at`
+   (and `updated_at`) becomes now. Otherwise the transaction rolls back
+   (the token stays usable) and the error is 400 `flow_state_not_found` /
+   `No associated flow state found. 422: No valid flow state found for
+   user.` or `… 422: Flow state does not have an auth code (not a PKCE
+   flow).`.
+4. Success: 303 to the redirect target with `code=<auth_code>` set in its
+   query (`prepPKCERedirectURL`). Go re-encodes the query: pairs are parsed
+   (a pair with `;` or a bad `%` escape is dropped), `code` replaces any
+   earlier one, and keys are sorted. The fragment is kept.
+5. Error redirects (`prepErrorRedirectURL`) and the email-change
+   single-confirmation message (`prepRedirectURL`) also set `error`,
+   `error_code`, `error_description` (or `message`) in the re-encoded
+   query, besides the usual fragment.
+
+The client then redeems the code with `POST /token?grant_type=pkce`
+([`token.md`](token.md)).
 The hash path reads `auth.one_time_tokens` (`confirmation_token`,
 `recovery_token`, or either email-change type). The email path reads the
 user's token columns. Email change with secure email change on tries the
@@ -123,9 +178,8 @@ invite password hash, which is the same order.
 
 ## Out of scope
 
-`auth:verify-type:email`, `auth:verify-type:magiclink`,
-`auth:verify-type:sms`, `auth:verify-type:phone_change`, and
-`auth:grant-type:pkce` return HTTP 501 via
+`auth:verify-type:sms` and `auth:verify-type:phone_change` return HTTP 501
+via
 `megabase_core::MegabaseNotImplemented`. Phone OTP on an in-scope type does
 too. Anything not served returns the body
 `{"code":"MEGABASE_NOT_IMPLEMENTED","component":"auth","message":"<unit> is not implemented by Megabase yet","unit":"<unit>"}`.

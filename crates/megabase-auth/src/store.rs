@@ -26,12 +26,17 @@ use crate::config::BCRYPT_COST;
 use crate::hooks::{self, HookError, MemoryHook, TokenHookCall};
 use crate::schema::SchemaError;
 
+mod confirmation;
+mod custom_provider;
 mod invite;
 mod mfa;
+mod pkce;
 mod recovery;
 
+pub use confirmation::{ConfirmationOutcome, ConfirmationSignup};
 pub use invite::{InviteCommand, InviteOutcome};
 pub use mfa::FactorRow;
+pub use pkce::PkceRedemption;
 
 const EMAIL_PROVIDER: &str = "email";
 
@@ -126,18 +131,79 @@ pub struct IdentityRecord {
     pub updated_at: SystemTime,
 }
 
-/// One `auth.flow_state` row, as far as the OAuth callback reads it
-/// (`FindFlowStateByID`, `internal/models/flow_state.go`).
+/// One `auth.flow_state` row, as far as the OAuth callback and the PKCE
+/// grant read it (`internal/models/flow_state.go`).
 #[derive(Clone, Debug)]
 pub struct FlowStateRecord {
     pub provider_type: String,
+    pub auth_code: Option<String>,
     pub code_challenge: Option<String>,
+    pub code_challenge_method: Option<String>,
     pub user_id: Option<Uuid>,
     pub authentication_method: String,
+    pub provider_access_token: String,
+    pub provider_refresh_token: String,
     pub created_at: Option<SystemTime>,
     pub auth_code_issued_at: Option<SystemTime>,
     pub referrer: Option<String>,
     pub linking_target_id: Option<Uuid>,
+}
+
+/// `auth.flow_state` columns [`flow_state_from_row`] reads.
+const FLOW_STATE_COLUMNS: &str = "id, provider_type, auth_code, code_challenge,
+    code_challenge_method::text AS code_challenge_method, user_id, authentication_method,
+    provider_access_token, provider_refresh_token, created_at, auth_code_issued_at,
+    referrer, linking_target_id";
+
+/// Map a [`FLOW_STATE_COLUMNS`] row. NULL provider tokens read as `""`, as
+/// the Go `string` fields do.
+fn flow_state_from_row(row: &sqlx::postgres::PgRow) -> Result<FlowStateRecord, StoreError> {
+    use sqlx::Row;
+    let time = |name: &str| -> Result<Option<SystemTime>, sqlx::Error> {
+        Ok(row
+            .try_get::<Option<chrono::DateTime<chrono::Utc>>, _>(name)?
+            .map(from_ts))
+    };
+    let text = |name: &str| -> Result<String, sqlx::Error> {
+        Ok(row.try_get::<Option<String>, _>(name)?.unwrap_or_default())
+    };
+    Ok(FlowStateRecord {
+        provider_type: row.try_get("provider_type")?,
+        auth_code: row.try_get("auth_code")?,
+        code_challenge: row.try_get("code_challenge")?,
+        code_challenge_method: row.try_get("code_challenge_method")?,
+        user_id: row.try_get("user_id")?,
+        authentication_method: row.try_get("authentication_method")?,
+        provider_access_token: text("provider_access_token")?,
+        provider_refresh_token: text("provider_refresh_token")?,
+        created_at: time("created_at")?,
+        auth_code_issued_at: time("auth_code_issued_at")?,
+        referrer: row.try_get("referrer")?,
+        linking_target_id: row.try_get("linking_target_id")?,
+    })
+}
+
+/// `defaultFlowStateExpiryDuration`; GoTrue raises any lower setting to it.
+pub(crate) const FLOW_STATE_EXPIRY: Duration = Duration::from_secs(300);
+
+impl FlowStateRecord {
+    /// `FlowState.IsExpired`: a magic-link flow ages from
+    /// `auth_code_issued_at`, every other flow from `created_at`. A NULL
+    /// timestamp is Go's zero time, which is always expired.
+    pub(crate) fn is_expired(&self, now: SystemTime) -> bool {
+        let issued = match self.auth_code_issued_at {
+            Some(issued) if self.authentication_method == "magiclink" => Some(issued),
+            _ => self.created_at,
+        };
+        issued.is_none_or(|issued| now > issued + FLOW_STATE_EXPIRY)
+    }
+
+    /// `FlowState.IsPKCE`: a non-empty code challenge.
+    pub(crate) fn is_pkce(&self) -> bool {
+        self.code_challenge
+            .as_deref()
+            .is_some_and(|challenge| !challenge.is_empty())
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -165,6 +231,10 @@ pub enum VerifyKind {
     Invite,
     Recovery,
     EmailChange,
+    /// `type=email`: the token is looked up as a confirmation token, then
+    /// as a recovery token, and the verify continues as `signup` or
+    /// `magiclink` accordingly.
+    Email,
     /// Email plus OTP for a type this crate does not confirm.
     Other,
 }
@@ -181,11 +251,21 @@ pub struct VerifyRequest {
     pub autoconfirm: bool,
     pub secure_email_change: bool,
     pub otp_exp_seconds: u64,
+    /// PKCE flow (a `pkce_` token on `GET /verify`): the parsed
+    /// `AuthenticationMethod` of the verification type. The verify then
+    /// issues the auth code of the user's latest flow state for that method
+    /// instead of a session (`issueAuthCode`).
+    pub pkce_method: Option<&'static str>,
 }
 
 /// Result of a verify that the database could answer.
 pub enum VerifyOutcome {
-    Session(Box<IssuedSession>),
+    /// A new session. For [`VerifyKind::Email`], the second field is the
+    /// type the token resolved to (`signup` or `magiclink`); GoTrue writes
+    /// that type into the `GET /verify` success redirect.
+    Session(Box<IssuedSession>, Option<&'static str>),
+    /// PKCE flow: the flow state's `auth_code`, now marked issued.
+    AuthCode(String),
     /// First half of a secure email change. No session.
     SingleConfirmation,
     Rejected {
@@ -636,7 +716,7 @@ impl Backend {
             BackendKind::None => Err(StoreError::Unavailable),
             BackendKind::Memory(db) => {
                 let mut outcome = memory_verify(db, request).await?;
-                if let VerifyOutcome::Session(issued) = &mut outcome {
+                if let VerifyOutcome::Session(issued, _) = &mut outcome {
                     customize_memory(db, hook, issued).await?;
                 }
                 Ok(outcome)
@@ -673,33 +753,14 @@ impl Backend {
             BackendKind::Memory(db) => Ok(db.lock().await.flow_states.get(&id).cloned()),
             BackendKind::Postgres(pg) => {
                 timed(async {
-                    use sqlx::Row;
-                    let row = sqlx::query(
-                        "SELECT provider_type, code_challenge, user_id, authentication_method,
-                                created_at, auth_code_issued_at, referrer, linking_target_id
-                         FROM auth.flow_state WHERE id = $1::uuid LIMIT 1",
-                    )
+                    let row = sqlx::query(&format!(
+                        "SELECT {FLOW_STATE_COLUMNS} FROM auth.flow_state
+                         WHERE id = $1::uuid LIMIT 1"
+                    ))
                     .bind(id)
                     .fetch_optional(&pg.pool)
                     .await?;
-                    let Some(row) = row else {
-                        return Ok(None);
-                    };
-                    let time = |name: &str| -> Result<Option<SystemTime>, sqlx::Error> {
-                        Ok(row
-                            .try_get::<Option<chrono::DateTime<chrono::Utc>>, _>(name)?
-                            .map(from_ts))
-                    };
-                    Ok(Some(FlowStateRecord {
-                        provider_type: row.try_get("provider_type")?,
-                        code_challenge: row.try_get("code_challenge")?,
-                        user_id: row.try_get("user_id")?,
-                        authentication_method: row.try_get("authentication_method")?,
-                        created_at: time("created_at")?,
-                        auth_code_issued_at: time("auth_code_issued_at")?,
-                        referrer: row.try_get("referrer")?,
-                        linking_target_id: row.try_get("linking_target_id")?,
-                    }))
+                    row.as_ref().map(flow_state_from_row).transpose()
                 })
                 .await
             }
@@ -1238,7 +1299,7 @@ impl Backend {
                     tokens.email_change_token_new = request_hash.to_string();
                 }
             }
-            VerifyKind::Other => {}
+            VerifyKind::Email | VerifyKind::Other => {}
         }
         let mut db = db.lock().await;
         db.one_time.push(OneTimeToken {
@@ -3174,7 +3235,9 @@ enum Mutated {
 #[cfg(test)]
 fn ott_name(kind: VerifyKind, current: bool) -> &'static str {
     match kind {
-        VerifyKind::Signup | VerifyKind::Invite | VerifyKind::Other => OTT_CONFIRMATION,
+        VerifyKind::Signup | VerifyKind::Invite | VerifyKind::Email | VerifyKind::Other => {
+            OTT_CONFIRMATION
+        }
         VerifyKind::Recovery => OTT_RECOVERY,
         VerifyKind::EmailChange if current => OTT_EMAIL_CURRENT,
         VerifyKind::EmailChange => OTT_EMAIL_NEW,
@@ -3186,7 +3249,72 @@ fn hash_types(kind: VerifyKind) -> (&'static str, &'static str) {
         VerifyKind::Signup | VerifyKind::Invite => (OTT_CONFIRMATION, ""),
         VerifyKind::Recovery => (OTT_RECOVERY, ""),
         VerifyKind::EmailChange => (OTT_EMAIL_CURRENT, OTT_EMAIL_NEW),
+        VerifyKind::Email => (OTT_CONFIRMATION, OTT_RECOVERY),
         VerifyKind::Other => ("", ""),
+    }
+}
+
+/// The kind the verify continues as. `type=email` becomes `signup` for a
+/// confirmation token and `magiclink` (the recovery path) for a recovery
+/// token, as `verifyTokenHash` and `verifyUserAndToken` rewrite
+/// `params.Type`.
+fn effective_kind(kind: VerifyKind, side: MatchedSide) -> VerifyKind {
+    match (kind, side) {
+        (VerifyKind::Email, MatchedSide::Recovery) => VerifyKind::Recovery,
+        (VerifyKind::Email, _) => VerifyKind::Signup,
+        (kind, _) => kind,
+    }
+}
+
+/// The `type` a `type=email` verify resolved to, for the GET redirect.
+fn resolved_email_type(kind: VerifyKind, side: MatchedSide) -> Option<&'static str> {
+    (kind == VerifyKind::Email).then_some(match side {
+        MatchedSide::Recovery => "magiclink",
+        _ => "signup",
+    })
+}
+
+/// `verifyTokenHash` for `type=email`: the user's `recovery_token` equal to
+/// the hash means `magiclink`, anything else `signup`. Other kinds keep the
+/// side of the one-time token row.
+fn hash_side(
+    kind: VerifyKind,
+    row_side: MatchedSide,
+    tokens: Option<&UserTokens>,
+    hash: &str,
+) -> MatchedSide {
+    if kind != VerifyKind::Email {
+        return row_side;
+    }
+    if tokens.is_some_and(|tokens| tokens.recovery_token == hash) {
+        MatchedSide::Recovery
+    } else {
+        MatchedSide::Confirmation
+    }
+}
+
+/// `verifyUserAndToken` for `type=email`: the confirmation token first,
+/// then the recovery token.
+fn email_otp_side(request: &VerifyRequest, tokens: &UserTokens) -> Option<MatchedSide> {
+    let hash = &request.token_hash;
+    let exp = request.otp_exp_seconds;
+    let confirmation = || {
+        otp_valid(
+            hash,
+            &tokens.confirmation_token,
+            tokens.confirmation_sent_at,
+            exp,
+        )
+    };
+    let recovery = || otp_valid(hash, &tokens.recovery_token, tokens.recovery_sent_at, exp);
+    match request.kind {
+        VerifyKind::Signup | VerifyKind::Invite if confirmation() => {
+            Some(MatchedSide::Confirmation)
+        }
+        VerifyKind::Recovery if recovery() => Some(MatchedSide::Recovery),
+        VerifyKind::Email if confirmation() => Some(MatchedSide::Confirmation),
+        VerifyKind::Email if recovery() => Some(MatchedSide::Recovery),
+        _ => None,
     }
 }
 
@@ -3231,6 +3359,37 @@ fn user_banned() -> VerifyOutcome {
     }
 }
 
+/// `issueAuthCode` failures, wrapped by `verifyGet` in a 400
+/// `flow_state_not_found` whose message embeds the inner 422 error text.
+fn no_flow_state() -> VerifyOutcome {
+    VerifyOutcome::Rejected {
+        status: 400,
+        error_code: "flow_state_not_found",
+        message: "No associated flow state found. 422: No valid flow state found for user.",
+    }
+}
+
+fn flow_state_not_pkce() -> VerifyOutcome {
+    VerifyOutcome::Rejected {
+        status: 400,
+        error_code: "flow_state_not_found",
+        message: "No associated flow state found. 422: Flow state does not have an auth code (not a PKCE flow).",
+    }
+}
+
+/// `FindFlowStateByUserID`: pop's `Last`, ordered by `created_at DESC, id DESC`.
+fn latest_memory_flow<'a>(
+    flows: &'a mut HashMap<Uuid, FlowStateRecord>,
+    user_id: Uuid,
+    method: &str,
+) -> Option<&'a mut FlowStateRecord> {
+    flows
+        .iter_mut()
+        .filter(|(_, flow)| flow.user_id == Some(user_id) && flow.authentication_method == method)
+        .max_by_key(|(id, flow)| (flow.created_at, **id))
+        .map(|(_, flow)| flow)
+}
+
 fn otp_expired(sent_at: SystemTime, exp_seconds: u64, now: SystemTime) -> bool {
     sent_at
         .checked_add(Duration::from_secs(exp_seconds))
@@ -3254,7 +3413,7 @@ fn sent_at_for(kind: VerifyKind, tokens: &UserTokens) -> Option<SystemTime> {
         VerifyKind::Signup | VerifyKind::Invite => tokens.confirmation_sent_at,
         VerifyKind::Recovery => tokens.recovery_sent_at,
         VerifyKind::EmailChange => tokens.email_change_sent_at,
-        VerifyKind::Other => None,
+        VerifyKind::Email | VerifyKind::Other => None,
     }
 }
 
@@ -3309,7 +3468,9 @@ fn locate_hash_memory(db: &MemoryDb, request: &VerifyRequest) -> Located {
         return Located::Reject(user_banned());
     }
     let tokens = db.tokens.get(&user.id);
-    let sent = tokens.and_then(|tokens| sent_at_for(request.kind, tokens));
+    let side = hash_side(request.kind, side, tokens, &request.token_hash);
+    let kind = effective_kind(request.kind, side);
+    let sent = tokens.and_then(|tokens| sent_at_for(kind, tokens));
     if sent.is_none_or(|sent| otp_expired(sent, request.otp_exp_seconds, SystemTime::now())) {
         return Located::Reject(link_expired());
     }
@@ -3327,28 +3488,8 @@ fn locate_email_memory(db: &MemoryDb, request: &VerifyRequest) -> Located {
         return Located::Reject(user_banned());
     }
     let tokens = db.tokens.get(&user.id).cloned().unwrap_or_default();
-    let side = match request.kind {
-        VerifyKind::Signup | VerifyKind::Invite
-            if otp_valid(
-                &request.token_hash,
-                &tokens.confirmation_token,
-                tokens.confirmation_sent_at,
-                request.otp_exp_seconds,
-            ) =>
-        {
-            MatchedSide::Confirmation
-        }
-        VerifyKind::Recovery
-            if otp_valid(
-                &request.token_hash,
-                &tokens.recovery_token,
-                tokens.recovery_sent_at,
-                request.otp_exp_seconds,
-            ) =>
-        {
-            MatchedSide::Recovery
-        }
-        _ => return Located::Reject(token_invalid()),
+    let Some(side) = email_otp_side(request, &tokens) else {
+        return Located::Reject(token_invalid());
     };
     Located::Found(Found {
         user_id: user.id,
@@ -3450,7 +3591,7 @@ async fn memory_verify(
                     needs_invite_password(
                         user,
                         tokens.unwrap_or(&UserTokens::default()),
-                        request.kind,
+                        effective_kind(request.kind, found.side),
                     )
                 })
             }
@@ -3466,21 +3607,38 @@ async fn memory_verify(
         return Ok(token_invalid());
     };
     let user_id = found.user_id;
+    // Work on copies so a rejected PKCE auth code leaves the user untouched,
+    // as GoTrue's transaction rollback does.
     let mut user = guard
         .users
-        .remove(&user_id)
+        .get(&user_id)
+        .cloned()
         .ok_or(StoreError::Unavailable)?;
-    let mut tokens = guard.tokens.remove(&user_id).unwrap_or_default();
+    let mut tokens = guard.tokens.get(&user_id).cloned().unwrap_or_default();
     let mut audits = Vec::new();
+    let now = SystemTime::now();
     let (mutated, clear) = mutate_user(
         &mut user,
         &mut tokens,
         found.side,
         request,
         password_hash.as_deref(),
-        SystemTime::now(),
+        now,
         &mut audits,
     )?;
+    let auth_code = match (&mutated, request.pkce_method) {
+        (Mutated::Session, Some(method)) => {
+            let Some(flow) = latest_memory_flow(&mut guard.flow_states, user_id, method) else {
+                return Ok(no_flow_state());
+            };
+            if !flow.is_pkce() {
+                return Ok(flow_state_not_pkce());
+            }
+            flow.auth_code_issued_at = Some(now);
+            Some(flow.auth_code.clone().unwrap_or_default())
+        }
+        _ => None,
+    };
     match clear {
         ClearOtt::All => guard.one_time.retain(|row| row.user_id != user_id),
         ClearOtt::Only(token_type) => guard
@@ -3490,16 +3648,23 @@ async fn memory_verify(
     for note in &audits {
         remember_audit(&user, note.action, note.log_type, note.traits.clone());
     }
-    let outcome = match mutated {
-        Mutated::Single => VerifyOutcome::SingleConfirmation,
-        Mutated::Session => {
+    let outcome = match (mutated, auth_code) {
+        (Mutated::Single, _) => VerifyOutcome::SingleConfirmation,
+        (Mutated::Session, Some(code)) => {
+            reload_confirmed_at(&mut user);
+            VerifyOutcome::AuthCode(code)
+        }
+        (Mutated::Session, None) => {
             user.last_sign_in_at = Some(SystemTime::now());
             user.updated_at = SystemTime::now();
             reload_confirmed_at(&mut user);
             let mut issued = grant_session(&mut user, SystemTime::now());
             issued.amr_method = "otp".into();
             guard.track(&issued);
-            VerifyOutcome::Session(Box::new(issued))
+            VerifyOutcome::Session(
+                Box::new(issued),
+                resolved_email_type(request.kind, found.side),
+            )
         }
     };
     guard.tokens.insert(user_id, tokens);
@@ -3517,9 +3682,10 @@ fn mutate_user(
     audits: &mut Vec<AuditNote>,
 ) -> Result<(Mutated, ClearOtt), StoreError> {
     user.updated_at = now;
-    match request.kind {
+    let kind = effective_kind(request.kind, side);
+    match kind {
         VerifyKind::Signup | VerifyKind::Invite => {
-            if needs_invite_password(user, tokens, request.kind) {
+            if needs_invite_password(user, tokens, kind) {
                 user.password_hash = password_hash.unwrap_or("").to_string();
                 if user.password_hash.is_empty() {
                     return Err(StoreError::Hash);
@@ -3578,7 +3744,8 @@ fn mutate_user(
             apply_email_change(user, tokens, now);
             Ok((Mutated::Session, ClearOtt::All))
         }
-        VerifyKind::Other => Err(StoreError::Unavailable),
+        // `effective_kind` never returns `Email`.
+        VerifyKind::Email | VerifyKind::Other => Err(StoreError::Unavailable),
     }
 }
 
@@ -3677,11 +3844,12 @@ async fn postgres_verify(
         });
     };
     let mut tokens = load_user_tokens(&mut tx, found.user_id).await?;
-    let password_hash = if needs_invite_password(&user, &tokens, request.kind) {
-        Some(hash_password(secure_alphanumeric(64)).await?)
-    } else {
-        None
-    };
+    let password_hash =
+        if needs_invite_password(&user, &tokens, effective_kind(request.kind, found.side)) {
+            Some(hash_password(secure_alphanumeric(64)).await?)
+        } else {
+            None
+        };
     let mut audits = Vec::new();
     let now = SystemTime::now();
     let (mutated, clear) = mutate_user(
@@ -3694,7 +3862,9 @@ async fn postgres_verify(
         &mut audits,
     )?;
     if matches!(mutated, Mutated::Session) {
-        user.last_sign_in_at = Some(now);
+        if request.pkce_method.is_none() {
+            user.last_sign_in_at = Some(now);
+        }
         reload_confirmed_at(&mut user);
     }
     persist_user(&mut tx, &user, &tokens).await?;
@@ -3710,9 +3880,16 @@ async fn postgres_verify(
         )
         .await?;
     }
-    let outcome = match mutated {
-        Mutated::Single => VerifyOutcome::SingleConfirmation,
-        Mutated::Session => {
+    let outcome = match (mutated, request.pkce_method) {
+        (Mutated::Single, _) => VerifyOutcome::SingleConfirmation,
+        (Mutated::Session, Some(method)) => {
+            match issue_auth_code_postgres(&mut tx, user.id, method, now).await? {
+                Ok(code) => VerifyOutcome::AuthCode(code),
+                // Dropping the transaction rolls the verify back.
+                Err(rejected) => return Ok(rejected),
+            }
+        }
+        (Mutated::Session, None) => {
             let Some(mut stored) = find_user_by_id(&mut tx, user.id).await? else {
                 return Err(StoreError::Unavailable);
             };
@@ -3723,11 +3900,52 @@ async fn postgres_verify(
                 .await
                 .map_err(write_to_store)?;
             customize_pg(&mut tx, hook, &mut issued).await?;
-            VerifyOutcome::Session(Box::new(issued))
+            VerifyOutcome::Session(
+                Box::new(issued),
+                resolved_email_type(request.kind, found.side),
+            )
         }
     };
     tx.commit().await?;
     Ok(outcome)
+}
+
+/// `issueAuthCode`: the user's latest flow state for `method` must be PKCE;
+/// its `auth_code_issued_at` is set and its `auth_code` returned.
+async fn issue_auth_code_postgres(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    user_id: Uuid,
+    method: &str,
+    now: SystemTime,
+) -> Result<Result<String, VerifyOutcome>, StoreError> {
+    use sqlx::Row;
+    let row = sqlx::query(
+        "SELECT id, auth_code, code_challenge FROM auth.flow_state
+         WHERE user_id = $1::uuid AND authentication_method = $2
+         ORDER BY created_at DESC, id DESC LIMIT 1",
+    )
+    .bind(user_id)
+    .bind(method)
+    .fetch_optional(&mut **tx)
+    .await?;
+    let Some(row) = row else {
+        return Ok(Err(no_flow_state()));
+    };
+    let challenge: Option<String> = row.try_get("code_challenge")?;
+    if challenge.is_none_or(|challenge| challenge.is_empty()) {
+        return Ok(Err(flow_state_not_pkce()));
+    }
+    let id: Uuid = row.try_get("id")?;
+    let code: Option<String> = row.try_get("auth_code")?;
+    sqlx::query(
+        "UPDATE auth.flow_state SET auth_code_issued_at = $2, updated_at = $2
+         WHERE id = $1::uuid",
+    )
+    .bind(id)
+    .bind(ts(now))
+    .execute(&mut **tx)
+    .await?;
+    Ok(Ok(code.unwrap_or_default()))
 }
 
 async fn locate_postgres(
@@ -3780,7 +3998,8 @@ async fn locate_hash_postgres(
         return Ok(Located::Reject(user_banned()));
     }
     let tokens = load_user_tokens(&mut *tx, user.id).await?;
-    let sent = sent_at_for(request.kind, &tokens);
+    let side = hash_side(request.kind, side, Some(&tokens), &request.token_hash);
+    let sent = sent_at_for(effective_kind(request.kind, side), &tokens);
     if sent.is_none_or(|sent| otp_expired(sent, request.otp_exp_seconds, SystemTime::now())) {
         return Ok(Located::Reject(link_expired()));
     }
@@ -3801,28 +4020,8 @@ async fn locate_email_postgres(
         return Ok(Located::Reject(user_banned()));
     }
     let tokens = load_user_tokens(&mut *tx, user.id).await?;
-    let side = match request.kind {
-        VerifyKind::Signup | VerifyKind::Invite
-            if otp_valid(
-                &request.token_hash,
-                &tokens.confirmation_token,
-                tokens.confirmation_sent_at,
-                request.otp_exp_seconds,
-            ) =>
-        {
-            MatchedSide::Confirmation
-        }
-        VerifyKind::Recovery
-            if otp_valid(
-                &request.token_hash,
-                &tokens.recovery_token,
-                tokens.recovery_sent_at,
-                request.otp_exp_seconds,
-            ) =>
-        {
-            MatchedSide::Recovery
-        }
-        _ => return Ok(Located::Reject(token_invalid())),
+    let Some(side) = email_otp_side(request, &tokens) else {
+        return Ok(Located::Reject(token_invalid()));
     };
     Ok(Located::Found(Found {
         user_id: user.id,

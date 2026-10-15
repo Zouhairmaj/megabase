@@ -49,6 +49,9 @@ pub struct AuthState {
     /// Token-grant limiter: `GOTRUE_RATE_LIMIT_TOKEN_REFRESH` (reference
     /// stack default 1) per five minutes, burst 30, one bucket per header value.
     pub(crate) token_limiter: Arc<KeyedLimiter>,
+    /// `grant_type=web3` limiter: `GOTRUE_RATE_LIMIT_WEB3` (default 30) per
+    /// five minutes, burst 30, one bucket per header value.
+    pub(crate) web3_limiter: Arc<KeyedLimiter>,
     /// Shared Auth pool. `try_from_env` leaves this empty. `megabase_server::run`
     /// replaces it with `Backend::connect` before `router_with_state`, and
     /// closes it on shutdown. Signup, logout, verify, the password and
@@ -114,8 +117,15 @@ impl AuthState {
             rate_limit_header: lookup("GOTRUE_RATE_LIMIT_HEADER")
                 .unwrap_or_else(|| REFERENCE_RATE_LIMIT_HEADER.into()),
             token_limiter: Arc::new(KeyedLimiter::new(
-                token_refresh_rate(lookup("GOTRUE_RATE_LIMIT_TOKEN_REFRESH").as_deref())?
-                    / (60.0 * 5.0),
+                rate_setting(
+                    &lookup,
+                    "GOTRUE_RATE_LIMIT_TOKEN_REFRESH",
+                    REFERENCE_TOKEN_REFRESH_RATE,
+                )? / (60.0 * 5.0),
+                TOKEN_BURST,
+            )),
+            web3_limiter: Arc::new(KeyedLimiter::new(
+                rate_setting(&lookup, "GOTRUE_RATE_LIMIT_WEB3", DEFAULT_WEB3_RATE)? / (60.0 * 5.0),
                 TOKEN_BURST,
             )),
             backend: Backend::none(),
@@ -153,6 +163,7 @@ impl AuthState {
             config,
             rate_limit_header: defaults.rate_limit_header,
             token_limiter: defaults.token_limiter,
+            web3_limiter: defaults.web3_limiter,
             backend,
         }
     }
@@ -249,16 +260,25 @@ const REFERENCE_RATE_LIMIT_HEADER: &str = "X-Megabase-Judge-Rate-Key";
 /// GoTrue's default of 150 so the burst cannot refill during a slow run.
 const REFERENCE_TOKEN_REFRESH_RATE: f64 = 1.0;
 
-fn token_refresh_rate(raw: Option<&str>) -> Result<f64, ConfigError> {
-    let Some(raw) = raw.filter(|value| !value.is_empty()) else {
-        return Ok(REFERENCE_TOKEN_REFRESH_RATE);
+/// GoTrue's `RateLimitWeb3` default; the reference stack does not set it.
+const DEFAULT_WEB3_RATE: f64 = 30.0;
+
+/// A `GOTRUE_RATE_LIMIT_*` float (events per five minutes); unset or empty
+/// is `default`.
+fn rate_setting(
+    lookup: &impl Fn(&str) -> Option<String>,
+    key: &str,
+    default: f64,
+) -> Result<f64, ConfigError> {
+    let Some(raw) = lookup(key).filter(|value| !value.is_empty()) else {
+        return Ok(default);
     };
     raw.parse::<f64>()
         .ok()
         .filter(|rate| rate.is_finite())
         .ok_or_else(|| ConfigError::Invalid {
-            key: "GOTRUE_RATE_LIMIT_TOKEN_REFRESH".into(),
-            value: raw.into(),
+            key: key.into(),
+            value: raw,
         })
 }
 
@@ -490,8 +510,13 @@ mod tests {
             AuthState::reference().rate_limit_header,
             REFERENCE_RATE_LIMIT_HEADER
         );
-        assert_eq!(token_refresh_rate(None).unwrap(), 1.0);
-        assert_eq!(token_refresh_rate(Some("150")).unwrap(), 150.0);
+        let key = "GOTRUE_RATE_LIMIT_TOKEN_REFRESH";
+        let unset = |_: &str| None;
+        assert_eq!(rate_setting(&unset, key, 1.0).unwrap(), 1.0);
+        let set = |name: &str| (name == key).then(|| "150".to_string());
+        assert_eq!(rate_setting(&set, key, 1.0).unwrap(), 150.0);
+        let bad = |name: &str| (name == key).then(|| "lots".to_string());
+        assert!(rate_setting(&bad, key, 1.0).is_err());
         let off =
             AuthState::from_lookup(|key| (key == "GOTRUE_RATE_LIMIT_HEADER").then(String::new));
         assert_eq!(off.rate_limit_header, "");

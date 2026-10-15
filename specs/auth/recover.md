@@ -48,11 +48,24 @@ but runs no mail server, so its SMTP dial always fails.
 3. Look the user up by lowercased email and audience (non-SSO). No user: 200
    `{}`. Nothing else runs, so known and unknown addresses cannot be told
    apart by the success answer.
+3a. PKCE flow (`code_challenge` set, `generateFlowState`,
+   [`internal/api/pkce.go:90`](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/pkce.go#L90)):
+   insert an `auth.flow_state` row with `provider_type` and
+   `authentication_method` `recovery`, the user id, the code challenge, the
+   method lowercased (`ParseCodeChallengeMethod`), a fresh UUID `auth_code`,
+   and `created_at`/`updated_at` now. A method other than `s256`/`plain`
+   (any case) or a failed insert is GoTrue's default 500
+   `unexpected_failure` / `Unexpected failure, please check server logs for
+   more information`. The row is committed on its own, before the steps
+   below, so it stays even when they fail (429, 500, or 501). Only `GET
+   /verify` with the emailed link issues its code ([`verify.md`](verify.md)).
 4. `recovery_sent_at + max_frequency` still in the future: 429
    `over_email_send_rate_limit` / `For security purposes, you can only request
    this after N seconds.` (whole seconds left, truncated).
 5. Generate an OTP (`GOTRUE_MAILER_OTP_LENGTH` digits, 6 to 10) and the token
-   hash `hex(SHA-224(email + otp))`.
+   hash `hex(SHA-224(email + otp))`. The PKCE flow stores it as
+   `pkce_<hash>` (`addFlowPrefixToToken`), in the user column and the
+   one-time token alike.
 6. `sendEmail` checks: an address outside a non-empty authorized list (a
    `+label` is ignored) is 400 `email_address_not_authorized` /
    `Email address "<email>" cannot be used as it is not authorized`. An email
@@ -74,10 +87,7 @@ but runs no mail server, so its SMTP dial always fails.
 - An SMTP host that accepts the TCP connection: the SMTP exchange, STARTTLS
   and authentication, and the recovery template (`ConfirmationURL` built from
   `MAILER_URLPATHS_RECOVERY` and the `redirect_to` referrer) are not ported.
-  Nothing is stored.
-- The PKCE flow (`code_challenge` set): it writes `auth.flow_state` and a
-  `pkce_` token prefix that verify does not exchange. Answered before the user
-  lookup, so it does not reveal whether the account exists.
+  Nothing is stored (the PKCE flow state from step 3a is already written).
 - The send-email hook (`GOTRUE_HOOK_SEND_EMAIL_*`).
 
 ## Edge cases
