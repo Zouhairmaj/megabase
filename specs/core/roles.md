@@ -118,8 +118,9 @@ rolls back and startup fails loudly (GOAL.md §3 rule 5).
 ## Out of scope
 
 `supabase_admin`, `supabase_auth_admin`, `supabase_storage_admin`,
-`supabase_functions_admin`, `dashboard_user`, `pgbouncer`, the
-`extensions` schema, `pgsodium` and the role settings listed above. Judge
+`supabase_functions_admin`, `dashboard_user`, `pgbouncer`, `pgsodium`
+and the role settings listed above. The `extensions` schema is
+[`platform-schemas.md`](platform-schemas.md). Judge
 cases cannot observe this unit: the judge's `megabase` database is on the
 pinned image, where the roles pre-exist. An empty-database run is verified
 by hand (issue #319) until a judge step for a stock cluster exists.

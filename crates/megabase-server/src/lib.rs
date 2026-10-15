@@ -195,6 +195,10 @@ pub async fn run(config: Config) -> std::io::Result<()> {
         megabase_auth::install_roles(&url)
             .await
             .map_err(std::io::Error::other)?;
+        info!("installing platform schemas");
+        megabase_auth::install_platform(&url)
+            .await
+            .map_err(std::io::Error::other)?;
         info!("installing auth schema");
         megabase_auth::install_schema(&url)
             .await
@@ -203,7 +207,7 @@ pub async fn run(config: Config) -> std::io::Result<()> {
             .await
             .map_err(std::io::Error::other)?;
     } else {
-        info!("DATABASE_URL unset; skipping role and auth schema install");
+        info!("DATABASE_URL unset; skipping role, platform and auth schema install");
     }
     let mut rest = megabase_rest::RestState::from_config(&config);
     // REST, Postgres Meta and Storage share one pool; each request that
