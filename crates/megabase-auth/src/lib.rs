@@ -12,6 +12,8 @@
 //! `pg-functions://` custom access token hook at every token issuance.
 //! Issue #47 serves the `/factors` authentication, configuration, and AAL
 //! gates, factor unenroll, and the recovery-code status and delete routes.
+//! Issue #46 serves `GET`/`POST /callback` up to the provider code exchange
+//! and `POST /magiclink` and `POST /otp` up to mail and SMS delivery.
 //! Every other Auth path returns `MEGABASE_NOT_IMPLEMENTED`. Database objects
 //! listed in `specs/auth/database.md` are installed when `DATABASE_URL` is
 //! set, after the standard API roles in `specs/core/roles.md`.
@@ -20,11 +22,13 @@ mod admin;
 mod admin_batch2;
 mod config;
 mod error;
+mod external;
 mod factors;
 mod gojson;
 mod hooks;
 mod http;
 mod jsonutil;
+mod otp;
 mod ratelimit;
 mod roles;
 mod routes;

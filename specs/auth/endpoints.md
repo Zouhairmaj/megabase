@@ -185,6 +185,109 @@ with unit `auth:route:POST /auth/v1/resend`. It performs no user lookup,
 enumeration, writes, or mail/SMS delivery. No coverage marker is added
 until delivery is ported.
 
+## Level 2 (issue 46): authorize, callback, magiclink, otp
+
+Unit ids: `auth:route:GET /auth/v1/authorize`,
+`auth:route:GET /auth/v1/callback`, `auth:route:POST /auth/v1/callback`,
+`auth:route:POST /auth/v1/magiclink`, `auth:route:POST /auth/v1/otp`.
+None carries a `megabase:unit` marker yet: each success path needs an OAuth
+provider exchange, the mailer, or an SMS sender, and those stay 501.
+
+| Behavior | File:line (pin) |
+|---|---|
+| Route table | `vendor/auth/internal/api/api.go:210-216` (callback), `:226` (authorize), `:262` (magiclink), `:265` (otp) |
+| Authorize | `vendor/auth/internal/api/external.go:27-139` |
+| Callback | `vendor/auth/internal/api/external.go:142-283`, `:534-599` (state), `:821-897` (`redirectErrors`); `external_oauth.go:31-123` |
+| Magic link | `vendor/auth/internal/api/magic_link.go:25-150` |
+| OTP | `vendor/auth/internal/api/otp.go:37-238` |
+
+### GET /authorize
+
+Served up to the provider lookup (unchanged by issue 46): an unknown,
+disabled, or (custom OAuth off) `custom:` provider is 400
+`validation_failed` / `Unsupported provider: <reason>`. An enabled provider
+would create an `auth.flow_state` row and 302 to the provider; that is 501.
+
+### GET and POST /callback
+
+`state` comes from the query (`GET`) or `r.FormValue` (`POST`: a urlencoded
+body before the query). Query parsing follows `url.ParseQuery`: pairs with
+`;` or a bad `%` escape are dropped. A multipart `POST` body is 501.
+
+The `loadFlowState` middleware checks, in order:
+
+| When | Status | `error_code` / `msg` |
+|---|---|---|
+| `state` empty | 400 | `bad_oauth_callback` / `OAuth state parameter missing` |
+| `state` not a UUID | 400 | `bad_oauth_state` / `OAuth state parameter is invalid` |
+| No `auth.flow_state` row | 400 | `bad_oauth_state` / `OAuth state not found or expired` |
+| Database error | 500 | `unexpected_failure` / `Error loading flow state` |
+| Older than 300 s (`created_at`, or `auth_code_issued_at` for `magiclink` rows) | 400 | `bad_oauth_state` / `OAuth state has expired` |
+| PKCE row (`code_challenge` set) with `user_id` set | 400 | `flow_state_already_used` / `State has already been used` |
+| `linking_target_id` user missing | 422 | `user_not_found` / `Linking target user not found` |
+
+A middleware failure is a 303 to `SITE_URL` with `error`, `error_code`, and
+`error_description` merged into its query (`url.Values.Encode`, keys
+sorted). `error` maps 400 `invalid_request`, 401 `unauthorized_client`, 403
+`access_denied`, 500 `server_error`, 503 `temporarily_unavailable`, anything
+else `server_error`; `signup_disabled`, `user_banned`, and
+`provider_email_needs_verification` are `access_denied`. GoTrue then writes
+its JSON error into the already-sent response, so the body is Go's redirect
+HTML (`GET` only) followed by `{"code":…,"error_code":…,"msg":…}`. The
+headers are those of the redirect: `GET` has `Content-Type: text/html;
+charset=utf-8`; `POST` has Go's sniffed `text/plain; charset=utf-8`; there
+is no `x-sb-error-code`.
+
+The handler then redirects errors with a 302 to `GOTRUE_EXTERNAL_REDIRECT_URL`,
+else the row's `referrer`, else `SITE_URL`. The error is set in the query
+(as above) and in the fragment: `error`, `error_code`, `error_description`
+(each only when non-empty) and `sb=`, escaped as `URL.EscapedFragment`
+(so `%` from the query encoding becomes `%25`). `POST` redirects have no
+body and no `Content-Type`. In order:
+
+- `error` parameter present: OAuth error, `error` and `error_description`
+  copied, no `error_code`.
+- `code` empty: 400 `bad_oauth_callback` / `OAuth callback with missing authorization code missing`.
+- Provider unknown or disabled: 400 `oauth_provider_not_supported` /
+  `Unsupported provider: <reason>` (same reasons as authorize).
+- Enabled provider, or a `twitter` row (OAuth 1.0): 501, since the code
+  exchange and account linking are not ported.
+
+### POST /magiclink
+
+1. Email provider off: 422 `email_provider_disabled` / `Email logins are disabled`.
+   `GOTRUE_EXTERNAL_EMAIL_MAGIC_LINK_ENABLED=false`: 422
+   `email_provider_disabled` / `Login with magic link is disabled`.
+2. Decode with `json.NewDecoder`: only the first JSON value is read and
+   trailing bytes are ignored. Errors are 400 `bad_json` /
+   `Could not read verification params: <detail>`, where an empty body is
+   `EOF`, a truncated value `unexpected EOF`, and a body over 1 MiB
+   `http: request body too large`. Top-level `null` is an empty request.
+3. Empty email: 422 `validation_failed` / `Password recovery requires an email`.
+   Then the signup email validator and PKCE checks.
+4. Every valid request is 501: GoTrue signs an unknown or unconfirmed user up
+   and sends the mail (with the stock stack's unreachable SMTP host that mail
+   fails with 500). No user lookup runs first, so the answer does not reveal
+   whether the account exists.
+
+### POST /otp
+
+1. Decode `OtpParams` with `json.Unmarshal` (`create_user` defaults to true,
+   and `null` keeps it). Errors are the usual `bad_json` text.
+2. Email and phone both set: 400 `Only an email address or phone number should be provided`.
+   Email with `channel`: 400 `Channel should only be specified with Phone OTP`.
+   Then PKCE.
+3. `create_user: false`: the email (or phone) is validated and looked up in
+   the request audience; no row is 422 `otp_disabled` /
+   `Signups not allowed for otp`. A database error lets the request through,
+   like GoTrue.
+4. Email: the magic link checks above, then 501. Phone: phone provider off is
+   400 `phone_provider_disabled` / `Unsupported phone provider`; then E.164
+   format and the channel check (`channel` defaults to `sms`), then 501.
+   Neither: 400 `One of email or phone must be set`.
+
+The magic link and OTP rate limiters (`limitHandler`) are not served.
+
 ## Out of scope
 
 `GET /user`, admin routes, captcha, rate limits, hooks, mail, and SMS.

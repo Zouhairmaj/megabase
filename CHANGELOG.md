@@ -4,6 +4,13 @@ All notable changes to Megabase are documented in this file.
 The format is produced by [release-please](https://github.com/googleapis/release-please).
 Sections: Features, Bug Fixes, Performance, Conformance/judge, Documentation.
 
+## [0.1.30](https://github.com/Zouhairmaj/megabase/compare/v0.1.29...v0.1.30) (2026-10-15)
+
+
+### Features
+
+* **storage:** serve render image routes up to the renderer ([#367](https://github.com/Zouhairmaj/megabase/issues/367)) ([dd2870a](https://github.com/Zouhairmaj/megabase/commit/dd2870a9e8fb28f64159ad7efe9bab6adc4f0e29))
+
 ## [0.1.29](https://github.com/Zouhairmaj/megabase/compare/v0.1.28...v0.1.29) (2026-10-15)
 
 
