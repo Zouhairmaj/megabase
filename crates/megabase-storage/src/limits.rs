@@ -22,6 +22,12 @@ pub(crate) fn is_valid_bucket_name(name: &str) -> bool {
     !name.is_empty() && name.len() < 101 && name.chars().all(is_bucket_name_char)
 }
 
+/// `isValidKey`: a non-empty object key over `VALID_OBJECT_KEY`,
+/// `^[A-Za-z0-9_/!.*'() &$=@;:+,?-]*$`.
+pub(crate) fn is_valid_key(key: &str) -> bool {
+    !key.is_empty() && key.chars().all(|c| c == '/' || is_bucket_name_char(c))
+}
+
 /// `createBucket` name checks: no surrounding whitespace, valid, and not
 /// ending with a reserved suffix.
 pub(crate) fn is_creatable_bucket_name(name: &str) -> bool {
@@ -84,6 +90,16 @@ mod tests {
         assert!(!is_creatable_bucket_name(" avatars"));
         assert!(!is_creatable_bucket_name("avatars "));
         assert!(!is_creatable_bucket_name("logs--table-s3"));
+    }
+
+    #[test]
+    fn object_keys_follow_the_s3_safe_set() {
+        assert!(is_valid_key("folder/cat.png"));
+        assert!(is_valid_key("a b(c)!*'&$=@;:+,?-_./"));
+        assert!(!is_valid_key(""));
+        assert!(!is_valid_key("caf\u{e9}.png"));
+        assert!(!is_valid_key("a#b"));
+        assert!(!is_valid_key("a%b"));
     }
 
     #[test]
