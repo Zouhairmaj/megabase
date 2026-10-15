@@ -2,12 +2,12 @@
   "schema": 1,
   "totals": {
     "units": 1031,
-    "implemented": 225,
+    "implemented": 230,
     "tested": 186,
     "conformant": 0
   },
   "percent": {
-    "coverage": 21.8,
+    "coverage": 22.3,
     "conformance": 0.0,
     "done": 0.0
   },
@@ -390,7 +390,7 @@
     },
     "storage": {
       "units": 149,
-      "implemented": 39,
+      "implemented": 44,
       "tested": 9,
       "conformant": 0,
       "groups": {
@@ -426,7 +426,7 @@
         },
         "object": {
           "units": 22,
-          "implemented": 11,
+          "implemented": 16,
           "tested": 0,
           "conformant": 0
         },
@@ -752,17 +752,22 @@
     "storage:route:DELETE /storage/v1/cdn/{bucketName}": "implemented",
     "storage:route:DELETE /storage/v1/cdn/{bucketName}/{*}": "implemented",
     "storage:route:DELETE /storage/v1/object/{bucketName}": "implemented",
+    "storage:route:DELETE /storage/v1/object/{bucketName}/{*}": "implemented",
     "storage:route:GET /storage/v1/bucket": "tested",
     "storage:route:GET /storage/v1/bucket/{bucketId}": "tested",
     "storage:route:GET /storage/v1/bucket/{bucketId}/lifecycle": "tested",
     "storage:route:GET /storage/v1/health": "implemented",
     "storage:route:GET /storage/v1/object/authenticated/{bucketName}/{*}": "implemented",
+    "storage:route:GET /storage/v1/object/info/authenticated/{bucketName}/{*}": "implemented",
+    "storage:route:GET /storage/v1/object/info/public/{bucketName}/{*}": "implemented",
+    "storage:route:GET /storage/v1/object/info/{bucketName}/{*}": "implemented",
     "storage:route:GET /storage/v1/object/public/{bucketName}/{*}": "implemented",
     "storage:route:GET /storage/v1/object/sign/{bucketName}/{*}": "implemented",
     "storage:route:GET /storage/v1/object/{bucketName}/{*}": "implemented",
     "storage:route:GET /storage/v1/render/image/authenticated/{bucketName}/{*}": "tested",
     "storage:route:GET /storage/v1/render/image/public/{bucketName}/{*}": "tested",
     "storage:route:GET /storage/v1/render/image/sign/{bucketName}/{*}": "tested",
+    "storage:route:HEAD /storage/v1/object/authenticated/{bucketName}/{*}": "implemented",
     "storage:route:POST /storage/v1/bucket": "tested",
     "storage:route:POST /storage/v1/object/list/{bucketName}": "implemented",
     "storage:route:POST /storage/v1/object/sign/{bucketName}": "implemented",
