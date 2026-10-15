@@ -93,6 +93,14 @@ impl WorkerHandle {
         self.addr
     }
 
+    /// Kill the process (if Megabase owns it) and wait for it, so it is
+    /// reaped instead of left as a zombie.
+    pub async fn stop(mut self) {
+        if let Some(child) = self.child.as_mut() {
+            let _ = child.kill().await;
+        }
+    }
+
     fn is_running(&mut self) -> bool {
         self.child
             .as_mut()
@@ -176,6 +184,7 @@ impl DenoRuntime {
                 return Ok(WorkerHandle::process(addr, child));
             }
             if Instant::now() >= deadline {
+                let _ = child.kill().await;
                 return Err(BootError::Timeout(self.boot_timeout));
             }
             tokio::time::sleep(Duration::from_millis(25)).await;
@@ -245,6 +254,9 @@ impl Workers {
                 return Ok(handle.addr());
             }
         }
+        if let Some(old) = current.take() {
+            old.stop().await;
+        }
         let handle = self
             .runtime
             .start(WorkerSpec {
@@ -266,7 +278,10 @@ impl Workers {
             .get(name)
             .map(Arc::clone);
         if let Some(slot) = slot {
-            *slot.lock().await = None;
+            let old = slot.lock().await.take();
+            if let Some(old) = old {
+                old.stop().await;
+            }
         }
     }
 }
