@@ -843,7 +843,7 @@ fn generate_password() -> Result<String, AuthError> {
     Ok(chars.into_iter().collect())
 }
 
-fn generate_otp(digits: usize) -> Result<String, AuthError> {
+pub(crate) fn generate_otp(digits: usize) -> Result<String, AuthError> {
     let digits = digits.clamp(6, 10);
     let bytes = random_bytes(8)?;
     let mut value = 0u64;

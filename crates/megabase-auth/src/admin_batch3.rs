@@ -115,7 +115,7 @@ fn check_password_strength(state: &AuthState, password: &str) -> Result<(), Auth
 }
 
 /// Go `time.ParseDuration`, in nanoseconds.
-fn parse_go_duration(input: &str) -> Result<i128, String> {
+pub(crate) fn parse_go_duration(input: &str) -> Result<i128, String> {
     let invalid = || format!("time: invalid duration {}", go_quote(input));
     let mut rest = input;
     let mut negative = false;

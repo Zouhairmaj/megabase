@@ -62,8 +62,19 @@ revoke (`GET` and `DELETE /user/oauth/grants`), are served when their flags
 in the table above are on. Spec:
 [`specs/auth/user.md`](../specs/auth/user.md),
 [`specs/auth/token.md`](../specs/auth/token.md), and
-[`specs/auth/verify.md`](../specs/auth/verify.md). Invite, recover, resend,
-and reauthenticate return 501 with their unit id. Magic link, SMS, phone
+[`specs/auth/verify.md`](../specs/auth/verify.md). `POST /recover` is
+served ([`specs/auth/recover.md`](../specs/auth/recover.md)). Its mail
+client follows `GOTRUE_SMTP_HOST`: unset is the reference stack's
+`supabase-mail` (port `GOTRUE_SMTP_PORT`, unset `2500`), which has no
+server, so a known email gets 500 `Error sending recovery email` as on that
+stack. Set `GOTRUE_SMTP_HOST=` (empty) for GoTrue's no-op mail client: the
+recovery token is stored without sending mail. An SMTP server that accepts the connection
+returns 501, because the SMTP exchange is not ported.
+`GOTRUE_SMTP_MAX_FREQUENCY` (default one minute),
+`GOTRUE_RATE_LIMIT_EMAIL_SENT` (default 30 per hour, applied when mailer
+autoconfirm is off), and `GOTRUE_EXTERNAL_EMAIL_AUTHORIZED_ADDRESSES` work
+as in GoTrue. Invite, resend, and reauthenticate return 501 with their unit
+id. Magic link, SMS, phone
 change, the `email` OTP type, and PKCE on verify do too. `PUT /user`
 returns 501 for an email change, a phone change while SMS autoconfirm is
 off, and a password change while reauthentication or the current password
