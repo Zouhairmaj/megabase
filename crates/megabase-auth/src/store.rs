@@ -26,6 +26,10 @@ use crate::config::BCRYPT_COST;
 use crate::hooks::{self, HookError, MemoryHook, TokenHookCall};
 use crate::schema::SchemaError;
 
+mod mfa;
+
+pub use mfa::FactorRow;
+
 const EMAIL_PROVIDER: &str = "email";
 
 #[derive(Debug, thiserror::Error)]
@@ -309,6 +313,8 @@ struct MemoryDb {
     flow_states: HashMap<Uuid, FlowStateRecord>,
     /// Test stand-in for the custom access token hook function.
     access_token_hook: Option<Arc<MemoryHook>>,
+    /// MFA factors, recovery-code sets, and AAL2 sessions (`mfa` module).
+    mfa: mfa::MemoryMfa,
 }
 
 struct MemoryClient {
@@ -345,6 +351,7 @@ impl Backend {
                 oauth_consents: Vec::new(),
                 flow_states: HashMap::new(),
                 access_token_hook: None,
+                mfa: mfa::MemoryMfa::default(),
             }))),
         }
     }

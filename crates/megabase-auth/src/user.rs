@@ -43,10 +43,10 @@ const UNIT_AUTHORIZE: &str = "auth:route:GET /auth/v1/user/identities/authorize"
 
 const AUDIENCE: &str = "Token audience doesn't match request audience";
 
-struct Authed {
-    claims: JwtClaims,
-    user: UserRecord,
-    session_id: Option<Uuid>,
+pub(crate) struct Authed {
+    pub(crate) claims: JwtClaims,
+    pub(crate) user: UserRecord,
+    pub(crate) session_id: Option<Uuid>,
 }
 
 // megabase:unit auth:route:GET /auth/v1/user
@@ -460,7 +460,11 @@ fn reject(response: Response) -> Result<Authed, Box<Response>> {
     Err(Box::new(response))
 }
 
-async fn require_user(state: &AuthState, headers: &HeaderMap) -> Result<Authed, Box<Response>> {
+/// GoTrue `requireAuthentication`: bearer token, claims, user, session, ban.
+pub(crate) async fn require_user(
+    state: &AuthState,
+    headers: &HeaderMap,
+) -> Result<Authed, Box<Response>> {
     let header = headers
         .get(AUTHORIZATION)
         .and_then(|value| value.to_str().ok())

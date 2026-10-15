@@ -101,7 +101,7 @@ Implemented and tested counts come from markers and `judge/cases/`. Live conform
 | Auth | admin | 1–2 | 28 | 28 | 28 |
 | Auth | database | 1 | 32 | 32 | 32 |
 | Auth | endpoints | 1–2 | 13 | 4 | 4 |
-| Auth | factors | 2 | 9 | 0 | 0 |
+| Auth | factors | 2 | 9 | 3 | 0 |
 | Auth | hooks | 1–2 | 7 | 1 | 0 |
 | Auth | oauth | 2 | 6 | 0 | 0 |
 | Auth | oauth-providers | 2 | 26 | 0 | 0 |
