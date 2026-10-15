@@ -2,12 +2,12 @@
   "schema": 1,
   "totals": {
     "units": 1031,
-    "implemented": 201,
+    "implemented": 213,
     "tested": 184,
     "conformant": 0
   },
   "percent": {
-    "coverage": 19.5,
+    "coverage": 20.7,
     "conformance": 0.0,
     "done": 0.0
   },
@@ -390,7 +390,7 @@
     },
     "storage": {
       "units": 149,
-      "implemented": 22,
+      "implemented": 34,
       "tested": 9,
       "conformant": 0,
       "groups": {
@@ -408,7 +408,7 @@
         },
         "database": {
           "units": 46,
-          "implemented": 9,
+          "implemented": 13,
           "tested": 0,
           "conformant": 0
         },
@@ -426,7 +426,7 @@
         },
         "object": {
           "units": 22,
-          "implemented": 0,
+          "implemented": 8,
           "tested": 0,
           "conformant": 0
         },
@@ -744,16 +744,24 @@
     "storage:route:DELETE /storage/v1/cdn": "implemented",
     "storage:route:DELETE /storage/v1/cdn/{bucketName}": "implemented",
     "storage:route:DELETE /storage/v1/cdn/{bucketName}/{*}": "implemented",
+    "storage:route:DELETE /storage/v1/object/{bucketName}": "implemented",
     "storage:route:GET /storage/v1/bucket": "tested",
     "storage:route:GET /storage/v1/bucket/{bucketId}": "tested",
     "storage:route:GET /storage/v1/bucket/{bucketId}/lifecycle": "tested",
     "storage:route:GET /storage/v1/health": "implemented",
+    "storage:route:GET /storage/v1/object/authenticated/{bucketName}/{*}": "implemented",
+    "storage:route:GET /storage/v1/object/public/{bucketName}/{*}": "implemented",
+    "storage:route:GET /storage/v1/object/sign/{bucketName}/{*}": "implemented",
+    "storage:route:GET /storage/v1/object/{bucketName}/{*}": "implemented",
     "storage:route:GET /storage/v1/render/image/authenticated/{bucketName}/{*}": "tested",
     "storage:route:GET /storage/v1/render/image/public/{bucketName}/{*}": "tested",
     "storage:route:GET /storage/v1/render/image/sign/{bucketName}/{*}": "tested",
     "storage:route:POST /storage/v1/bucket": "tested",
+    "storage:route:POST /storage/v1/object/sign/{bucketName}/{*}": "implemented",
+    "storage:route:POST /storage/v1/object/{bucketName}/{*}": "implemented",
     "storage:route:PUT /storage/v1/bucket/{bucketId}": "tested",
     "storage:route:PUT /storage/v1/bucket/{bucketId}/lifecycle": "tested",
+    "storage:route:PUT /storage/v1/object/{bucketName}/{*}": "implemented",
     "storage:sql-function:storage.add_prefixes()": "implemented",
     "storage:sql-function:storage.allow_any_operation()": "implemented",
     "storage:sql-function:storage.allow_only_operation()": "implemented",
@@ -762,6 +770,10 @@
     "storage:sql-function:storage.delete_prefix_hierarchy_trigger()": "implemented",
     "storage:sql-function:storage.enforce_bucket_lifecycle_service_role()": "implemented",
     "storage:sql-function:storage.enforce_bucket_name_length()": "implemented",
-    "storage:sql-function:storage.extension()": "implemented"
+    "storage:sql-function:storage.extension()": "implemented",
+    "storage:sql-function:storage.filename()": "implemented",
+    "storage:sql-function:storage.foldername()": "implemented",
+    "storage:sql-function:storage.protect_delete()": "implemented",
+    "storage:sql-table:storage.objects": "implemented"
   }
 }

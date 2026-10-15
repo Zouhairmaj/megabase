@@ -3,7 +3,8 @@
 //! The SQL is ported from the storage-api tenant migrations; each file under
 //! `sql/` names its upstream migration. The full `storage` schema is not
 //! installed (`specs/storage/database.md`), so the
-//! `storage:sql-table:storage.buckets` unit carries no marker.
+//! `storage:sql-table:storage.buckets` unit carries no marker;
+//! `storage.objects` is installed in its final shape.
 
 use std::time::Duration;
 
@@ -15,6 +16,14 @@ const INSTALL_LOCK: &str =
     "SELECT pg_advisory_xact_lock(hashtext('megabase.storage.install_schema'))";
 
 const BUCKETS: &str = include_str!("../sql/buckets.sql");
+
+// megabase:unit storage:sql-table:storage.objects
+// megabase:unit storage:sql-function:storage.protect_delete()
+const OBJECTS_TABLE: &str = include_str!("../sql/objects.sql");
+
+// megabase:unit storage:sql-function:storage.foldername()
+// megabase:unit storage:sql-function:storage.filename()
+const PATH_FUNCTIONS: &str = include_str!("../sql/path_functions.sql");
 
 /// Dependency of the operation helpers; the unit itself is not claimed yet.
 const OPERATION: &str = include_str!("../sql/operation.sql");
@@ -46,6 +55,8 @@ const DROPPED_PREFIX_FUNCTIONS: &str = include_str!("../sql/dropped_prefix_funct
 /// before the `LANGUAGE sql` helpers that call it.
 const OBJECTS: &[&str] = &[
     BUCKETS,
+    OBJECTS_TABLE,
+    PATH_FUNCTIONS,
     OPERATION,
     ALLOW_ONLY_OPERATION,
     ALLOW_ANY_OPERATION,
@@ -118,7 +129,10 @@ mod tests {
     fn tables_and_dependencies_come_before_their_users() {
         let sql = install_sql();
         let buckets = position(&sql, "CREATE TABLE IF NOT EXISTS storage.buckets");
+        let objects = position(&sql, "CREATE TABLE IF NOT EXISTS storage.objects");
         let operation = position(&sql, "CREATE OR REPLACE FUNCTION storage.operation()");
+        assert!(buckets < objects, "objects references buckets");
+        assert!(objects < position(&sql, "TRIGGER protect_objects_delete"));
         assert!(buckets < operation);
         for helper in [
             "storage.allow_only_operation(",

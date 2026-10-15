@@ -226,7 +226,8 @@ pub async fn run(config: Config) -> std::io::Result<()> {
         pool = Some(shared);
     }
     let meta = megabase_meta::MetaState::new(pool.clone(), config.jwt_hs256().ok());
-    let storage = megabase_storage::StorageState::new(pool, config.jwt_hs256().ok());
+    let storage = megabase_storage::StorageState::new(pool, config.jwt_hs256().ok())
+        .with_file_root(config.storage_file_path.as_deref());
     let addr = config.bind_address();
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     info!("megabase listening on {}", listener.local_addr()?);

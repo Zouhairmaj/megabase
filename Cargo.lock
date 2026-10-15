@@ -1398,6 +1398,7 @@ version = "0.1.30"
 dependencies = [
  "axum",
  "chrono",
+ "md-5 0.10.6",
  "megabase-core",
  "serde_json",
  "sqlx",
@@ -1405,6 +1406,7 @@ dependencies = [
  "tokio",
  "tower",
  "tracing",
+ "uuid",
 ]
 
 [[package]]
