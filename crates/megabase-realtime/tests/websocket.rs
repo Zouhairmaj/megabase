@@ -85,21 +85,108 @@ where
     }
 }
 
-#[tokio::test]
-async fn supabase_js_join_heartbeat_leave() {
+type Socket = tokio_tungstenite::WebSocketStream<tokio::net::TcpStream>;
+
+async fn serve() -> std::net::SocketAddr {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     tokio::spawn(async move {
         axum::serve(listener, router(state())).await.unwrap();
     });
+    addr
+}
 
+async fn connect(addr: std::net::SocketAddr) -> Socket {
     let url = format!(
         "ws://{addr}/realtime/v1/websocket?apikey={}&vsn=2.0.0",
         anon_key()
     );
     let stream = tokio::net::TcpStream::connect(addr).await.unwrap();
-    let (mut socket, response) = tokio_tungstenite::client_async(url, stream).await.unwrap();
+    let (socket, response) = tokio_tungstenite::client_async(url, stream).await.unwrap();
     assert_eq!(response.status(), StatusCode::SWITCHING_PROTOCOLS);
+    socket
+}
+
+async fn send(socket: &mut Socket, frame: Value) {
+    socket.send(Message::Text(frame.to_string())).await.unwrap();
+}
+
+/// What realtime-js sends for `supabase.channel('room', { config })`.
+async fn join(socket: &mut Socket, config: Value) -> Value {
+    send(
+        socket,
+        json!(["1", "1", "realtime:room", "phx_join",
+            {"config": config, "access_token": anon_key()}]),
+    )
+    .await;
+    next_json(socket).await
+}
+
+#[tokio::test]
+async fn broadcast_between_two_sockets() {
+    let addr = serve().await;
+    let mut alice = connect(addr).await;
+    let mut bob = connect(addr).await;
+    let config = json!({"broadcast": {"ack": true, "self": true}, "presence": {"key": ""}});
+    assert_eq!(join(&mut alice, config).await[4]["status"], "ok");
+    assert_eq!(join(&mut bob, json!({})).await[4]["status"], "ok");
+
+    let message = json!({"type": "broadcast", "event": "cursor", "payload": {"x": 1}});
+    send(
+        &mut alice,
+        json!(["1", "2", "realtime:room", "broadcast", message]),
+    )
+    .await;
+    let pushed = json!([null, null, "realtime:room", "broadcast", message]);
+    // `self` echoes to the sender, then `ack` replies.
+    assert_eq!(next_json(&mut alice).await, pushed);
+    assert_eq!(
+        next_json(&mut alice).await,
+        json!(["1", "2", "realtime:room", "phx_reply", {"status": "ok", "response": {}}])
+    );
+    assert_eq!(next_json(&mut bob).await, pushed);
+}
+
+#[tokio::test]
+async fn presence_between_two_sockets() {
+    let addr = serve().await;
+    let mut alice = connect(addr).await;
+    let mut bob = connect(addr).await;
+    let presence = |key: &str| json!({"presence": {"enabled": true, "key": key}});
+    join(&mut alice, presence("alice")).await;
+    assert_eq!(
+        next_json(&mut alice).await,
+        json!(["1", null, "realtime:room", "presence_state", {}])
+    );
+
+    send(
+        &mut alice,
+        json!(["1", "2", "realtime:room", "presence",
+            {"type": "presence", "event": "track", "payload": {"status": "online"}}]),
+    )
+    .await;
+    assert_eq!(next_json(&mut alice).await[4]["status"], "ok");
+    let diff = next_json(&mut alice).await;
+    assert_eq!(diff[3], "presence_diff");
+    assert_eq!(diff[4]["joins"]["alice"]["metas"][0]["status"], "online");
+
+    join(&mut bob, presence("bob")).await;
+    let state = next_json(&mut bob).await;
+    assert_eq!(state[3], "presence_state");
+    assert_eq!(state[4]["alice"]["metas"][0]["status"], "online");
+
+    // Alice disconnects: bob gets her leave.
+    alice.close(None).await.unwrap();
+    let diff = next_json(&mut bob).await;
+    assert_eq!(diff[3], "presence_diff");
+    assert_eq!(diff[4]["joins"], json!({}));
+    assert_eq!(diff[4]["leaves"]["alice"]["metas"][0]["status"], "online");
+}
+
+#[tokio::test]
+async fn supabase_js_join_heartbeat_leave() {
+    let addr = serve().await;
+    let mut socket = connect(addr).await;
 
     // What realtime-js sends for `supabase.channel('room').subscribe()`.
     let join = json!(["1", "1", "realtime:room", "phx_join", {

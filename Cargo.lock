@@ -1374,6 +1374,7 @@ dependencies = [
  "tokio",
  "tokio-tungstenite",
  "tower",
+ "uuid",
 ]
 
 [[package]]

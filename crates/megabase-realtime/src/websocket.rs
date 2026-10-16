@@ -17,6 +17,7 @@ use axum::{
 };
 use megabase_core::MegabaseNotImplemented;
 
+use crate::hub::{Outbox, OUTBOX_CAPACITY};
 use crate::protocol::{Serializer, Session};
 use crate::token::{authorize_conn, TokenError};
 use crate::{RealtimeState, COMPONENT};
@@ -26,11 +27,15 @@ pub(crate) const UNIT: &str = "realtime:route:GET /realtime/v1/websocket";
 /// `endpoint.ex` `max_frame_size`.
 const MAX_FRAME_SIZE: usize = 5_000_000;
 
-fn unix_now() -> i64 {
+fn unix_now_ms() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX))
+        .map(|d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX))
         .unwrap_or(0)
+}
+
+fn unix_now() -> i64 {
+    unix_now_ms().div_euclid(1000)
 }
 
 /// `UserSocket.handle_error/2`: `{"error": message}` as JSON.
@@ -114,25 +119,42 @@ async fn serve(
     let Some(jwt) = state.jwt.as_ref() else {
         return;
     };
-    let mut session = Session::new(jwt, token);
-    while let Some(Ok(message)) = socket.recv().await {
-        let text = match message {
-            Message::Text(text) => text,
-            Message::Close(_) => break,
-            // Binary user broadcasts are not served; pings are answered by the
-            // WebSocket layer.
-            _ => continue,
+    let (outbox, mut inbox) = Outbox::new(OUTBOX_CAPACITY);
+    let evicted = outbox.evicted();
+    let mut session = Session::new(jwt, &state.hub, serializer, token, outbox);
+    loop {
+        let replies = tokio::select! {
+            // The hub dropped this socket for not draining its queue.
+            () = evicted.notified() => break,
+            // Pushes from other channels (broadcasts, presence diffs).
+            Some(text) = inbox.recv() => vec![text],
+            message = socket.recv() => {
+                let text = match message {
+                    Some(Ok(Message::Text(text))) => text,
+                    Some(Ok(Message::Close(_)) | Err(_)) | None => break,
+                    // Binary user broadcasts are not served; pings are answered
+                    // by the WebSocket layer.
+                    Some(Ok(_)) => continue,
+                };
+                let Some(frame) = serializer.decode(&text) else {
+                    continue;
+                };
+                session
+                    .handle(frame, unix_now_ms())
+                    .into_iter()
+                    .map(|reply| serializer.encode(reply))
+                    .collect()
+            }
         };
-        let Some(frame) = serializer.decode(&text) else {
-            continue;
-        };
-        for reply in session.handle(frame, unix_now()) {
-            if socket
-                .send(Message::Text(serializer.encode(reply)))
-                .await
-                .is_err()
-            {
-                return;
+        for text in replies {
+            // A client that stops reading blocks `send`; eviction must still win.
+            tokio::select! {
+                sent = socket.send(Message::Text(text)) => {
+                    if sent.is_err() {
+                        return;
+                    }
+                }
+                () = evicted.notified() => return,
             }
         }
     }

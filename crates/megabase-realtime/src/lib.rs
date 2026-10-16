@@ -3,7 +3,7 @@
 //! Target behavior: Supabase Realtime, vendor/realtime (Apache-2.0), pinned in `vendor/`.
 //! `GET /api/ping` is served (ported from `lib/realtime_web/controllers/ping_controller.ex`),
 //! and so is the Phoenix socket at `GET /websocket` (`websocket`, `protocol`,
-//! `token`). Every other request returns the structured
+//! `hub`, `term`, `token`). Every other request returns the structured
 //! `MEGABASE_NOT_IMPLEMENTED` 501. Each file names its upstream source.
 
 // Ported from supabase/realtime lib/realtime_web/controllers/ping_controller.ex (Apache-2.0), pin v2.143.3.
@@ -18,16 +18,20 @@ use axum::{
 };
 use megabase_core::Hs256;
 
+mod hub;
 mod protocol;
+mod term;
 mod token;
 mod websocket;
 
 pub const COMPONENT: &str = "realtime";
 
-/// What the Realtime routes need: the tenant's JWT secret.
+/// What the Realtime routes need: the tenant's JWT secret and the topics
+/// every socket shares. Clones share the topics.
 #[derive(Debug, Clone, Default)]
 pub struct RealtimeState {
     jwt: Option<Hs256>,
+    hub: Arc<hub::Hub>,
 }
 
 impl RealtimeState {
@@ -35,7 +39,10 @@ impl RealtimeState {
     /// `None` the WebSocket route answers 501.
     #[must_use]
     pub fn new(jwt: Option<Hs256>) -> Self {
-        Self { jwt }
+        Self {
+            jwt,
+            hub: Arc::default(),
+        }
     }
 }
 

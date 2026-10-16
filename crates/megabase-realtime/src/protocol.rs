@@ -1,7 +1,10 @@
 //! Phoenix channel protocol over the Realtime socket: frames, heartbeat,
-//! `phx_join` on `realtime:*` topics, and `phx_leave`.
+//! `phx_join` on `realtime:*` topics, public broadcast, presence and
+//! `phx_leave`.
 
 // Ported from supabase/realtime lib/realtime_web/channels/realtime_channel.ex,
+// lib/realtime_web/channels/realtime_channel/broadcast_handler.ex,
+// lib/realtime_web/channels/realtime_channel/presence_handler.ex,
 // lib/realtime_web/socket/v2_serializer.ex and lib/realtime_web/socket.ex (Apache-2.0),
 // pin v2.143.3. Socket-level handling follows Phoenix 1.7 `Phoenix.Socket`, which
 // Realtime uses unchanged.
@@ -11,8 +14,15 @@ use std::collections::HashMap;
 use megabase_core::{Hs256, MegabaseNotImplemented};
 use serde_json::{json, Map, Value};
 
+use crate::hub::{ConnId, Hub, Outbox};
+use crate::term::{external_size, uuid1, MAX_PAYLOAD_SIZE};
 use crate::token::{authorize_conn, TokenError};
 use crate::COMPONENT;
+
+/// `CLIENT_PRESENCE_MAX_CALLS` default: presence events per window and channel.
+const CLIENT_PRESENCE_MAX_CALLS: u32 = 5;
+/// `CLIENT_PRESENCE_WINDOW_MS` default.
+const CLIENT_PRESENCE_WINDOW_MS: i64 = 30_000;
 
 /// Negotiated `vsn` serializer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -75,13 +85,34 @@ impl Frame {
         }
     }
 
+    /// A server push (`Phoenix.Channel.push/3`, or a fastlane broadcast when
+    /// `join_ref` is null): `ref` is null.
+    pub(crate) fn push(join_ref: Value, topic: &str, event: &str, payload: &Value) -> Self {
+        Self {
+            join_ref,
+            reference: Value::Null,
+            topic: topic.to_owned(),
+            event: event.to_owned(),
+            payload: payload.clone(),
+        }
+    }
+
     /// `Phoenix.Socket` `encode_close/3`: `ref` is the join ref.
     fn close(join_ref: &Value, topic: &str) -> Self {
+        Self::exit(join_ref, topic, "phx_close")
+    }
+
+    /// `Phoenix.Socket` `encode_on_exit/4` for a crashed channel.
+    fn error(join_ref: &Value, topic: &str) -> Self {
+        Self::exit(join_ref, topic, "phx_error")
+    }
+
+    fn exit(join_ref: &Value, topic: &str, event: &str) -> Self {
         Self {
             join_ref: join_ref.clone(),
             reference: join_ref.clone(),
             topic: topic.to_owned(),
-            event: "phx_close".to_owned(),
+            event: event.to_owned(),
             payload: json!({}),
         }
     }
@@ -158,28 +189,100 @@ impl Serializer {
         };
         value.to_string()
     }
+
+    /// `fastlane!/1` for a broadcast: the V2 serializer refuses a payload
+    /// that is not a map, and the dispatcher skips the message.
+    pub(crate) fn fastlane(self, frame: Frame) -> Option<String> {
+        (self == Self::V1 || frame.payload.is_object()).then(|| self.encode(frame))
+    }
+}
+
+/// What a successful join assigns to the channel.
+#[derive(Debug, PartialEq)]
+struct JoinConfig {
+    ack_broadcast: bool,
+    self_broadcast: bool,
+    presence_enabled: bool,
+    presence_key: String,
+}
+
+/// One joined channel (the channel process's assigns).
+struct Channel {
+    join_ref: Value,
+    config: JoinConfig,
+    /// `presence_track_payload`: the last tracked payload.
+    presence_payload: Option<Value>,
+    /// `presence_client_rate_limit`: calls in the window ending at `reset_at`.
+    presence_calls: u32,
+    presence_reset_at: Option<i64>,
+}
+
+impl Channel {
+    /// `limit_client_presence_event/1` at monotonic time `now_ms`.
+    fn allow_presence_event(&mut self, now_ms: i64) -> bool {
+        match self.presence_reset_at {
+            Some(reset_at) if now_ms <= reset_at => {
+                if self.presence_calls >= CLIENT_PRESENCE_MAX_CALLS {
+                    return false;
+                }
+                self.presence_calls += 1;
+            }
+            _ => {
+                self.presence_calls = 1;
+                self.presence_reset_at = Some(now_ms + CLIENT_PRESENCE_WINDOW_MS);
+            }
+        }
+        true
+    }
 }
 
 /// Per-connection channel state.
 pub(crate) struct Session<'a> {
     jwt: &'a Hs256,
+    hub: &'a Hub,
+    conn: ConnId,
+    serializer: Serializer,
+    /// Where other sockets' pushes to this socket land.
+    outbox: Outbox,
     /// The socket's own token (`tenant_token`).
     socket_token: String,
-    /// Joined topic -> its join ref.
-    channels: HashMap<String, Value>,
+    /// Joined topic -> its channel.
+    channels: HashMap<String, Channel>,
+}
+
+impl Drop for Session<'_> {
+    /// The transport went away: every channel stops, which unsubscribes it
+    /// and untracks its presence.
+    fn drop(&mut self) {
+        for topic in self.channels.keys() {
+            self.hub.unsubscribe(topic, self.conn);
+        }
+    }
 }
 
 impl<'a> Session<'a> {
-    pub(crate) fn new(jwt: &'a Hs256, socket_token: String) -> Self {
+    pub(crate) fn new(
+        jwt: &'a Hs256,
+        hub: &'a Hub,
+        serializer: Serializer,
+        socket_token: String,
+        outbox: Outbox,
+    ) -> Self {
         Self {
             jwt,
+            hub,
+            conn: hub.connect(),
+            serializer,
+            outbox,
             socket_token,
             channels: HashMap::new(),
         }
     }
 
-    /// Frames to send back for one client frame, at Unix time `now`.
-    pub(crate) fn handle(&mut self, frame: Frame, now: i64) -> Vec<Frame> {
+    /// Frames to send back for one client frame, at Unix time `now_ms` in
+    /// milliseconds. Pushes from other channels arrive on the outbox.
+    pub(crate) fn handle(&mut self, frame: Frame, now_ms: i64) -> Vec<Frame> {
+        let now = now_ms.div_euclid(1000);
         if frame.topic == "phoenix" && frame.event == "heartbeat" {
             return vec![Frame::reply(
                 Value::Null,
@@ -193,14 +296,13 @@ impl<'a> Session<'a> {
         if let Some(current) = self.channels.get(&frame.topic) {
             if frame.event == "phx_join" {
                 // Duplicate join: Phoenix shuts the existing channel down first.
-                out.push(Frame::close(current, &frame.topic));
-                self.channels.remove(&frame.topic);
-            } else if !current.is_null() && *current != frame.join_ref {
+                out.push(Frame::close(&current.join_ref, &frame.topic));
+                self.stop(&frame.topic);
+            } else if !current.join_ref.is_null() && current.join_ref != frame.join_ref {
                 // The client raced a server close; Phoenix drops the message.
                 return out;
             } else {
-                let join_ref = current.clone();
-                out.extend(self.channel_event(join_ref, frame));
+                out.extend(self.channel_event(frame, now_ms));
                 return out;
             }
         }
@@ -215,16 +317,35 @@ impl<'a> Session<'a> {
             return out;
         }
         match self.join(&frame.topic, &frame.payload, now) {
-            Ok(response) => {
-                self.channels
-                    .insert(frame.topic.clone(), frame.join_ref.clone());
+            Ok(config) => {
+                let presence_enabled = config.presence_enabled;
+                self.hub.subscribe(
+                    &frame.topic,
+                    self.conn,
+                    self.serializer,
+                    self.outbox.clone(),
+                );
+                self.channels.insert(
+                    frame.topic.clone(),
+                    Channel {
+                        join_ref: frame.join_ref.clone(),
+                        config,
+                        presence_payload: None,
+                        presence_calls: 0,
+                        presence_reset_at: None,
+                    },
+                );
                 out.push(Frame::reply(
-                    frame.join_ref,
+                    frame.join_ref.clone(),
                     frame.reference,
                     &frame.topic,
                     "ok",
-                    response,
+                    json!({ "postgres_changes": [] }),
                 ));
+                // `send(self(), :sync_presence)` right after the join.
+                if presence_enabled {
+                    out.push(self.presence_state(frame.join_ref, &frame.topic));
+                }
             }
             Err(response) => out.push(Frame::reply(
                 frame.join_ref,
@@ -237,11 +358,32 @@ impl<'a> Session<'a> {
         out
     }
 
-    /// An event on a joined channel.
-    fn channel_event(&mut self, join_ref: Value, frame: Frame) -> Vec<Frame> {
+    /// The channel on `topic` stopped: forget it, unsubscribe it and untrack
+    /// its presence.
+    fn stop(&mut self, topic: &str) {
+        self.channels.remove(topic);
+        self.hub.unsubscribe(topic, self.conn);
+    }
+
+    /// `presence_state` push with the topic's grouped presences.
+    // megabase:unit realtime:server-event:presence_state
+    fn presence_state(&self, join_ref: Value, topic: &str) -> Frame {
+        Frame::push(
+            join_ref,
+            topic,
+            "presence_state",
+            &self.hub.presence_state(topic),
+        )
+    }
+
+    /// An event on the joined channel `frame.topic`.
+    fn channel_event(&mut self, frame: Frame, now_ms: i64) -> Vec<Frame> {
+        let Some(join_ref) = self.channels.get(&frame.topic).map(|c| c.join_ref.clone()) else {
+            return Vec::new();
+        };
         let unit = match frame.event.as_str() {
             "phx_leave" => {
-                self.channels.remove(&frame.topic);
+                self.stop(&frame.topic);
                 return vec![
                     Frame::reply(
                         join_ref.clone(),
@@ -253,8 +395,8 @@ impl<'a> Session<'a> {
                     Frame::close(&join_ref, &frame.topic),
                 ];
             }
-            "broadcast" => "realtime:client-event:broadcast",
-            "presence" => "realtime:client-event:presence",
+            "broadcast" => return self.broadcast(join_ref, frame),
+            "presence" => return self.presence(&join_ref, &frame, now_ms),
             "access_token" => "realtime:client-event:access_token",
             // `handle_in/3` catch-all: logged, no reply.
             _ => return Vec::new(),
@@ -268,8 +410,132 @@ impl<'a> Session<'a> {
         )]
     }
 
-    /// `RealtimeChannel.join/3` for a public channel with no extensions.
-    fn join(&self, topic: &str, params: &Value, now: i64) -> Result<Value, Value> {
+    /// `BroadcastHandler.handle/3` on a public channel: fan out to the other
+    /// subscribers (and this one with `self`), reply only with `ack`.
+    // megabase:unit realtime:client-event:broadcast
+    fn broadcast(&mut self, join_ref: Value, frame: Frame) -> Vec<Frame> {
+        let Some(channel) = self.channels.get(&frame.topic) else {
+            return Vec::new();
+        };
+        let mut out = Vec::new();
+        let (status, response) = if external_size(&frame.payload) > MAX_PAYLOAD_SIZE {
+            ("error", json!({ "error": "payload_size_exceeded" }))
+        } else {
+            self.hub.broadcast(&frame.topic, self.conn, &frame.payload);
+            if channel.config.self_broadcast
+                && (self.serializer == Serializer::V1 || frame.payload.is_object())
+            {
+                out.push(Frame::push(
+                    Value::Null,
+                    &frame.topic,
+                    "broadcast",
+                    &frame.payload,
+                ));
+            }
+            ("ok", json!({}))
+        };
+        if channel.config.ack_broadcast {
+            out.push(Frame::reply(
+                join_ref,
+                frame.reference,
+                &frame.topic,
+                status,
+                response,
+            ));
+        }
+        out
+    }
+
+    /// `handle_in("presence", …)` with `PresenceHandler.handle/2`.
+    // megabase:unit realtime:client-event:presence
+    fn presence(&mut self, join_ref: &Value, frame: &Frame, now_ms: i64) -> Vec<Frame> {
+        let topic = frame.topic.as_str();
+        let reply = |status: &str, response: Value| {
+            vec![Frame::reply(
+                join_ref.clone(),
+                frame.reference.clone(),
+                topic,
+                status,
+                response,
+            )]
+        };
+        // `handle(_, socket)`: no `event` is a no-op.
+        let Some(event) = frame.payload.as_object().and_then(|p| p.get("event")) else {
+            return reply("ok", json!({}));
+        };
+        // `String.downcase/2` raises on a non-string: the channel crashes.
+        let Some(event) = event.as_str().map(str::to_ascii_lowercase) else {
+            self.stop(topic);
+            return vec![Frame::error(join_ref, topic)];
+        };
+        let Some(channel) = self.channels.get_mut(topic) else {
+            return Vec::new();
+        };
+        if !channel.allow_presence_event(now_ms) {
+            return self.shutdown(join_ref, topic, "Client presence rate limit exceeded");
+        }
+        match event.as_str() {
+            "track" => {
+                let payload = frame
+                    .payload
+                    .get("payload")
+                    .map_or_else(|| json!({}), Value::clone);
+                let Value::Object(meta) = &payload else {
+                    return reply(
+                        "error",
+                        json!({ "reason": "Presence track payload must be a map" }),
+                    );
+                };
+                // `check_track_payload/2`: an unchanged payload is a no-op.
+                if channel.presence_payload.as_ref() == Some(&payload) {
+                    return reply("ok", json!({}));
+                }
+                if external_size(&payload) > MAX_PAYLOAD_SIZE {
+                    return self.shutdown(join_ref, topic, "Track message size exceeded");
+                }
+                self.hub
+                    .track(topic, self.conn, &channel.config.presence_key, meta);
+                let resync = !channel.config.presence_enabled;
+                channel.config.presence_enabled = true;
+                channel.presence_payload = Some(payload);
+                let mut out = reply("ok", json!({}));
+                if resync {
+                    out.push(self.presence_state(join_ref.clone(), topic));
+                }
+                out
+            }
+            "untrack" => {
+                self.hub.untrack(topic, self.conn);
+                channel.presence_payload = None;
+                reply("ok", json!({}))
+            }
+            // `{:error, :unknown_presence_event}` -> `{:reply, :error, socket}`.
+            _ => reply("error", json!({})),
+        }
+    }
+
+    /// `shutdown_response/2`: a `system` error push, then the channel stops.
+    fn shutdown(&mut self, join_ref: &Value, topic: &str, message: &str) -> Vec<Frame> {
+        self.stop(topic);
+        let channel = topic.strip_prefix("realtime:").unwrap_or(topic);
+        vec![
+            Frame::push(
+                join_ref.clone(),
+                topic,
+                "system",
+                &json!({
+                    "extension": "system",
+                    "status": "error",
+                    "message": message,
+                    "channel": channel,
+                }),
+            ),
+            Frame::close(join_ref, topic),
+        ]
+    }
+
+    /// `RealtimeChannel.join/3` for a public channel without Postgres changes.
+    fn join(&self, topic: &str, params: &Value, now: i64) -> Result<JoinConfig, Value> {
         let sub_topic = &topic["realtime:".len()..];
         if sub_topic.is_empty() {
             return Err(reason("TopicNameRequired: You must provide a topic name"));
@@ -298,15 +564,27 @@ impl<'a> Session<'a> {
             Some("realtime:server-event:postgres_changes")
         } else if flag(&["broadcast", "replication_ready"]) {
             Some("realtime:server-event:system")
-        } else if flag(&["presence", "enabled"]) {
-            Some("realtime:server-event:presence_state")
         } else {
             None
         };
-        match unit {
-            Some(unit) => Err(not_implemented(unit)),
-            None => Ok(json!({ "postgres_changes": [] })),
+        if let Some(unit) = unit {
+            return Err(not_implemented(unit));
         }
+        // `Join.presence_key/1`: a non-empty string, number or boolean, else
+        // a fresh UUID v1. The key is a JSON object key on the wire.
+        let presence_key = match field(&["presence", "key"]) {
+            Some(Value::String(key)) if !key.is_empty() => key.to_owned(),
+            Some(Value::Number(key)) => key.to_string(),
+            Some(Value::Bool(key)) => key.to_string(),
+            _ => uuid1(),
+        };
+        Ok(JoinConfig {
+            ack_broadcast: flag(&["broadcast", "ack"]),
+            self_broadcast: flag(&["broadcast", "self"]),
+            // The self-hosted tenant has `presence_enabled` false.
+            presence_enabled: flag(&["presence", "enabled"]),
+            presence_key,
+        })
     }
 
     /// `assign_access_token/2` then `confirm_token/1`.
@@ -380,6 +658,10 @@ fn not_implemented(unit: &str) -> Value {
 
 #[cfg(test)]
 mod tests {
+    use tokio::sync::mpsc::Receiver;
+
+    use crate::hub::OUTBOX_CAPACITY;
+
     use super::*;
 
     const SECRET: &str = "super-secret-jwt-token-with-at-least-32-characters-long";
@@ -401,12 +683,44 @@ mod tests {
         Serializer::V2.decode(text).unwrap()
     }
 
-    fn run(session: &mut Session<'_>, text: &str) -> Vec<String> {
+    fn open<'a>(
+        jwt: &'a Hs256,
+        hub: &'a Hub,
+        serializer: Serializer,
+    ) -> (Session<'a>, Receiver<String>) {
+        let (outbox, inbox) = Outbox::new(OUTBOX_CAPACITY);
+        (Session::new(jwt, hub, serializer, anon(), outbox), inbox)
+    }
+
+    fn run_at(session: &mut Session<'_>, text: &str, now_ms: i64) -> Vec<String> {
         session
-            .handle(frame(text), NOW)
+            .handle(frame(text), now_ms)
             .into_iter()
             .map(|f| Serializer::V2.encode(f))
             .collect()
+    }
+
+    fn run(session: &mut Session<'_>, text: &str) -> Vec<String> {
+        run_at(session, text, NOW * 1000)
+    }
+
+    fn drain(inbox: &mut Receiver<String>) -> Vec<Value> {
+        let mut out = Vec::new();
+        while let Ok(text) = inbox.try_recv() {
+            out.push(serde_json::from_str(&text).unwrap());
+        }
+        out
+    }
+
+    fn values(frames: &[String]) -> Vec<Value> {
+        frames
+            .iter()
+            .map(|text| serde_json::from_str(text).unwrap())
+            .collect()
+    }
+
+    fn join(config: &Value) -> String {
+        json!(["1", "1", "realtime:room", "phx_join", { "config": config }]).to_string()
     }
 
     const JOIN: &str = r#"["1","1","realtime:room","phx_join",{"config":{"broadcast":{"ack":false,"self":false},"presence":{"key":"","enabled":false},"postgres_changes":[],"private":false}}]"#;
@@ -424,7 +738,8 @@ mod tests {
     #[test]
     fn heartbeat_replies_ok() {
         let jwt = jwt();
-        let mut session = Session::new(&jwt, anon());
+        let hub = Hub::default();
+        let (mut session, _inbox) = open(&jwt, &hub, Serializer::V2);
         assert_eq!(
             run(&mut session, r#"[null,"7","phoenix","heartbeat",{}]"#),
             [r#"[null,"7","phoenix","phx_reply",{"response":{},"status":"ok"}]"#]
@@ -434,7 +749,8 @@ mod tests {
     #[test]
     fn join_then_leave() {
         let jwt = jwt();
-        let mut session = Session::new(&jwt, anon());
+        let hub = Hub::default();
+        let (mut session, _inbox) = open(&jwt, &hub, Serializer::V2);
         assert_eq!(
             run(&mut session, JOIN),
             [
@@ -459,7 +775,8 @@ mod tests {
     #[test]
     fn duplicate_join_closes_the_old_channel() {
         let jwt = jwt();
-        let mut session = Session::new(&jwt, anon());
+        let hub = Hub::default();
+        let (mut session, _inbox) = open(&jwt, &hub, Serializer::V2);
         run(&mut session, JOIN);
         let again = JOIN.replacen(r#"["1","1""#, r#"["4","4""#, 1);
         let out = run(&mut session, &again);
@@ -472,7 +789,8 @@ mod tests {
     #[test]
     fn unmatched_topics() {
         let jwt = jwt();
-        let mut session = Session::new(&jwt, anon());
+        let hub = Hub::default();
+        let (mut session, _inbox) = open(&jwt, &hub, Serializer::V2);
         assert_eq!(
             run(&mut session, r#"["1","1","room","phx_join",{}]"#),
             [
@@ -490,7 +808,8 @@ mod tests {
     #[test]
     fn empty_topic_name_is_rejected() {
         let jwt = jwt();
-        let mut session = Session::new(&jwt, anon());
+        let hub = Hub::default();
+        let (mut session, _inbox) = open(&jwt, &hub, Serializer::V2);
         let out = run(
             &mut session,
             r#"["1","1","realtime:","phx_join",{"config":{}}]"#,
@@ -501,7 +820,8 @@ mod tests {
     #[test]
     fn join_token_errors() {
         let jwt = jwt();
-        let mut session = Session::new(&jwt, anon());
+        let hub = Hub::default();
+        let (mut session, _inbox) = open(&jwt, &hub, Serializer::V2);
         let cases = [
             (
                 token(&json!({"role": "anon", "exp": NOW - 10})),
@@ -529,7 +849,8 @@ mod tests {
     #[test]
     fn sb_access_token_uses_the_socket_token() {
         let jwt = jwt();
-        let mut session = Session::new(&jwt, anon());
+        let hub = Hub::default();
+        let (mut session, _inbox) = open(&jwt, &hub, Serializer::V2);
         let text = r#"["1","1","realtime:room","phx_join",{"config":{},"access_token":"sb_publishable_x"}]"#;
         assert!(run(&mut session, text)[0].contains(r#""status":"ok""#));
     }
@@ -544,15 +865,12 @@ mod tests {
                 "realtime:protocol-event:phx_join",
             ),
             (
-                json!({"config": {"presence": {"enabled": true}}}),
-                "realtime:server-event:presence_state",
-            ),
-            (
                 json!({"config": {"postgres_changes": [{"event": "*", "schema": "public"}]}}),
                 "realtime:server-event:postgres_changes",
             ),
         ] {
-            let mut session = Session::new(&jwt, anon());
+            let hub = Hub::default();
+            let (mut session, _inbox) = open(&jwt, &hub, Serializer::V2);
             let text = json!(["1", "1", "realtime:room", "phx_join", payload]).to_string();
             let out = run(&mut session, &text);
             assert!(
@@ -567,27 +885,299 @@ mod tests {
     #[test]
     fn channel_events() {
         let jwt = jwt();
-        let mut session = Session::new(&jwt, anon());
+        let hub = Hub::default();
+        let (mut session, _inbox) = open(&jwt, &hub, Serializer::V2);
         run(&mut session, JOIN);
         let out = run(
             &mut session,
-            r#"["1","2","realtime:room","broadcast",{"type":"broadcast","event":"e","payload":{}}]"#,
+            r#"["1","2","realtime:room","access_token",{"access_token":"x"}]"#,
         );
-        assert!(out[0].contains("realtime:client-event:broadcast"));
+        assert!(out[0].contains("realtime:client-event:access_token"));
         assert!(run(&mut session, r#"["1","3","realtime:room","whatever",{}]"#).is_empty());
+    }
+
+    const BROADCAST: &str = r#"["1","2","realtime:room","broadcast",{"type":"broadcast","event":"e","payload":{"n":1}}]"#;
+
+    #[test]
+    fn broadcast_reaches_the_other_subscribers() {
+        let jwt = jwt();
+        let hub = Hub::default();
+        let (mut a, mut a_inbox) = open(&jwt, &hub, Serializer::V2);
+        let (mut b, mut b_inbox) = open(&jwt, &hub, Serializer::V2);
+        let (mut c, mut c_inbox) = open(&jwt, &hub, Serializer::V2);
+        run(&mut a, JOIN);
+        run(&mut b, JOIN);
+        run(&mut c, &JOIN.replace("realtime:room", "realtime:other"));
+
+        // Without `ack` there is no reply; without `self` no echo.
+        assert!(run(&mut a, BROADCAST).is_empty());
+        assert!(drain(&mut a_inbox).is_empty());
+        assert_eq!(
+            drain(&mut b_inbox),
+            [json!([null, null, "realtime:room", "broadcast",
+                {"type": "broadcast", "event": "e", "payload": {"n": 1}}])]
+        );
+        assert!(drain(&mut c_inbox).is_empty());
+
+        // After leaving, b no longer receives.
+        run(&mut b, r#"["1","3","realtime:room","phx_leave",{}]"#);
+        run(&mut a, BROADCAST);
+        assert!(drain(&mut b_inbox).is_empty());
+    }
+
+    #[test]
+    fn broadcast_self_and_ack() {
+        let jwt = jwt();
+        let hub = Hub::default();
+        let (mut a, mut a_inbox) = open(&jwt, &hub, Serializer::V2);
+        run(
+            &mut a,
+            &join(&json!({"broadcast": {"self": true, "ack": "true"}})),
+        );
+        assert_eq!(
+            values(&run(&mut a, BROADCAST)),
+            [
+                json!([null, null, "realtime:room", "broadcast",
+                    {"type": "broadcast", "event": "e", "payload": {"n": 1}}]),
+                json!(["1", "2", "realtime:room", "phx_reply", {"status": "ok", "response": {}}]),
+            ]
+        );
+        assert!(drain(&mut a_inbox).is_empty());
+
+        // A V2 socket drops a non-map payload; the ack still replies.
+        assert_eq!(
+            values(&run(
+                &mut a,
+                r#"["1","3","realtime:room","broadcast","text"]"#
+            )),
+            [json!(["1", "3", "realtime:room", "phx_reply", {"status": "ok", "response": {}}])]
+        );
+    }
+
+    #[test]
+    fn broadcast_payload_size_limit() {
+        let jwt = jwt();
+        let hub = Hub::default();
+        let (mut a, _a_inbox) = open(&jwt, &hub, Serializer::V2);
+        let (mut b, mut b_inbox) = open(&jwt, &hub, Serializer::V2);
+        run(&mut a, &join(&json!({"broadcast": {"ack": true}})));
+        run(&mut b, JOIN);
+        let big = json!(["1", "2", "realtime:room", "broadcast",
+            {"event": "e", "payload": "x".repeat(MAX_PAYLOAD_SIZE)}])
+        .to_string();
+        assert_eq!(
+            values(&run(&mut a, &big)),
+            [json!(["1", "2", "realtime:room", "phx_reply",
+                {"status": "error", "response": {"error": "payload_size_exceeded"}}])]
+        );
+        assert!(drain(&mut b_inbox).is_empty());
+    }
+
+    fn track(payload: &Value) -> String {
+        json!(["1", "5", "realtime:room", "presence",
+            {"type": "presence", "event": "track", "payload": payload}])
+        .to_string()
+    }
+
+    const OK5: &str = r#"["1","5","realtime:room","phx_reply",{"response":{},"status":"ok"}]"#;
+
+    #[test]
+    fn presence_enabled_join_pushes_state() {
+        let jwt = jwt();
+        let hub = Hub::default();
+        let (mut a, mut a_inbox) = open(&jwt, &hub, Serializer::V2);
+        let (mut b, mut b_inbox) = open(&jwt, &hub, Serializer::V2);
+        let config = json!({"presence": {"enabled": true, "key": "alice"}});
+        let out = values(&run(&mut a, &join(&config)));
+        assert_eq!(
+            out[1],
+            json!(["1", null, "realtime:room", "presence_state", {}])
+        );
+
+        // Presence was on at join: no resync, only the diff (to a itself).
+        assert_eq!(run(&mut a, &track(&json!({"online_at": 1}))), [OK5]);
+        assert_eq!(drain(&mut a_inbox)[0][3], "presence_diff");
+        assert!(drain(&mut b_inbox).is_empty(), "b has not joined");
+
+        // b joins after the track and sees alice in its state.
+        let config = json!({"presence": {"enabled": true, "key": 7}});
+        let out = values(&run(&mut b, &join(&config)));
+        let meta = &out[1][4]["alice"]["metas"][0];
+        assert_eq!(meta["online_at"], 1);
+        assert!(meta["phx_ref"].is_string());
+    }
+
+    #[test]
+    fn presence_track_update_untrack() {
+        let jwt = jwt();
+        let hub = Hub::default();
+        let (mut a, mut a_inbox) = open(&jwt, &hub, Serializer::V2);
+        let (mut b, mut b_inbox) = open(&jwt, &hub, Serializer::V2);
+        run(&mut a, &join(&json!({"presence": {"key": "alice"}})));
+        run(&mut b, JOIN);
+
+        // Presence was off: the track turns it on and resyncs the state.
+        let out = values(&run(&mut a, &track(&json!({"n": 1}))));
+        assert_eq!(out[0], serde_json::from_str::<Value>(OK5).unwrap());
+        assert_eq!(out[1][3], "presence_state");
+        assert_eq!(out[1][4]["alice"]["metas"][0]["n"], 1);
+        let joined = drain(&mut a_inbox);
+        assert_eq!(joined, drain(&mut b_inbox));
+        assert_eq!(joined[0][3], "presence_diff");
+        assert_eq!(joined[0][4]["joins"]["alice"]["metas"][0]["n"], 1);
+        assert_eq!(joined[0][4]["leaves"], json!({}));
+
+        // The same payload again is a no-op.
+        assert_eq!(run(&mut a, &track(&json!({"n": 1}))), [OK5]);
+        assert!(drain(&mut b_inbox).is_empty());
+
+        // A new payload updates: no resync, a diff with both sides.
+        assert_eq!(run(&mut a, &track(&json!({"n": 2}))), [OK5]);
+        let diff = &drain(&mut b_inbox)[0][4];
+        assert_eq!(diff["joins"]["alice"]["metas"][0]["n"], 2);
+        assert_eq!(diff["leaves"]["alice"]["metas"][0]["n"], 1);
+
+        let untrack =
+            r#"["1","5","realtime:room","presence",{"type":"presence","event":"UNTRACK"}]"#;
+        assert_eq!(run(&mut a, untrack), [OK5]);
+        let diff = &drain(&mut b_inbox)[0][4];
+        assert_eq!(diff["leaves"]["alice"]["metas"][0]["n"], 2);
+        assert_eq!(hub.presence_state("realtime:room"), json!({}));
+        drain(&mut a_inbox);
+    }
+
+    #[test]
+    fn presence_leave_and_disconnect_untrack() {
+        let jwt = jwt();
+        let hub = Hub::default();
+        let (mut b, mut b_inbox) = open(&jwt, &hub, Serializer::V2);
+        run(&mut b, JOIN);
+        {
+            let (mut a, _a_inbox) = open(&jwt, &hub, Serializer::V2);
+            run(&mut a, &join(&json!({"presence": {"key": "alice"}})));
+            run(&mut a, &track(&json!({})));
+            drain(&mut b_inbox);
+            // The socket closes.
+        }
+        let diff = &drain(&mut b_inbox)[0][4];
+        assert!(diff["leaves"]["alice"]["metas"][0]["phx_ref"].is_string());
+
+        let (mut a, _a_inbox) = open(&jwt, &hub, Serializer::V2);
+        run(&mut a, &join(&json!({"presence": {"key": "alice"}})));
+        run(&mut a, &track(&json!({})));
+        drain(&mut b_inbox);
+        run(&mut a, r#"["1","9","realtime:room","phx_leave",{}]"#);
+        assert_eq!(drain(&mut b_inbox)[0][4]["joins"], json!({}));
+    }
+
+    #[test]
+    fn presence_errors() {
+        let jwt = jwt();
+        let hub = Hub::default();
+        let (mut a, _a_inbox) = open(&jwt, &hub, Serializer::V2);
+        run(&mut a, JOIN);
+        // No event: a plain ok.
+        assert_eq!(
+            run(
+                &mut a,
+                r#"["1","5","realtime:room","presence",{"type":"presence"}]"#
+            ),
+            [OK5]
+        );
+        assert_eq!(
+            values(&run(&mut a, &track(&json!([1])))),
+            [
+                json!(["1", "5", "realtime:room", "phx_reply", {"status": "error",
+                "response": {"reason": "Presence track payload must be a map"}}])
+            ]
+        );
+        assert_eq!(
+            run(
+                &mut a,
+                r#"["1","5","realtime:room","presence",{"event":"nope"}]"#
+            ),
+            [r#"["1","5","realtime:room","phx_reply",{"response":{},"status":"error"}]"#]
+        );
+        // A non-string event crashes the channel.
+        assert_eq!(
+            run(
+                &mut a,
+                r#"["1","5","realtime:room","presence",{"event":1}]"#
+            ),
+            [r#"["1","1","realtime:room","phx_error",{}]"#]
+        );
+        assert!(run(&mut a, BROADCAST)[0].contains("unmatched topic"));
+    }
+
+    #[test]
+    fn presence_client_rate_limit_shuts_the_channel_down() {
+        let jwt = jwt();
+        let hub = Hub::default();
+        let (mut a, _a_inbox) = open(&jwt, &hub, Serializer::V2);
+        run(&mut a, JOIN);
+        let untrack = r#"["1","5","realtime:room","presence",{"event":"untrack"}]"#;
+        let start = NOW * 1000;
+        for _ in 0..CLIENT_PRESENCE_MAX_CALLS {
+            assert_eq!(run_at(&mut a, untrack, start), [OK5]);
+        }
+        assert_eq!(
+            values(&run_at(&mut a, untrack, start + CLIENT_PRESENCE_WINDOW_MS)),
+            [
+                json!(["1", null, "realtime:room", "system", {"channel": "room",
+                    "extension": "system", "message": "Client presence rate limit exceeded",
+                    "status": "error"}]),
+                json!(["1", "1", "realtime:room", "phx_close", {}]),
+            ]
+        );
+
+        // A new window starts after `window_ms`.
+        run(&mut a, JOIN);
+        for _ in 0..CLIENT_PRESENCE_MAX_CALLS {
+            run_at(&mut a, untrack, start);
+        }
+        assert_eq!(
+            run_at(&mut a, untrack, start + CLIENT_PRESENCE_WINDOW_MS + 1),
+            [OK5]
+        );
+    }
+
+    #[test]
+    fn presence_keys() {
+        let jwt = jwt();
+        let hub = Hub::default();
+        let (session, _inbox) = open(&jwt, &hub, Serializer::V2);
+        let key = |config: Value| {
+            session
+                .join("realtime:room", &json!({ "config": config }), NOW)
+                .unwrap()
+                .presence_key
+        };
+        assert_eq!(key(json!({"presence": {"key": "k"}})), "k");
+        assert_eq!(key(json!({"presence": {"key": 5}})), "5");
+        assert_eq!(key(json!({"presence": {"key": false}})), "false");
+        for config in [
+            json!({}),
+            json!({"presence": {"key": ""}}),
+            json!({"presence": {"key": {}}}),
+        ] {
+            let generated = key(config);
+            assert_eq!(generated.len(), 36);
+            assert_eq!(&generated[14..15], "1");
+        }
     }
 
     #[test]
     fn v1_frames() {
         let jwt = jwt();
-        let mut session = Session::new(&jwt, anon());
+        let hub = Hub::default();
+        let (mut session, _inbox) = open(&jwt, &hub, Serializer::V1);
         let frame = Serializer::V1
             .decode(
                 r#"{"topic":"realtime:room","event":"phx_join","payload":{"config":{}},"ref":"1"}"#,
             )
             .unwrap();
         let out: Vec<String> = session
-            .handle(frame, NOW)
+            .handle(frame, NOW * 1000)
             .into_iter()
             .map(|f| Serializer::V1.encode(f))
             .collect();
