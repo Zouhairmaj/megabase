@@ -23,7 +23,7 @@ Options considered:
    function's own `deno.json` import map would conflict.
 3. A network namespace per worker so `:8000` is private. Needs privileges
    Megabase does not have in a container.
-4. Preload a small bootstrap before the function (`deno run --preload`)
+4. Run a small bootstrap module that imports the function (`deno run`)
    that does what edge-runtime does in JavaScript: route TCP `Deno.listen`
    to the worker's port and provide `Deno.serveHttp` for those connections.
 
@@ -36,9 +36,11 @@ TCP `Deno.listen` it starts one `Deno.serve` (bound through
 one-request connection, and answers `Deno.serveHttp` for those
 connections. `Deno.serve` itself and non-TCP listeners are untouched.
 
-Consequences: `MEGABASE_DENO` must be Deno 2.4 or later (`--preload`). A
-function's main module is still its own `index.ts`, so `import.meta.main`
-and config discovery are unchanged. Raw TCP servers that read bytes from
+Consequences: `MEGABASE_DENO` is any Deno 2 (CI uses 2.1.4, the version in
+edge-runtime v1.77.4; `--preload` needs 2.4, so it is not used). The
+bootstrap is the main module and imports the function's `index.ts`, so
+`import.meta.main` and config discovery differ from a plain
+`deno run index.ts`. Raw TCP servers that read bytes from
 `Deno.listen` connections are not supported, as in edge-runtime, where
 those connections only carry HTTP. Spec:
 [`specs/functions/invoke.md`](../../specs/functions/invoke.md).
