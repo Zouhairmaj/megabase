@@ -30,12 +30,14 @@ mod confirmation;
 mod custom_provider;
 mod invite;
 mod mfa;
+mod passkey;
 mod pkce;
 mod recovery;
 
 pub use confirmation::{ConfirmationOutcome, ConfirmationSignup};
 pub use invite::{InviteCommand, InviteOutcome};
 pub use mfa::FactorRow;
+pub use passkey::PasskeyRow;
 pub use pkce::PkceRedemption;
 
 const EMAIL_PROVIDER: &str = "email";
@@ -424,6 +426,8 @@ struct MemoryDb {
     access_token_hook: Option<Arc<MemoryHook>>,
     /// MFA factors, recovery-code sets, and AAL2 sessions (`mfa` module).
     mfa: mfa::MemoryMfa,
+    /// `auth.webauthn_credentials` (`passkey` module).
+    passkeys: Vec<PasskeyRow>,
 }
 
 struct MemoryClient {
@@ -462,6 +466,7 @@ impl Backend {
                 oauth_client_states: HashMap::new(),
                 access_token_hook: None,
                 mfa: mfa::MemoryMfa::default(),
+                passkeys: Vec::new(),
             }))),
         }
     }

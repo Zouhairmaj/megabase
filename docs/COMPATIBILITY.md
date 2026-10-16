@@ -105,7 +105,7 @@ Implemented and tested counts come from markers and `judge/cases/`. Live conform
 | Auth | hooks | 1–2 | 7 | 1 | 0 |
 | Auth | oauth | 2 | 6 | 2 | 0 |
 | Auth | oauth-providers | 2 | 26 | 20 | 0 |
-| Auth | passkeys | 2 | 7 | 0 | 0 |
+| Auth | passkeys | 2 | 7 | 3 | 0 |
 | Auth | scim | 2 | 3 | 0 | 0 |
 | Auth | sso | 2 | 3 | 0 | 0 |
 | Auth | token | 1–2 | 6 | 4 | 3 |

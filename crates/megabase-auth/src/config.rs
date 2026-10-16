@@ -43,6 +43,8 @@ pub struct AuthConfig {
     pub saml_enabled: bool,
     pub saml_private_key_next_configured: bool,
     pub passkeys_enabled: bool,
+    /// `GOTRUE_PASSKEY_MAX_PASSKEYS_PER_USER` (default 10).
+    pub passkey_max_per_user: i64,
     pub jwt_aud: String,
     pub jwt_default_group: String,
     pub jwt_exp_seconds: i64,
@@ -325,6 +327,7 @@ impl AuthConfig {
             // With SAML off, GoTrue reports `true`: see `from_lookup`.
             saml_private_key_next_configured: true,
             passkeys_enabled: false,
+            passkey_max_per_user: 10,
             jwt_aud: "authenticated".into(),
             jwt_default_group: "authenticated".into(),
             jwt_exp_seconds: 3600,
@@ -430,6 +433,8 @@ impl AuthConfig {
             saml_private_key_next_configured,
             passkeys_enabled: optional_bool(&lookup, "GOTRUE_PASSKEY_ENABLED")?
                 .unwrap_or(defaults.passkeys_enabled),
+            passkey_max_per_user: optional_i64(&lookup, "GOTRUE_PASSKEY_MAX_PASSKEYS_PER_USER")?
+                .unwrap_or(defaults.passkey_max_per_user),
             jwt_aud: lookup("GOTRUE_JWT_AUD").unwrap_or(defaults.jwt_aud),
             jwt_default_group: lookup("GOTRUE_JWT_DEFAULT_GROUP_NAME")
                 .unwrap_or(defaults.jwt_default_group),
