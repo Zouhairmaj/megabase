@@ -4,6 +4,14 @@ All notable changes to Megabase are documented in this file.
 The format is produced by [release-please](https://github.com/googleapis/release-please).
 Sections: Features, Bug Fixes, Performance, Conformance/judge, Documentation.
 
+## [0.1.44](https://github.com/Zouhairmaj/megabase/compare/v0.1.43...v0.1.44) (2026-10-16)
+
+
+### Features
+
+* **realtime:** serve the websocket handshake, heartbeat, join and leave ([#457](https://github.com/Zouhairmaj/megabase/issues/457)) ([504a616](https://github.com/Zouhairmaj/megabase/commit/504a616abb977fd0afc3d08bb6201df4875467c6))
+* **storage:** add bucket delete/empty and object move/copy routes ([#456](https://github.com/Zouhairmaj/megabase/issues/456)) ([1fa65b0](https://github.com/Zouhairmaj/megabase/commit/1fa65b0d4486d7a8c4516cf7d02dfd948fcf310f))
+
 ## [0.1.43](https://github.com/Zouhairmaj/megabase/compare/v0.1.42...v0.1.43) (2026-10-16)
 
 
