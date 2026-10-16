@@ -16,7 +16,9 @@
 //! and `POST /magiclink` and `POST /otp` up to mail and SMS delivery.
 //! Issue #382 serves `POST /recover` through GoTrue's no-op mail client and
 //! an unreachable SMTP host. Issue #401 serves `POST /invite` the same way.
-//! Issue #55 serves the JWKS and OIDC / OAuth discovery documents.
+//! Issue #55 serves the JWKS and OIDC / OAuth discovery documents. Issue #49
+//! serves the `GET /authorize` redirect for the providers whose constructor
+//! needs no network call.
 //! Every other Auth path returns `MEGABASE_NOT_IMPLEMENTED`. Database objects
 //! listed in `specs/auth/database.md` are installed when `DATABASE_URL` is
 //! set, after the standard API roles in `specs/core/roles.md` and the
@@ -37,6 +39,7 @@ mod jsonutil;
 mod oauth_server;
 mod otp;
 mod platform;
+mod provider;
 mod ratelimit;
 mod recover;
 mod roles;

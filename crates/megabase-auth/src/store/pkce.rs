@@ -30,9 +30,9 @@ pub(super) async fn insert_flow_state(
              (id, user_id, auth_code, code_challenge_method, code_challenge,
               provider_type, provider_access_token, provider_refresh_token,
               created_at, updated_at, authentication_method,
-              auth_code_issued_at, referrer, linking_target_id)
+              auth_code_issued_at, referrer, linking_target_id, email_optional)
          VALUES ($1::uuid, $2::uuid, $3, $4::auth.code_challenge_method, $5,
-                 $6, $7, $8, $9, $9, $10, $11, $12, $13::uuid)",
+                 $6, $7, $8, $9, $9, $10, $11, $12, $13::uuid, $14)",
     )
     .bind(id)
     .bind(flow.user_id)
@@ -47,6 +47,7 @@ pub(super) async fn insert_flow_state(
     .bind(flow.auth_code_issued_at.map(ts))
     .bind(flow.referrer.as_deref())
     .bind(flow.linking_target_id)
+    .bind(flow.email_optional)
     .execute(&mut *conn)
     .await?;
     Ok(())

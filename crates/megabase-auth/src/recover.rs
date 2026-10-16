@@ -204,6 +204,7 @@ pub(crate) async fn create_email_flow(
         auth_code_issued_at: None,
         referrer: None,
         linking_target_id: None,
+        email_optional: false,
     };
     state
         .backend

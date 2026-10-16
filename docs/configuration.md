@@ -139,7 +139,10 @@ secure email change on. Bool
 overrides accept Go's `1`/`t`/`true`/`0`/`f`/`false`.
 `GOTRUE_PASSWORD_MIN_LENGTH` below 6 is raised to 6. External OAuth
 provider flags (`GOTRUE_EXTERNAL_GITHUB_ENABLED` and the rest of the
-settings object) default off. The admin allow-list stays the GoTrue unset
+settings object) default off. An enabled provider also reads
+`GOTRUE_EXTERNAL_<NAME>_CLIENT_ID`, `_SECRET`, `_REDIRECT_URI`, `_URL` and
+`_EMAIL_OPTIONAL` ([`specs/auth/oauth-providers.md`](../specs/auth/oauth-providers.md)).
+The admin allow-list stays the GoTrue unset
 default in the table above.
 
 ## PostgreSQL TLS
