@@ -2,12 +2,12 @@
   "schema": 1,
   "totals": {
     "units": 1031,
-    "implemented": 296,
+    "implemented": 306,
     "tested": 192,
     "conformant": 0
   },
   "percent": {
-    "coverage": 28.7,
+    "coverage": 29.7,
     "conformance": 0.0,
     "done": 0.0
   },
@@ -390,7 +390,7 @@
     },
     "storage": {
       "units": 149,
-      "implemented": 77,
+      "implemented": 87,
       "tested": 9,
       "conformant": 0,
       "groups": {
@@ -450,7 +450,7 @@
         },
         "vector": {
           "units": 13,
-          "implemented": 0,
+          "implemented": 10,
           "tested": 0,
           "conformant": 0
         }
@@ -840,6 +840,16 @@
     "storage:route:POST /storage/v1/s3/{Bucket}/{*}?uploads": "implemented",
     "storage:route:POST /storage/v1/s3/{Bucket}?delete": "implemented",
     "storage:route:POST /storage/v1/s3/{Bucket}|content-type=multipart/form-data": "implemented",
+    "storage:route:POST /storage/v1/vector/CreateIndex": "implemented",
+    "storage:route:POST /storage/v1/vector/CreateVectorBucket": "implemented",
+    "storage:route:POST /storage/v1/vector/DeleteIndex": "implemented",
+    "storage:route:POST /storage/v1/vector/DeleteVectorBucket": "implemented",
+    "storage:route:POST /storage/v1/vector/DeleteVectors": "implemented",
+    "storage:route:POST /storage/v1/vector/GetIndex": "implemented",
+    "storage:route:POST /storage/v1/vector/GetVectorBucket": "implemented",
+    "storage:route:POST /storage/v1/vector/GetVectors": "implemented",
+    "storage:route:POST /storage/v1/vector/ListIndexes": "implemented",
+    "storage:route:POST /storage/v1/vector/ListVectorBuckets": "implemented",
     "storage:route:PUT /storage/v1/bucket/{bucketId}": "tested",
     "storage:route:PUT /storage/v1/bucket/{bucketId}/lifecycle": "tested",
     "storage:route:PUT /storage/v1/object/{bucketName}/{*}": "implemented",

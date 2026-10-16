@@ -60,7 +60,7 @@ pub(super) async fn catalog_disabled(
 /// Fastify's `handleRequest` skips body parsing only when there is no
 /// `Content-Type`, no `Transfer-Encoding`, and `Content-Length` is absent
 /// or `0`.
-fn has_body(headers: &HeaderMap) -> bool {
+pub(super) fn has_body(headers: &HeaderMap) -> bool {
     headers.contains_key(header::CONTENT_TYPE)
         || headers.contains_key(header::TRANSFER_ENCODING)
         || headers
@@ -70,7 +70,7 @@ fn has_body(headers: &HeaderMap) -> bool {
 
 /// `DELETE` and `OPTIONS` are parsed only when a `Content-Type` comes with a
 /// `Transfer-Encoding` or a `Content-Length` (of any value, including `0`).
-fn has_framed_content_type(headers: &HeaderMap) -> bool {
+pub(super) fn has_framed_content_type(headers: &HeaderMap) -> bool {
     headers.contains_key(header::CONTENT_TYPE)
         && (headers.contains_key(header::TRANSFER_ENCODING)
             || headers.contains_key(header::CONTENT_LENGTH))
