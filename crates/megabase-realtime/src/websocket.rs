@@ -16,9 +16,10 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use megabase_core::MegabaseNotImplemented;
+use tokio::sync::Notify;
 
 use crate::hub::{Outbox, OUTBOX_CAPACITY};
-use crate::protocol::{Serializer, Session};
+use crate::protocol::{Serializer, Session, Wire};
 use crate::token::{authorize_conn, TokenError};
 use crate::{RealtimeState, COMPONENT};
 
@@ -136,41 +137,72 @@ async fn serve(
             // The hub dropped this socket for not draining its queue.
             () = evicted.notified() => break,
             // Channel timers: token re-confirmation and held refreshes.
-            () = timer => session
-                .tick(unix_now_ms())
-                .into_iter()
-                .map(|reply| serializer.encode(reply))
-                .collect(),
+            () = timer => session.tick(unix_now_ms()),
             // Pushes from other channels (broadcasts, presence diffs).
-            Some(text) = inbox.recv() => vec![text],
-            message = socket.recv() => {
-                let text = match message {
-                    Some(Ok(Message::Text(text))) => text,
-                    Some(Ok(Message::Close(_)) | Err(_)) | None => break,
-                    // Binary user broadcasts are not served; pings are answered
-                    // by the WebSocket layer.
-                    Some(Ok(_)) => continue,
-                };
-                let Some(frame) = serializer.decode(&text) else {
-                    continue;
-                };
-                session
-                    .handle(frame, unix_now_ms())
-                    .into_iter()
-                    .map(|reply| serializer.encode(reply))
-                    .collect()
-            }
+            Some(wire) = inbox.recv() => vec![wire],
+            message = socket.recv() => match message {
+                Some(Ok(message)) => match receive(&mut session, serializer, message) {
+                    Some(replies) => replies,
+                    None => break,
+                },
+                Some(Err(_)) | None => break,
+            },
         };
-        for text in replies {
-            // A client that stops reading blocks `send`; eviction must still win.
-            tokio::select! {
-                sent = socket.send(Message::Text(text)) => {
-                    if sent.is_err() {
-                        return;
-                    }
-                }
-                () = evicted.notified() => return,
-            }
+        if !send_all(&mut socket, &evicted, replies).await {
+            return;
         }
     }
+}
+
+/// The replies to one client message; `None` once the client closed.
+/// Malformed frames are ignored.
+fn receive(
+    session: &mut Session<'_>,
+    serializer: Serializer,
+    message: Message,
+) -> Option<Vec<Wire>> {
+    let text = match (message, serializer) {
+        (Message::Text(text), _) => text,
+        (Message::Binary(bytes), Serializer::V2) => {
+            return Some(
+                Serializer::decode_binary(&bytes)
+                    .map(|frame| session.handle_binary(frame))
+                    .unwrap_or_default(),
+            );
+        }
+        // The V1 serializer decodes JSON whatever the opcode.
+        (Message::Binary(bytes), Serializer::V1) => match String::from_utf8(bytes) {
+            Ok(text) => text,
+            Err(_) => return Some(Vec::new()),
+        },
+        (Message::Close(_), _) => return None,
+        // Pings are answered by the WebSocket layer.
+        (Message::Ping(_) | Message::Pong(_), _) => return Some(Vec::new()),
+    };
+    Some(
+        serializer
+            .decode(&text)
+            .map(|frame| session.handle(frame, unix_now_ms()))
+            .unwrap_or_default(),
+    )
+}
+
+/// Sends `replies` in order; `false` once the socket is gone or evicted.
+async fn send_all(socket: &mut WebSocket, evicted: &Notify, replies: Vec<Wire>) -> bool {
+    for wire in replies {
+        let message = match wire {
+            Wire::Text(text) => Message::Text(text),
+            Wire::Binary(bytes) => Message::Binary(bytes),
+        };
+        // A client that stops reading blocks `send`; eviction must still win.
+        tokio::select! {
+            sent = socket.send(message) => {
+                if sent.is_err() {
+                    return false;
+                }
+            }
+            () = evicted.notified() => return false,
+        }
+    }
+    true
 }

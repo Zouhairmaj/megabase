@@ -27,12 +27,36 @@ pub(crate) fn external_size(value: &Value) -> usize {
     1 + term_size(value)
 }
 
+/// `:erlang.external_size/1` of `{:binary, data}`, the payload
+/// `V2Serializer` decodes a binary `@push` frame into.
+pub(crate) fn binary_tuple_size(data: usize) -> usize {
+    // Version, SMALL_TUPLE_EXT (tag, arity), the atom, BINARY_EXT.
+    1 + 2 + atom_size("binary") + 5 + data
+}
+
+/// `:erlang.external_size/1` of `{user_event, encoding, user_payload,
+/// metadata}`, the payload `V2Serializer` decodes a `@user_broadcast_push`
+/// frame into.
+pub(crate) fn user_broadcast_size(
+    event: &str,
+    json: bool,
+    payload: usize,
+    metadata: &Value,
+) -> usize {
+    let encoding = if json { "json" } else { "binary" };
+    1 + 2 + (5 + event.len()) + atom_size(encoding) + (5 + payload) + term_size(metadata)
+}
+
+/// SMALL_ATOM_UTF8_EXT: tag, length, name.
+fn atom_size(name: &str) -> usize {
+    2 + name.len()
+}
+
 fn term_size(value: &Value) -> usize {
     match value {
-        // SMALL_ATOM_UTF8_EXT: tag, length, name.
-        Value::Null => 2 + "nil".len(),
-        Value::Bool(true) => 2 + "true".len(),
-        Value::Bool(false) => 2 + "false".len(),
+        Value::Null => atom_size("nil"),
+        Value::Bool(true) => atom_size("true"),
+        Value::Bool(false) => atom_size("false"),
         Value::Number(number) => number
             .as_i64()
             .map(i128::from)
@@ -139,6 +163,16 @@ mod tests {
         for (value, size) in cases {
             assert_eq!(external_size(&value), size, "{value}");
         }
+    }
+
+    #[test]
+    fn binary_payload_tuple_sizes() {
+        // {:binary, "ab"}: 1 + 2 + 8 + 7.
+        assert_eq!(binary_tuple_size(2), 18);
+        // {"e", :json, "{}", %{}}: 1 + 2 + 6 + 6 + 7 + 5.
+        assert_eq!(user_broadcast_size("e", true, 2, &json!({})), 27);
+        // {"e", :binary, "ab", %{"a" => 1}}: 1 + 2 + 6 + 8 + 7 + 13.
+        assert_eq!(user_broadcast_size("e", false, 2, &json!({"a": 1})), 37);
     }
 
     #[test]

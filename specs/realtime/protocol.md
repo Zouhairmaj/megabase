@@ -9,8 +9,9 @@ event, `realtime:client-event:access_token`)
 Level: 3
 
 The Phoenix channel events realtime-js names in `CHANNEL_EVENTS`, as the
-Realtime socket answers them. Framing, the handshake, join error reasons,
-broadcast and presence are in [`websocket.md`](websocket.md); this spec
+Realtime socket answers them. Framing, the handshake and join error
+reasons are in [`websocket.md`](websocket.md), broadcast and presence in
+[`client-events.md`](client-events.md); this spec
 covers the event lifecycle and the token refresh.
 
 ## Upstream

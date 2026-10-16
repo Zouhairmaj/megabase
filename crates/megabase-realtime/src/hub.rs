@@ -14,7 +14,7 @@ use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::Notify;
 
-use crate::protocol::{Frame, Serializer};
+use crate::protocol::{Broadcast, Frame, Serializer, Wire};
 use crate::term::phx_ref;
 
 /// One socket connection.
@@ -28,13 +28,13 @@ pub(crate) const OUTBOX_CAPACITY: usize = 1024;
 /// a client that stops reading cannot make the process buffer without limit.
 #[derive(Clone, Debug)]
 pub(crate) struct Outbox {
-    tx: Sender<String>,
+    tx: Sender<Wire>,
     evicted: Arc<Notify>,
 }
 
 impl Outbox {
     /// A queue holding up to `capacity` pushes, and its receiving end.
-    pub(crate) fn new(capacity: usize) -> (Self, Receiver<String>) {
+    pub(crate) fn new(capacity: usize) -> (Self, Receiver<Wire>) {
         let (tx, rx) = channel(capacity);
         let outbox = Self {
             tx,
@@ -80,22 +80,24 @@ struct Presence {
 impl Topic {
     /// `MessageDispatcher.dispatch/3`: a fastlane push to every subscriber but
     /// `except`, encoded with each subscriber's serializer.
-    fn dispatch(&mut self, name: &str, except: Option<ConnId>, event: &str, payload: &Value) {
+    fn dispatch(
+        &mut self,
+        name: &str,
+        except: Option<ConnId>,
+        encode: &dyn Fn(Serializer) -> Option<Wire>,
+    ) {
         // One encoding per serializer: `[V1, V2]`, built on first use.
-        let mut cache: [Option<Option<String>>; 2] = [None, None];
+        let mut cache: [Option<Option<Wire>>; 2] = [None, None];
         let mut slow = Vec::new();
         for member in self.members.iter().filter(|m| Some(m.conn) != except) {
             let slot = match member.serializer {
                 Serializer::V1 => 0,
                 Serializer::V2 => 1,
             };
-            let text = cache[slot].get_or_insert_with(|| {
-                let frame = Frame::push(Value::Null, name, event, payload);
-                member.serializer.fastlane(frame)
-            });
-            if let Some(text) = text {
+            let wire = cache[slot].get_or_insert_with(|| encode(member.serializer));
+            if let Some(wire) = wire {
                 // A closed outbox is a socket that is going away.
-                if let Err(TrySendError::Full(_)) = member.outbox.tx.try_send(text.clone()) {
+                if let Err(TrySendError::Full(_)) = member.outbox.tx.try_send(wire.clone()) {
                     slow.push(member.conn);
                 }
             }
@@ -121,7 +123,15 @@ impl Topic {
         };
         let left = self.presences.remove(index);
         let diff = diff(&[], &[&left]);
-        self.dispatch(name, None, "presence_diff", &diff);
+        self.presence_diff(name, &diff);
+    }
+
+    /// A `presence_diff` push to every subscriber.
+    fn presence_diff(&mut self, name: &str, diff: &Value) {
+        self.dispatch(name, None, &|serializer| {
+            let frame = Frame::push(Value::Null, name, "presence_diff", diff);
+            serializer.fastlane(frame).map(Wire::Text)
+        });
     }
 }
 
@@ -195,9 +205,11 @@ impl Hub {
 
     /// `pubsub_broadcast_from/5`: a `broadcast` push to every subscriber of
     /// `topic` except `from`.
-    pub(crate) fn broadcast(&self, topic: &str, from: ConnId, payload: &Value) {
+    pub(crate) fn broadcast(&self, topic: &str, from: ConnId, broadcast: &Broadcast) {
         if let Some(entry) = self.topics().get_mut(topic) {
-            entry.dispatch(topic, Some(from), "broadcast", payload);
+            entry.dispatch(topic, Some(from), &|serializer| {
+                broadcast.fastlane(serializer, topic)
+            });
         }
     }
 
@@ -236,7 +248,7 @@ impl Hub {
                 diff
             }
         };
-        entry.dispatch(topic, None, "presence_diff", &diff);
+        entry.presence_diff(topic, &diff);
     }
 
     /// `Presence.untrack/3` for the channel of `conn`.
@@ -262,7 +274,7 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    fn member(hub: &Hub, serializer: Serializer) -> (ConnId, Receiver<String>) {
+    fn member(hub: &Hub, serializer: Serializer) -> (ConnId, Receiver<Wire>) {
         let conn = hub.connect();
         let (tx, rx) = Outbox::new(OUTBOX_CAPACITY);
         hub.subscribe("realtime:room", conn, serializer, tx);
@@ -280,7 +292,7 @@ mod tests {
         let payload = json!({"user": 1});
         hub.track("realtime:room", slow, "k", payload.as_object().unwrap());
         // The track diff fills the slow queue; the next broadcast overflows it.
-        hub.broadcast("realtime:room", sender, &json!({"n": 1}));
+        hub.broadcast("realtime:room", sender, &Broadcast::Json(json!({"n": 1})));
         evicted.notified().await;
         assert_eq!(hub.presence_state("realtime:room"), json!({}));
         // The survivor saw the join and then the leave of the slow socket.
@@ -289,12 +301,58 @@ mod tests {
         assert_eq!(diffs[1][4]["leaves"]["k"]["metas"][0]["user"], 1);
     }
 
-    fn drain(rx: &mut Receiver<String>) -> Vec<Value> {
+    fn drain(rx: &mut Receiver<Wire>) -> Vec<Value> {
         let mut out = Vec::new();
-        while let Ok(text) = rx.try_recv() {
+        while let Ok(wire) = rx.try_recv() {
+            let Wire::Text(text) = wire else {
+                panic!("unexpected {wire:?}");
+            };
             out.push(serde_json::from_str(&text).unwrap());
         }
         out
+    }
+
+    #[test]
+    fn user_broadcast_is_binary_on_v2_and_json_on_v1() {
+        let hub = Hub::default();
+        let (a, _a_rx) = member(&hub, Serializer::V2);
+        let (_, mut v2_rx) = member(&hub, Serializer::V2);
+        let (_, mut v1_rx) = member(&hub, Serializer::V1);
+        let user = |json: bool, payload: &[u8]| Broadcast::User {
+            event: "e".to_owned(),
+            json,
+            payload: payload.to_vec(),
+        };
+        hub.broadcast("realtime:room", a, &user(true, br#"{"n": 1}"#));
+        let mut expected = vec![4, 13, 1, 0, 1];
+        expected.extend_from_slice(b"realtime:roome{\"n\": 1}");
+        assert_eq!(v2_rx.try_recv().unwrap(), Wire::Binary(expected));
+        // V1 gets the JSON broadcast with the payload bytes verbatim.
+        assert_eq!(
+            v1_rx.try_recv().unwrap(),
+            Wire::Text(
+                r#"{"event":"broadcast","payload":{"event":"e","payload":{"n": 1},"type":"broadcast"},"ref":null,"topic":"realtime:room"}"#
+                    .to_owned()
+            )
+        );
+
+        // A binary payload, or JSON that does not decode, skips V1.
+        hub.broadcast("realtime:room", a, &user(false, &[0xff]));
+        hub.broadcast("realtime:room", a, &user(true, b"{"));
+        assert_eq!(
+            v2_rx.try_recv().unwrap(),
+            Wire::Binary([&[4, 13, 1, 0, 0][..], b"realtime:roome", &[0xff]].concat())
+        );
+        assert!(matches!(v2_rx.try_recv(), Ok(Wire::Binary(_))));
+        assert!(v1_rx.try_recv().is_err());
+
+        // A `{:binary, data}` broadcast: kind 2 on V2, nothing on V1.
+        hub.broadcast("realtime:room", a, &Broadcast::Binary(vec![1, 2]));
+        assert_eq!(
+            v2_rx.try_recv().unwrap(),
+            Wire::Binary([&[2, 13, 9][..], b"realtime:roombroadcast", &[1, 2]].concat())
+        );
+        assert!(v1_rx.try_recv().is_err());
     }
 
     #[test]
@@ -303,8 +361,8 @@ mod tests {
         let (a, mut a_rx) = member(&hub, Serializer::V2);
         let (_, mut b_rx) = member(&hub, Serializer::V2);
         let (_, mut c_rx) = member(&hub, Serializer::V1);
-        hub.broadcast("realtime:room", a, &json!({"event": "e"}));
-        hub.broadcast("realtime:room", a, &json!("text"));
+        hub.broadcast("realtime:room", a, &Broadcast::Json(json!({"event": "e"})));
+        hub.broadcast("realtime:room", a, &Broadcast::Json(json!("text")));
         assert!(drain(&mut a_rx).is_empty());
         assert_eq!(
             drain(&mut b_rx),
