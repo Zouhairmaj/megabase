@@ -2,12 +2,12 @@
   "schema": 1,
   "totals": {
     "units": 1036,
-    "implemented": 322,
+    "implemented": 326,
     "tested": 218,
     "conformant": 0
   },
   "percent": {
-    "coverage": 31.1,
+    "coverage": 31.5,
     "conformance": 0.0,
     "done": 0.0
   },
@@ -284,13 +284,13 @@
     },
     "realtime": {
       "units": 19,
-      "implemented": 4,
+      "implemented": 8,
       "tested": 1,
       "conformant": 0,
       "groups": {
         "client-events": {
           "units": 3,
-          "implemented": 0,
+          "implemented": 2,
           "tested": 0,
           "conformant": 0
         },
@@ -308,7 +308,7 @@
         },
         "server-events": {
           "units": 6,
-          "implemented": 0,
+          "implemented": 2,
           "tested": 0,
           "conformant": 0
         },
@@ -687,10 +687,14 @@
     "functions:route:* /functions/v1/{function_name}": "tested",
     "meta:route:GET /pg/config/version": "tested",
     "meta:route:GET /pg/health": "tested",
+    "realtime:client-event:broadcast": "implemented",
+    "realtime:client-event:presence": "implemented",
     "realtime:route:GET /realtime/v1/api/ping": "tested",
     "realtime:route:GET /realtime/v1/websocket": "implemented",
     "realtime:route:POST /realtime/v1/api/broadcast": "implemented",
     "realtime:route:POST /realtime/v1/api/broadcast/{topic}/events/{event}": "implemented",
+    "realtime:server-event:presence_diff": "implemented",
+    "realtime:server-event:presence_state": "implemented",
     "rest:aggregate:avg": "tested",
     "rest:aggregate:count": "tested",
     "rest:aggregate:max": "tested",
