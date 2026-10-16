@@ -34,6 +34,7 @@ mod hooks;
 mod http;
 mod invite;
 mod jsonutil;
+mod oauth_server;
 mod otp;
 mod platform;
 mod ratelimit;
@@ -71,6 +72,7 @@ pub fn router_with_state(state: AuthState) -> Router {
     admin::router(state.clone())
         .merge(factors::router(state.clone()))
         .merge(well_known::router(state.clone()))
+        .merge(oauth_server::router(state.clone()))
         .merge(routes::router(state))
         // Path match without a method handler is Axum 405; send those to the
         // same 501 as unknown paths (GOAL.md §3 rule 5).

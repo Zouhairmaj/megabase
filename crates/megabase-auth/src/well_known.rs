@@ -163,7 +163,7 @@ fn cached_json(value: &impl Serialize) -> Response {
 /// Go `json.Marshal` escapes `<`, `>`, `&`, U+2028 and U+2029. In serde_json
 /// output those characters only occur inside strings, so a textual
 /// replacement after serialization is exact.
-fn go_marshal(value: &impl Serialize) -> serde_json::Result<String> {
+pub(crate) fn go_marshal(value: &impl Serialize) -> serde_json::Result<String> {
     let text = serde_json::to_string(value)?;
     let mut out = String::with_capacity(text.len());
     for ch in text.chars() {
