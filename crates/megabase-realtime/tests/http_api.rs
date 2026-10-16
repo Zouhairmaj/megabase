@@ -206,6 +206,18 @@ async fn auth_tenant_rejects_bad_tokens() {
 }
 
 #[tokio::test]
+async fn auth_runs_before_query_decoding() {
+    let key = anon_key();
+    for base in [BATCH, SINGLE] {
+        let uri = format!("{base}?a[b]=1");
+        let reply = post(&uri, JSON, None, "{}").await;
+        assert_eq!(reply.status, StatusCode::UNAUTHORIZED, "{uri}");
+        let reply = post(&uri, JSON, Some(&key), "{}").await;
+        assert_eq!(reply.status, StatusCode::NOT_IMPLEMENTED, "{uri}");
+    }
+}
+
+#[tokio::test]
 async fn bearer_header_wins_over_apikey() {
     let request = Request::post(SINGLE)
         .header(header::CONTENT_TYPE, "application/json")

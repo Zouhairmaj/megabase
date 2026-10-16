@@ -494,12 +494,12 @@ pub(crate) async fn broadcast(
             return MegabaseNotImplemented::new(COMPONENT, BATCH_UNIT).into_response()
         }
     };
-    let Some(mut params) = decode_query(query.as_deref()) else {
-        return MegabaseNotImplemented::new(COMPONENT, BATCH_UNIT).into_response();
-    };
     if let Some(rejection) = authenticate(&state, &headers, BATCH_UNIT) {
         return rejection;
     }
+    let Some(mut params) = decode_query(query.as_deref()) else {
+        return MegabaseNotImplemented::new(COMPONENT, BATCH_UNIT).into_response();
+    };
     // Phoenix merges body params over query params; an `octet-stream` body
     // only adds `"_binary"`, which the changeset ignores.
     if let BodyParams::Map(map) = body {
@@ -555,9 +555,6 @@ pub(crate) async fn broadcast_single(
         Err(ParseFailure::Status(status)) => return parser_error(status, &headers),
         Err(ParseFailure::Unmodeled) => return not_implemented(),
     };
-    let Some(mut params) = decode_query(query.as_deref()) else {
-        return not_implemented();
-    };
     // `ValidateBroadcastContentType`: no header, `application/json` or
     // `application/octet-stream`.
     match media_type(&headers) {
@@ -576,6 +573,9 @@ pub(crate) async fn broadcast_single(
     if let Some(rejection) = authenticate(&state, &headers, SINGLE_UNIT) {
         return rejection;
     }
+    let Some(mut params) = decode_query(query.as_deref()) else {
+        return not_implemented();
+    };
     // The first controller clause matches `body_params` with a `"_binary"` key.
     let payload = match body {
         // `external_size` of a binary is its length plus 6.
