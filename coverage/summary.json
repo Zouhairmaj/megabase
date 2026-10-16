@@ -3,7 +3,7 @@
   "totals": {
     "units": 1031,
     "implemented": 260,
-    "tested": 186,
+    "tested": 189,
     "conformant": 0
   },
   "percent": {
@@ -12,14 +12,14 @@
     "done": 0.0
   },
   "judge": {
-    "cases": 410,
+    "cases": 417,
     "passing": 0
   },
   "components": {
     "auth": {
       "units": 159,
       "implemented": 119,
-      "tested": 80,
+      "tested": 83,
       "conformant": 0,
       "groups": {
         "admin": {
@@ -67,7 +67,7 @@
         "passkeys": {
           "units": 7,
           "implemented": 3,
-          "tested": 0,
+          "tested": 3,
           "conformant": 0
         },
         "scim": {
@@ -594,7 +594,7 @@
     "auth:route:DELETE /auth/v1/admin/users/{user_id}/passkeys/{passkey_id}": "tested",
     "auth:route:DELETE /auth/v1/factors/recovery-codes": "implemented",
     "auth:route:DELETE /auth/v1/factors/{factor_id}": "implemented",
-    "auth:route:DELETE /auth/v1/passkeys/{passkey_id}": "implemented",
+    "auth:route:DELETE /auth/v1/passkeys/{passkey_id}": "tested",
     "auth:route:DELETE /auth/v1/user/identities/{identity_id}": "tested",
     "auth:route:DELETE /auth/v1/user/oauth/grants": "tested",
     "auth:route:GET /.well-known/oauth-authorization-server": "implemented",
@@ -614,13 +614,13 @@
     "auth:route:GET /auth/v1/factors/recovery-codes": "implemented",
     "auth:route:GET /auth/v1/health": "tested",
     "auth:route:GET /auth/v1/oauth/userinfo": "implemented",
-    "auth:route:GET /auth/v1/passkeys": "implemented",
+    "auth:route:GET /auth/v1/passkeys": "tested",
     "auth:route:GET /auth/v1/settings": "tested",
     "auth:route:GET /auth/v1/user": "tested",
     "auth:route:GET /auth/v1/user/identities/authorize": "tested",
     "auth:route:GET /auth/v1/user/oauth/grants": "tested",
     "auth:route:GET /auth/v1/verify": "tested",
-    "auth:route:PATCH /auth/v1/passkeys/{passkey_id}": "implemented",
+    "auth:route:PATCH /auth/v1/passkeys/{passkey_id}": "tested",
     "auth:route:POST /auth/v1/admin/custom-providers": "tested",
     "auth:route:POST /auth/v1/admin/generate_link": "tested",
     "auth:route:POST /auth/v1/admin/oauth/clients": "tested",
