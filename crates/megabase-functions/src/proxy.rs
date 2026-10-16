@@ -1,12 +1,15 @@
+// Ported from supabase/edge-runtime ext/workers/user_workers.js (MIT), pin v1.77.4.
+
 //! Forward one request to a worker over HTTP/1.1 and stream the response
 //! back, the way Kong proxies `/functions/v1/*` to `http://functions:9000/*`
-//! (`vendor/supabase/docker/volumes/api/kong.yml:344`, `strip_path: true`).
+//! (`vendor/supabase/docker/volumes/api/kong.yml:344`, `strip_path: true`)
+//! and edge-runtime's `UserWorker.fetch` relays the worker's answer.
 
 use std::net::SocketAddr;
 
 use axum::body::Body;
 use axum::extract::Request;
-use axum::http::{header, HeaderMap, HeaderName, HeaderValue, Uri};
+use axum::http::{header, HeaderMap, HeaderName, HeaderValue, Method, StatusCode, Uri};
 use axum::response::Response;
 use hyper_util::rt::TokioIo;
 use tokio::net::TcpStream;
@@ -79,6 +82,7 @@ pub async fn forward(
     });
 
     let (mut parts, body) = request.into_parts();
+    let method = parts.method.clone();
     parts.uri = target.parse::<Uri>()?;
     parts.version = axum::http::Version::HTTP_11;
     strip_hop_by_hop(&mut parts.headers);
@@ -92,7 +96,40 @@ pub async fn forward(
         .await?;
     let (mut parts, body) = response.into_parts();
     strip_hop_by_hop(&mut parts.headers);
+    if drops_body(&method, parts.status) {
+        // A redirect or 205 keeps no bytes, so its stale length goes too, and
+        // RFC 9110 §9.3.6 forbids `Content-Length` in a 2xx answer to CONNECT;
+        // a HEAD or 204/304 `Content-Length` still describes the resource.
+        if drops_content_length(&method, parts.status) {
+            parts.headers.remove(header::CONTENT_LENGTH);
+        }
+        return Ok(Response::from_parts(parts, Body::empty()));
+    }
     Ok(Response::from_parts(parts, Body::new(body)))
+}
+
+// `nullBodyStatus` and `redirectStatus` (`user_workers.js:28`–`:35`):
+// `UserWorker.fetch` closes the worker's body for these statuses and for
+// `HEAD` / `CONNECT` (`:107`–`:122`) and answers `new Response(null, ...)`.
+fn null_body_status(status: StatusCode) -> bool {
+    matches!(status.as_u16(), 101 | 204 | 205 | 304)
+}
+
+fn redirect_status(status: StatusCode) -> bool {
+    matches!(status.as_u16(), 301 | 302 | 303 | 307 | 308)
+}
+
+fn drops_content_length(method: &Method, status: StatusCode) -> bool {
+    redirect_status(status)
+        || status == StatusCode::RESET_CONTENT
+        || (*method == Method::CONNECT && status.is_success())
+}
+
+fn drops_body(method: &Method, status: StatusCode) -> bool {
+    null_body_status(status)
+        || redirect_status(status)
+        || *method == Method::HEAD
+        || *method == Method::CONNECT
 }
 
 #[cfg(test)]
@@ -116,5 +153,32 @@ mod tests {
         strip_hop_by_hop(&mut headers);
         assert_eq!(headers.len(), 1);
         assert_eq!(headers[header::AUTHORIZATION], "Bearer x");
+    }
+
+    #[test]
+    fn null_body_and_redirect_statuses_and_head_drop_the_body() {
+        for code in [101, 204, 205, 304, 301, 302, 303, 307, 308] {
+            let status = StatusCode::from_u16(code).unwrap();
+            assert!(drops_body(&Method::GET, status), "{code}");
+        }
+        for code in [200, 201, 300, 400, 404, 500] {
+            let status = StatusCode::from_u16(code).unwrap();
+            assert!(!drops_body(&Method::POST, status), "{code}");
+            assert!(drops_body(&Method::HEAD, status), "{code}");
+            assert!(drops_body(&Method::CONNECT, status), "{code}");
+        }
+    }
+
+    #[test]
+    fn content_length_is_dropped_for_redirects_205_and_connect_2xx() {
+        let status = |code| StatusCode::from_u16(code).unwrap();
+        for code in [301, 302, 303, 307, 308, 205] {
+            assert!(drops_content_length(&Method::GET, status(code)), "{code}");
+        }
+        assert!(drops_content_length(&Method::CONNECT, status(200)));
+        assert!(!drops_content_length(&Method::CONNECT, status(500)));
+        assert!(!drops_content_length(&Method::HEAD, status(200)));
+        assert!(!drops_content_length(&Method::GET, status(204)));
+        assert!(!drops_content_length(&Method::GET, status(304)));
     }
 }
