@@ -92,6 +92,7 @@ Handshake (before the upgrade):
 | `alg` not HS* | 401 | `{"error":"Failed to generate JWT signer, check your JWT secret or JWKS configuration"}` |
 | `exp` integer and not in the future | 401 | `{"error":"Token has expired"}` |
 | No `role` or no `exp` | 401 | ``{"error":"Fields `role` and `exp` are required in JWT"}`` |
+| Joins-per-second limit triggered ([`server-events.md`](server-events.md#disconnect)) | 429 | `{"error":"Too many joins per second"}` |
 | Claims not an object, header not an object, non-numeric `exp`/`iat`, bad percent escape | 500 | `{"error":"Error connecting to Realtime"}` |
 
 Error bodies are `application/json; charset=utf-8`.
@@ -103,6 +104,7 @@ token), else the socket token:
 | When | `reason` |
 |---|---|
 | Topic `realtime:` | `TopicNameRequired: You must provide a topic name` |
+| Joins-per-second limit triggered; the socket then closes | `ClientJoinRateLimitReached: Too many joins per second` |
 | Expired | `InvalidJWTToken: Token has expired <n> seconds ago` |
 | Missing `role`/`exp` | ``InvalidJWTToken: Fields `role` and `exp` are required in JWT`` |
 | Not a JWT | `MalformedJWT: The token provided is not a valid JWT` |
@@ -110,12 +112,15 @@ token), else the socket token:
 | `alg` not HS* | `JwtSignerError: Failed to generate JWT signer, check your JWT secret or JWKS configuration` |
 | Rounded `exp` not after now | `InvalidJWTToken: Token expiration time is invalid` |
 | Other token failures | `Unknown Error on Channel` |
+| Public channel with a `broadcast.replay` key | `UnableToReplayMessages: Replay is not allowed for public channels` |
 
 ## Edge cases
 
 - The self-hosted stack has one tenant (`realtime-dev`, not suspended,
-  `private_only` and `presence_enabled` false), so tenant lookup, rate
-  limits and the connect/join error backoff are not modelled.
+  `private_only` and `presence_enabled` false), so tenant lookup, the
+  user and channel limits and the connect/join error backoff are not
+  modelled. The joins-per-second limit is
+  ([`server-events.md`](server-events.md#disconnect)).
 - Elixir rounds a float `exp`/`iat` after validation; a float `exp` in the
   past fails validation as a non-integer and is a 500 / unknown error.
 - Boolean config fields accept `true`/`false` and the strings `"true"` /
@@ -137,13 +142,13 @@ token), else the socket token:
 - No `JWT_SECRET` configured, `HS384`/`HS512` tokens, or a GET that is not
   a WebSocket upgrade: HTTP 501 `MEGABASE_NOT_IMPLEMENTED`.
 - Joins that ask for private channels (RLS on `realtime.messages`),
-  Postgres changes (including the old topic-only API), broadcast replay or
+  Postgres changes (including the old topic-only API) or
   `replication_ready`. These reply `phx_reply` error with a
   `MEGABASE_NOT_IMPLEMENTED` response (`reason`, `code`, `component`,
   `unit`).
-- Server `disconnect` pushes; `system` pushes other than the presence and
-  token shutdowns. `access_token` refreshes and token expiry are in
-  [`protocol.md`](protocol.md).
+- Server events not listed as served in
+  [`server-events.md`](server-events.md). `access_token` refreshes and
+  token expiry are in [`protocol.md`](protocol.md).
 - `/realtime/v1/longpoll`.
 
 ## Judge cases

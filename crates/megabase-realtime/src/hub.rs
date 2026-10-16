@@ -15,6 +15,7 @@ use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::Notify;
 
 use crate::protocol::{Broadcast, Frame, Serializer, Wire};
+use crate::rate::JoinRate;
 use crate::term::phx_ref;
 
 /// One socket connection.
@@ -54,6 +55,8 @@ impl Outbox {
 pub(crate) struct Hub {
     next_conn: AtomicU64,
     topics: Mutex<HashMap<String, Topic>>,
+    /// The tenant's joins-per-second counter.
+    joins: Mutex<JoinRate>,
 }
 
 #[derive(Debug, Default)]
@@ -166,9 +169,25 @@ impl Hub {
         self.topics.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
+    fn joins(&self) -> MutexGuard<'_, JoinRate> {
+        self.joins.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
     /// A fresh id for a new socket.
     pub(crate) fn connect(&self) -> ConnId {
         self.next_conn.fetch_add(1, Ordering::Relaxed)
+    }
+
+    /// `TenantRateLimiters.check_tenant/1`: whether the joins-per-second
+    /// limit refuses new sockets at Unix time `now_ms`.
+    pub(crate) fn too_many_joins(&self, now_ms: i64) -> bool {
+        self.joins().triggered(now_ms)
+    }
+
+    /// `limit_joins/2`: counts a join at Unix time `now_ms`, or `false`
+    /// while the joins-per-second limit is triggered.
+    pub(crate) fn count_join(&self, now_ms: i64) -> bool {
+        self.joins().join(now_ms)
     }
 
     /// `Endpoint.subscribe/2` for the channel of `conn` on `topic`.
