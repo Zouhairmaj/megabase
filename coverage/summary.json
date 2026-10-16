@@ -2,12 +2,12 @@
   "schema": 1,
   "totals": {
     "units": 1036,
-    "implemented": 324,
+    "implemented": 326,
     "tested": 218,
     "conformant": 0
   },
   "percent": {
-    "coverage": 31.3,
+    "coverage": 31.5,
     "conformance": 0.0,
     "done": 0.0
   },
@@ -284,7 +284,7 @@
     },
     "realtime": {
       "units": 19,
-      "implemented": 6,
+      "implemented": 8,
       "tested": 1,
       "conformant": 0,
       "groups": {
@@ -296,7 +296,7 @@
         },
         "http-api": {
           "units": 3,
-          "implemented": 1,
+          "implemented": 3,
           "tested": 1,
           "conformant": 0
         },
@@ -691,6 +691,8 @@
     "realtime:client-event:presence": "implemented",
     "realtime:route:GET /realtime/v1/api/ping": "tested",
     "realtime:route:GET /realtime/v1/websocket": "implemented",
+    "realtime:route:POST /realtime/v1/api/broadcast": "implemented",
+    "realtime:route:POST /realtime/v1/api/broadcast/{topic}/events/{event}": "implemented",
     "realtime:server-event:presence_diff": "implemented",
     "realtime:server-event:presence_state": "implemented",
     "rest:aggregate:avg": "tested",

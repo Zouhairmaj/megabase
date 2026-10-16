@@ -2,8 +2,9 @@
 //!
 //! Target behavior: Supabase Realtime, vendor/realtime (Apache-2.0), pinned in `vendor/`.
 //! `GET /api/ping` is served (ported from `lib/realtime_web/controllers/ping_controller.ex`),
-//! and so is the Phoenix socket at `GET /websocket` (`websocket`, `protocol`,
-//! `hub`, `term`, `token`). Every other request returns the structured
+//! so are `POST /api/broadcast` and `POST /api/broadcast/:topic/events/:event`
+//! (`http_api`), and so is the Phoenix socket at `GET /websocket` (`websocket`,
+//! `protocol`, `hub`, `term`, `token`). Every other request returns the structured
 //! `MEGABASE_NOT_IMPLEMENTED` 501. Each file names its upstream source.
 
 // Ported from supabase/realtime lib/realtime_web/controllers/ping_controller.ex (Apache-2.0), pin v2.143.3.
@@ -13,11 +14,12 @@ use std::sync::Arc;
 use axum::{
     http::header,
     response::{IntoResponse, Response},
-    routing::get,
+    routing::{get, post},
     Router,
 };
 use megabase_core::Hs256;
 
+mod http_api;
 mod hub;
 mod protocol;
 mod term;
@@ -50,6 +52,11 @@ impl RealtimeState {
 pub fn router(state: RealtimeState) -> Router {
     Router::new()
         .route("/realtime/v1/api/ping", get(ping))
+        .route("/realtime/v1/api/broadcast", post(http_api::broadcast))
+        .route(
+            "/realtime/v1/api/broadcast/:topic/events/:event",
+            post(http_api::broadcast_single),
+        )
         .route("/realtime/v1/websocket", get(websocket::websocket))
         .with_state(Arc::new(state))
         .merge(megabase_core::not_implemented_router(COMPONENT))
