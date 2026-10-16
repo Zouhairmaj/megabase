@@ -207,8 +207,9 @@ Deno.serveHttp = function serveHttp(conn) {
 #[must_use]
 pub fn module() -> String {
     format!(
-        "{SOURCE}{ENTRYPOINT}{env}{IMPORT}",
-        env = crate::env::SOURCE
+        "{SOURCE}{ENTRYPOINT}{env}{runtime}{IMPORT}",
+        env = crate::env::SOURCE,
+        runtime = crate::runtime::SOURCE
     )
 }
 
@@ -306,6 +307,13 @@ mod tests {
         assert!(delete < env && env < import);
         // `DENO_SERVE_ADDRESS` is read before the snapshot hides it.
         assert!(module.find("Deno.env.get(\"DENO_SERVE_ADDRESS\")").unwrap() < env);
+    }
+
+    #[test]
+    fn module_installs_the_console_size_before_importing_the_function() {
+        let module = module();
+        let size = module.find(crate::runtime::SOURCE).unwrap();
+        assert!(size < module.find("await import(").unwrap());
     }
 
     #[test]
