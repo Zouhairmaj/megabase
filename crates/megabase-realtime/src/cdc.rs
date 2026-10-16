@@ -50,6 +50,41 @@ pub(crate) struct Subscriber {
     pub is_new_api: bool,
     /// `{subscription_id, id}` per `postgres_changes` entry, in join order.
     pub ids: Vec<(Uuid, u32)>,
+    pub auth: Auth,
+}
+
+/// The claims a channel's subscription rows must carry, and whether the rows
+/// carry them yet. `apply_rls` runs under the stored claims, so the
+/// dispatcher only pushes to a channel whose rows hold its latest claims: a
+/// refreshed token suspends delivery until its claims are stored.
+#[derive(Debug)]
+pub(crate) struct Auth {
+    /// The verified claims of the channel's current access token.
+    claims: Value,
+    /// Bumped by every token refresh.
+    generation: u64,
+    /// The generation whose claims the rows hold.
+    stored: Option<u64>,
+    /// Serializes the channel's row writes, so a slower write with older
+    /// claims never lands after a newer one.
+    writes: Arc<tokio::sync::Mutex<()>>,
+}
+
+impl Auth {
+    /// `claims`, not stored yet.
+    pub(crate) fn new(claims: Value) -> Self {
+        Self {
+            claims,
+            generation: 0,
+            stored: None,
+            writes: Arc::default(),
+        }
+    }
+
+    /// Whether the rows hold the latest claims.
+    fn current(&self) -> bool {
+        self.stored == Some(self.generation)
+    }
 }
 
 /// A joined channel's `pg_change_params` waiting for `:postgres_subscribe`.
@@ -60,8 +95,6 @@ pub(crate) struct Pending {
     pub join_ref: Value,
     pub serializer: Serializer,
     pub outbox: Outbox,
-    /// The verified claims of the channel's access token.
-    pub claims: Value,
     /// Same order as `params`.
     pub ids: Vec<(Uuid, u32)>,
     pub params: Vec<Value>,
@@ -183,15 +216,14 @@ impl Cdc {
             if !self.holds(pending.conn, &pending.topic, first) {
                 return;
             }
-            match self.subscribe_attempt(&pending).await {
-                Ok(()) => {
-                    if self.holds(pending.conn, &pending.topic, first) {
-                        pending.system("ok", "Subscribed to PostgreSQL");
-                    } else {
-                        // The channel stopped while the rows were inserted.
-                        let ids = pending.ids.iter().map(|(id, _)| *id).collect();
-                        self.forget(ids);
-                    }
+            match self.store(&pending).await {
+                Ok(true) => {
+                    pending.system("ok", "Subscribed to PostgreSQL");
+                    return;
+                }
+                Ok(false) => {
+                    // The channel stopped while the rows were inserted.
+                    self.forget(pending.ids.iter().map(|(id, _)| *id).collect());
                     return;
                 }
                 Err((message, fatal)) => {
@@ -201,41 +233,113 @@ impl Cdc {
                     }
                 }
             }
-            let wait = 5_000
-                + u64::from(u16::from_be_bytes([
-                    Uuid::new_v4().as_bytes()[0],
-                    Uuid::new_v4().as_bytes()[1],
-                ])) % 5_001;
-            tokio::time::sleep(Duration::from_millis(wait)).await;
+            tokio::time::sleep(resubscribe_wait()).await;
+        }
+    }
+
+    /// A token refresh replaced the claims of the channel of `conn` on
+    /// `topic` (`None`: the new token yields no claims). Delivery to the
+    /// channel stops at once and resumes only once
+    /// [`Cdc::refresh_claims`] stores the new claims.
+    pub(crate) fn set_claims(&self, conn: ConnId, topic: &str, claims: Option<Value>) {
+        for subscriber in self.subscribers().iter_mut() {
+            if subscriber.conn == conn && subscriber.topic == topic {
+                subscriber.auth.generation += 1;
+                if let Some(claims) = claims {
+                    subscriber.auth.claims = claims;
+                }
+                return;
+            }
         }
     }
 
     /// Stores the channel's subscriptions again with the claims of its
-    /// refreshed token (the insert's conflict path updates `claims`). A
-    /// failure keeps the previous claims and is logged.
+    /// refreshed token (the insert's conflict path updates `claims`). Fails
+    /// closed: until a write succeeds the channel gets no changes, and a
+    /// failed write is logged and tried again 5 to 10 s later. A fatal error
+    /// keeps the channel suspended. Stops once the channel is gone.
     pub(crate) async fn refresh_claims(self: Arc<Self>, pending: Pending) {
         let Some(&(first, _)) = pending.ids.first() else {
             return;
         };
-        if let Err((message, _)) = self.subscribe_attempt(&pending).await {
-            tracing::warn!(%message, "could not refresh the claims of realtime subscriptions");
+        loop {
+            if !self.holds(pending.conn, &pending.topic, first) {
+                return;
+            }
+            match self.store(&pending).await {
+                Ok(true) => return,
+                Ok(false) => {
+                    // The channel stopped while the rows were stored.
+                    self.forget(pending.ids.iter().map(|(id, _)| *id).collect());
+                    return;
+                }
+                Err((message, fatal)) => {
+                    tracing::warn!(
+                        %message,
+                        fatal,
+                        "could not refresh the claims of realtime subscriptions; changes are held back"
+                    );
+                    if fatal {
+                        return;
+                    }
+                }
+            }
+            tokio::time::sleep(resubscribe_wait()).await;
         }
-        if !self.holds(pending.conn, &pending.topic, first) {
-            // The channel stopped while the rows were stored.
-            self.forget(pending.ids.iter().map(|(id, _)| *id).collect());
-        }
+    }
+
+    /// Runs `f` on the channel of `pending` that still holds its first
+    /// subscription id.
+    fn with_subscriber<T>(
+        &self,
+        pending: &Pending,
+        f: impl FnOnce(&mut Subscriber) -> T,
+    ) -> Option<T> {
+        let &(first, _) = pending.ids.first()?;
+        self.subscribers()
+            .iter_mut()
+            .find(|s| {
+                s.conn == pending.conn
+                    && s.topic == pending.topic
+                    && s.ids.iter().any(|(i, _)| *i == first)
+            })
+            .map(f)
+    }
+
+    /// Writes the channel's rows with its latest claims and records which
+    /// claims they hold. `Ok(false)`: the channel is gone.
+    async fn store(&self, pending: &Pending) -> Result<bool, (String, bool)> {
+        let Some(writes) = self.with_subscriber(pending, |s| Arc::clone(&s.auth.writes)) else {
+            return Ok(false);
+        };
+        let _write = writes.lock().await;
+        // Read under the write lock: a refresh that lands after this read
+        // bumps the generation, so this write cannot resume delivery.
+        let Some((generation, claims)) =
+            self.with_subscriber(pending, |s| (s.auth.generation, s.auth.claims.clone()))
+        else {
+            return Ok(false);
+        };
+        self.subscribe_attempt(pending, &claims).await?;
+        Ok(self
+            .with_subscriber(pending, |s| s.auth.stored = Some(generation))
+            .is_some())
     }
 
     /// `postgres_subscribe_attempt/2`: the error message and whether it is
     /// one of `@postgres_subscribe_fatal_reasons`.
-    async fn subscribe_attempt(&self, pending: &Pending) -> Result<(), (String, bool)> {
+    async fn subscribe_attempt(
+        &self,
+        pending: &Pending,
+        claims: &Value,
+    ) -> Result<(), (String, bool)> {
         let mut list = Vec::with_capacity(pending.params.len());
         for ((id, _), params) in pending.ids.iter().zip(&pending.params) {
             let params = subscriptions::parse_subscription_params(params)
                 .map_err(|error| (error.to_string(), true))?;
             list.push(subscriptions::NewSubscription {
                 id: *id,
-                claims: pending.claims.clone(),
+                claims: claims.clone(),
                 params,
             });
         }
@@ -253,6 +357,10 @@ impl Cdc {
     // megabase:unit realtime:server-event:postgres_changes
     pub(crate) fn dispatch(&self, change: &Change) {
         for subscriber in self.subscribers().iter() {
+            // The rows' claims are not the channel's latest: hold back.
+            if !subscriber.auth.current() {
+                continue;
+            }
             // `for … reduce: [] … [id | acc]` keeps the matches in reverse order.
             let valid: Vec<u32> = subscriber
                 .ids
@@ -437,6 +545,13 @@ fn jitter() -> u64 {
     50 + u64::from(Uuid::new_v4().as_bytes()[0]) % 51
 }
 
+/// `postgres_subscribe(5, 10)`: 5 to 10 s.
+fn resubscribe_wait() -> Duration {
+    let bytes = Uuid::new_v4();
+    let random = u16::from_be_bytes([bytes.as_bytes()[0], bytes.as_bytes()[1]]);
+    Duration::from_millis(5_000 + u64::from(random) % 5_001)
+}
+
 /// One `realtime.list_changes` row.
 #[derive(Debug, Default, PartialEq)]
 pub(crate) struct ChangeRow {
@@ -609,6 +724,7 @@ mod tests {
             outbox: new_box,
             is_new_api: true,
             ids: vec![(a, 11), (b, 22)],
+            auth: stored_auth(),
         });
         cdc.subscribe(Subscriber {
             conn: 2,
@@ -617,6 +733,7 @@ mod tests {
             outbox: old_box,
             is_new_api: false,
             ids: vec![(a, 33)],
+            auth: stored_auth(),
         });
         cdc.subscribe(Subscriber {
             conn: 3,
@@ -625,6 +742,7 @@ mod tests {
             outbox: other_box,
             is_new_api: true,
             ids: vec![(c, 44)],
+            auth: stored_auth(),
         });
         let change = Change {
             kind: "INSERT".to_owned(),
@@ -650,6 +768,98 @@ mod tests {
         cdc.dispatch(&change);
         assert!(drain(&mut new_rx).is_empty());
         assert_eq!(drain(&mut old_rx).len(), 1);
+    }
+
+    /// Claims whose rows are already stored.
+    fn stored_auth() -> Auth {
+        let mut auth = Auth::new(json!({"role": "authenticated"}));
+        auth.stored = Some(0);
+        auth
+    }
+
+    #[tokio::test]
+    async fn a_failed_claims_refresh_holds_changes_back() {
+        // Nothing listens on port 1: every write fails, as during an outage.
+        let pool = sqlx::postgres::PgPoolOptions::new()
+            .acquire_timeout(Duration::from_millis(200))
+            .connect_lazy("postgres://megabase@127.0.0.1:1/megabase")
+            .unwrap();
+        let cdc = Cdc::new(pool, None);
+        let id = Uuid::new_v4();
+        let (outbox, mut rx) = Outbox::new(OUTBOX_CAPACITY);
+        cdc.subscribe(Subscriber {
+            conn: 1,
+            topic: "realtime:room".to_owned(),
+            serializer: Serializer::V2,
+            outbox: outbox.clone(),
+            is_new_api: true,
+            ids: vec![(id, 11)],
+            auth: stored_auth(),
+        });
+        let change = Change {
+            kind: "INSERT".to_owned(),
+            payload: r#"{"type":"INSERT"}"#.to_owned(),
+            subscription_ids: HashSet::from([id]),
+        };
+        cdc.dispatch(&change);
+        assert_eq!(drain(&mut rx).len(), 1);
+
+        // The refreshed token suspends delivery before anything is written.
+        cdc.set_claims(1, "realtime:room", Some(json!({"role": "anon"})));
+        cdc.dispatch(&change);
+        assert!(drain(&mut rx).is_empty());
+
+        let pending = Pending {
+            conn: 1,
+            topic: "realtime:room".to_owned(),
+            join_ref: Value::Null,
+            serializer: Serializer::V2,
+            outbox,
+            ids: vec![(id, 11)],
+            params: vec![json!({"event": "*", "schema": "public"})],
+        };
+        let Err((_, fatal)) = cdc.store(&pending).await else {
+            panic!("the write must fail without a database");
+        };
+        assert!(!fatal, "an unreachable database is retried");
+        // The rows still hold the old claims, so the channel stays suspended.
+        cdc.dispatch(&change);
+        assert!(drain(&mut rx).is_empty());
+
+        // A token without claims keeps it suspended too.
+        cdc.set_claims(1, "realtime:room", None);
+        cdc.dispatch(&change);
+        assert!(drain(&mut rx).is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_stored_refresh_resumes_only_at_the_latest_generation() {
+        let cdc = Cdc::new(lazy_pool(), None);
+        let id = Uuid::new_v4();
+        let (outbox, mut rx) = Outbox::new(OUTBOX_CAPACITY);
+        cdc.subscribe(Subscriber {
+            conn: 1,
+            topic: "realtime:room".to_owned(),
+            serializer: Serializer::V2,
+            outbox,
+            is_new_api: true,
+            ids: vec![(id, 11)],
+            auth: stored_auth(),
+        });
+        let change = Change {
+            kind: "INSERT".to_owned(),
+            payload: r#"{"type":"INSERT"}"#.to_owned(),
+            subscription_ids: HashSet::from([id]),
+        };
+        cdc.set_claims(1, "realtime:room", Some(json!({"role": "anon"})));
+        cdc.set_claims(1, "realtime:room", Some(json!({"role": "authenticated"})));
+        // A write that read generation 1 lands after the second refresh.
+        cdc.subscribers()[0].auth.stored = Some(1);
+        cdc.dispatch(&change);
+        assert!(drain(&mut rx).is_empty());
+        cdc.subscribers()[0].auth.stored = Some(2);
+        cdc.dispatch(&change);
+        assert_eq!(drain(&mut rx).len(), 1);
     }
 
     #[test]

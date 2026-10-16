@@ -127,17 +127,73 @@ const STEPS: &[Step] = &[
     always("publication", include_str!("../sql/publication.sql")),
 ];
 
-/// `true` when the objects a guarded step may have skipped have the newest
-/// attributes the subscription SQL uses.
-const SHAPE_PROBE: &str = "SELECT
-  (SELECT count(*) = 4 FROM pg_attribute
-     WHERE attrelid = (SELECT typrelid FROM pg_type WHERE oid = 'realtime.user_defined_filter'::regtype)
-       AND attname IN ('column_name', 'op', 'value', 'negate') AND NOT attisdropped)
-  AND (SELECT count(*) = 2 FROM pg_attribute
-     WHERE attrelid = 'realtime.subscription'::regclass
-       AND attname IN ('selected_columns', 'action_filter') AND NOT attisdropped)
-  AND (SELECT count(*) = 2 FROM pg_enum
-     WHERE enumtypid = 'realtime.equality_op'::regtype AND enumlabel IN ('isdistinct', 'match'))";
+/// Every `realtime.user_defined_filter` attribute and its type
+/// (`types/user_defined_filter.sql`).
+const FILTER_ATTRIBUTES: &[(&str, &str)] = &[
+    ("column_name", "text"),
+    ("op", "realtime.equality_op"),
+    ("value", "text"),
+    ("negate", "boolean"),
+];
+
+/// Every `realtime.subscription` column and its type
+/// (`tables/subscription.sql`): the insert writes them, `apply_rls` reads
+/// them, and `claims_role` is the role it runs under.
+const SUBSCRIPTION_COLUMNS: &[(&str, &str)] = &[
+    ("id", "bigint"),
+    ("subscription_id", "uuid"),
+    ("entity", "regclass"),
+    ("claims", "jsonb"),
+    ("created_at", "timestamp without time zone"),
+    ("action_filter", "text"),
+    ("selected_columns", "text[]"),
+    ("filters", "realtime.user_defined_filter[]"),
+    ("claims_role", "regrole"),
+];
+
+/// The unique index the insert's `on conflict` targets.
+const SUBSCRIPTION_UNIQUE_INDEX: &str =
+    "realtime.subscription_subscription_id_entity_filters_action_filter_selec";
+
+/// `SELECT count(*) = <n>` of the attributes of `relid` (a SQL `oid`
+/// expression) that carry the listed name and exact type.
+fn attributes_probe(relid: &str, attributes: &[(&str, &str)]) -> String {
+    let values = attributes
+        .iter()
+        .map(|(name, typ)| format!("('{name}', '{typ}')"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!(
+        "(SELECT count(*) = {n} FROM pg_attribute a \
+           JOIN (VALUES {values}) AS e(name, typ) \
+             ON a.attname = e.name AND a.atttypid = e.typ::regtype \
+           WHERE a.attrelid = {relid} AND a.attnum > 0 AND NOT a.attisdropped)",
+        n = attributes.len(),
+    )
+}
+
+/// `true` when the objects a guarded step may have skipped have the shape
+/// the subscription SQL uses: every attribute with its type, the
+/// `equality_op` values, the unique index the insert's `on conflict` names,
+/// and the filter-check trigger.
+fn shape_probe() -> String {
+    let filter = attributes_probe(
+        "(SELECT typrelid FROM pg_type WHERE oid = 'realtime.user_defined_filter'::regtype)",
+        FILTER_ATTRIBUTES,
+    );
+    let subscription = attributes_probe("'realtime.subscription'::regclass", SUBSCRIPTION_COLUMNS);
+    format!(
+        "SELECT {filter} \
+           AND {subscription} \
+           AND (SELECT count(*) = 2 FROM pg_enum \
+                  WHERE enumtypid = 'realtime.equality_op'::regtype \
+                    AND enumlabel IN ('isdistinct', 'match')) \
+           AND to_regclass('{SUBSCRIPTION_UNIQUE_INDEX}') IS NOT NULL \
+           AND EXISTS (SELECT 1 FROM pg_trigger \
+                  WHERE tgrelid = 'realtime.subscription'::regclass \
+                    AND tgname = 'tr_check_filters' AND NOT tgisinternal)"
+    )
+}
 
 /// Failure installing the realtime schema. Display text does not include the URL.
 #[derive(Debug, thiserror::Error)]
@@ -211,7 +267,7 @@ async fn install(pool: &sqlx::PgPool) -> Result<(), SchemaError> {
             .await
             .map_err(SchemaError::at(step.name))?;
     }
-    let current: bool = sqlx::query_scalar(SHAPE_PROBE)
+    let current: bool = sqlx::query_scalar(&shape_probe())
         .fetch_one(&mut *tx)
         .await
         .map_err(SchemaError::at("shape"))?;
@@ -294,6 +350,49 @@ mod tests {
         assert!(table < index("functions/apply_rls"));
         assert!(index("functions/apply_rls") < list_changes);
         assert!(index("functions/quote_wal2json") < list_changes);
+    }
+
+    /// Each `(name, type)` is declared as `"name" type` in `sql`, and `sql`
+    /// declares no other quoted attribute.
+    fn declares_exactly(sql: &str, attributes: &[(&str, &str)]) {
+        for (name, typ) in attributes {
+            let quoted = format!("\"{name}\"");
+            let declared = sql.lines().any(|line| {
+                line.split_once(&quoted)
+                    .is_some_and(|(_, rest)| rest.trim_start().starts_with(typ))
+            });
+            assert!(declared, "{name} {typ} is not declared");
+        }
+        let declared = sql
+            .lines()
+            .filter(|line| {
+                let line = line.trim_start();
+                line.starts_with('"') || line.starts_with("add column \"")
+            })
+            .count();
+        assert_eq!(declared, attributes.len());
+    }
+
+    #[test]
+    fn shape_probe_checks_every_attribute_and_its_type() {
+        declares_exactly(
+            STEPS[index("types/user_defined_filter")].sql,
+            FILTER_ATTRIBUTES,
+        );
+        let table = STEPS[index("tables/subscription")].sql;
+        declares_exactly(table, SUBSCRIPTION_COLUMNS);
+        let (_, index_name) = SUBSCRIPTION_UNIQUE_INDEX.split_once('.').unwrap();
+        assert!(table.contains(&format!("create unique index {index_name} on")));
+        assert!(table.contains("create trigger tr_check_filters"));
+
+        let probe = shape_probe();
+        for (name, typ) in FILTER_ATTRIBUTES.iter().chain(SUBSCRIPTION_COLUMNS) {
+            assert!(probe.contains(&format!("('{name}', '{typ}')")), "{name}");
+        }
+        assert!(probe.contains("count(*) = 4 FROM pg_attribute"));
+        assert!(probe.contains("count(*) = 9 FROM pg_attribute"));
+        assert!(probe.contains("a.atttypid = e.typ::regtype"));
+        assert!(probe.contains(SUBSCRIPTION_UNIQUE_INDEX));
     }
 
     #[test]

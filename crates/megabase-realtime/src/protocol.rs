@@ -20,7 +20,7 @@ use megabase_core::{Hs256, MegabaseNotImplemented};
 use serde_json::{json, Map, Value};
 use uuid::Uuid;
 
-use crate::cdc::{params_id, Cdc, Pending, Subscriber};
+use crate::cdc::{params_id, Auth, Cdc, Pending, Subscriber};
 use crate::hub::{ConnId, Hub, Outbox};
 use crate::term::{binary_tuple_size, external_size, user_broadcast_size, uuid1, MAX_PAYLOAD_SIZE};
 use crate::token::{authorize_conn, TokenError};
@@ -732,6 +732,7 @@ impl<'a> Session<'a> {
             outbox: self.outbox.clone(),
             is_new_api: config.is_new_api,
             ids: ids.clone(),
+            auth: Auth::new(claims),
         });
         let reply = params
             .iter()
@@ -748,7 +749,6 @@ impl<'a> Session<'a> {
             join_ref: frame.join_ref.clone(),
             serializer: self.serializer,
             outbox: self.outbox.clone(),
-            claims,
             ids,
             params,
         };
@@ -876,10 +876,13 @@ impl<'a> Session<'a> {
         let message = match confirmed {
             Ok(confirm_token_at) => {
                 // The stored subscriptions carry the claims `apply_rls` runs
-                // under, so they follow the refreshed token.
-                if let (Some(cdc), Some(pending)) = (self.cdc.as_ref(), channel.cdc.as_mut()) {
-                    if let Ok(claims) = authorize_conn(self.jwt, &token, now_ms.div_euclid(1000)) {
-                        pending.claims = Value::Object(claims);
+                // under, so they follow the refreshed token. Delivery stops
+                // until they are stored; claims-less tokens keep it stopped.
+                if let (Some(cdc), Some(pending)) = (self.cdc.as_ref(), channel.cdc.as_ref()) {
+                    let claims = authorize_conn(self.jwt, &token, now_ms.div_euclid(1000)).ok();
+                    let stored = claims.is_some();
+                    cdc.set_claims(self.conn, topic, claims.map(Value::Object));
+                    if stored {
                         tokio::spawn(Arc::clone(cdc).refresh_claims(pending.clone()));
                     }
                 }
