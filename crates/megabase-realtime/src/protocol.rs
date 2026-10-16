@@ -397,7 +397,7 @@ impl<'a> Session<'a> {
                 ];
             }
             "broadcast" => return self.broadcast(join_ref, frame),
-            "presence" => return self.presence(join_ref, frame, now_ms),
+            "presence" => return self.presence(&join_ref, &frame, now_ms),
             "access_token" => "realtime:client-event:access_token",
             // `handle_in/3` catch-all: logged, no reply.
             _ => return Vec::new(),
@@ -449,7 +449,7 @@ impl<'a> Session<'a> {
 
     /// `handle_in("presence", …)` with `PresenceHandler.handle/2`.
     // megabase:unit realtime:client-event:presence
-    fn presence(&mut self, join_ref: Value, frame: Frame, now_ms: i64) -> Vec<Frame> {
+    fn presence(&mut self, join_ref: &Value, frame: &Frame, now_ms: i64) -> Vec<Frame> {
         let topic = frame.topic.as_str();
         let reply = |status: &str, response: Value| {
             vec![Frame::reply(
@@ -467,7 +467,7 @@ impl<'a> Session<'a> {
         // `String.downcase/2` raises on a non-string: the channel crashes.
         let Some(event) = event.as_str().map(str::to_ascii_lowercase) else {
             self.stop(topic);
-            return vec![Frame::error(&join_ref, topic)];
+            return vec![Frame::error(join_ref, topic)];
         };
         let Some(channel) = self.channels.get_mut(topic) else {
             return Vec::new();
@@ -501,7 +501,7 @@ impl<'a> Session<'a> {
                 channel.presence_payload = Some(payload);
                 let mut out = reply("ok", json!({}));
                 if resync {
-                    out.push(self.presence_state(join_ref, topic));
+                    out.push(self.presence_state(join_ref.clone(), topic));
                 }
                 out
             }
@@ -516,7 +516,7 @@ impl<'a> Session<'a> {
     }
 
     /// `shutdown_response/2`: a `system` error push, then the channel stops.
-    fn shutdown(&mut self, join_ref: Value, topic: &str, message: &str) -> Vec<Frame> {
+    fn shutdown(&mut self, join_ref: &Value, topic: &str, message: &str) -> Vec<Frame> {
         self.stop(topic);
         let channel = topic.strip_prefix("realtime:").unwrap_or(topic);
         vec![
@@ -531,7 +531,7 @@ impl<'a> Session<'a> {
                     "channel": channel,
                 }),
             ),
-            Frame::close(&join_ref, topic),
+            Frame::close(join_ref, topic),
         ]
     }
 

@@ -70,6 +70,10 @@ token is percent-decoded once more and stripped of whitespace
 | joined topic / `broadcast` | the payload as a `broadcast` push to every other socket on the topic (and this one with `broadcast.self`), then `phx_reply` ok `{}` only with `broadcast.ack` |
 | joined topic / `presence` `track` | `phx_reply` ok `{}`; `presence_state` if presence was off; `presence_diff` to every socket on the topic |
 | joined topic / `presence` `untrack` | `phx_reply` ok `{}`; a `leaves` `presence_diff` if something was tracked |
+| non-`realtime:` topic, or a non-join event on an unjoined topic | `phx_reply` error `{"reason":"unmatched topic"}` |
+| joined topic, `join_ref` differs from the current join | nothing |
+| joined topic, unknown event | nothing |
+| invalid JSON / wrong frame shape | nothing; the socket stays open |
 
 Pushes use `ref` null. `presence_state` and `system` carry the channel's
 `join_ref`; broadcasts and `presence_diff` (fastlane) carry `join_ref`
@@ -102,10 +106,6 @@ Presence:
 - The diff to the tracking socket is pushed after its reply (and after
   the resync `presence_state`): Phoenix.Presence dispatches diffs
   asynchronously.
-| non-`realtime:` topic, or a non-join event on an unjoined topic | `phx_reply` error `{"reason":"unmatched topic"}` |
-| joined topic, `join_ref` differs from the current join | nothing |
-| joined topic, unknown event | nothing |
-| invalid JSON / wrong frame shape | nothing; the socket stays open |
 
 ## Errors
 

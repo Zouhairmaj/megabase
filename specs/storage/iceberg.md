@@ -2,6 +2,8 @@
 
 Status: draft
 Unit ids (`coverage/units.json`):
+- `storage:route:DELETE /storage/v1/iceberg/bucket/{bucketName}`
+- `storage:route:DELETE /storage/v1/iceberg/v1/{prefix}/namespaces/{namespace}`
 - `storage:route:DELETE /storage/v1/iceberg/v1/{prefix}/namespaces/{namespace}/tables/{table}`
 - `storage:route:GET /storage/v1/iceberg/bucket`
 - `storage:route:GET /storage/v1/iceberg/v1/config`

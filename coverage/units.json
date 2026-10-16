@@ -83,7 +83,7 @@
       "license": "MIT"
     }
   ],
-  "total": 1031,
+  "total": 1036,
   "by_component": {
     "auth": 159,
     "functions": 276,
@@ -91,7 +91,7 @@
     "pooler": 16,
     "realtime": 19,
     "rest": 93,
-    "storage": 149,
+    "storage": 154,
     "studio": 250
   },
   "units": [
@@ -3817,6 +3817,36 @@
       }
     },
     {
+      "id": "storage:route:DELETE /storage/v1/bucket/{bucketId}",
+      "component": "storage",
+      "group": "bucket",
+      "kind": "route",
+      "name": "DELETE /storage/v1/bucket/{bucketId}",
+      "method": "DELETE",
+      "path": "/storage/v1/bucket/{bucketId}",
+      "level": 2,
+      "source": {
+        "repo": "storage",
+        "file": "src/http/routes/bucket/deleteBucket.ts",
+        "line": 32
+      }
+    },
+    {
+      "id": "storage:route:DELETE /storage/v1/bucket/{bucketId}/lifecycle",
+      "component": "storage",
+      "group": "bucket",
+      "kind": "route",
+      "name": "DELETE /storage/v1/bucket/{bucketId}/lifecycle",
+      "method": "DELETE",
+      "path": "/storage/v1/bucket/{bucketId}/lifecycle",
+      "level": 2,
+      "source": {
+        "repo": "storage",
+        "file": "src/http/routes/bucket/lifecycle.ts",
+        "line": 117
+      }
+    },
+    {
       "id": "storage:route:GET /storage/v1/bucket",
       "component": "storage",
       "group": "bucket",
@@ -3874,6 +3904,21 @@
         "repo": "storage",
         "file": "src/http/routes/bucket/createBucket.ts",
         "line": 46
+      }
+    },
+    {
+      "id": "storage:route:POST /storage/v1/bucket/{bucketId}/empty",
+      "component": "storage",
+      "group": "bucket",
+      "kind": "route",
+      "name": "POST /storage/v1/bucket/{bucketId}/empty",
+      "method": "POST",
+      "path": "/storage/v1/bucket/{bucketId}/empty",
+      "level": 2,
+      "source": {
+        "repo": "storage",
+        "file": "src/http/routes/bucket/emptyBucket.ts",
+        "line": 39
       }
     },
     {
@@ -4562,6 +4607,36 @@
         "repo": "storage",
         "file": "src/http/routes/health/healthcheck.ts",
         "line": 6
+      }
+    },
+    {
+      "id": "storage:route:DELETE /storage/v1/iceberg/bucket/{bucketName}",
+      "component": "storage",
+      "group": "iceberg",
+      "kind": "route",
+      "name": "DELETE /storage/v1/iceberg/bucket/{bucketName}",
+      "method": "DELETE",
+      "path": "/storage/v1/iceberg/bucket/{bucketName}",
+      "level": 2,
+      "source": {
+        "repo": "storage",
+        "file": "src/http/routes/iceberg/bucket.ts",
+        "line": 52
+      }
+    },
+    {
+      "id": "storage:route:DELETE /storage/v1/iceberg/v1/{prefix}/namespaces/{namespace}",
+      "component": "storage",
+      "group": "iceberg",
+      "kind": "route",
+      "name": "DELETE /storage/v1/iceberg/v1/{prefix}/namespaces/{namespace}",
+      "method": "DELETE",
+      "path": "/storage/v1/iceberg/v1/{prefix}/namespaces/{namespace}",
+      "level": 2,
+      "source": {
+        "repo": "storage",
+        "file": "src/http/routes/iceberg/namespace.ts",
+        "line": 188
       }
     },
     {

@@ -50,11 +50,20 @@ impl Topic {
     /// `MessageDispatcher.dispatch/3`: a fastlane push to every subscriber but
     /// `except`, encoded with each subscriber's serializer.
     fn dispatch(&self, name: &str, except: Option<ConnId>, event: &str, payload: &Value) {
+        // One encoding per serializer: `[V1, V2]`, built on first use.
+        let mut cache: [Option<Option<String>>; 2] = [None, None];
         for member in self.members.iter().filter(|m| Some(m.conn) != except) {
-            let frame = Frame::push(Value::Null, name, event, payload);
-            if let Some(text) = member.serializer.fastlane(frame) {
+            let slot = match member.serializer {
+                Serializer::V1 => 0,
+                Serializer::V2 => 1,
+            };
+            let text = cache[slot].get_or_insert_with(|| {
+                let frame = Frame::push(Value::Null, name, event, payload);
+                member.serializer.fastlane(frame)
+            });
+            if let Some(text) = text {
                 // A closed outbox is a socket that is going away.
-                let _ = member.outbox.send(text);
+                let _ = member.outbox.send(text.clone());
             }
         }
     }
