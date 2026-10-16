@@ -103,6 +103,7 @@ None.
 ### Judge disputes
 
 - `rest.root.options` (#337): Kong's 403 body on the admin-only root carries `request_id`, 32 hex digits generated per request. Megabase now sends the same field, but `judge/harness/src/normalize.rs` does not treat `request_id` as volatile, so two independent random ids never match. Tracked by #344 (`review/judge-volatile-request-id`).
+- `functions:op:op_get_env`, `op_env`, `op_set_env`, `op_delete_env` (#476, Refs #72): the `Deno.env` behavior is observable only through a function that reads `Deno.env`, and the only vendored function (`hello`) never does. A fixture function would be TypeScript outside `vendor/`, which GOAL.md §3 rule 1 and AGENTS.md ("Never add non-Rust source") forbid, and `judge/compose.override.yml` mounts no function source for either stack. Until a human decides that a judge-only function source may be mounted for both stacks (or the pinned `vendor/` gains a function that reads `Deno.env`), these four units cannot be compared and no case is added. The intended assertions are on #476.
 
 ## Phase 0
 
