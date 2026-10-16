@@ -190,6 +190,10 @@ impl DenoRuntime {
             .bootstrap
             .get_or_try_init(|| async { bootstrap::install(&std::env::temp_dir()) })
             .await?;
+        // The bootstrap builds a `file://` URL from this path and the child
+        // runs in the function directory, so a relative functions dir must
+        // be made absolute here.
+        let entrypoint = std::path::absolute(spec.entrypoint)?;
         let mut command = Command::new(&self.binary);
         command
             .arg("run")
@@ -197,12 +201,12 @@ impl DenoRuntime {
             .arg("--no-prompt")
             .arg(preload)
             .envs(self.env.iter().map(|(key, value)| (key, value)))
-            .env(ENTRYPOINT_ENV, spec.entrypoint)
+            .env(ENTRYPOINT_ENV, &entrypoint)
             .env("DENO_SERVE_ADDRESS", format!("tcp:{addr}"))
             .stdin(Stdio::null())
             .stderr(Stdio::piped())
             .kill_on_drop(true);
-        if let Some(dir) = spec.entrypoint.parent() {
+        if let Some(dir) = entrypoint.parent() {
             command.current_dir(dir);
         }
         let mut child = command.spawn()?;
@@ -453,5 +457,41 @@ mod tests {
         );
         drop(runtime);
         assert!(!preload.parent().unwrap().exists());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_relative_entrypoint_is_passed_as_an_absolute_path() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let tools = temp_dir("relative-tools");
+        let fake = tools.join("fake-deno");
+        std::fs::write(
+            &fake,
+            "#!/bin/sh\nprintf '%s' \"$MEGABASE_FUNCTION_ENTRYPOINT\" > \"$0.entry\"\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        // A functions dir relative to the current directory, like
+        // `MEGABASE_FUNCTIONS_DIR=vendor/supabase/docker/volumes/functions`.
+        let relative = PathBuf::from(format!("megabase-relative-{}", std::process::id()));
+        std::fs::create_dir_all(relative.join("hello")).unwrap();
+        std::fs::write(relative.join("hello/index.ts"), "").unwrap();
+        let runtime = DenoRuntime::new(&fake, Vec::new());
+        let entry = entrypoint(&relative, "hello").unwrap();
+        assert!(entry.is_relative());
+        let result = runtime
+            .start(WorkerSpec {
+                name: "hello",
+                entrypoint: &entry,
+            })
+            .await;
+        let absolute = std::env::current_dir().unwrap().join(&entry);
+        std::fs::remove_dir_all(&relative).unwrap();
+
+        assert!(matches!(result, Err(BootError::Exited(_))));
+        let seen = std::fs::read_to_string(tools.join("fake-deno.entry")).unwrap();
+        assert_eq!(seen, absolute.to_str().unwrap());
     }
 }
