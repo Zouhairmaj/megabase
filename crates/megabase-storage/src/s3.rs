@@ -61,9 +61,9 @@ const XML_DECLARATION: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone
 /// find-my-way's default `maxParamLength`.
 const MAX_PARAM_LENGTH: usize = 100;
 
-/// `GET` on `/s3`, and `GET`, `DELETE`, `HEAD` and `POST` on `/s3/:Bucket`
-/// and `/s3/:Bucket/*`. The `signatureV4` `preHandler` runs before any S3
-/// command is selected, so a request without a signature gets
+/// `GET` on `/s3`, and `GET`, `DELETE`, `HEAD`, `POST` and `PUT` on
+/// `/s3/:Bucket` and `/s3/:Bucket/*`. The `signatureV4` `preHandler` runs
+/// before any S3 command is selected, so a request without a signature gets
 /// `AccessDenied('Missing signature')` whatever its query or headers would
 /// have matched. A `multipart/form-data` `POST` is read as a POST policy
 /// form first; one without the policy signature fields gets
@@ -91,6 +91,12 @@ const MAX_PARAM_LENGTH: usize = 100;
 // megabase:unit storage:route:POST /storage/v1/s3/{Bucket}/{*}?uploads
 // megabase:unit storage:route:POST /storage/v1/s3/{Bucket}?delete
 // megabase:unit storage:route:POST /storage/v1/s3/{Bucket}|content-type=multipart/form-data
+// megabase:unit storage:route:PUT /storage/v1/s3/{Bucket}
+// megabase:unit storage:route:PUT /storage/v1/s3/{Bucket}/{*}
+// megabase:unit storage:route:PUT /storage/v1/s3/{Bucket}/{*}?partNumber&uploadId|x-amz-copy-source
+// megabase:unit storage:route:PUT /storage/v1/s3/{Bucket}/{*}?uploadId&partNumber
+// megabase:unit storage:route:PUT /storage/v1/s3/{Bucket}/{*}|x-amz-copy-source
+// megabase:unit storage:route:PUT /storage/v1/s3/{Bucket}?lifecycle
 pub(super) async fn unsigned(
     method: Method,
     OriginalUri(uri): OriginalUri,
@@ -112,13 +118,18 @@ pub(super) async fn unsigned(
             "Missing signature",
         )
     };
+    let in_bucket = matches!(target, Target::Bucket | Target::Object);
     match (&method, target) {
-        (&Method::GET, _) | (&Method::HEAD, Target::Bucket) => missing_signature(),
-        (&Method::DELETE, Target::Bucket) if !has_framed_content_type(&headers) => {
+        (&Method::GET, _) => missing_signature(),
+        (&Method::HEAD, _) if in_bucket => missing_signature(),
+        (&Method::DELETE, _) if in_bucket && !has_framed_content_type(&headers) => {
             missing_signature()
         }
-        (&Method::POST, Target::Bucket) if !has_body(&headers) => missing_signature(),
-        (&Method::POST, Target::Bucket) => match unsigned_post_policy(&headers, body).await {
+        (&Method::POST | &Method::PUT, _) if in_bucket && !has_body(&headers) => {
+            missing_signature()
+        }
+        (&Method::PUT, Target::Object) if passes_disabled_parsers(&headers) => missing_signature(),
+        (&Method::POST, _) if in_bucket => match unsigned_post_policy(&headers, body).await {
             Some(()) => s3_error(
                 &method,
                 StatusCode::BAD_REQUEST,
@@ -149,6 +160,52 @@ fn has_body(headers: &HeaderMap) -> bool {
         || headers
             .get(header::CONTENT_LENGTH)
             .is_some_and(|length| length.as_bytes() != b"0")
+}
+
+/// The `PUT /:Bucket/*` routes set `disableContentTypeParser`, so every
+/// parser that can match there leaves the body unread, except
+/// `@fastify/multipart`, which makes `extractSignature` read a form. True
+/// for a well-formed `Content-Type` whose type is not `multipart`; a missing
+/// or malformed one stays 501 rather than relying on Fastify's fallback.
+fn passes_disabled_parsers(headers: &HeaderMap) -> bool {
+    let Some(Ok(content_type)) = headers.get(header::CONTENT_TYPE).map(|v| v.to_str()) else {
+        return false;
+    };
+    let mut parts = content_type.split(';');
+    let Some((kind, subtype)) = parts.next().and_then(|media| media.split_once('/')) else {
+        return false;
+    };
+    is_token(kind)
+        && is_token(subtype)
+        && !kind.eq_ignore_ascii_case("multipart")
+        && parts.all(|parameter| {
+            parameter
+                .trim_matches([' ', '\t'])
+                .split_once('=')
+                .is_some_and(|(name, value)| {
+                    is_token(name) && (is_token(value) || is_plain_quoted_string(value))
+                })
+        })
+}
+
+/// A `quoted-string` without escapes or non-ASCII text.
+fn is_plain_quoted_string(value: &str) -> bool {
+    value
+        .strip_prefix('"')
+        .and_then(|value| value.strip_suffix('"'))
+        .is_some_and(|inner| {
+            inner
+                .bytes()
+                .all(|b| b == b' ' || (b.is_ascii_graphic() && b != b'"' && b != b'\\'))
+        })
+}
+
+/// An RFC 9110 `token`.
+fn is_token(value: &str) -> bool {
+    !value.is_empty()
+        && value
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&b))
 }
 
 /// `Some` when `extractSignature` would read the body as a POST policy
@@ -207,8 +264,10 @@ async fn unsigned_post_policy(headers: &HeaderMap, body: Body) -> Option<()> {
 enum Target {
     /// `/s3` or `/s3/`: only `GET` has a route.
     Service,
-    /// `/s3/:Bucket`, `/s3/:Bucket/` or `/s3/:Bucket/*`.
+    /// `/s3/:Bucket` or `/s3/:Bucket/`.
     Bucket,
+    /// `/s3/:Bucket/*` with a non-empty wildcard.
+    Object,
 }
 
 /// Paths find-my-way matches to an S3 route without its not-found or
@@ -222,11 +281,18 @@ fn target(path: &str) -> Option<Target> {
     }
     let rest = rest.strip_prefix('/')?;
     let (bucket, key) = rest.split_once('/').unwrap_or((rest, ""));
-    (!bucket.is_empty()
-        && bucket.len() <= MAX_PARAM_LENGTH
-        && decodes_to_utf8(bucket)
-        && decodes_to_utf8(key))
-    .then_some(Target::Bucket)
+    if bucket.is_empty()
+        || bucket.len() > MAX_PARAM_LENGTH
+        || !decodes_to_utf8(bucket)
+        || !decodes_to_utf8(key)
+    {
+        return None;
+    }
+    Some(if key.is_empty() {
+        Target::Bucket
+    } else {
+        Target::Object
+    })
 }
 
 fn decodes_to_utf8(raw: &str) -> bool {
@@ -390,7 +456,23 @@ mod tests {
         )
     }
 
-    const ROUTES: [(&str, &str, &str); 25] = [
+    const ROUTES: [(&str, &str, &str); 33] = [
+        ("PUT", "/s3/photos", "photos"),
+        ("PUT", "/s3/photos/", "photos"),
+        ("PUT", "/s3/photos?lifecycle", "photos"),
+        ("PUT", "/s3/photos/a/b.png", "photos/a/b.png"),
+        (
+            "PUT",
+            "/s3/photos/a.png?uploadId=u1&partNumber=1",
+            "photos/a.png",
+        ),
+        (
+            "PUT",
+            "/s3/photos/a.png?partNumber=1&uploadId=u1",
+            "photos/a.png",
+        ),
+        ("PUT", "/s3/photos//a.png", "photos/a.png"),
+        ("PUT", "/s3/ph%6Ftos/a%20b", "ph%6Ftos/a%20b"),
         ("GET", "/s3", ""),
         ("GET", "/s3/", ""),
         ("GET", "/s3/photos", "photos"),
@@ -573,6 +655,78 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn object_puts_with_a_body_are_access_denied() {
+        for (content_type, extra) in [
+            ("application/octet-stream", None),
+            ("image/png", None),
+            ("application/json", None),
+            ("text/plain; charset=utf-8", None),
+            (
+                "application/xml",
+                Some((
+                    header::HeaderName::from_static("x-amz-copy-source"),
+                    "photos/b.png",
+                )),
+            ),
+            ("text/xml; charset=\"utf-8\"", None),
+        ] {
+            let mut headers = vec![(header::CONTENT_TYPE, content_type)];
+            headers.extend(extra);
+            let (status, _, body) = send_body(
+                "PUT",
+                "/storage/v1/s3/photos/a.png?uploadId=u1&partNumber=2",
+                &headers,
+                "not xml {".to_owned(),
+            )
+            .await;
+            assert_eq!(status, StatusCode::FORBIDDEN, "{content_type}");
+            assert_eq!(body, missing_signature("photos/a.png"), "{content_type}");
+        }
+    }
+
+    #[tokio::test]
+    async fn unported_put_bodies_stay_501() {
+        for (path, extra) in [
+            // `PUT /:Bucket` parses XML, JSON and text bodies.
+            (
+                "/s3/photos",
+                vec![(header::CONTENT_TYPE, "application/xml")],
+            ),
+            ("/s3/photos?lifecycle", vec![(header::CONTENT_LENGTH, "4")]),
+            // A form is read by `extractSignature`.
+            ("/s3/photos/a.png", vec![(header::CONTENT_TYPE, FORM_TYPE)]),
+            (
+                "/s3/photos/a.png",
+                vec![(header::CONTENT_TYPE, "Multipart/Mixed; boundary=x")],
+            ),
+            // No or a malformed `Content-Type` with a body.
+            ("/s3/photos/a.png", vec![(header::CONTENT_LENGTH, "4")]),
+            ("/s3/photos/a.png", vec![(header::CONTENT_TYPE, "png")]),
+            (
+                "/s3/photos/a.png",
+                vec![(header::CONTENT_TYPE, " image/png")],
+            ),
+            (
+                "/s3/photos/a.png",
+                vec![(header::CONTENT_TYPE, "image/png; charset")],
+            ),
+            (
+                "/s3/photos/a.png",
+                vec![(header::CONTENT_TYPE, "image/png; a=\"b")],
+            ),
+        ] {
+            let (status, _, _) = send_body(
+                "PUT",
+                &format!("{KONG_PREFIX}{path}"),
+                &extra,
+                "body".to_owned(),
+            )
+            .await;
+            assert_eq!(status, StatusCode::NOT_IMPLEMENTED, "{path} {extra:?}");
+        }
+    }
+
+    #[tokio::test]
     async fn a_jwt_is_not_a_signature() {
         for (name, value) in [
             (header::AUTHORIZATION, "Bearer eyJhbGciOiJIUzI1NiJ9.e30.x"),
@@ -616,7 +770,8 @@ mod tests {
             ("HEAD", "/s3".to_owned(), vec![]),
             ("POST", "/s3/".to_owned(), vec![]),
             ("DELETE", "/s3".to_owned(), vec![]),
-            ("PUT", "/s3/photos".to_owned(), vec![]),
+            ("PUT", "/s3".to_owned(), vec![]),
+            ("PUT", "/s3/".to_owned(), vec![]),
             ("PATCH", "/s3/photos".to_owned(), vec![]),
             ("GET", "/s3//key".to_owned(), vec![]),
             ("GET", format!("/s3/{long}"), vec![]),

@@ -2,12 +2,12 @@
   "schema": 1,
   "totals": {
     "units": 1031,
-    "implemented": 306,
-    "tested": 212,
+    "implemented": 312,
+    "tested": 218,
     "conformant": 0
   },
   "percent": {
-    "coverage": 29.7,
+    "coverage": 30.3,
     "conformance": 0.0,
     "done": 0.0
   },
@@ -390,8 +390,8 @@
     },
     "storage": {
       "units": 149,
-      "implemented": 87,
-      "tested": 29,
+      "implemented": 93,
+      "tested": 35,
       "conformant": 0,
       "groups": {
         "bucket": {
@@ -444,8 +444,8 @@
         },
         "s3": {
           "units": 26,
-          "implemented": 20,
-          "tested": 20,
+          "implemented": 26,
+          "tested": 26,
           "conformant": 0
         },
         "vector": {
@@ -853,6 +853,12 @@
     "storage:route:PUT /storage/v1/bucket/{bucketId}": "tested",
     "storage:route:PUT /storage/v1/bucket/{bucketId}/lifecycle": "tested",
     "storage:route:PUT /storage/v1/object/{bucketName}/{*}": "implemented",
+    "storage:route:PUT /storage/v1/s3/{Bucket}": "tested",
+    "storage:route:PUT /storage/v1/s3/{Bucket}/{*}": "tested",
+    "storage:route:PUT /storage/v1/s3/{Bucket}/{*}?partNumber&uploadId|x-amz-copy-source": "tested",
+    "storage:route:PUT /storage/v1/s3/{Bucket}/{*}?uploadId&partNumber": "tested",
+    "storage:route:PUT /storage/v1/s3/{Bucket}/{*}|x-amz-copy-source": "tested",
+    "storage:route:PUT /storage/v1/s3/{Bucket}?lifecycle": "tested",
     "storage:sql-function:storage.add_prefixes()": "implemented",
     "storage:sql-function:storage.allow_any_operation()": "implemented",
     "storage:sql-function:storage.allow_only_operation()": "implemented",
