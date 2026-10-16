@@ -195,7 +195,11 @@ method, the path after `/functions/v1`, the query, headers (including
 inherits Megabase's environment plus `SUPABASE_URL` (Megabase's own
 listener), `SUPABASE_ANON_KEY` and `SUPABASE_SERVICE_ROLE_KEY` (from
 `ANON_KEY` / `SERVICE_ROLE_KEY`, else signed with `JWT_SECRET`), and
-`SUPABASE_DB_URL` (`DATABASE_URL`); values already set win. Function code
+`SUPABASE_DB_URL` (`DATABASE_URL`); values already set win. Inside the
+function, `Deno.env` is edge-runtime's read-only view of that environment,
+snapshotted when the worker starts, with `SB_EXECUTION_ID` added: `set`
+throws `NotSupported` and `delete` does nothing
+([`specs/functions/env.md`](../specs/functions/env.md)). Function code
 is trusted operator code with full Deno permissions, as in the self-hosted
 stack. The container image does not ship Deno.
 

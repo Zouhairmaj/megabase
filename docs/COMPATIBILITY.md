@@ -128,7 +128,7 @@ Implemented and tested counts come from markers and `judge/cases/`. Live conform
 | Storage | s3 | 2 | 26 | 26 | 26 |
 | Storage | vector | 2 | 13 | 10 | 0 |
 | Functions | ai | 4 | 5 | 0 | 0 |
-| Functions | env | 4 | 4 | 0 | 0 |
+| Functions | env | 4 | 4 | 4 | 0 |
 | Functions | event_worker | 4 | 2 | 0 | 0 |
 | Functions | invoke | 4 | 1 | 1 | 1 |
 | Functions | node | 4 | 233 | 0 | 0 |

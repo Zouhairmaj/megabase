@@ -20,7 +20,9 @@
 //! server the first time the function calls `Deno.listen` for TCP, hands each
 //! request to that listener as a one-request connection, and answers
 //! `Deno.serveHttp` for those connections. Other transports are untouched. See
-//! `docs/decisions/0043-functions-listen-bootstrap.md`.
+//! `docs/decisions/0043-functions-listen-bootstrap.md`. Before importing the
+//! function it also replaces `Deno.env` with the user-worker view in
+//! [`crate::env`].
 
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
@@ -198,17 +200,24 @@ Deno.serveHttp = function serveHttp(conn) {
 };
 "#;
 
-/// The main module of every worker: [`SOURCE`] followed by an import of the
-/// function's entrypoint (path in `MEGABASE_FUNCTION_ENTRYPOINT`, removed
-/// from the environment before the function runs).
+/// The main module of every worker: [`SOURCE`], the read of the function's
+/// entrypoint (path in `MEGABASE_FUNCTION_ENTRYPOINT`, removed from the
+/// environment), the user-worker `Deno.env` ([`crate::env::SOURCE`]), and
+/// finally the import of the entrypoint.
 #[must_use]
 pub fn module() -> String {
-    format!("{SOURCE}{LOADER}")
+    format!(
+        "{SOURCE}{ENTRYPOINT}{env}{IMPORT}",
+        env = crate::env::SOURCE
+    )
 }
 
-const LOADER: &str = r#"
+const ENTRYPOINT: &str = r#"
 const entrypoint = Deno.env.get("MEGABASE_FUNCTION_ENTRYPOINT");
 Deno.env.delete("MEGABASE_FUNCTION_ENTRYPOINT");
+"#;
+
+const IMPORT: &str = r#"
 await import("file://" + encodeURI(entrypoint).replace(/[?#]/g, encodeURIComponent));
 "#;
 
@@ -282,6 +291,21 @@ mod tests {
         let wrap = module.find("Deno.serve = function").unwrap();
         let import = module.find("await import(").unwrap();
         assert!(wrap < import);
+    }
+
+    #[test]
+    fn module_installs_the_worker_env_after_reading_the_entrypoint_and_before_importing_it() {
+        let module = module();
+        // The worker `Deno.env.delete` is a no-op, so the real variable must
+        // be removed while `Deno.env` is still Deno's own.
+        let delete = module
+            .find("Deno.env.delete(\"MEGABASE_FUNCTION_ENTRYPOINT\")")
+            .unwrap();
+        let env = module.find(crate::env::SOURCE).unwrap();
+        let import = module.find("await import(").unwrap();
+        assert!(delete < env && env < import);
+        // `DENO_SERVE_ADDRESS` is read before the snapshot hides it.
+        assert!(module.find("Deno.env.get(\"DENO_SERVE_ADDRESS\")").unwrap() < env);
     }
 
     #[test]

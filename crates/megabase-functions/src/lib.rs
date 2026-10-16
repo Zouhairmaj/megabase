@@ -12,6 +12,7 @@
 //! `MEGABASE_NOT_IMPLEMENTED` 501. Spec: `specs/functions/invoke.md`.
 
 pub mod bootstrap;
+pub mod env;
 pub mod gate;
 pub mod proxy;
 pub mod worker;
