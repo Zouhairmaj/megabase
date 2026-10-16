@@ -4,6 +4,13 @@ All notable changes to Megabase are documented in this file.
 The format is produced by [release-please](https://github.com/googleapis/release-please).
 Sections: Features, Bug Fixes, Performance, Conformance/judge, Documentation.
 
+## [0.1.41](https://github.com/Zouhairmaj/megabase/compare/v0.1.40...v0.1.41) (2026-10-16)
+
+
+### Features
+
+* **auth:** gate sso routes behind the saml disabled check ([#439](https://github.com/Zouhairmaj/megabase/issues/439)) ([46afe3c](https://github.com/Zouhairmaj/megabase/commit/46afe3cd9e2a9e8d3222265b452ffc6de09c6d5c))
+
 ## [0.1.40](https://github.com/Zouhairmaj/megabase/compare/v0.1.39...v0.1.40) (2026-10-16)
 
 
