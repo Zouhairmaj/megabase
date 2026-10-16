@@ -257,8 +257,9 @@ missing metadata values are `null`, timestamps are ISO with milliseconds.
   `mimetype` and `contentLength`. Fastify's automatic `HEAD` on the
   `/object/info` routes.
 - `HEAD /object/public/:bucket/*` and `HEAD /object/:bucket/*` (the same
-  handler; issue 61 PR 2), `/object/list-v2`, copy, move, and the signed
-  upload itself (`PUT /object/upload/sign/:bucket/*`).
+  handler; issue 61 PR 2), `/object/list-v2`, and the signed upload itself
+  (`PUT /object/upload/sign/:bucket/*`). Copy and move are in
+  [`object-transfer.md`](object-transfer.md).
 
 ## Judge cases
 

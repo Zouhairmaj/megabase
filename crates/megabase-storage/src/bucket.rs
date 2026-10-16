@@ -1,11 +1,16 @@
-//! `POST /bucket`, `PUT /bucket/:bucketId` and the bucket lifecycle routes.
+//! `POST /bucket`, `PUT` and `DELETE /bucket/:bucketId`,
+//! `POST /bucket/:bucketId/empty` and the bucket lifecycle routes.
 
 // Ported from supabase/storage src/http/routes/bucket/createBucket.ts,
-// src/http/routes/bucket/updateBucket.ts, src/http/routes/bucket/lifecycle.ts,
-// src/storage/storage.ts, src/storage/database/pg.ts,
-// src/storage/database/errors.ts, src/storage/lifecycle/guards.ts,
-// src/storage/schemas/lifecycle.ts and src/internal/errors/codes.ts
-// (Apache-2.0), pin v1.80.2.
+// src/http/routes/bucket/updateBucket.ts, src/http/routes/bucket/deleteBucket.ts,
+// src/http/routes/bucket/emptyBucket.ts, src/http/routes/bucket/lifecycle.ts,
+// src/http/plugins/empty-json-body.ts, src/storage/storage.ts,
+// src/storage/events/objects/object-admin-delete-all-before.ts,
+// src/storage/database/pg.ts, src/storage/database/errors.ts,
+// src/storage/lifecycle/guards.ts, src/storage/schemas/lifecycle.ts and
+// src/internal/errors/codes.ts (Apache-2.0), pin v1.80.2.
+
+use std::path::PathBuf;
 
 use axum::{
     body::Bytes,
@@ -13,8 +18,10 @@ use axum::{
     http::{header, HeaderMap, Method, StatusCode},
     response::{IntoResponse, Response},
 };
+use chrono::{DateTime, Utc};
 use megabase_core::MegabaseNotImplemented;
 use serde_json::{json, Map, Value};
+use sqlx::{Postgres, Row, Transaction};
 
 use crate::{
     database_error, fastify_json,
@@ -23,31 +30,92 @@ use crate::{
         UPLOAD_FILE_SIZE_LIMIT,
     },
     mime::normalize_allowed_mime_types,
-    not_implemented, service_role, StorageError, StorageState, COMPONENT,
+    not_implemented,
+    object::{object_file, try_remove_file},
+    service_role, StorageError, StorageState, COMPONENT,
 };
 
 /// `LIFECYCLE_MAX_RULES`.
 const LIFECYCLE_MAX_RULES: usize = 1000;
 
+/// `STORAGE_EMPTY_BUCKET_MAX` default (unset in the self-hosted compose file).
+const EMPTY_BUCKET_MAX: i64 = 200_000;
+
+/// `MAX_OBJECTS_PER_DELETE_BATCH`: `MAX_KEYS_PER_S3_DELETE / 2`.
+const EMPTY_BUCKET_BATCH: i64 = 500;
+
+/// `findBucketById(id, 'id', { forUpdate: true })`.
+const LOCK_BUCKET_SQL: &str = "SELECT id FROM storage.buckets WHERE id = $1 LIMIT 1 FOR UPDATE";
+
+/// `findBucketById(id, 'name')`.
+const FIND_BUCKET_SQL: &str = "SELECT name FROM storage.buckets WHERE id = $1 LIMIT 1";
+
+/// `countObjectsInBucket(id, limit)`.
+const COUNT_OBJECTS_SQL: &str = "SELECT count(*) FROM \
+     (SELECT 1 FROM storage.objects WHERE bucket_id = $1 LIMIT $2) AS objects";
+
+/// `deleteBucket(id)`.
+const DELETE_BUCKET_SQL: &str = "DELETE FROM storage.buckets WHERE id = ANY($1::text[])";
+
+/// `listObjects(bucket, 'id, name', limit, before)`. Upstream does not filter
+/// on `archived_at`; `deleteObjects` then skips archived rows, which
+/// Megabase never writes, so the filter only keeps this loop finite.
+const LIST_OBJECTS_BEFORE_SQL: &str = "SELECT id::text FROM storage.objects \
+     WHERE bucket_id = $1 AND created_at < $2 AND archived_at IS NULL \
+     ORDER BY name COLLATE \"C\" LIMIT $3";
+
+/// `deleteObjects(bucket, ids, 'id')`.
+const DELETE_OBJECTS_BY_ID_SQL: &str = "DELETE FROM storage.objects \
+     WHERE bucket_id = $1 AND id = ANY($2::uuid[]) AND archived_at IS NULL \
+     RETURNING name, version";
+
+/// `ObjectAdminDeleteAllBefore` with the queue disabled.
+const EMPTY_BUCKET_MESSAGE: &str =
+    "Empty bucket has been queued. Completion may take up to an hour.";
+
 /// A body Fastify's schema validation would reject. Its error envelope is
 /// not ported, so the request is answered with a 501.
-fn validation_not_implemented() -> Response {
+pub(crate) fn validation_not_implemented() -> Response {
     MegabaseNotImplemented::new(COMPONENT, "storage request body validation").into_response()
 }
 
 /// The JSON object body Fastify's `application/json` parser accepts.
 /// `None` for another content type, an empty or malformed body, or a
 /// non-object (content-type parser and schema errors are not ported).
-fn json_object(headers: &HeaderMap, body: &[u8]) -> Option<Map<String, Value>> {
-    let content_type = headers.get(header::CONTENT_TYPE)?.to_str().ok()?;
-    let essence = content_type.split(';').next().unwrap_or_default().trim();
-    if !essence.eq_ignore_ascii_case("application/json") {
+pub(crate) fn json_object(headers: &HeaderMap, body: &[u8]) -> Option<Map<String, Value>> {
+    if !has_json_content_type(headers) {
         return None;
     }
     match serde_json::from_slice(body).ok()? {
         Value::Object(object) => Some(object),
         _ => None,
     }
+}
+
+fn has_json_content_type(headers: &HeaderMap) -> bool {
+    headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|content_type| {
+            content_type
+                .split(';')
+                .next()
+                .unwrap_or_default()
+                .trim()
+                .eq_ignore_ascii_case("application/json")
+        })
+}
+
+/// A body `registerJsonParserAllowingEmptyBody` accepts: none without a
+/// `Content-Type`, or an empty or valid JSON body under `application/json`.
+/// Fastify's answers for other content types and malformed JSON are not
+/// ported.
+fn is_empty_or_json_body(headers: &HeaderMap, body: &[u8]) -> bool {
+    if !headers.contains_key(header::CONTENT_TYPE) {
+        return body.is_empty();
+    }
+    has_json_content_type(headers)
+        && (body.is_empty() || serde_json::from_slice::<Value>(body).is_ok())
 }
 
 /// An Ajv `integer`: a finite number without a fractional part.
@@ -342,6 +410,187 @@ pub(crate) async fn update_bucket(
     }
 }
 
+/// A transaction as the service role that may delete from the storage
+/// tables (`storage.allow_delete_query`, set by storage-api's request scope).
+async fn begin_service_role(
+    pool: &sqlx::PgPool,
+) -> Result<Transaction<'static, Postgres>, sqlx::Error> {
+    let mut tx = pool.begin().await?;
+    sqlx::query("SET LOCAL ROLE service_role")
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query("SELECT set_config('storage.allow_delete_query', 'true', true)")
+        .execute(&mut *tx)
+        .await?;
+    Ok(tx)
+}
+
+/// `countObjectsInBucket(id, limit)`: at most `limit`.
+async fn count_objects(
+    tx: &mut Transaction<'static, Postgres>,
+    bucket_id: &str,
+    limit: i64,
+) -> Result<i64, sqlx::Error> {
+    sqlx::query_scalar(COUNT_OBJECTS_SQL)
+        .bind(bucket_id)
+        .bind(limit)
+        .fetch_one(&mut **tx)
+        .await
+}
+
+/// `DELETE /bucket/:bucketId`: lock the row, refuse a bucket that still has
+/// objects (`BucketNotEmpty`), delete it, answer
+/// `{"message":"Successfully deleted"}`.
+// megabase:unit storage:route:DELETE /storage/v1/bucket/{bucketId}
+pub(crate) async fn delete_bucket(
+    State(state): State<StorageState>,
+    Path(bucket_id): Path<String>,
+    method: Method,
+    OriginalUri(uri): OriginalUri,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    let Some((pool, _claims)) = service_role(&state, &headers) else {
+        return not_implemented(&method, &uri);
+    };
+    if !is_empty_or_json_body(&headers, &body) {
+        return validation_not_implemented();
+    }
+    let result = async {
+        let mut tx = begin_service_role(pool).await?;
+        let found = sqlx::query(LOCK_BUCKET_SQL)
+            .bind(&bucket_id)
+            .fetch_optional(&mut *tx)
+            .await?;
+        if found.is_none() {
+            return Ok(Err(StorageError::no_such_bucket()));
+        }
+        if count_objects(&mut tx, &bucket_id, 1).await? > 0 {
+            return Ok(Err(StorageError::bucket_not_empty()));
+        }
+        let deleted = sqlx::query(DELETE_BUCKET_SQL)
+            .bind(std::slice::from_ref(&bucket_id))
+            .execute(&mut *tx)
+            .await?
+            .rows_affected();
+        if deleted == 0 {
+            return Ok(Err(StorageError::no_such_bucket()));
+        }
+        tx.commit().await?;
+        Ok::<_, sqlx::Error>(Ok(()))
+    }
+    .await;
+    match result {
+        Ok(Ok(())) => fastify_json(
+            StatusCode::OK,
+            &json!({ "message": "Successfully deleted" }),
+        ),
+        Ok(Err(error)) => error.into_response(),
+        Err(error) => database_error(&error),
+    }
+}
+
+/// `POST /bucket/:bucketId/empty`: check the bucket and its size, then run
+/// `ObjectAdminDeleteAllBefore` inline (the self-hosted stack sets no
+/// `PG_QUEUE_ENABLE`, so `send` invokes the handler before answering).
+// megabase:unit storage:route:POST /storage/v1/bucket/{bucketId}/empty
+pub(crate) async fn empty_bucket(
+    State(state): State<StorageState>,
+    Path(bucket_id): Path<String>,
+    method: Method,
+    OriginalUri(uri): OriginalUri,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    let Some((pool, _claims)) = service_role(&state, &headers) else {
+        return not_implemented(&method, &uri);
+    };
+    let Some(root) = state.files.as_deref() else {
+        return not_implemented(&method, &uri);
+    };
+    if !is_empty_or_json_body(&headers, &body) {
+        return validation_not_implemented();
+    }
+    let before = Utc::now();
+    let checked = async {
+        let mut tx = begin_service_role(pool).await?;
+        let found = sqlx::query(FIND_BUCKET_SQL)
+            .bind(&bucket_id)
+            .fetch_optional(&mut *tx)
+            .await?;
+        if found.is_none() {
+            return Ok(Err(StorageError::no_such_bucket()));
+        }
+        if count_objects(&mut tx, &bucket_id, EMPTY_BUCKET_MAX + 1).await? > EMPTY_BUCKET_MAX {
+            return Ok(Err(StorageError::unable_to_empty_bucket(
+                "Unable to empty the bucket because it contains too many objects",
+            )));
+        }
+        tx.commit().await?;
+        Ok::<_, sqlx::Error>(Ok(()))
+    }
+    .await;
+    match checked {
+        Ok(Ok(())) => {}
+        Ok(Err(error)) => return error.into_response(),
+        Err(error) => return database_error(&error),
+    }
+    loop {
+        match delete_objects_before(pool, root, &bucket_id, before).await {
+            Ok(Ok(0)) => break,
+            Ok(Ok(_)) => {}
+            Ok(Err(error)) => {
+                tracing::error!(%error, "storage bucket empty file removal failed");
+                return not_implemented(&method, &uri);
+            }
+            Err(error) => return database_error(&error),
+        }
+    }
+    fastify_json(StatusCode::OK, &json!({ "message": EMPTY_BUCKET_MESSAGE }))
+}
+
+/// One `ObjectAdminDeleteAllBefore` batch: delete up to
+/// `MAX_OBJECTS_PER_DELETE_BATCH` rows created before `before` and, inside
+/// the same transaction, their files. Returns how many rows it listed.
+async fn delete_objects_before(
+    pool: &sqlx::PgPool,
+    root: &std::path::Path,
+    bucket_id: &str,
+    before: DateTime<Utc>,
+) -> Result<Result<usize, std::io::Error>, sqlx::Error> {
+    let mut tx = begin_service_role(pool).await?;
+    let ids: Vec<String> = sqlx::query_scalar(LIST_OBJECTS_BEFORE_SQL)
+        .bind(bucket_id)
+        .bind(before)
+        .bind(EMPTY_BUCKET_BATCH)
+        .fetch_all(&mut *tx)
+        .await?;
+    if ids.is_empty() {
+        return Ok(Ok(0));
+    }
+    let rows = sqlx::query(DELETE_OBJECTS_BY_ID_SQL)
+        .bind(bucket_id)
+        .bind(&ids)
+        .fetch_all(&mut *tx)
+        .await?;
+    let mut files: Vec<PathBuf> = Vec::with_capacity(rows.len());
+    for row in &rows {
+        let name: Option<String> = row.try_get("name")?;
+        let version: Option<String> = row.try_get("version")?;
+        if let (Some(name), Some(version)) = (name, version) {
+            files.extend(object_file(root, bucket_id, &name, &version));
+        }
+    }
+    // As upstream, a backend failure drops `tx` (rollback) so the rows stay.
+    for file in &files {
+        if let Err(error) = try_remove_file(file).await {
+            return Ok(Err(error));
+        }
+    }
+    tx.commit().await?;
+    Ok(Ok(ids.len()))
+}
+
 /// `assertLifecycleApiEnabled`: `STORAGE_LIFECYCLE_ENABLED` is unset in the
 /// pinned self-hosted compose file, so the lifecycle API is disabled.
 fn lifecycle_disabled() -> Response {
@@ -379,6 +628,24 @@ pub(crate) async fn put_bucket_lifecycle(
         Some(body) if is_lifecycle_configuration(&body) => lifecycle_disabled(),
         _ => validation_not_implemented(),
     }
+}
+
+/// `DELETE /bucket/:bucketId/lifecycle` with the lifecycle API disabled.
+// megabase:unit storage:route:DELETE /storage/v1/bucket/{bucketId}/lifecycle
+pub(crate) async fn delete_bucket_lifecycle(
+    State(state): State<StorageState>,
+    method: Method,
+    OriginalUri(uri): OriginalUri,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    if service_role(&state, &headers).is_none() {
+        return not_implemented(&method, &uri);
+    }
+    if !is_empty_or_json_body(&headers, &body) {
+        return validation_not_implemented();
+    }
+    lifecycle_disabled()
 }
 
 /// `bucketLifecycleConfigurationSchema` with Ajv `coerceTypes: false`.

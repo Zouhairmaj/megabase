@@ -4,7 +4,8 @@ Status: draft
 Unit ids (`coverage/units.json`): `storage:route:POST /storage/v1/bucket`,
 `storage:route:PUT /storage/v1/bucket/{bucketId}`,
 `storage:route:GET /storage/v1/bucket/{bucketId}/lifecycle`,
-`storage:route:PUT /storage/v1/bucket/{bucketId}/lifecycle`
+`storage:route:PUT /storage/v1/bucket/{bucketId}/lifecycle`,
+`storage:route:DELETE /storage/v1/bucket/{bucketId}/lifecycle`
 Level: 2
 
 The list and get routes of the same epic are in
@@ -29,7 +30,7 @@ there and not repeated.
 | `createBucket` insert (`owner` only when `sub` is a UUID, `owner_id` = `sub`, `type` `STANDARD`), duplicate is `BucketAlreadyExists` | `vendor/storage/src/storage/database/pg.ts:451`–`:498` |
 | `updateBucket` update of the given columns; no row is `NoSuchBucket` | `vendor/storage/src/storage/database/pg.ts:1051`–`:1091` |
 | `23505` is `ResourceAlreadyExists` | `vendor/storage/src/storage/database/errors.ts:25` |
-| Lifecycle routes: body validation, then `assertLifecycleApiEnabled` / `assertLifecycleWriteReady` | `vendor/storage/src/http/routes/bucket/lifecycle.ts:57`–`:113`, `vendor/storage/src/storage/lifecycle/guards.ts:1` |
+| Lifecycle routes: body validation, then `assertLifecycleApiEnabled` / `assertLifecycleWriteReady`; the delete accepts an empty JSON body | `vendor/storage/src/http/routes/bucket/lifecycle.ts:57`–`:131`, `vendor/storage/src/storage/lifecycle/guards.ts:1`, `vendor/storage/src/http/plugins/empty-json-body.ts:1` |
 | `bucketLifecycleConfigurationSchema` | `vendor/storage/src/storage/schemas/lifecycle.ts:1`–`:47` |
 | `STORAGE_LIFECYCLE_ENABLED` (off unless `true`), `FILE_SIZE_LIMIT`, `ICEBERG_BUCKET_DETECTION_SUFFIX` default `--table-s3` | `vendor/storage/src/config.ts:450`, `:496`, `:795` |
 | Error bodies | `vendor/storage/src/internal/errors/codes.ts` (`FeatureNotEnabled` `:105`, `NoSuchBucket` `:134`, `InvalidMimeType` `:310`, `EntityTooLarge` `:342`, `InvalidBucketName` `:375`, `BucketAlreadyExists` `:420`) |
@@ -61,8 +62,10 @@ As `buckets.md`, plus a JSON body (`Content-Type: application/json`) on
   removed, duplicates dropped; `null` stays `null`.
 - Update: 200 `{"message":"Successfully updated"}`. Only the given columns
   change; `null` clears `file_size_limit` / `allowed_mime_types`.
-- Lifecycle get and put: the lifecycle API is disabled in the pinned
-  self-hosted configuration, so both answer the `FeatureNotEnabled` error.
+- Lifecycle get, put and delete: the lifecycle API is disabled in the
+  pinned self-hosted configuration, so all three answer the
+  `FeatureNotEnabled` error. The delete takes no body, an empty
+  `application/json` body, or any JSON value.
 
 ## Errors
 
@@ -75,7 +78,7 @@ All are sent with HTTP 400 and `Content-Type: application/json; charset=utf-8`.
 | An `allowed_mime_types` entry that is not a media type (wildcard type, wildcard subtype other than `*`, bad parameter, over 1000 characters) | `{"statusCode":"415","code":"InvalidMimeType","error":"invalid_mime_type","message":"mime type <entry> is not supported"}` |
 | Create with an existing `id` or `name` | `{"statusCode":"409","code":"BucketAlreadyExists","error":"Duplicate","message":"The resource already exists"}` |
 | Update of an unknown bucket | `NoSuchBucket` (see `buckets.md`) |
-| Lifecycle get; lifecycle put with a valid body | `{"statusCode":"409","code":"FeatureNotEnabled","error":"FeatureNotEnabled","message":"The feature object lifecycles is not enabled for this resource"}` |
+| Lifecycle get and delete; lifecycle put with a valid body | `{"statusCode":"409","code":"FeatureNotEnabled","error":"FeatureNotEnabled","message":"The feature object lifecycles is not enabled for this resource"}` |
 
 Checks run in upstream order: body schema, name, `ANALYTICS`, size limit,
 MIME types, database.
@@ -85,8 +88,8 @@ MIME types, database.
 - The create `id` is not validated, as upstream.
 - `Math.round` semantics for fractional sizes (`"0.5B"` → 1).
 - `allowed_mime_types: []` and `[""]` store an empty array.
-- The lifecycle get does not look up the bucket: an unknown bucket gets
-  the same `FeatureNotEnabled` error.
+- The lifecycle get and delete do not look up the bucket: an unknown
+  bucket gets the same `FeatureNotEnabled` error.
 
 ## Out of scope (501)
 

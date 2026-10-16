@@ -12,13 +12,14 @@
 //! `Deno.listen({ port: 8000 })` and `Deno.serveHttp(conn)`, works unchanged.
 //!
 //! A plain Deno 2 process binds the real port (two functions collide on
-//! `:8000`) and no longer has `Deno.serveHttp`. Megabase therefore preloads
-//! [`SOURCE`] (`deno run --preload`) before the function. `Deno.serve` already
-//! binds the worker's port through `DENO_SERVE_ADDRESS`; the bootstrap starts
-//! one such `Deno.serve` the first time the function calls `Deno.listen` for
-//! TCP, hands each request to that listener as a one-request connection, and
-//! answers `Deno.serveHttp` for those connections. Other transports and
-//! `Deno.serve` itself are untouched. See
+//! `:8000`) and no longer has `Deno.serveHttp`. Megabase therefore runs
+//! [`module`] as the main module of `deno run` (Deno 2.1.4 has no
+//! `--preload`), which imports the function. Deno 2.1.4 ignores
+//! `DENO_SERVE_ADDRESS`, so the bootstrap wraps `Deno.serve` to bind the
+//! worker's address whenever the function gives none. It starts one such
+//! server the first time the function calls `Deno.listen` for TCP, hands each
+//! request to that listener as a one-request connection, and answers
+//! `Deno.serveHttp` for those connections. Other transports are untouched. See
 //! `docs/decisions/0043-functions-listen-bootstrap.md`.
 
 use std::io::Write as _;
@@ -29,11 +30,12 @@ use std::time::{SystemTime, UNIX_EPOCH};
 /// File name of the bootstrap inside its private directory.
 pub const FILE_NAME: &str = "megabase-worker-bootstrap.js";
 
-/// JavaScript preloaded into every worker. It runs before the function's
-/// module graph is evaluated.
+/// JavaScript that runs first in every worker, before the function's module
+/// graph is evaluated.
 pub const SOURCE: &str = r#"// Megabase edge function worker bootstrap (crates/megabase-functions/src/bootstrap.rs).
 const nativeListen = Deno.listen;
 const nativeServeHttp = Deno.serveHttp;
+const nativeServe = Deno.serve;
 const REQUEST = Symbol("megabase.request");
 const listeners = [];
 let server;
@@ -142,6 +144,33 @@ class WorkerHttpConn {
   }
 }
 
+// Deno 2.1.4 ignores DENO_SERVE_ADDRESS and binds 0.0.0.0:8000 when
+// `Deno.serve` gets no address, so force the worker address in that case.
+const serveAddress = /^tcp:(.+):(\d+)$/.exec(Deno.env.get("DENO_SERVE_ADDRESS") ?? "");
+
+function hasAddress(options) {
+  return options.port !== undefined || options.hostname !== undefined ||
+    options.path !== undefined || options.cid !== undefined ||
+    options.transport !== undefined;
+}
+
+function withWorkerAddress(options) {
+  if (!serveAddress || !options || typeof options !== "object" || hasAddress(options)) {
+    return options;
+  }
+  return { ...options, hostname: serveAddress[1], port: Number(serveAddress[2]) };
+}
+
+Deno.serve = function serve(...args) {
+  if (typeof args[0] === "function") {
+    return nativeServe.call(Deno, withWorkerAddress({}), args[0]);
+  }
+  if (typeof args[1] === "function") {
+    return nativeServe.call(Deno, withWorkerAddress(args[0]), args[1]);
+  }
+  return nativeServe.call(Deno, withWorkerAddress(args[0]));
+};
+
 function workerServer() {
   server ??= Deno.serve({ onListen() {} }, (request, info) =>
     new Promise((resolve, reject) => {
@@ -169,7 +198,21 @@ Deno.serveHttp = function serveHttp(conn) {
 };
 "#;
 
-/// Write [`SOURCE`] to a new private directory under `parent` and return the
+/// The main module of every worker: [`SOURCE`] followed by an import of the
+/// function's entrypoint (path in `MEGABASE_FUNCTION_ENTRYPOINT`, removed
+/// from the environment before the function runs).
+#[must_use]
+pub fn module() -> String {
+    format!("{SOURCE}{LOADER}")
+}
+
+const LOADER: &str = r#"
+const entrypoint = Deno.env.get("MEGABASE_FUNCTION_ENTRYPOINT");
+Deno.env.delete("MEGABASE_FUNCTION_ENTRYPOINT");
+await import("file://" + encodeURI(entrypoint).replace(/[?#]/g, encodeURIComponent));
+"#;
+
+/// Write [`module`] to a new private directory under `parent` and return the
 /// file's path. The directory name is unique per process and call, and it is
 /// created (mode `0700` on Unix) only if it does not exist yet, so a
 /// pre-planted path in a shared temporary directory is never followed.
@@ -199,7 +242,7 @@ pub fn install(parent: &Path) -> std::io::Result<PathBuf> {
         .write(true)
         .create_new(true)
         .open(&path)?;
-    file.write_all(SOURCE.as_bytes())?;
+    file.write_all(module().as_bytes())?;
     Ok(path)
 }
 
@@ -212,7 +255,7 @@ mod tests {
         let first = install(&std::env::temp_dir()).unwrap();
         let second = install(&std::env::temp_dir()).unwrap();
         assert_ne!(first.parent(), second.parent());
-        assert_eq!(std::fs::read_to_string(&first).unwrap(), SOURCE);
+        assert_eq!(std::fs::read_to_string(&first).unwrap(), module());
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt as _;
@@ -225,6 +268,20 @@ mod tests {
         for path in [first, second] {
             std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
         }
+    }
+
+    #[test]
+    fn module_wraps_serve_for_every_overload_and_loads_the_entrypoint_last() {
+        let module = module();
+        assert!(module.contains("DENO_SERVE_ADDRESS"));
+        assert!(module.contains("Deno.serve = function serve(...args)"));
+        // serve(handler), serve(options, handler) and serve({ handler })
+        assert!(module.contains("typeof args[0] === \"function\""));
+        assert!(module.contains("typeof args[1] === \"function\""));
+        assert!(module.contains("nativeServe.call(Deno, withWorkerAddress(args[0]))"));
+        let wrap = module.find("Deno.serve = function").unwrap();
+        let import = module.find("await import(").unwrap();
+        assert!(wrap < import);
     }
 
     #[test]

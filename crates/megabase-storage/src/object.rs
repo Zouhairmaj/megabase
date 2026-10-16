@@ -36,12 +36,14 @@ use sqlx::{Postgres, Row, Transaction};
 
 mod info;
 mod sign;
+mod transfer;
 
 pub(super) use info::{
     get_object_info_any, get_object_info_authenticated, get_public_object_info,
     head_authenticated_object,
 };
 pub(super) use sign::{sign_objects, sign_upload_object};
+pub(super) use transfer::{copy_object, move_object};
 
 use super::{
     database_error, fastify_json, iso,
@@ -250,7 +252,12 @@ fn is_plain_path(path: &str) -> bool {
 
 /// `<root>/<bucket>/<name>/<version>`, or `None` for a path Megabase does
 /// not store.
-fn object_file(root: &FsPath, bucket: &str, name: &str, version: &str) -> Option<PathBuf> {
+pub(super) fn object_file(
+    root: &FsPath,
+    bucket: &str,
+    name: &str,
+    version: &str,
+) -> Option<PathBuf> {
     if !is_plain_path(bucket) || !is_plain_path(name) || !is_plain_path(version) {
         return None;
     }
@@ -676,7 +683,7 @@ async fn write_file(file: &FsPath, body: &[u8]) -> std::io::Result<DateTime<Utc>
 }
 
 /// Removes `file`, treating a file that is already gone as removed.
-async fn try_remove_file(file: &FsPath) -> std::io::Result<()> {
+pub(super) async fn try_remove_file(file: &FsPath) -> std::io::Result<()> {
     match tokio::fs::remove_file(file).await {
         Err(error) if error.kind() != std::io::ErrorKind::NotFound => Err(error),
         _ => Ok(()),
@@ -1256,9 +1263,9 @@ fn timestamp(row: &sqlx::postgres::PgRow, column: &str) -> Result<Value, sqlx::E
         .map_or(Value::Null, |at| json!(iso(Some(at)))))
 }
 
-/// A deleted row through fast-json-stringify and `objectSchema`: schema
-/// property order, a `null` plain string is `""`.
-fn deleted_object_json(row: &sqlx::postgres::PgRow) -> Result<Value, sqlx::Error> {
+/// A row through fast-json-stringify and `objectSchema`: schema property
+/// order, a `null` plain string is `""`.
+fn object_row_json(row: &sqlx::postgres::PgRow) -> Result<Value, sqlx::Error> {
     let text = |column: &str| -> Result<Value, sqlx::Error> {
         Ok(json!(row
             .try_get::<Option<String>, _>(column)?
@@ -1339,7 +1346,7 @@ pub(super) async fn delete_objects(
         let mut deleted = Vec::with_capacity(rows.len());
         let mut files = Vec::with_capacity(rows.len());
         for row in &rows {
-            deleted.push(deleted_object_json(row)?);
+            deleted.push(object_row_json(row)?);
             let name: Option<String> = row.try_get("name")?;
             let version: Option<String> = row.try_get("version")?;
             if let (Some(name), Some(version)) = (name, version) {
@@ -1745,6 +1752,10 @@ mod tests {
             (Method::DELETE, "/storage/v1/object/avatars", true),
             (Method::DELETE, "/storage/v1/object/avatars/u1/a.png", true),
             (Method::POST, "/storage/v1/object/list/avatars", true),
+            (Method::POST, "/storage/v1/object/move", true),
+            (Method::POST, "/storage/v1/object/copy", true),
+            (Method::POST, "/storage/v1/object/move", false),
+            (Method::POST, "/storage/v1/object/copy", false),
             (Method::POST, "/storage/v1/object/sign/avatars", true),
             (
                 Method::POST,

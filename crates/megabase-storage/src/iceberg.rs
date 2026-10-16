@@ -28,6 +28,8 @@ const KONG_PREFIX: &str = "/storage/v1";
 /// failure is answered by the root error handler instead. That path is
 /// not ported: a request other than `GET`/`HEAD` that carries a
 /// `Content-Type` or a body is a 501.
+// megabase:unit storage:route:DELETE /storage/v1/iceberg/bucket/{bucketName}
+// megabase:unit storage:route:DELETE /storage/v1/iceberg/v1/{prefix}/namespaces/{namespace}
 // megabase:unit storage:route:DELETE /storage/v1/iceberg/v1/{prefix}/namespaces/{namespace}/tables/{table}
 // megabase:unit storage:route:GET /storage/v1/iceberg/bucket
 // megabase:unit storage:route:GET /storage/v1/iceberg/v1/config
