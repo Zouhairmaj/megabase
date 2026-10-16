@@ -97,9 +97,10 @@ pub async fn forward(
     let (mut parts, body) = response.into_parts();
     strip_hop_by_hop(&mut parts.headers);
     if drops_body(&method, parts.status) {
-        // A redirect or 205 keeps no bytes, so its stale length goes too;
+        // A redirect or 205 keeps no bytes, so its stale length goes too, and
+        // RFC 9110 §9.3.6 forbids `Content-Length` in a 2xx answer to CONNECT;
         // a HEAD or 204/304 `Content-Length` still describes the resource.
-        if redirect_status(parts.status) || parts.status == StatusCode::RESET_CONTENT {
+        if drops_content_length(&method, parts.status) {
             parts.headers.remove(header::CONTENT_LENGTH);
         }
         return Ok(Response::from_parts(parts, Body::empty()));
@@ -116,6 +117,12 @@ fn null_body_status(status: StatusCode) -> bool {
 
 fn redirect_status(status: StatusCode) -> bool {
     matches!(status.as_u16(), 301 | 302 | 303 | 307 | 308)
+}
+
+fn drops_content_length(method: &Method, status: StatusCode) -> bool {
+    redirect_status(status)
+        || status == StatusCode::RESET_CONTENT
+        || (*method == Method::CONNECT && status.is_success())
 }
 
 fn drops_body(method: &Method, status: StatusCode) -> bool {
@@ -160,5 +167,18 @@ mod tests {
             assert!(drops_body(&Method::HEAD, status), "{code}");
             assert!(drops_body(&Method::CONNECT, status), "{code}");
         }
+    }
+
+    #[test]
+    fn content_length_is_dropped_for_redirects_205_and_connect_2xx() {
+        let status = |code| StatusCode::from_u16(code).unwrap();
+        for code in [301, 302, 303, 307, 308, 205] {
+            assert!(drops_content_length(&Method::GET, status(code)), "{code}");
+        }
+        assert!(drops_content_length(&Method::CONNECT, status(200)));
+        assert!(!drops_content_length(&Method::CONNECT, status(500)));
+        assert!(!drops_content_length(&Method::HEAD, status(200)));
+        assert!(!drops_content_length(&Method::GET, status(204)));
+        assert!(!drops_content_length(&Method::GET, status(304)));
     }
 }

@@ -76,7 +76,9 @@ Configuration (`docs/configuration.md`): `MEGABASE_FUNCTIONS_DIR` plays
    status is 101, 204, 205, 304, 301, 302, 303, 307 or 308, or the method
    is `HEAD` or `CONNECT` (`vendor/edge-runtime/ext/workers/user_workers.js:28`–`:35`,
    `:107`–`:128`). Status and headers still pass; for a redirect or 205
-   the function's `Content-Length` is replaced by the empty body's `0`.
+   the function's `Content-Length` is replaced by the empty body's `0`; a
+   2xx answer to `CONNECT` carries no `Content-Length` at all (RFC 9110
+   §9.3.6).
 5. **Environment** of the worker: Megabase's environment (upstream passes
    `Deno.env.toObject()`), plus `SUPABASE_URL`, `SUPABASE_ANON_KEY`,
    `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_DB_URL` when not already set
