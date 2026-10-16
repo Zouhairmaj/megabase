@@ -81,7 +81,9 @@ fn mount_dir(ctx: &mut Ctx, repo: &Repo, dir: &str, prefix: &str, group: &str) -
                 variants.push(value.1.clone());
             }
         }
-        for route in ts_routes(&text, &["fastify", "s3Router"]) {
+        // `f` is the child instance routes such as `deleteBucket.ts` register
+        // on inside `fastify.register(async (f) => { ... })`.
+        for route in ts_routes(&text, &["fastify", "f", "s3Router"]) {
             for variant in &variants {
                 let path = normalize_path(&join_paths(&[prefix, sub, variant, &route.path]));
                 let path = if route.path.ends_with('/') && route.path.len() > 1 {

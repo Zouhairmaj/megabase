@@ -1,9 +1,10 @@
 //! Supabase Storage-compatible API (`/storage/v1`) for Megabase.
 //!
 //! Target behavior: Supabase Storage, vendor/storage (Apache-2.0), pinned in `vendor/`.
-//! The bucket routes (list, get, create, update, and the lifecycle get and
-//! put) are served for the service role (`specs/storage/buckets.md`,
-//! `specs/storage/bucket.md`), and `GET /health` for any valid JWT
+//! The bucket routes (list, get, create, update, delete, empty, and the
+//! lifecycle get, put and delete) are served for the service role
+//! (`specs/storage/buckets.md`, `specs/storage/bucket.md`,
+//! `specs/storage/bucket-delete.md`), and `GET /health` for any valid JWT
 //! (`specs/storage/health.md`). A missing or invalid JWT, other roles on the
 //! bucket routes, and every other route return the structured
 //! `MEGABASE_NOT_IMPLEMENTED` 501. The `DELETE /cdn` purge routes answer as
@@ -18,9 +19,9 @@
 //! The `GET /render/image` routes answer their signature, key, bucket and
 //! object errors; the transformation itself is a 501
 //! (`specs/storage/render.md`). The `/object` upload, download, info, sign,
-//! remove and list routes run under the request's RLS scope and keep bytes
-//! under `FILE_STORAGE_BACKEND_PATH` (`specs/storage/object.md`,
-//! `specs/storage/object-list.md`).
+//! remove, move, copy and list routes run under the request's RLS scope and
+//! keep bytes under `FILE_STORAGE_BACKEND_PATH` (`specs/storage/object.md`,
+//! `specs/storage/object-transfer.md`, `specs/storage/object-list.md`).
 
 // Ported from supabase/storage src/http/routes/bucket/getAllBuckets.ts,
 // src/http/routes/bucket/getBucket.ts, src/http/routes/health/healthcheck.ts,
@@ -111,11 +112,19 @@ pub fn router_with_state(state: StorageState) -> Router {
         )
         .route(
             "/storage/v1/bucket/:bucket_id",
-            get(get_bucket).put(bucket::update_bucket),
+            get(get_bucket)
+                .put(bucket::update_bucket)
+                .delete(bucket::delete_bucket),
+        )
+        .route(
+            "/storage/v1/bucket/:bucket_id/empty",
+            post(bucket::empty_bucket),
         )
         .route(
             "/storage/v1/bucket/:bucket_id/lifecycle",
-            get(bucket::get_bucket_lifecycle).put(bucket::put_bucket_lifecycle),
+            get(bucket::get_bucket_lifecycle)
+                .put(bucket::put_bucket_lifecycle)
+                .delete(bucket::delete_bucket_lifecycle),
         )
         .route("/storage/v1/health", get(healthcheck))
         .route("/storage/v1/health/", get(healthcheck))
@@ -161,6 +170,8 @@ pub fn router_with_state(state: StorageState) -> Router {
             "/storage/v1/object/sign/:bucket_name/*object_name",
             get(object::get_signed_object).post(object::sign_object),
         )
+        .route("/storage/v1/object/move", post(object::move_object))
+        .route("/storage/v1/object/copy", post(object::copy_object))
         .route(
             "/storage/v1/object/list/:bucket_name",
             post(object::list_objects),
@@ -493,6 +504,28 @@ impl StorageError {
         }
     }
 
+    /// `ERRORS.BucketNotEmpty`. It sets no `error`, so the global error
+    /// handler repeats the code there.
+    fn bucket_not_empty() -> Self {
+        Self {
+            status_code: "409",
+            code: "ResourceNotEmpty",
+            error: "ResourceNotEmpty",
+            message: Cow::Borrowed("The bucket you tried to delete is not empty"),
+        }
+    }
+
+    /// `ERRORS.UnableToEmptyBucket(bucket, message)`. It sets no `error`, so
+    /// the global error handler repeats the code there.
+    fn unable_to_empty_bucket(message: &'static str) -> Self {
+        Self {
+            status_code: "409",
+            code: "InvalidRequest",
+            error: "InvalidRequest",
+            message: Cow::Borrowed(message),
+        }
+    }
+
     /// `ERRORS.EntityTooLarge()` with its default entity and limit.
     fn entity_too_large() -> Self {
         Self {
@@ -635,8 +668,11 @@ mod tests {
             for (method, path) in [
                 (Method::POST, "/storage/v1/bucket"),
                 (Method::PUT, "/storage/v1/bucket/avatars"),
+                (Method::DELETE, "/storage/v1/bucket/avatars"),
+                (Method::POST, "/storage/v1/bucket/avatars/empty"),
                 (Method::GET, "/storage/v1/bucket/avatars/lifecycle"),
                 (Method::PUT, "/storage/v1/bucket/avatars/lifecycle"),
+                (Method::DELETE, "/storage/v1/bucket/avatars/lifecycle"),
             ] {
                 assert_eq!(
                     status_of(method, path, bearer.as_deref()).await,
@@ -733,6 +769,126 @@ mod tests {
             let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
             assert_eq!(&body[..], br#"{"healthy":false}"#);
         }
+    }
+
+    /// A pool whose queries fail: nothing listens on port 1.
+    fn unreachable_state() -> StorageState {
+        let pool = sqlx::postgres::PgPoolOptions::new()
+            .acquire_timeout(std::time::Duration::from_millis(500))
+            .connect_lazy("postgres://postgres@127.0.0.1:1/postgres")
+            .unwrap();
+        StorageState::new(Some(pool), Some(Hs256::new(SECRET).unwrap()))
+    }
+
+    async fn service_request(
+        state: StorageState,
+        method: Method,
+        path: &str,
+        content_type: Option<&str>,
+        body: &'static str,
+    ) -> (StatusCode, Value) {
+        let mut request = axum::http::Request::builder()
+            .method(method)
+            .uri(path)
+            .header(
+                header::AUTHORIZATION,
+                format!("Bearer {}", token("service_role")),
+            );
+        if let Some(content_type) = content_type {
+            request = request.header(header::CONTENT_TYPE, content_type);
+        }
+        let response = router_with_state(state)
+            .oneshot(request.body(Body::from(body)).unwrap())
+            .await
+            .unwrap();
+        let status = response.status();
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        (status, serde_json::from_slice(&body).unwrap())
+    }
+
+    #[tokio::test]
+    async fn delete_lifecycle_is_disabled_for_the_service_role() {
+        for (content_type, body) in [
+            (None, ""),
+            (Some("application/json"), ""),
+            (Some("application/json"), "{}"),
+        ] {
+            let (status, body) = service_request(
+                unreachable_state(),
+                Method::DELETE,
+                "/storage/v1/bucket/avatars/lifecycle",
+                content_type,
+                body,
+            )
+            .await;
+            assert_eq!(status, StatusCode::BAD_REQUEST);
+            assert_eq!(
+                body,
+                json!({
+                    "statusCode": "409",
+                    "code": "FeatureNotEnabled",
+                    "error": "FeatureNotEnabled",
+                    "message": "The feature object lifecycles is not enabled for this resource",
+                })
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn bucket_delete_and_empty_bodies_must_be_empty_or_json() {
+        let routes = [
+            (Method::DELETE, "/storage/v1/bucket/avatars"),
+            (Method::POST, "/storage/v1/bucket/avatars/empty"),
+            (Method::DELETE, "/storage/v1/bucket/avatars/lifecycle"),
+        ];
+        for (method, path) in routes {
+            for (content_type, body) in [
+                (None, "x"),
+                (Some("text/plain"), "x"),
+                (Some("application/json"), "{"),
+            ] {
+                let state = unreachable_state().with_file_root(Some(std::path::Path::new("/x")));
+                let (status, body) =
+                    service_request(state, method.clone(), path, content_type, body).await;
+                assert_eq!(status, StatusCode::NOT_IMPLEMENTED, "{method} {path}");
+                assert_eq!(body["code"], "MEGABASE_NOT_IMPLEMENTED");
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn emptying_a_bucket_needs_a_storage_root() {
+        let (status, _) = service_request(
+            unreachable_state(),
+            Method::POST,
+            "/storage/v1/bucket/avatars/empty",
+            Some("application/json"),
+            "{}",
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
+    }
+
+    #[test]
+    fn bucket_errors_render_storage_bodies() {
+        assert_eq!(
+            StorageError::bucket_not_empty().body(),
+            json!({
+                "statusCode": "409",
+                "code": "ResourceNotEmpty",
+                "error": "ResourceNotEmpty",
+                "message": "The bucket you tried to delete is not empty",
+            })
+        );
+        assert_eq!(
+            StorageError::unable_to_empty_bucket("too many").body(),
+            json!({
+                "statusCode": "409",
+                "code": "InvalidRequest",
+                "error": "InvalidRequest",
+                "message": "too many",
+            })
+        );
     }
 
     #[test]
