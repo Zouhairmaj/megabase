@@ -1,7 +1,8 @@
 # Auth: OAuth providers (issue 49)
 
 Status: partial. The authorize redirect is served for azure, bitbucket,
-discord, facebook, figma, fly, github and gitlab. The provider code exchange
+discord, facebook, figma, fly, github, gitlab, kakao, keycloak, linkedin,
+notion, slack, slack_oidc, snapchat and spotify. The provider code exchange
 on `/callback` stays 501 for every provider.
 Unit ids (`coverage/units.json`): `auth:provider:<name>` for the 25 built-in
 providers and `auth:provider:custom:{identifier}`.
@@ -74,14 +75,29 @@ defaults; empty parts stay and become extra spaces in `scope`.
 | fly | `chooseHost(url, api.fly.io)/oauth/authorize` | `read` | yes |
 | github | `chooseHost(url, github.com)/login/oauth/authorize` | `user:email` | yes |
 | gitlab | `chooseHost(url, gitlab.com)/oauth/authorize` | `read_user` | yes |
+| kakao | `chooseHost(url, kauth.kakao.com)/oauth/authorize` | `account_email profile_image profile_nickname` | yes |
+| keycloak | `URL` (one trailing `/` removed) + `/protocol/openid-connect/auth` | `profile email` | yes |
+| linkedin | `chooseHost(url, api.linkedin.com)/oauth/v2/authorization` | `r_emailaddress r_liteprofile` | yes |
+| notion | `chooseHost(url, api.notion.com)/v1/oauth/authorize` | none (no `scope` parameter) | no |
+| slack | `chooseHost(url, slack.com)/oauth/authorize` | `profile email openid` | yes |
+| slack_oidc | `chooseHost(url, slack.com)/openid/connect/authorize` | `profile email openid` | yes |
+| snapchat | `chooseHost(url, accounts.snapchat.com)/accounts/oauth2/auth` | `https://auth.snapchat.com/oauth2/api/user.external_id`, `…user.display_name`, `…user.bitmoji.avatar` | yes |
+| spotify | `chooseHost(url, accounts.spotify.com)/authorize` | `user-read-email` | yes |
+
+Keycloak has no default host: after `ValidateOAuth` passes, an empty `URL`
+is rejected with `unable to find URL for the Keycloak provider`
+(`vendor/auth/internal/api/provider/keycloak.go:64-66`), answered like a
+`ValidateOAuth` failure.
 
 None of them requires PKCE towards the provider, so no
 `auth.oauth_client_states` row is written.
 
 Not ported (501 after `ValidateOAuth` passes): apple, google, linkedin_oidc
-and vercel_marketplace (their constructor fetches an OIDC discovery
-document), twitter (OAuth 1.0 request token), every other built-in
-provider (follow-up PRs of issue 49), and `custom:` providers.
+and vercel_marketplace (their constructor calls `OIDCProviderCache.GetProvider`,
+which fetches the issuer's OIDC discovery document over HTTPS, for example
+`vendor/auth/internal/api/provider/google.go:58` and
+`linkedin_oidc.go:41`), twitter (OAuth 1.0 request token), every other
+built-in provider (follow-up PRs of issue 49), and `custom:` providers.
 
 ## `GET /authorize`
 
@@ -115,7 +131,8 @@ Query parsing follows `url.ParseQuery`. In order:
 ## Tests
 
 `crates/megabase-auth/src/provider.rs` (validation order, URL encoding,
-`chooseHost`, Bitbucket ignoring `scopes`) and
+`chooseHost`, Bitbucket and Notion ignoring `scopes`, the Keycloak `URL`
+check, the second batch of authorize URLs and scopes) and
 `crates/megabase-auth/src/external.rs` (flow state row, PKCE, reserved
 parameters, 501 paths). The judge stack enables no provider, so its cases
 can only check the rejection paths, which `auth.toml` already covers.
