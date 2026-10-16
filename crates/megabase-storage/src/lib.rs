@@ -9,7 +9,7 @@
 //! `MEGABASE_NOT_IMPLEMENTED` 501. The `DELETE /cdn` purge routes answer as
 //! storage-api does without a CDN purge endpoint (`specs/storage/cdn.md`),
 //! and the `/iceberg` routes as it does without the Iceberg catalog
-//! (`specs/storage/iceberg.md`). The `GET` and `DELETE` `/s3` routes answer
+//! (`specs/storage/iceberg.md`). The `GET`, `HEAD`, `DELETE` and `POST` `/s3` routes answer
 //! requests without an AWS Signature V4; signed ones are a 501
 //! (`specs/storage/s3.md`).
 //! The `GET /render/image` routes answer their signature, key, bucket and

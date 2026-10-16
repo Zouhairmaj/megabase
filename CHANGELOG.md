@@ -4,6 +4,19 @@ All notable changes to Megabase are documented in this file.
 The format is produced by [release-please](https://github.com/googleapis/release-please).
 Sections: Features, Bug Fixes, Performance, Conformance/judge, Documentation.
 
+## [0.1.42](https://github.com/Zouhairmaj/megabase/compare/v0.1.41...v0.1.42) (2026-10-16)
+
+
+### Features
+
+* **storage:** answer the iceberg routes as the not-enabled catalog does ([#442](https://github.com/Zouhairmaj/megabase/issues/442)) ([46fab6a](https://github.com/Zouhairmaj/megabase/commit/46fab6a948e7e485dbd06425655116d5676c6630))
+* **storage:** answer unsigned s3 get and delete requests with access denied ([#444](https://github.com/Zouhairmaj/megabase/issues/444)) ([32eef8b](https://github.com/Zouhairmaj/megabase/commit/32eef8b840388f720db87120e10fff7f008a553d))
+
+
+### Bug Fixes
+
+* **ci:** prepare megabase database in lockfile judge ([#429](https://github.com/Zouhairmaj/megabase/issues/429)) ([002fa7b](https://github.com/Zouhairmaj/megabase/commit/002fa7b1288b05a052f6a3197f44abee5cc032e2))
+
 ## [0.1.41](https://github.com/Zouhairmaj/megabase/compare/v0.1.40...v0.1.41) (2026-10-16)
 
 
