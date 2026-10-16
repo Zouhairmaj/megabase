@@ -73,6 +73,7 @@ answers as storage-api does with both unset. The database is not used.
 ## Out of scope (501)
 
 A JSON body that is empty, malformed, over the limit, or has a `__proto__`
-or `constructor` key: the root error handler answers it, and its body is not
-ported. The enabled behavior of every route (`VECTOR_ENABLED=true`) is not
+key at any depth, or a `constructor` object with a `prototype` key
+(secure-json-parse): the root error handler answers it, and its body is not
+ported. Those words elsewhere (string values, other keys) are not poison. The enabled behavior of every route (`VECTOR_ENABLED=true`) is not
 ported.

@@ -27,7 +27,7 @@ const KONG_PREFIX: &str = "/storage/v1";
 ///
 /// Fastify parses a body before the handler runs. Storage-api's catch-all
 /// parser accepts any media type except `application/json`, whose parser
-/// rejects an empty or malformed body (and `__proto__` / `constructor`
+/// rejects an empty or malformed body (and `__proto__` / `constructor.prototype`
 /// keys) through the root error handler. That path is not ported: such a
 /// request is a 501.
 // megabase:unit storage:route:POST /storage/v1/vector/CreateIndex
@@ -80,10 +80,27 @@ fn parses_as_json(body: &[u8]) -> bool {
     let Ok(text) = std::str::from_utf8(body) else {
         return false;
     };
-    !text.trim().is_empty()
-        && !text.contains("__proto__")
-        && !text.contains("constructor")
-        && serde_json::from_str::<Value>(text).is_ok()
+    if text.trim().is_empty() {
+        return false;
+    }
+    serde_json::from_str::<Value>(text).is_ok_and(|value| !has_poisoned_key(&value))
+}
+
+/// secure-json-parse with `error` for both poisoning options: a `__proto__`
+/// key, or a `constructor` object holding a `prototype` key, at any depth.
+fn has_poisoned_key(value: &Value) -> bool {
+    match value {
+        Value::Object(map) => map.iter().any(|(key, child)| {
+            key == "__proto__"
+                || (key == "constructor"
+                    && child
+                        .as_object()
+                        .is_some_and(|inner| inner.contains_key("prototype")))
+                || has_poisoned_key(child)
+        }),
+        Value::Array(items) => items.iter().any(has_poisoned_key),
+        _ => false,
+    }
 }
 
 /// `setRestNotFoundHandler` body, serialized with `errorSchema`: every field
@@ -211,7 +228,8 @@ mod tests {
             "{",
             "   ",
             r#"{"__proto__":{}}"#,
-            r#"{"constructor":1}"#,
+            r#"{"constructor":{"prototype":{}}}"#,
+            r#"{"a":[{"b":{"__proto__":1}}]}"#,
         ] {
             let (status, _, _) =
                 send("POST", "/storage/v1/vector/GetIndex", &json_type(), body).await;
@@ -220,5 +238,18 @@ mod tests {
         let ct = [(header::CONTENT_TYPE, "application/json; charset=utf-8")];
         let (status, _, _) = send("POST", "/storage/v1/vector/GetIndex", &ct, "{}").await;
         assert_eq!(status, StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn poison_words_outside_poisoned_keys_are_not_found() {
+        for body in [
+            r#"{"description":"constructor __proto__"}"#,
+            r#"{"constructor":1}"#,
+            r#"{"my__proto__":true}"#,
+        ] {
+            let (status, _, _) =
+                send("POST", "/storage/v1/vector/GetIndex", &json_type(), body).await;
+            assert_eq!(status, StatusCode::NOT_FOUND, "{body:?}");
+        }
     }
 }

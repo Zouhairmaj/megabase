@@ -3,19 +3,54 @@
 
 // Ported from supabase/storage src/http/routes/s3/index.ts,
 // src/http/routes/s3/error-handler.ts, src/http/plugins/signature-v4.ts,
-// src/http/plugins/xml.ts and src/internal/errors/codes.ts (Apache-2.0),
-// pin v1.80.2.
+// src/storage/protocols/s3/signature-v4.ts, src/http/plugins/xml.ts and
+// src/internal/errors/codes.ts (Apache-2.0), pin v1.80.2.
 
 use axum::{
+    body::{to_bytes, Body},
     extract::OriginalUri,
     http::{header, HeaderMap, Method, StatusCode},
     response::{IntoResponse, Response},
 };
 
-use super::not_implemented;
+use super::{multipart, not_implemented};
 
 /// The Kong route prefix storage-api never sees (`strip_path: true`).
 const KONG_PREFIX: &str = "/storage/v1";
+
+/// The `fields` limit the S3 routes give `@fastify/multipart`.
+const MAX_FORM_FIELDS: usize = 20;
+
+/// busboy's default `fieldSize`; a longer value is truncated.
+const MAX_FIELD_BYTES: usize = 1024 * 1024;
+
+/// The largest POST policy body Megabase reads; a larger one is a 501.
+const MAX_FORM_BYTES: usize = 2 * 1024 * 1024;
+
+/// The form fields `parseMultipartSignature` requires as strings.
+const POLICY_SIGNATURE_FIELDS: [&str; 4] = [
+    "X-Amz-Credential",
+    "X-Amz-Signature",
+    "Policy",
+    "X-Amz-Date",
+];
+
+/// `Object.prototype` keys, which `@fastify/multipart` rejects as field
+/// names (`PrototypeViolationError`).
+const PROTOTYPE_KEYS: [&str; 12] = [
+    "__proto__",
+    "constructor",
+    "hasOwnProperty",
+    "isPrototypeOf",
+    "propertyIsEnumerable",
+    "toLocaleString",
+    "toString",
+    "valueOf",
+    "__defineGetter__",
+    "__defineSetter__",
+    "__lookupGetter__",
+    "__lookupSetter__",
+];
 
 /// `S3_XML_NAMESPACE` in `routes/s3/index.ts`.
 const S3_XML_NAMESPACE: &str = "http://s3.amazonaws.com/doc/2006-03-01/";
@@ -26,10 +61,13 @@ const XML_DECLARATION: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone
 /// find-my-way's default `maxParamLength`.
 const MAX_PARAM_LENGTH: usize = 100;
 
-/// `GET` and `DELETE` on `/s3`, `/s3/:Bucket` and `/s3/:Bucket/*`. The
-/// `signatureV4` `preHandler` runs before any S3 command is selected, so a
-/// request without a signature gets `AccessDenied('Missing signature')`
-/// whatever its query or headers would have matched.
+/// `GET` on `/s3`, and `GET`, `DELETE`, `HEAD` and `POST` on `/s3/:Bucket`
+/// and `/s3/:Bucket/*`. The `signatureV4` `preHandler` runs before any S3
+/// command is selected, so a request without a signature gets
+/// `AccessDenied('Missing signature')` whatever its query or headers would
+/// have matched. A `multipart/form-data` `POST` is read as a POST policy
+/// form first; one without the policy signature fields gets
+/// `InvalidSignature('Invalid signature format')`.
 ///
 /// Signed requests, Fastify body parsing, `Accept` negotiation and the
 /// router's not-found and bad-URL answers are not ported and stay 501.
@@ -43,25 +81,55 @@ const MAX_PARAM_LENGTH: usize = 100;
 // megabase:unit storage:route:GET /storage/v1/s3/{Bucket}/{*}?tagging
 // megabase:unit storage:route:GET /storage/v1/s3/{Bucket}/{*}?uploadId
 // megabase:unit storage:route:GET /storage/v1/s3/{Bucket}?lifecycle
+// megabase:unit storage:route:GET /storage/v1/s3/{Bucket}?list-type=2
+// megabase:unit storage:route:GET /storage/v1/s3/{Bucket}?location
+// megabase:unit storage:route:GET /storage/v1/s3/{Bucket}?uploads
+// megabase:unit storage:route:GET /storage/v1/s3/{Bucket}?versioning
+// megabase:unit storage:route:HEAD /storage/v1/s3/{Bucket}
+// megabase:unit storage:route:HEAD /storage/v1/s3/{Bucket}/{*}
+// megabase:unit storage:route:POST /storage/v1/s3/{Bucket}/{*}?uploadId
+// megabase:unit storage:route:POST /storage/v1/s3/{Bucket}/{*}?uploads
+// megabase:unit storage:route:POST /storage/v1/s3/{Bucket}?delete
+// megabase:unit storage:route:POST /storage/v1/s3/{Bucket}|content-type=multipart/form-data
 pub(super) async fn unsigned(
     method: Method,
     OriginalUri(uri): OriginalUri,
     headers: HeaderMap,
+    body: Body,
 ) -> Response {
-    let served = matches!(method, Method::GET | Method::DELETE)
-        && !(method == Method::DELETE && has_framed_content_type(&headers))
-        && routable(uri.path())
-        && !is_signed(&headers, uri.query())
-        && accepts_xml_fast_path(&headers);
-    if !served {
+    let Some(target) = target(uri.path()) else {
+        return not_implemented(&method, &uri);
+    };
+    if is_signed(&headers, uri.query()) || !accepts_xml_fast_path(&headers) {
         return not_implemented(&method, &uri);
     }
-    s3_error(
-        StatusCode::FORBIDDEN,
-        &resource(uri.path()),
-        "AccessDenied",
-        "Missing signature",
-    )
+    let missing_signature = || {
+        s3_error(
+            &method,
+            StatusCode::FORBIDDEN,
+            &resource(uri.path()),
+            "AccessDenied",
+            "Missing signature",
+        )
+    };
+    match (&method, target) {
+        (&Method::GET, _) | (&Method::HEAD, Target::Bucket) => missing_signature(),
+        (&Method::DELETE, Target::Bucket) if !has_framed_content_type(&headers) => {
+            missing_signature()
+        }
+        (&Method::POST, Target::Bucket) if !has_body(&headers) => missing_signature(),
+        (&Method::POST, Target::Bucket) => match unsigned_post_policy(&headers, body).await {
+            Some(()) => s3_error(
+                &method,
+                StatusCode::BAD_REQUEST,
+                &resource(uri.path()),
+                "InvalidSignature",
+                "Invalid signature format",
+            ),
+            None => not_implemented(&method, &uri),
+        },
+        _ => not_implemented(&method, &uri),
+    }
 }
 
 /// `DELETE` bodies are parsed only when a `Content-Type` comes with a
@@ -72,28 +140,93 @@ fn has_framed_content_type(headers: &HeaderMap) -> bool {
             || headers.contains_key(header::CONTENT_LENGTH))
 }
 
+/// `POST` bodies are parsed unless there is no `Content-Type`, no
+/// `Transfer-Encoding`, and `Content-Length` is absent or `0` (fastify
+/// `handleRequest`).
+fn has_body(headers: &HeaderMap) -> bool {
+    headers.contains_key(header::CONTENT_TYPE)
+        || headers.contains_key(header::TRANSFER_ENCODING)
+        || headers
+            .get(header::CONTENT_LENGTH)
+            .is_some_and(|length| length.as_bytes() != b"0")
+}
+
+/// `Some` when `extractSignature` would read the body as a POST policy
+/// form and `parseMultipartSignature` would find a policy signature field
+/// missing. `None` for anything else: another content type, a form busboy
+/// or `@fastify/multipart` would reject or read differently, or a form
+/// with every signature field (a signed request).
+async fn unsigned_post_policy(headers: &HeaderMap, body: Body) -> Option<()> {
+    let content_type = headers.get(header::CONTENT_TYPE)?.to_str().ok()?;
+    // `@fastify/multipart` registers its parser for this exact media type.
+    if content_type.split(';').next()?.trim() != "multipart/form-data" {
+        return None;
+    }
+    let body = to_bytes(body, MAX_FORM_BYTES).await.ok()?;
+    let form = multipart::read_form(content_type, &body)?;
+    // busboy keeps adding the parts after the file to `data.fields` while
+    // `extractSignature` reads them, so only a form that ends with its file
+    // part reads the same way every time.
+    if !form.closed_after_file || form.fields.len() > MAX_FORM_FIELDS {
+        return None;
+    }
+    let mut names: Vec<&str> = form.fields.iter().map(|(name, _)| name.as_str()).collect();
+    names.extend(form.file_name());
+    // busboy decodes non-ASCII names by charset; that is not ported.
+    if names
+        .iter()
+        .any(|name| !name.is_ascii() || PROTOTYPE_KEYS.contains(name))
+        || form
+            .fields
+            .iter()
+            .any(|(_, value)| value.len() > MAX_FIELD_BYTES)
+    {
+        return None;
+    }
+    let count = names.len();
+    names.sort_unstable();
+    names.dedup();
+    // A repeated name becomes an array in `data.fields`.
+    if names.len() != count {
+        return None;
+    }
+    // Without a file part `req.file()` resolves to `undefined` and no field
+    // reaches the `FormData`. A file part not named `file` is appended as
+    // the string `undefined`.
+    let Some(file) = form.file_name() else {
+        return Some(());
+    };
+    let signed = POLICY_SIGNATURE_FIELDS
+        .iter()
+        .all(|field| *field == file || form.fields.iter().any(|(name, _)| name == field));
+    (!signed).then_some(())
+}
+
+/// What an S3 path addresses once find-my-way matches it to a route.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Target {
+    /// `/s3` or `/s3/`: only `GET` has a route.
+    Service,
+    /// `/s3/:Bucket`, `/s3/:Bucket/` or `/s3/:Bucket/*`.
+    Bucket,
+}
+
 /// Paths find-my-way matches to an S3 route without its not-found or
 /// bad-URL answer: `/s3`, `/s3/`, or a non-empty bucket of at most
 /// `maxParamLength` characters followed by an optional key; the bucket and
 /// the key must have percent-encoding that decodes to UTF-8.
-fn routable(path: &str) -> bool {
-    let Some(rest) = path
-        .strip_prefix(KONG_PREFIX)
-        .and_then(|p| p.strip_prefix("/s3"))
-    else {
-        return false;
-    };
+fn target(path: &str) -> Option<Target> {
+    let rest = path.strip_prefix(KONG_PREFIX)?.strip_prefix("/s3")?;
     if rest.is_empty() || rest == "/" {
-        return true;
+        return Some(Target::Service);
     }
-    let Some(rest) = rest.strip_prefix('/') else {
-        return false;
-    };
+    let rest = rest.strip_prefix('/')?;
     let (bucket, key) = rest.split_once('/').unwrap_or((rest, ""));
-    !bucket.is_empty()
+    (!bucket.is_empty()
         && bucket.len() <= MAX_PARAM_LENGTH
         && decodes_to_utf8(bucket)
-        && decodes_to_utf8(key)
+        && decodes_to_utf8(key))
+    .then_some(Target::Bucket)
 }
 
 fn decodes_to_utf8(raw: &str) -> bool {
@@ -162,8 +295,16 @@ fn resource(path: &str) -> String {
         .join("/")
 }
 
-/// `formatS3ErrorResponse` serialized by the `xmlParser` plugin.
-fn s3_error(status: StatusCode, resource: &str, code: &str, message: &str) -> Response {
+/// `formatS3ErrorResponse` serialized by the `xmlParser` plugin. A `HEAD`
+/// response keeps the `Content-Length` of that body and sends none (Node's
+/// `http` drops it).
+fn s3_error(
+    method: &Method,
+    status: StatusCode,
+    resource: &str,
+    code: &str,
+    message: &str,
+) -> Response {
     let resource = if resource.is_empty() {
         "<Resource/>".to_owned()
     } else {
@@ -174,12 +315,12 @@ fn s3_error(status: StatusCode, resource: &str, code: &str, message: &str) -> Re
         escape_text(code),
         escape_text(message),
     );
-    (
-        status,
-        [(header::CONTENT_TYPE, "application/xml; charset=utf-8")],
-        body,
-    )
-        .into_response()
+    let content_type = (header::CONTENT_TYPE, "application/xml; charset=utf-8");
+    if method == Method::HEAD {
+        let length = (header::CONTENT_LENGTH, body.len().to_string());
+        return (status, [content_type], [length], ()).into_response();
+    }
+    (status, [content_type], body).into_response()
 }
 
 /// `escapeXmlValue` for text nodes: `\t` and `\n` stay as they are.
@@ -214,12 +355,21 @@ mod tests {
         path: &str,
         extra: &[(header::HeaderName, &str)],
     ) -> (StatusCode, HeaderMap, String) {
+        send_body(method, path, extra, String::new()).await
+    }
+
+    async fn send_body(
+        method: &str,
+        path: &str,
+        extra: &[(header::HeaderName, &str)],
+        body: String,
+    ) -> (StatusCode, HeaderMap, String) {
         let mut request = axum::http::Request::builder().method(method).uri(path);
         for (name, value) in extra {
             request = request.header(name, *value);
         }
         let response = router_with_state(StorageState::default())
-            .oneshot(request.body(Body::empty()).unwrap())
+            .oneshot(request.body(Body::from(body)).unwrap())
             .await
             .unwrap();
         let status = response.status();
@@ -240,12 +390,24 @@ mod tests {
         )
     }
 
-    const ROUTES: [(&str, &str, &str); 13] = [
+    const ROUTES: [(&str, &str, &str); 25] = [
         ("GET", "/s3", ""),
         ("GET", "/s3/", ""),
         ("GET", "/s3/photos", "photos"),
         ("GET", "/s3/photos/", "photos"),
         ("GET", "/s3/photos?lifecycle", "photos"),
+        ("GET", "/s3/photos?list-type=2&prefix=a%2F", "photos"),
+        ("GET", "/s3/photos?location", "photos"),
+        ("GET", "/s3/photos/?uploads", "photos"),
+        ("GET", "/s3/photos?versioning", "photos"),
+        ("POST", "/s3/photos?delete", "photos"),
+        ("POST", "/s3/photos/", "photos"),
+        ("POST", "/s3/photos/a.png?uploads", "photos/a.png"),
+        ("POST", "/s3/photos/a.png?uploadId=u1", "photos/a.png"),
+        ("POST", "/s3/photos/a/b.png", "photos/a/b.png"),
+        ("HEAD", "/s3/photos", "photos"),
+        ("HEAD", "/s3/photos/", "photos"),
+        ("HEAD", "/s3/photos/a/b.png", "photos/a/b.png"),
         ("GET", "/s3/photos/a/b.png", "photos/a/b.png"),
         ("GET", "/s3/photos/a.png?tagging", "photos/a.png"),
         ("GET", "/s3/photos/a.png?uploadId=u1", "photos/a.png"),
@@ -265,8 +427,149 @@ mod tests {
                 headers[header::CONTENT_TYPE],
                 "application/xml; charset=utf-8"
             );
-            assert_eq!(body, missing_signature(resource), "{method} {path}");
+            let expected = missing_signature(resource);
+            if method == "HEAD" {
+                assert_eq!(body, "", "{path}");
+                assert_eq!(
+                    headers[header::CONTENT_LENGTH],
+                    expected.len().to_string(),
+                    "{path}"
+                );
+            } else {
+                assert_eq!(body, expected, "{method} {path}");
+            }
         }
+    }
+
+    #[tokio::test]
+    async fn bodiless_posts_are_access_denied() {
+        let (status, _, _) = send(
+            "POST",
+            "/storage/v1/s3/photos?delete",
+            &[(header::CONTENT_LENGTH, "0")],
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+    }
+
+    const FORM_TYPE: &str = "multipart/form-data; boundary=----b";
+
+    fn form(fields: &[&str], file: Option<&str>) -> String {
+        let mut body = String::new();
+        for name in fields {
+            body.push_str(&format!(
+                "------b\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\nv\r\n"
+            ));
+        }
+        if let Some(name) = file {
+            body.push_str(&format!(
+                "------b\r\nContent-Disposition: form-data; name=\"{name}\"; filename=\"a.txt\"\r\n\
+                 Content-Type: text/plain\r\n\r\nhello\r\n"
+            ));
+        }
+        body.push_str("------b--\r\n");
+        body
+    }
+
+    async fn post_form(path: &str, body: String) -> (StatusCode, String) {
+        let (status, _, body) = send_body(
+            "POST",
+            &format!("{KONG_PREFIX}{path}"),
+            &[(header::CONTENT_TYPE, FORM_TYPE)],
+            body,
+        )
+        .await;
+        (status, body)
+    }
+
+    #[tokio::test]
+    async fn unsigned_post_policies_are_invalid_signatures() {
+        let invalid = format!(
+            "{XML_DECLARATION}<Error xmlns=\"{S3_XML_NAMESPACE}\"><Resource>photos</Resource>\
+             <Code>InvalidSignature</Code><Message>Invalid signature format</Message></Error>"
+        );
+        for body in [
+            form(&["key", "Content-Type"], Some("file")),
+            form(&["key"], None),
+            form(
+                &["X-Amz-Credential", "X-Amz-Signature", "Policy"],
+                Some("file"),
+            ),
+            // Without a file part no field reaches the `FormData`.
+            form(
+                &[
+                    "X-Amz-Credential",
+                    "X-Amz-Signature",
+                    "Policy",
+                    "X-Amz-Date",
+                ],
+                None,
+            ),
+        ] {
+            assert_eq!(
+                post_form("/s3/photos", body.clone()).await,
+                (StatusCode::BAD_REQUEST, invalid.clone()),
+                "{body}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn unported_post_bodies_stay_501() {
+        let many: Vec<String> = (0..=MAX_FORM_FIELDS).map(|i| format!("f{i}")).collect();
+        let many: Vec<&str> = many.iter().map(String::as_str).collect();
+        let mut trailing = form(&["key"], Some("file"));
+        trailing.truncate(trailing.len() - "------b--\r\n".len());
+        trailing.push_str(
+            "------b\r\nContent-Disposition: form-data; name=\"x\"\r\n\r\nv\r\n------b--\r\n",
+        );
+        for body in [
+            // Every signature field: a signed request.
+            form(
+                &[
+                    "X-Amz-Credential",
+                    "X-Amz-Signature",
+                    "Policy",
+                    "X-Amz-Date",
+                ],
+                Some("file"),
+            ),
+            // The file part is appended as the string `undefined`.
+            form(
+                &["X-Amz-Credential", "X-Amz-Signature", "X-Amz-Date"],
+                Some("Policy"),
+            ),
+            form(&many, Some("file")),
+            form(&["key", "key"], Some("file")),
+            form(&["key"], Some("key")),
+            form(&["__proto__"], Some("file")),
+            trailing,
+            "garbage".to_owned(),
+            String::new(),
+        ] {
+            assert_eq!(
+                post_form("/s3/photos", body.clone()).await.0,
+                StatusCode::NOT_IMPLEMENTED,
+                "{body}"
+            );
+        }
+        for content_type in ["application/xml", "Multipart/Form-Data; boundary=----b"] {
+            let (status, _, _) = send_body(
+                "POST",
+                "/storage/v1/s3/photos?delete",
+                &[(header::CONTENT_TYPE, content_type)],
+                form(&["key"], Some("file")),
+            )
+            .await;
+            assert_eq!(status, StatusCode::NOT_IMPLEMENTED, "{content_type}");
+        }
+        let (status, _, _) = send(
+            "POST",
+            "/storage/v1/s3/photos?delete",
+            &[(header::CONTENT_LENGTH, "12")],
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
     }
 
     #[tokio::test]
@@ -310,9 +613,11 @@ mod tests {
     async fn unported_paths_stay_501() {
         let long = "b".repeat(MAX_PARAM_LENGTH + 1);
         for (method, path, extra) in [
-            ("HEAD", "/s3/photos".to_owned(), vec![]),
+            ("HEAD", "/s3".to_owned(), vec![]),
+            ("POST", "/s3/".to_owned(), vec![]),
+            ("DELETE", "/s3".to_owned(), vec![]),
             ("PUT", "/s3/photos".to_owned(), vec![]),
-            ("POST", "/s3/photos?delete".to_owned(), vec![]),
+            ("PATCH", "/s3/photos".to_owned(), vec![]),
             ("GET", "/s3//key".to_owned(), vec![]),
             ("GET", format!("/s3/{long}"), vec![]),
             ("GET", "/s3/ph%zztos".to_owned(), vec![]),

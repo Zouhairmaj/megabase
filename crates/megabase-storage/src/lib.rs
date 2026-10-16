@@ -10,8 +10,10 @@
 //! storage-api does without a CDN purge endpoint (`specs/storage/cdn.md`),
 //! and the `/iceberg` routes as it does without the Iceberg catalog
 //! (`specs/storage/iceberg.md`), and the `/vector` routes as it does without
-//! `VECTOR_ENABLED` (`specs/storage/vector.md`). The `GET` and `DELETE` `/s3` routes answer
-//! requests without an AWS Signature V4; signed ones are a 501
+//! `VECTOR_ENABLED` (`specs/storage/vector.md`). Selected `GET`, `HEAD`,
+//! `DELETE` and `POST` `/s3` routes answer requests without an AWS Signature
+//! V4; signed requests and the other `/s3` routes (such as service-level
+//! `HEAD /s3`) are a 501
 //! (`specs/storage/s3.md`).
 //! The `GET /render/image` routes answer their signature, key, bucket and
 //! object errors; the transformation itself is a 501
