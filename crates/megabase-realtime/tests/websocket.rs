@@ -298,3 +298,56 @@ async fn refreshed_token_expiry_closes_the_channel() {
         json!(["1", "1", "realtime:room", "phx_close", {}])
     );
 }
+
+/// `ClientJoinRateLimitReached`: once the joins-per-second average reaches
+/// 100 at a 5 s tick, a join gets the error reply and the socket closes,
+/// and new sockets get a 429.
+#[tokio::test]
+async fn too_many_joins_disconnect_the_socket() {
+    let addr = serve().await;
+    let mut socket = connect(addr).await;
+    for i in 0..1000 {
+        let topic = format!("realtime:t{i}");
+        send(
+            &mut socket,
+            json!(["1", "1", topic, "phx_join", {"config": {}}]),
+        )
+        .await;
+    }
+    for _ in 0..1000 {
+        assert_eq!(next_json(&mut socket).await[4]["status"], "ok");
+    }
+    // The counter started with the connect: its next tick sees 1000 joins.
+    tokio::time::sleep(std::time::Duration::from_millis(5_100)).await;
+    send(
+        &mut socket,
+        json!(["1", "1", "realtime:room", "phx_join", {"config": {}}]),
+    )
+    .await;
+    assert_eq!(
+        next_json(&mut socket).await,
+        json!(["1", "1", "realtime:room", "phx_reply", {"status": "error",
+            "response": {"reason": "ClientJoinRateLimitReached: Too many joins per second"}}])
+    );
+    loop {
+        match socket.next().await {
+            Some(Ok(Message::Close(_))) | None => break,
+            Some(Ok(Message::Ping(_) | Message::Pong(_))) => continue,
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+
+    let url = format!(
+        "ws://{addr}/realtime/v1/websocket?apikey={}&vsn=2.0.0",
+        anon_key()
+    );
+    let stream = tokio::net::TcpStream::connect(addr).await.unwrap();
+    let Err(tokio_tungstenite::tungstenite::Error::Http(response)) =
+        tokio_tungstenite::client_async(url, stream).await
+    else {
+        panic!("the handshake succeeded");
+    };
+    assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+    let body = response.body().as_deref().unwrap_or_default();
+    assert_eq!(body, br#"{"error":"Too many joins per second"}"#);
+}

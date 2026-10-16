@@ -164,9 +164,10 @@ pub(crate) enum Broadcast {
 }
 
 impl Broadcast {
-    /// `MessageDispatcher` `fastlane!/2` for a subscriber of `topic` using
-    /// `serializer`; `None` is a message that serializer cannot encode, which
-    /// the dispatcher skips.
+    /// The `broadcast` push a subscriber of `topic` using `serializer`
+    /// receives (`MessageDispatcher` `fastlane!/2`); `None` is a message that
+    /// serializer cannot encode, which the dispatcher skips.
+    // megabase:unit realtime:server-event:broadcast
     pub(crate) fn fastlane(&self, serializer: Serializer, topic: &str) -> Option<Wire> {
         match (self, serializer) {
             (Self::Json(payload), _) => serializer
@@ -483,6 +484,8 @@ pub(crate) struct Session<'a> {
     socket_token: String,
     /// Joined topic -> its channel.
     channels: HashMap<String, Channel>,
+    /// A channel sent the transport `%Broadcast{event: "disconnect"}`.
+    disconnect: bool,
 }
 
 impl Drop for Session<'_> {
@@ -511,7 +514,14 @@ impl<'a> Session<'a> {
             outbox,
             socket_token,
             channels: HashMap::new(),
+            disconnect: false,
         }
+    }
+
+    /// Whether the socket must close once the replies so far are sent:
+    /// `Phoenix.Socket` stops the transport on a `disconnect` broadcast.
+    pub(crate) fn disconnected(&self) -> bool {
+        self.disconnect
     }
 
     /// Frames to send back for one client frame, at Unix time `now_ms` in
@@ -621,6 +631,10 @@ impl<'a> Session<'a> {
     // megabase:unit realtime:protocol-event:phx_join
     fn phx_join(&mut self, frame: Frame, now_ms: i64) -> Vec<Frame> {
         let mut out = Vec::new();
+        if let Some(rejected) = self.limit_joins(&frame, now_ms) {
+            out.push(rejected);
+            return out;
+        }
         match self.join(&frame.topic, &frame.payload, now_ms) {
             Ok(config) => {
                 let presence_enabled = config.presence_enabled;
@@ -664,6 +678,27 @@ impl<'a> Session<'a> {
             )),
         }
         out
+    }
+
+    /// `limit_joins/2`, the first join step that can fail on the
+    /// self-hosted tenant: counts the join, or rejects it while the
+    /// joins-per-second limit is triggered and disconnects the socket after
+    /// the error reply. `join("realtime:", …)` rejects an empty topic before.
+    // megabase:unit realtime:server-event:disconnect
+    fn limit_joins(&mut self, frame: &Frame, now_ms: i64) -> Option<Frame> {
+        if frame.topic == "realtime:" || self.hub.count_join(now_ms) {
+            return None;
+        }
+        // `send(transport_pid, %Phoenix.Socket.Broadcast{event: "disconnect"})`
+        // reaches the transport after it sends the join reply.
+        self.disconnect = true;
+        Some(Frame::reply(
+            frame.join_ref.clone(),
+            frame.reference.clone(),
+            &frame.topic,
+            "error",
+            reason("ClientJoinRateLimitReached: Too many joins per second"),
+        ))
     }
 
     /// The channel on `topic` stopped: forget it, unsubscribe it and untrack
@@ -971,7 +1006,10 @@ impl<'a> Session<'a> {
         }
     }
 
-    /// `shutdown_response/2`: a `system` error push, then the channel stops.
+    /// `shutdown_response/2`: a `system` error push
+    /// (`push_system_message/5` with a string message), then the channel
+    /// stops.
+    // megabase:unit realtime:server-event:system
     fn shutdown(&mut self, join_ref: &Value, topic: &str, message: &str) -> Vec<Frame> {
         self.stop(topic);
         let channel = topic.strip_prefix("realtime:").unwrap_or(topic);
@@ -1015,8 +1053,15 @@ impl<'a> Session<'a> {
             Some("realtime:server-event:postgres_changes")
         } else if flag(&["private"]) {
             Some("realtime:protocol-event:phx_join")
-        } else if field(&["broadcast", "replay"]).is_some_and(|v| !v.is_null()) {
-            Some("realtime:server-event:broadcast")
+        } else if field(&["broadcast"])
+            .and_then(Value::as_object)
+            .is_some_and(|broadcast| broadcast.contains_key("replay"))
+        {
+            // `maybe_replay_messages/5` on a public channel matches any
+            // `replay` value, `null` included.
+            return Err(reason(
+                "UnableToReplayMessages: Replay is not allowed for public channels",
+            ));
         } else if field(&["postgres_changes"])
             .and_then(Value::as_array)
             .is_some_and(|changes| changes.iter().any(|c| !c.is_null()))
@@ -1398,6 +1443,65 @@ mod tests {
             );
             assert!(out[0].contains(unit), "{}", out[0]);
         }
+    }
+
+    #[test]
+    fn replay_on_a_public_channel_is_refused() {
+        let jwt = jwt();
+        for replay in [json!({"since": 0, "limit": 5}), Value::Null] {
+            let hub = Hub::default();
+            let (mut session, _inbox) = open(&jwt, &hub, Serializer::V2);
+            let out = run(
+                &mut session,
+                &join(&json!({"broadcast": {"replay": replay}})),
+            );
+            assert_eq!(
+                values(&out),
+                [
+                    json!(["1", "1", "realtime:room", "phx_reply", {"status": "error",
+                    "response": {"reason": "UnableToReplayMessages: Replay is not allowed for public channels"}}])
+                ]
+            );
+        }
+    }
+
+    #[test]
+    fn too_many_joins_reject_the_join_and_disconnect() {
+        let jwt = jwt();
+        let hub = Hub::default();
+        let (mut session, _inbox) = open(&jwt, &hub, Serializer::V2);
+        let now = NOW * 1000;
+        for _ in 0..1000 {
+            assert!(hub.count_join(now));
+        }
+        // Below the limit until the next tick.
+        assert!(run_at(&mut session, JOIN, now)[0].contains(r#""status":"ok""#));
+        assert!(!session.disconnected());
+        assert!(hub.too_many_joins(now + 5_000));
+        let other = JOIN.replace("realtime:room", "realtime:other");
+        assert_eq!(
+            values(&run_at(&mut session, &other, now + 5_000)),
+            [
+                json!(["1", "1", "realtime:other", "phx_reply", {"status": "error",
+                "response": {"reason": "ClientJoinRateLimitReached: Too many joins per second"}}])
+            ]
+        );
+        assert!(session.disconnected());
+    }
+
+    #[test]
+    fn an_empty_topic_is_not_counted() {
+        let jwt = jwt();
+        let hub = Hub::default();
+        let (mut session, _inbox) = open(&jwt, &hub, Serializer::V2);
+        let now = NOW * 1000;
+        for _ in 0..1000 {
+            hub.count_join(now);
+        }
+        let empty = JOIN.replace("realtime:room", "realtime:");
+        let out = run_at(&mut session, &empty, now + 5_000);
+        assert!(out[0].contains("TopicNameRequired"), "{}", out[0]);
+        assert!(!session.disconnected());
     }
 
     #[test]

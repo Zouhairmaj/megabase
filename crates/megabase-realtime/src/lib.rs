@@ -22,6 +22,7 @@ use megabase_core::Hs256;
 mod http_api;
 mod hub;
 mod protocol;
+mod rate;
 mod term;
 mod token;
 mod websocket;
