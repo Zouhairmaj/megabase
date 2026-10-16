@@ -1142,7 +1142,10 @@ pub(super) async fn sign_object(
     }
 }
 
-/// jose's message for the two `jwtVerify` failures Megabase reproduces.
+/// jose's message for the `jwtVerify` failures Megabase reproduces (jose
+/// 6.2.3, `vendor/storage/package-lock.json`). `compactVerify` rejects a
+/// token that is not three `.`-separated segments, including an empty one,
+/// before it reads the header.
 fn invalid_jwt(state: &StorageState, token: &str) -> Option<StorageError> {
     let verifier = state.jwt.as_deref()?;
     match verifier.verify_at(token, i64::MIN / 2) {
@@ -1150,6 +1153,9 @@ fn invalid_jwt(state: &StorageState, token: &str) -> Option<StorageError> {
             .exp
             .filter(|exp| *exp <= Utc::now().timestamp())
             .map(|_| StorageError::invalid_jwt("\"exp\" claim timestamp check failed")),
+        Err(JwtError::Empty | JwtError::UnexpectedParts(_)) => {
+            Some(StorageError::invalid_jwt("Invalid Compact JWS"))
+        }
         Err(JwtError::KeyError) => Some(StorageError::invalid_jwt("signature verification failed")),
         Err(_) => None,
     }
@@ -1169,11 +1175,9 @@ pub(super) async fn get_signed_object(
     let (Ok(Path((bucket_name, object_name))), Some(pairs)) = (path, query_pairs(&uri)) else {
         return not_implemented(&method, &uri);
     };
-    let (Some(Some(token)), Some(None)) = (single(&pairs, "token"), single(&pairs, "download"))
-    else {
-        // `download` on a signed URL is served by `download_option` below
-        // only when absent; a required `token` that is missing is a Fastify
-        // validation message.
+    let (Some(Some(token)), Some(_)) = (single(&pairs, "token"), single(&pairs, "download")) else {
+        // A missing `token` or a repeated key is a Fastify validation
+        // message, which is not ported.
         return not_implemented(&method, &uri);
     };
     let Some((pool, root)) = backend(&state) else {
@@ -1221,12 +1225,16 @@ pub(super) async fn get_signed_object(
     };
     match find_object(pool, &scope, token_bucket, token_object).await {
         Ok(Some(object)) => {
+            // `download` only reaches the renderer's `Content-Disposition`.
+            let Some(download) = download_option(&uri) else {
+                return not_implemented(&method, &uri);
+            };
             render_asset(
                 root,
                 token_bucket,
                 token_object,
                 &object,
-                &Download::No,
+                &download,
                 Some(exp),
                 &method,
                 &uri,
@@ -1993,5 +2001,104 @@ mod tests {
         assert_eq!(option("download=a%20b"), "501");
         assert_eq!(option("versionId=v1"), "501");
         assert_eq!(option("download=a&download=b"), "501");
+    }
+
+    #[tokio::test]
+    async fn signed_get_rejects_malformed_and_forged_tokens_with_or_without_download() {
+        use tower::ServiceExt;
+
+        const SECRET: &str = "super-secret-jwt-token-with-at-least-32-characters-long";
+        let forged = megabase_core::Hs256::new("another-secret-that-is-at-least-32-bytes-long")
+            .unwrap()
+            .sign(&json!({ "url": "raw/a/b/RC.md", "scope": "download", "exp": i64::MAX / 2 }))
+            .unwrap();
+        // Token verification runs before any query, so nothing listens.
+        let pool = sqlx::postgres::PgPoolOptions::new()
+            .connect_lazy("postgres://postgres@127.0.0.1:1/postgres")
+            .unwrap();
+        let root = std::env::temp_dir();
+        let app = crate::router_with_state(
+            StorageState::new(Some(pool), Some(megabase_core::Hs256::new(SECRET).unwrap()))
+                .with_file_root(Some(&root)),
+        );
+        for (token, message) in [
+            ("bad", "Invalid Compact JWS"),
+            ("", "Invalid Compact JWS"),
+            ("a.b", "Invalid Compact JWS"),
+            ("a.b.c.d", "Invalid Compact JWS"),
+            (forged.as_str(), "signature verification failed"),
+        ] {
+            for download in ["", "&download=", "&download=RC.md"] {
+                let path = format!("/storage/v1/object/sign/raw/a/b/RC.md?token={token}{download}");
+                let response = app
+                    .clone()
+                    .oneshot(axum::http::Request::get(&path).body(Body::empty()).unwrap())
+                    .await
+                    .unwrap();
+                assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{path}");
+                let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+                    .await
+                    .unwrap();
+                let body: Value = serde_json::from_slice(&body).unwrap();
+                assert_eq!(
+                    body,
+                    json!({
+                        "statusCode": "400",
+                        "code": "InvalidJWT",
+                        "error": "InvalidJWT",
+                        "message": message,
+                    }),
+                    "{path}"
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn downloads_set_an_attachment_disposition() {
+        let root = std::env::temp_dir().join(format!("megabase-download-{}", uuid::Uuid::new_v4()));
+        let file = root.join("raw/a/b/RC.md/v1");
+        tokio::fs::create_dir_all(file.parent().unwrap())
+            .await
+            .unwrap();
+        tokio::fs::write(&file, b"# RC").await.unwrap();
+        let object = FoundObject {
+            version: Some("v1".into()),
+            metadata: Some(json!({ "mimetype": "text/markdown" })),
+        };
+        let uri: Uri = "/storage/v1/object/sign/raw/a/b/RC.md".parse().unwrap();
+        let disposition = |response: &Response| {
+            response
+                .headers()
+                .get(header::CONTENT_DISPOSITION)
+                .map(|value| value.to_str().unwrap().to_string())
+        };
+        for (download, expected) in [
+            (Download::No, None),
+            (Download::Yes(String::new()), Some("attachment;")),
+            (
+                Download::Yes("RC.md".into()),
+                Some("attachment; filename=RC.md; filename*=UTF-8''RC.md"),
+            ),
+        ] {
+            let response = render_asset(
+                &root,
+                "raw",
+                "a/b/RC.md",
+                &object,
+                &download,
+                Some(1_613_537_012),
+                &Method::GET,
+                &uri,
+            )
+            .await;
+            assert_eq!(response.status(), StatusCode::OK);
+            assert_eq!(disposition(&response).as_deref(), expected);
+            assert_eq!(
+                response.headers()[header::EXPIRES],
+                "Wed, 17 Feb 2021 04:43:32 GMT"
+            );
+        }
+        tokio::fs::remove_dir_all(&root).await.unwrap();
     }
 }

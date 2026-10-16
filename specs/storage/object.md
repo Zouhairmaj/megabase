@@ -119,11 +119,16 @@ for a binary body.
   only) and row as superuser. Row found but bucket missing or private is
   `NoSuchBucket`; bucket public and no row is `NoSuchKey`; both missing is a
   501 (storage-api races the two lookups).
-- `GET /object/sign/:bucket/*?token=`: jose verification (`InvalidJWT`
-  `"exp" claim timestamp check failed` or `signature verification failed`),
-  scope (`InvalidSignature` `Token is not scoped for download`), `url` equal
-  to `<bucket>/<*>` (`InvalidSignature` `Invalid signature`), `InvalidKey`
-  on the token object, then the row as superuser.
+- `GET /object/sign/:bucket/*?token=&download=`: jose 6.2.3 verification
+  (`InvalidJWT`: `Invalid Compact JWS` for a token that is not three
+  `.`-separated segments, empty included; `signature verification failed`;
+  `"exp" claim timestamp check failed`), scope (`InvalidSignature` `Token
+  is not scoped for download`), `url` equal to `<bucket>/<*>`
+  (`InvalidSignature` `Invalid signature`), `InvalidKey` on the token
+  object, then the row as superuser
+  (`vendor/storage/src/http/routes/object/getSignedObject.ts:58`,
+  `vendor/storage/src/storage/object.ts:979`). `download` only reaches the
+  renderer, so it never changes an error.
 
 200 headers: `Accept-Ranges: bytes`, `Content-Type` (the stored mimetype;
 `text/html` becomes `text/plain`), `ETag`, `X-Robots-Tag: none`,
