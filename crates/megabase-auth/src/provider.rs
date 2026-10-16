@@ -1,6 +1,7 @@
 // Ported from supabase/auth internal/api/external.go (`API.Provider`),
 // internal/conf/configuration.go (`ValidateOAuth`) and
-// internal/api/provider/{provider,azure,bitbucket,discord,facebook,figma,fly,github,gitlab}.go
+// internal/api/provider/{provider,azure,bitbucket,discord,facebook,figma,fly,github,gitlab,
+// kakao,keycloak,linkedin,notion,slack,slack_oidc,snapchat,spotify}.go
 // (MIT), pin v2.197.0. The authorize URL reproduces the output of
 // golang.org/x/oauth2 v0.36.0 `Config.AuthCodeURL` (the version in that
 // pin's go.mod); no oauth2 source is copied.
@@ -81,11 +82,12 @@ pub(crate) fn provider(config: &AuthConfig, name: &str, scopes: &str) -> Provide
         return Provider::Rejected(reason.into());
     }
     match endpoint(name, client, scopes) {
-        Some(endpoint) => Provider::Ready {
+        Ok(Some(endpoint)) => Provider::Ready {
             config: endpoint,
             email_optional: client.email_optional,
         },
-        None => Provider::NotPorted,
+        Ok(None) => Provider::NotPorted,
+        Err(reason) => Provider::Rejected(reason.into()),
     }
 }
 
@@ -140,8 +142,14 @@ fn validate_oauth(enabled: bool, client: &OAuthClient) -> Result<(), &'static st
     Ok(())
 }
 
-/// The ported `New<Provider>Provider` constructors after `ValidateOAuth`.
-fn endpoint(name: &str, client: &OAuthClient, scopes: &str) -> Option<AuthCodeConfig> {
+/// The ported `New<Provider>Provider` constructors after `ValidateOAuth`:
+/// `Ok(None)` for a constructor that is not ported, `Err` for a
+/// constructor's own error.
+fn endpoint(
+    name: &str,
+    client: &OAuthClient,
+    scopes: &str,
+) -> Result<Option<AuthCodeConfig>, &'static str> {
     let url = client.url.as_str();
     let (auth_url, default_scopes, takes_scopes): (String, &[&str], bool) = match name {
         // megabase:unit auth:provider:azure
@@ -192,19 +200,82 @@ fn endpoint(name: &str, client: &OAuthClient, scopes: &str) -> Option<AuthCodeCo
             &["read_user"],
             true,
         ),
-        _ => return None,
+        // megabase:unit auth:provider:kakao
+        "kakao" => (
+            choose_host(url, "kauth.kakao.com") + "/oauth/authorize",
+            &["account_email", "profile_image", "profile_nickname"],
+            true,
+        ),
+        // megabase:unit auth:provider:keycloak
+        "keycloak" => {
+            // No default host: an empty `URL` is the constructor's error,
+            // checked after `ValidateOAuth`.
+            if url.is_empty() {
+                return Err("unable to find URL for the Keycloak provider");
+            }
+            (
+                choose_host(url, "") + "/protocol/openid-connect/auth",
+                &["profile", "email"],
+                true,
+            )
+        }
+        // megabase:unit auth:provider:linkedin
+        "linkedin" => (
+            choose_host(url, "api.linkedin.com") + "/oauth/v2/authorization",
+            &["r_emailaddress", "r_liteprofile"],
+            true,
+        ),
+        // megabase:unit auth:provider:notion
+        "notion" => (
+            choose_host(url, "api.notion.com") + "/v1/oauth/authorize",
+            &[],
+            false,
+        ),
+        // megabase:unit auth:provider:slack
+        "slack" => (
+            choose_host(url, "slack.com") + "/oauth/authorize",
+            &["profile", "email", "openid"],
+            true,
+        ),
+        // megabase:unit auth:provider:slack_oidc
+        "slack_oidc" => (
+            choose_host(url, "slack.com") + "/openid/connect/authorize",
+            &["profile", "email", "openid"],
+            true,
+        ),
+        // megabase:unit auth:provider:snapchat
+        "snapchat" => (
+            choose_host(url, "accounts.snapchat.com") + "/accounts/oauth2/auth",
+            &[
+                "https://auth.snapchat.com/oauth2/api/user.external_id",
+                "https://auth.snapchat.com/oauth2/api/user.display_name",
+                "https://auth.snapchat.com/oauth2/api/user.bitmoji.avatar",
+            ],
+            true,
+        ),
+        // megabase:unit auth:provider:spotify
+        "spotify" => (
+            choose_host(url, "accounts.spotify.com") + "/authorize",
+            &["user-read-email"],
+            true,
+        ),
+        _ => return Ok(None),
     };
     let mut scope_list: Vec<String> = default_scopes.iter().map(|s| (*s).to_string()).collect();
     // `append(oauthScopes, strings.Split(scopes, ",")...)`: empty parts stay.
     if takes_scopes && !scopes.is_empty() {
         scope_list.extend(scopes.split(',').map(str::to_string));
     }
-    Some(AuthCodeConfig {
+    // `ValidateOAuth` already rejected an empty client id list.
+    let Some(client_id) = client.client_id.first() else {
+        return Ok(None);
+    };
+    Ok(Some(AuthCodeConfig {
         auth_url,
-        client_id: client.client_id.first()?.clone(),
+        client_id: client_id.clone(),
         redirect_uri: client.redirect_uri.clone(),
         scopes: scope_list,
-    })
+    }))
 }
 
 /// `chooseHost`: `https://` plus the default host, or `base` without one
@@ -308,5 +379,103 @@ mod tests {
             provider(&configured("apple", ""), "apple", ""),
             Provider::NotPorted
         ));
+    }
+
+    #[test]
+    fn second_batch_constructors_match_upstream() {
+        let mut base = AuthConfig::reference_defaults();
+        let external = &mut base.external;
+        for flag in [
+            &mut external.google,
+            &mut external.kakao,
+            &mut external.keycloak,
+            &mut external.linkedin,
+            &mut external.linkedin_oidc,
+            &mut external.notion,
+            &mut external.slack,
+            &mut external.slack_oidc,
+            &mut external.snapchat,
+            &mut external.spotify,
+        ] {
+            *flag = true;
+        }
+        let client = |url: &str| OAuthClient {
+            client_id: vec!["cid".into()],
+            secret: "s".into(),
+            redirect_uri: "http://localhost:8000/auth/v1/callback".into(),
+            url: url.into(),
+            email_optional: false,
+        };
+        let build = |name: &str, url: &str, scopes: &str| {
+            let mut config = AuthConfig::reference_defaults();
+            config.external = base.external.clone();
+            config.oauth_clients.set(name, client(url));
+            provider(&config, name, scopes)
+        };
+        let cases: [(&str, &str, &[&str]); 8] = [
+            (
+                "kakao",
+                "https://kauth.kakao.com/oauth/authorize",
+                &["account_email", "profile_image", "profile_nickname", "x"],
+            ),
+            (
+                "linkedin",
+                "https://api.linkedin.com/oauth/v2/authorization",
+                &["r_emailaddress", "r_liteprofile", "x"],
+            ),
+            ("notion", "https://api.notion.com/v1/oauth/authorize", &[]),
+            (
+                "slack",
+                "https://slack.com/oauth/authorize",
+                &["profile", "email", "openid", "x"],
+            ),
+            (
+                "slack_oidc",
+                "https://slack.com/openid/connect/authorize",
+                &["profile", "email", "openid", "x"],
+            ),
+            (
+                "snapchat",
+                "https://accounts.snapchat.com/accounts/oauth2/auth",
+                &[
+                    "https://auth.snapchat.com/oauth2/api/user.external_id",
+                    "https://auth.snapchat.com/oauth2/api/user.display_name",
+                    "https://auth.snapchat.com/oauth2/api/user.bitmoji.avatar",
+                    "x",
+                ],
+            ),
+            (
+                "spotify",
+                "https://accounts.spotify.com/authorize",
+                &["user-read-email", "x"],
+            ),
+            (
+                "keycloak",
+                "https://kc.example.com/realms/r/protocol/openid-connect/auth",
+                &["profile", "email", "x"],
+            ),
+        ];
+        for (name, auth_url, scopes) in cases {
+            let url = if name == "keycloak" {
+                "https://kc.example.com/realms/r/"
+            } else {
+                ""
+            };
+            let config = ready(build(name, url, "x"));
+            assert_eq!(config.auth_url, auth_url, "{name}");
+            assert_eq!(config.scopes, scopes, "{name}");
+        }
+        // Notion sends no `scope` at all.
+        let notion = ready(build("notion", "", "x"));
+        assert!(!notion.auth_code_url("st", &Vec::new()).contains("scope="));
+        // Keycloak has no default host.
+        assert!(matches!(
+            build("keycloak", "", ""),
+            Provider::Rejected(reason) if reason == "unable to find URL for the Keycloak provider"
+        ));
+        // Google and LinkedIn (OIDC) fetch a discovery document.
+        for name in ["google", "linkedin_oidc"] {
+            assert!(matches!(build(name, "", ""), Provider::NotPorted), "{name}");
+        }
     }
 }
