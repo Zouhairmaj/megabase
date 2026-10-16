@@ -4,6 +4,13 @@ All notable changes to Megabase are documented in this file.
 The format is produced by [release-please](https://github.com/googleapis/release-please).
 Sections: Features, Bug Fixes, Performance, Conformance/judge, Documentation.
 
+## [0.1.48](https://github.com/Zouhairmaj/megabase/compare/v0.1.47...v0.1.48) (2026-10-16)
+
+
+### Features
+
+* **functions:** drop response bodies for head, null-body and redirect statuses ([#473](https://github.com/Zouhairmaj/megabase/issues/473)) ([2cbfd32](https://github.com/Zouhairmaj/megabase/commit/2cbfd32dc2d9179a5e6f9ce86cb3d2d9c0a91737))
+
 ## [0.1.47](https://github.com/Zouhairmaj/megabase/compare/v0.1.46...v0.1.47) (2026-10-16)
 
 
