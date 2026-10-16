@@ -182,13 +182,13 @@ Presence (`phx_reply` unless noted):
   a WebSocket upgrade: HTTP 501 `MEGABASE_NOT_IMPLEMENTED`.
 - Joins that ask for private channels (RLS on `realtime.messages`),
   Postgres changes (including the old topic-only API), broadcast replay or
-  `replication_ready`; and client `access_token` events. These reply
-  `phx_reply` error with a `MEGABASE_NOT_IMPLEMENTED` response (`reason`,
-  `code`, `component`, `unit`).
+  `replication_ready`. These reply `phx_reply` error with a
+  `MEGABASE_NOT_IMPLEMENTED` response (`reason`, `code`, `component`,
+  `unit`).
 - Binary (V2 user broadcast) frames are ignored.
-- Channel token expiry timers and server `disconnect` pushes; `system`
-  pushes other than the presence shutdowns.
-- Broadcast via the REST API (`POST /api/broadcast`).
+- Server `disconnect` pushes; `system` pushes other than the presence and
+  token shutdowns. `access_token` refreshes and token expiry are in
+  [`protocol.md`](protocol.md).
 - `/realtime/v1/longpoll`.
 
 ## Judge cases

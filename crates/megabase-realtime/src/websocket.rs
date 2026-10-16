@@ -5,7 +5,7 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use axum::{
     extract::{
@@ -123,9 +123,24 @@ async fn serve(
     let evicted = outbox.evicted();
     let mut session = Session::new(jwt, &state.hub, serializer, token, outbox);
     loop {
+        let wait = session.deadline().map(|at| {
+            Duration::from_millis(u64::try_from(at.saturating_sub(unix_now_ms())).unwrap_or(0))
+        });
+        let timer = async move {
+            match wait {
+                Some(wait) => tokio::time::sleep(wait).await,
+                None => std::future::pending().await,
+            }
+        };
         let replies = tokio::select! {
             // The hub dropped this socket for not draining its queue.
             () = evicted.notified() => break,
+            // Channel timers: token re-confirmation and held refreshes.
+            () = timer => session
+                .tick(unix_now_ms())
+                .into_iter()
+                .map(|reply| serializer.encode(reply))
+                .collect(),
             // Pushes from other channels (broadcasts, presence diffs).
             Some(text) = inbox.recv() => vec![text],
             message = socket.recv() => {
