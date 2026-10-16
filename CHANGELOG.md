@@ -4,6 +4,13 @@ All notable changes to Megabase are documented in this file.
 The format is produced by [release-please](https://github.com/googleapis/release-please).
 Sections: Features, Bug Fixes, Performance, Conformance/judge, Documentation.
 
+## [0.1.47](https://github.com/Zouhairmaj/megabase/compare/v0.1.46...v0.1.47) (2026-10-16)
+
+
+### Features
+
+* **realtime:** serve postgres_changes server events ([#471](https://github.com/Zouhairmaj/megabase/issues/471)) ([bb2acda](https://github.com/Zouhairmaj/megabase/commit/bb2acdaaded147a3b62063150f482c422b661300))
+
 ## [0.1.46](https://github.com/Zouhairmaj/megabase/compare/v0.1.45...v0.1.46) (2026-10-16)
 
 
