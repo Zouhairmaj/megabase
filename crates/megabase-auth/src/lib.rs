@@ -19,7 +19,9 @@
 //! Issue #55 serves the JWKS and OIDC / OAuth discovery documents. Issue #49
 //! serves the `GET /authorize` redirect for the providers whose constructor
 //! needs no network call. Issue #50 serves the `/passkeys` disabled gate and,
-//! with passkeys on, the passkey list, rename, and delete routes.
+//! with passkeys on, the passkey list, rename, and delete routes. Issue #52
+//! serves the `/sso` SAML disabled gate and, with SAML on, `POST /sso` up to
+//! signing the SAML `AuthnRequest`.
 //! Every other Auth path returns `MEGABASE_NOT_IMPLEMENTED`. Database objects
 //! listed in `specs/auth/database.md` are installed when `DATABASE_URL` is
 //! set, after the standard API roles in `specs/core/roles.md` and the
@@ -47,6 +49,7 @@ mod recover;
 mod roles;
 mod routes;
 mod schema;
+mod sso;
 mod state;
 mod store;
 mod token;
@@ -75,17 +78,22 @@ pub fn router() -> Router {
 
 pub fn router_with_state(state: AuthState) -> Router {
     let passkeys_enabled = state.config.passkeys_enabled;
+    let saml_enabled = state.config.saml_enabled;
     admin::router(state.clone())
         .merge(factors::router(state.clone()))
         .merge(well_known::router(state.clone()))
         .merge(oauth_server::router(state.clone()))
         .merge(passkeys::router(state.clone()))
+        .merge(sso::router(state.clone()))
         .merge(routes::router(state))
         // Path match without a method handler is Axum 405; send those to the
         // same 501 as unknown paths (GOAL.md §3 rule 5).
         .method_not_allowed_fallback(not_implemented)
         .fallback(move |method: Method, uri: OriginalUri| async move {
-            match passkeys::fallback_gate(passkeys_enabled, uri.0.path()) {
+            let path = uri.0.path();
+            match passkeys::fallback_gate(passkeys_enabled, path)
+                .or_else(|| sso::fallback_gate(saml_enabled, path))
+            {
                 Some(response) => response,
                 None => not_implemented(method, uri).await.into_response(),
             }

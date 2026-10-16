@@ -29,6 +29,10 @@ pub(crate) enum Kind {
     Map,
     /// `bool`
     Bool,
+    /// An `encoding.TextUnmarshaler` such as `uuid.UUID`: the key is matched
+    /// like any field and `null` is a no-op, but the value is checked by the
+    /// caller.
+    Text,
 }
 
 /// A Go params struct: its name in `internal/api` and its JSON-tagged fields.
@@ -177,7 +181,7 @@ fn normalized_object(
         if let Some(message) = field_mismatch(target, name, *kind, &value) {
             return Some(Err(message));
         }
-        if value.is_null() && matches!(kind, Kind::Str | Kind::Bool) {
+        if value.is_null() && matches!(kind, Kind::Str | Kind::Bool | Kind::Text) {
             continue;
         }
         object.insert((*name).to_string(), value);
@@ -258,6 +262,7 @@ fn field_mismatch(target: &GoStruct, name: &str, kind: Kind, value: &Value) -> O
         Kind::Str => (value.is_string(), "string"),
         Kind::Map => (value.is_object(), "map[string]interface {}"),
         Kind::Bool => (value.is_boolean(), "bool"),
+        Kind::Text => (true, ""),
     };
     (!matches && !value.is_null()).then(|| {
         format!(

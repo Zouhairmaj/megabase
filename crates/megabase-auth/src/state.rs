@@ -61,6 +61,12 @@ pub struct AuthState {
     /// `GOTRUE_RATE_LIMIT_OAUTH_DYNAMIC_CLIENT_REGISTER` (default 10) per five
     /// minutes, burst 30, one bucket per header value.
     pub(crate) oauth_register_limiter: Arc<KeyedLimiter>,
+    /// `POST /sso` limiter: `GOTRUE_RATE_LIMIT_SSO` (default 30) per five
+    /// minutes, burst 30, one bucket per header value.
+    pub(crate) sso_limiter: Arc<KeyedLimiter>,
+    /// `POST /sso/saml/acs` limiter: `GOTRUE_SAML_RATE_LIMIT_ASSERTION`
+    /// (default 15) per five minutes, burst 30, one bucket per header value.
+    pub(crate) saml_assertion_limiter: Arc<KeyedLimiter>,
     /// Shared Auth pool. `try_from_env` leaves this empty. `megabase_server::run`
     /// replaces it with `Backend::connect` before `router_with_state`, and
     /// closes it on shutdown. Signup, logout, verify, the password and
@@ -150,6 +156,18 @@ impl AuthState {
                 )? / (60.0 * 5.0),
                 TOKEN_BURST,
             )),
+            sso_limiter: Arc::new(KeyedLimiter::new(
+                rate_setting(&lookup, "GOTRUE_RATE_LIMIT_SSO", DEFAULT_SSO_RATE)? / (60.0 * 5.0),
+                TOKEN_BURST,
+            )),
+            saml_assertion_limiter: Arc::new(KeyedLimiter::new(
+                rate_setting(
+                    &lookup,
+                    "GOTRUE_SAML_RATE_LIMIT_ASSERTION",
+                    DEFAULT_SAML_ASSERTION_RATE,
+                )? / (60.0 * 5.0),
+                TOKEN_BURST,
+            )),
             backend: Backend::none(),
         })
     }
@@ -189,6 +207,8 @@ impl AuthState {
             token_limiter: defaults.token_limiter,
             web3_limiter: defaults.web3_limiter,
             oauth_register_limiter: defaults.oauth_register_limiter,
+            sso_limiter: defaults.sso_limiter,
+            saml_assertion_limiter: defaults.saml_assertion_limiter,
             backend,
         }
     }
@@ -289,6 +309,10 @@ const REFERENCE_TOKEN_REFRESH_RATE: f64 = 1.0;
 const DEFAULT_WEB3_RATE: f64 = 30.0;
 /// `RateLimitOAuthDynamicClientRegister` default.
 const DEFAULT_OAUTH_REGISTER_RATE: f64 = 10.0;
+/// `RateLimitSso` default.
+const DEFAULT_SSO_RATE: f64 = 30.0;
+/// `SAMLConfiguration.RateLimitAssertion` default.
+const DEFAULT_SAML_ASSERTION_RATE: f64 = 15.0;
 
 /// A `GOTRUE_RATE_LIMIT_*` float (events per five minutes); unset or empty
 /// is `default`.
