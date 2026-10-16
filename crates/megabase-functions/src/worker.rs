@@ -15,10 +15,11 @@ use std::process::{ExitStatus, Stdio};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
+use tokio::io::{AsyncBufReadExt as _, BufReader};
 use tokio::net::TcpStream;
 use tokio::process::{Child, Command};
 use tokio::time::Instant;
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::bootstrap;
 
@@ -42,7 +43,9 @@ pub const DEFAULT_BOOT_TIMEOUT: Duration = Duration::from_secs(60);
 pub enum BootError {
     /// No `index.{ts,tsx,js,mjs,jsx}` in the function directory
     /// (edge-runtime `could not find an appropriate entrypoint`).
-    #[error("worker boot error: could not find an appropriate entrypoint")]
+    #[error(
+        "worker boot error: failed to bootstrap runtime: could not find an appropriate entrypoint"
+    )]
     NoEntrypoint,
     /// The runtime binary could not be started.
     #[error("worker boot error: {0}")]
@@ -54,6 +57,9 @@ pub enum BootError {
     #[error("worker boot error: worker did not listen within {0:?}")]
     Timeout(Duration),
 }
+
+/// Environment variable carrying the entrypoint path to the bootstrap module.
+pub const ENTRYPOINT_ENV: &str = "MEGABASE_FUNCTION_ENTRYPOINT";
 
 /// What a [`Runtime`] needs to start one function.
 #[derive(Debug, Clone, Copy)]
@@ -124,14 +130,18 @@ pub trait Runtime: Send + Sync + 'static {
     fn start<'a>(&'a self, spec: WorkerSpec<'a>) -> StartFuture<'a>;
 }
 
-/// Runs each function as
-/// `deno run --allow-all --no-prompt --preload <bootstrap> <entrypoint>`.
+/// Runs each function as `deno run --allow-all --no-prompt <bootstrap>`.
+/// The bootstrap is the main module: it installs the `Deno.listen` shim and
+/// then imports the function's entrypoint, whose path it reads (and removes)
+/// from [`ENTRYPOINT_ENV`]. `--preload` is not used: it needs Deno 2.4 and
+/// edge-runtime v1.77.4 bundles Deno 2.1.4.
 ///
 /// The function's own `Deno.serve(...)` call binds the loopback port chosen
 /// here through `DENO_SERVE_ADDRESS` (`tcp:127.0.0.1:<port>`), which
 /// overrides the address of every `Deno.serve` in the process. The
-/// preloaded [`crate::bootstrap`] sends servers built on TCP `Deno.listen`
-/// (std `serve()`) to that same port. `--preload` needs Deno 2.4 or later.
+/// [`crate::bootstrap`] sends servers built on TCP `Deno.listen` (std
+/// `serve()`) to that same port. The child's stderr goes to the Megabase log,
+/// one `warn` event per line.
 /// The child inherits Megabase's environment plus [`DenoRuntime::new`]'s
 /// `env`, like upstream `main` passes `Deno.env.toObject()` to the user
 /// worker.
@@ -185,18 +195,27 @@ impl DenoRuntime {
             .arg("run")
             .arg("--allow-all")
             .arg("--no-prompt")
-            .arg("--preload")
             .arg(preload)
-            .arg(spec.entrypoint)
             .envs(self.env.iter().map(|(key, value)| (key, value)))
+            .env(ENTRYPOINT_ENV, spec.entrypoint)
             .env("DENO_SERVE_ADDRESS", format!("tcp:{addr}"))
             .stdin(Stdio::null())
+            .stderr(Stdio::piped())
             .kill_on_drop(true);
         if let Some(dir) = spec.entrypoint.parent() {
             command.current_dir(dir);
         }
         let mut child = command.spawn()?;
         info!(function = spec.name, %addr, "starting edge function worker");
+        if let Some(stderr) = child.stderr.take() {
+            let function = spec.name.to_owned();
+            tokio::spawn(async move {
+                let mut lines = BufReader::new(stderr).lines();
+                while let Ok(Some(line)) = lines.next_line().await {
+                    warn!(function = %function, "edge function worker stderr: {line}");
+                }
+            });
+        }
         let deadline = Instant::now() + self.boot_timeout;
         loop {
             if let Some(status) = child.try_wait()? {
@@ -351,7 +370,7 @@ mod tests {
         }
         assert_eq!(
             BootError::NoEntrypoint.to_string(),
-            "worker boot error: could not find an appropriate entrypoint"
+            "worker boot error: failed to bootstrap runtime: could not find an appropriate entrypoint"
         );
     }
 
@@ -389,14 +408,18 @@ mod tests {
 
     #[cfg(unix)]
     #[tokio::test]
-    async fn the_worker_preloads_the_bootstrap_before_the_entrypoint() {
+    async fn the_worker_runs_the_bootstrap_as_its_main_module() {
         use std::os::unix::fs::PermissionsExt as _;
 
         let dir = temp_dir("preload");
         std::fs::write(dir.join("index.ts"), "").unwrap();
         // A stand-in `deno` that records its arguments and exits.
         let fake = dir.join("fake-deno");
-        std::fs::write(&fake, "#!/bin/sh\nprintf '%s\\n' \"$@\" > args\n").unwrap();
+        std::fs::write(
+            &fake,
+            "#!/bin/sh\nprintf '%s\\n' \"$@\" > args\nprintf '%s' \"$MEGABASE_FUNCTION_ENTRYPOINT\" > entry\n",
+        )
+        .unwrap();
         std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
         let runtime = DenoRuntime::new(&fake, Vec::new());
         let error = runtime
@@ -417,14 +440,16 @@ mod tests {
                 "run",
                 "--allow-all",
                 "--no-prompt",
-                "--preload",
                 preload.to_str().unwrap(),
-                entry.to_str().unwrap(),
             ]
         );
         assert_eq!(
+            std::fs::read_to_string(dir.join("entry")).unwrap(),
+            entry.to_str().unwrap()
+        );
+        assert_eq!(
             std::fs::read_to_string(&preload).unwrap(),
-            bootstrap::SOURCE
+            bootstrap::module()
         );
         drop(runtime);
         assert!(!preload.parent().unwrap().exists());

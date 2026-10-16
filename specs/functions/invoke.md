@@ -89,7 +89,7 @@ Any other `OPTIONS` reaches the function, without the JWT gate.
 |---|---|---|
 | Gate failures above | 401 | `{"msg": "<message>"}` |
 | Empty function name | 400 | `{"msg":"missing function name in request"}` |
-| No entrypoint (missing function, `.`, `..`, `\`, NUL in the name) | 500 | `{"msg":"InvalidWorkerCreation: worker boot error: could not find an appropriate entrypoint"}` |
+| No entrypoint (missing function, `.`, `..`, `\`, NUL in the name) | 500 | `{"msg":"InvalidWorkerCreation: worker boot error: failed to bootstrap runtime: could not find an appropriate entrypoint"}` |
 | Worker could not start (Deno missing, exits, no listener in 60 s) | 500 | `{"msg":"InvalidWorkerCreation: worker boot error: <Megabase detail>"}` |
 | Worker connection or HTTP exchange fails | 500 | `{"msg":"InvalidWorkerResponse: <Megabase detail>"}`; the worker is dropped and restarted on the next request |
 
@@ -112,9 +112,9 @@ upstream's comes from edge-runtime internals (eszip build, V8 boot).
   (`Deno.listen({ port: 8000 })` + `Deno.serveHttp`). In edge-runtime every
   `Deno.listen` of a user worker receives the worker's requests and
   `Deno.serveHttp` serves them (`vendor/edge-runtime/ext/runtime/js/denoOverrides.js:98`–`:103`,
-  `ext/runtime/js/http.js:64`, `:120`). Megabase preloads a bootstrap
-  (`crates/megabase-functions/src/bootstrap.rs`, `deno run --preload`, Deno
-  2.4+) that routes TCP `Deno.listen` to the worker's own `Deno.serve` and
+  `ext/runtime/js/http.js:64`, `:120`). Megabase runs a bootstrap module
+  (`crates/megabase-functions/src/bootstrap.rs`, the main module of
+  `deno run`, which then imports `index.ts`) that routes TCP `Deno.listen` to the worker's own `Deno.serve` and
   provides `Deno.serveHttp` for those connections, so two std-`serve()`
   functions never compete for `:8000`. Unix-socket listeners are untouched.
 - Without `MEGABASE_FUNCTIONS_DIR` every request is the structured 501.

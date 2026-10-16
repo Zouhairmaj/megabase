@@ -221,7 +221,7 @@ async fn missing_function_is_a_worker_creation_error() {
         assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR, "{uri}");
         assert_eq!(
             body,
-            json!({"msg": "InvalidWorkerCreation: worker boot error: could not find an appropriate entrypoint"}),
+            json!({"msg": "InvalidWorkerCreation: worker boot error: failed to bootstrap runtime: could not find an appropriate entrypoint"}),
             "{uri}"
         );
     }
