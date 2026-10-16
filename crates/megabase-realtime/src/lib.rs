@@ -1,12 +1,14 @@
 //! Supabase Realtime-compatible API (`/realtime/v1`) for Megabase.
 //!
 //! Target behavior: Supabase Realtime, vendor/realtime (Apache-2.0), pinned in `vendor/`.
-//! `GET /api/ping` is served (ported from `lib/realtime_web/controllers/ping_controller.ex`).
-//! Every other request returns the structured `MEGABASE_NOT_IMPLEMENTED` 501.
-//! When more logic is ported, each file gets a header naming the upstream
-//! repository, path and license.
+//! `GET /api/ping` is served (ported from `lib/realtime_web/controllers/ping_controller.ex`),
+//! and so is the Phoenix socket at `GET /websocket` (`websocket`, `protocol`,
+//! `hub`, `term`, `token`). Every other request returns the structured
+//! `MEGABASE_NOT_IMPLEMENTED` 501. Each file names its upstream source.
 
 // Ported from supabase/realtime lib/realtime_web/controllers/ping_controller.ex (Apache-2.0), pin v2.143.3.
+
+use std::sync::Arc;
 
 use axum::{
     http::header,
@@ -14,12 +16,42 @@ use axum::{
     routing::get,
     Router,
 };
+use megabase_core::Hs256;
+
+mod hub;
+mod protocol;
+mod term;
+mod token;
+mod websocket;
 
 pub const COMPONENT: &str = "realtime";
 
-pub fn router() -> Router {
+/// What the Realtime routes need: the tenant's JWT secret and the topics
+/// every socket shares. Clones share the topics.
+#[derive(Debug, Clone, Default)]
+pub struct RealtimeState {
+    jwt: Option<Hs256>,
+    hub: Arc<hub::Hub>,
+}
+
+impl RealtimeState {
+    /// State that verifies socket tokens with `jwt` (`JWT_SECRET`). With
+    /// `None` the WebSocket route answers 501.
+    #[must_use]
+    pub fn new(jwt: Option<Hs256>) -> Self {
+        Self {
+            jwt,
+            hub: Arc::default(),
+        }
+    }
+}
+
+/// Realtime routes under `/realtime/v1`.
+pub fn router(state: RealtimeState) -> Router {
     Router::new()
         .route("/realtime/v1/api/ping", get(ping))
+        .route("/realtime/v1/websocket", get(websocket::websocket))
+        .with_state(Arc::new(state))
         .merge(megabase_core::not_implemented_router(COMPONENT))
         .method_not_allowed_fallback(megabase_core::not_implemented_handler(COMPONENT))
 }
@@ -47,7 +79,7 @@ mod tests {
 
     #[tokio::test]
     async fn ping_answers_success() {
-        let response = router()
+        let response = router(RealtimeState::default())
             .oneshot(
                 Request::get("/realtime/v1/api/ping")
                     .body(Body::empty())
@@ -66,7 +98,7 @@ mod tests {
 
     #[tokio::test]
     async fn other_paths_stay_501() {
-        let response = router()
+        let response = router(RealtimeState::default())
             .oneshot(
                 Request::get("/realtime/v1/api/other")
                     .body(Body::empty())

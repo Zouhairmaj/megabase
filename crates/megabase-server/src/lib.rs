@@ -93,6 +93,7 @@ struct Services<'a> {
     meta: &'a megabase_meta::MetaState,
     storage: &'a megabase_storage::StorageState,
     functions: &'a megabase_functions::FunctionsState,
+    realtime: &'a megabase_realtime::RealtimeState,
 }
 
 impl Services<'_> {
@@ -100,7 +101,7 @@ impl Services<'_> {
         match component {
             megabase_auth::COMPONENT => megabase_auth::router_with_state(self.auth.clone()),
             megabase_rest::COMPONENT => megabase_rest::router(self.rest.clone()),
-            megabase_realtime::COMPONENT => megabase_realtime::router(),
+            megabase_realtime::COMPONENT => megabase_realtime::router(self.realtime.clone()),
             megabase_storage::COMPONENT => {
                 megabase_storage::router_with_state(self.storage.clone())
             }
@@ -139,6 +140,7 @@ pub fn create_router_from(auth: &megabase_auth::AuthState, config: &Config) -> R
             meta: &meta,
             storage: &storage,
             functions: &megabase_functions::FunctionsState::disabled(),
+            realtime: &megabase_realtime::RealtimeState::new(config.jwt_hs256().ok()),
         }),
         config,
     )
@@ -256,6 +258,7 @@ pub async fn run(config: Config) -> std::io::Result<()> {
             meta: &meta,
             storage: &storage,
             functions: &functions,
+            realtime: &megabase_realtime::RealtimeState::new(config.jwt_hs256().ok()),
         }),
         &config,
     );

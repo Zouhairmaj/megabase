@@ -112,11 +112,11 @@ Implemented and tested counts come from markers and `judge/cases/`. Live conform
 | Auth | user | 1–2 | 6 | 6 | 6 |
 | Auth | verify | 1–2 | 10 | 10 | 6 |
 | Auth | well-known | 2 | 3 | 3 | 0 |
-| Realtime | client-events | 3 | 3 | 0 | 0 |
+| Realtime | client-events | 3 | 3 | 2 | 0 |
 | Realtime | http-api | 3 | 3 | 1 | 1 |
 | Realtime | protocol | 3 | 6 | 0 | 0 |
-| Realtime | server-events | 3 | 6 | 0 | 0 |
-| Realtime | websocket | 3 | 1 | 0 | 0 |
+| Realtime | server-events | 3 | 6 | 2 | 0 |
+| Realtime | websocket | 3 | 1 | 1 | 0 |
 | Storage | bucket | 2 | 6 | 6 | 6 |
 | Storage | cdn | 2 | 3 | 3 | 0 |
 | Storage | database | 2 | 46 | 15 | 0 |
