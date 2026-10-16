@@ -1,0 +1,907 @@
+{
+  "schema": 1,
+  "totals": {
+    "units": 1036,
+    "implemented": 341,
+    "tested": 218,
+    "conformant": 218
+  },
+  "percent": {
+    "coverage": 32.9,
+    "conformance": 100.0,
+    "done": 21.0
+  },
+  "judge": {
+    "cases": 447,
+    "passing": 447
+  },
+  "components": {
+    "auth": {
+      "units": 159,
+      "implemented": 122,
+      "tested": 86,
+      "conformant": 86,
+      "groups": {
+        "admin": {
+          "units": 28,
+          "implemented": 28,
+          "tested": 28,
+          "conformant": 28
+        },
+        "database": {
+          "units": 32,
+          "implemented": 32,
+          "tested": 32,
+          "conformant": 32
+        },
+        "endpoints": {
+          "units": 13,
+          "implemented": 7,
+          "tested": 5,
+          "conformant": 5
+        },
+        "factors": {
+          "units": 9,
+          "implemented": 3,
+          "tested": 0,
+          "conformant": 0
+        },
+        "hooks": {
+          "units": 7,
+          "implemented": 1,
+          "tested": 0,
+          "conformant": 0
+        },
+        "oauth": {
+          "units": 6,
+          "implemented": 2,
+          "tested": 0,
+          "conformant": 0
+        },
+        "oauth-providers": {
+          "units": 26,
+          "implemented": 20,
+          "tested": 0,
+          "conformant": 0
+        },
+        "passkeys": {
+          "units": 7,
+          "implemented": 3,
+          "tested": 3,
+          "conformant": 3
+        },
+        "scim": {
+          "units": 3,
+          "implemented": 3,
+          "tested": 3,
+          "conformant": 3
+        },
+        "sso": {
+          "units": 3,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "token": {
+          "units": 6,
+          "implemented": 4,
+          "tested": 3,
+          "conformant": 3
+        },
+        "user": {
+          "units": 6,
+          "implemented": 6,
+          "tested": 6,
+          "conformant": 6
+        },
+        "verify": {
+          "units": 10,
+          "implemented": 10,
+          "tested": 6,
+          "conformant": 6
+        },
+        "well-known": {
+          "units": 3,
+          "implemented": 3,
+          "tested": 0,
+          "conformant": 0
+        }
+      }
+    },
+    "functions": {
+      "units": 276,
+      "implemented": 5,
+      "tested": 1,
+      "conformant": 1,
+      "groups": {
+        "ai": {
+          "units": 5,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "env": {
+          "units": 4,
+          "implemented": 4,
+          "tested": 0,
+          "conformant": 0
+        },
+        "event_worker": {
+          "units": 2,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "invoke": {
+          "units": 1,
+          "implemented": 1,
+          "tested": 1,
+          "conformant": 1
+        },
+        "node": {
+          "units": 233,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "os": {
+          "units": 1,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "runtime": {
+          "units": 25,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "workers": {
+          "units": 5,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        }
+      }
+    },
+    "meta": {
+      "units": 69,
+      "implemented": 2,
+      "tested": 2,
+      "conformant": 2,
+      "groups": {
+        "column-privileges": {
+          "units": 3,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "columns": {
+          "units": 5,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "endpoints": {
+          "units": 14,
+          "implemented": 2,
+          "tested": 2,
+          "conformant": 2
+        },
+        "extensions": {
+          "units": 5,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "functions": {
+          "units": 5,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "policies": {
+          "units": 5,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "publications": {
+          "units": 5,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "query": {
+          "units": 4,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "roles": {
+          "units": 5,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "schemas": {
+          "units": 5,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "table-privileges": {
+          "units": 3,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "tables": {
+          "units": 5,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "triggers": {
+          "units": 5,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        }
+      }
+    },
+    "pooler": {
+      "units": 16,
+      "implemented": 0,
+      "tested": 0,
+      "conformant": 0,
+      "groups": {
+        "clusters": {
+          "units": 3,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "endpoints": {
+          "units": 4,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "pool-modes": {
+          "units": 2,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "tenants": {
+          "units": 7,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        }
+      }
+    },
+    "realtime": {
+      "units": 19,
+      "implemented": 19,
+      "tested": 1,
+      "conformant": 1,
+      "groups": {
+        "client-events": {
+          "units": 3,
+          "implemented": 3,
+          "tested": 0,
+          "conformant": 0
+        },
+        "http-api": {
+          "units": 3,
+          "implemented": 3,
+          "tested": 1,
+          "conformant": 1
+        },
+        "protocol": {
+          "units": 6,
+          "implemented": 6,
+          "tested": 0,
+          "conformant": 0
+        },
+        "server-events": {
+          "units": 6,
+          "implemented": 6,
+          "tested": 0,
+          "conformant": 0
+        },
+        "websocket": {
+          "units": 1,
+          "implemented": 1,
+          "tested": 0,
+          "conformant": 0
+        }
+      }
+    },
+    "rest": {
+      "units": 93,
+      "implemented": 93,
+      "tested": 93,
+      "conformant": 93,
+      "groups": {
+        "aggregates": {
+          "units": 5,
+          "implemented": 5,
+          "tested": 5,
+          "conformant": 5
+        },
+        "embedding": {
+          "units": 2,
+          "implemented": 2,
+          "tested": 2,
+          "conformant": 2
+        },
+        "filtering": {
+          "units": 28,
+          "implemented": 28,
+          "tested": 28,
+          "conformant": 28
+        },
+        "logic": {
+          "units": 3,
+          "implemented": 3,
+          "tested": 3,
+          "conformant": 3
+        },
+        "media-types": {
+          "units": 13,
+          "implemented": 13,
+          "tested": 13,
+          "conformant": 13
+        },
+        "ordering": {
+          "units": 4,
+          "implemented": 4,
+          "tested": 4,
+          "conformant": 4
+        },
+        "prefer": {
+          "units": 16,
+          "implemented": 16,
+          "tested": 16,
+          "conformant": 16
+        },
+        "query-params": {
+          "units": 8,
+          "implemented": 8,
+          "tested": 8,
+          "conformant": 8
+        },
+        "resources": {
+          "units": 10,
+          "implemented": 10,
+          "tested": 10,
+          "conformant": 10
+        },
+        "rpc": {
+          "units": 4,
+          "implemented": 4,
+          "tested": 4,
+          "conformant": 4
+        }
+      }
+    },
+    "storage": {
+      "units": 154,
+      "implemented": 100,
+      "tested": 35,
+      "conformant": 35,
+      "groups": {
+        "bucket": {
+          "units": 9,
+          "implemented": 9,
+          "tested": 6,
+          "conformant": 6
+        },
+        "cdn": {
+          "units": 3,
+          "implemented": 3,
+          "tested": 0,
+          "conformant": 0
+        },
+        "database": {
+          "units": 46,
+          "implemented": 15,
+          "tested": 0,
+          "conformant": 0
+        },
+        "health": {
+          "units": 1,
+          "implemented": 1,
+          "tested": 0,
+          "conformant": 0
+        },
+        "iceberg": {
+          "units": 15,
+          "implemented": 15,
+          "tested": 0,
+          "conformant": 0
+        },
+        "object": {
+          "units": 22,
+          "implemented": 18,
+          "tested": 0,
+          "conformant": 0
+        },
+        "render": {
+          "units": 3,
+          "implemented": 3,
+          "tested": 3,
+          "conformant": 3
+        },
+        "resumable": {
+          "units": 16,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "s3": {
+          "units": 26,
+          "implemented": 26,
+          "tested": 26,
+          "conformant": 26
+        },
+        "vector": {
+          "units": 13,
+          "implemented": 10,
+          "tested": 0,
+          "conformant": 0
+        }
+      }
+    },
+    "studio": {
+      "units": 250,
+      "implemented": 0,
+      "tested": 0,
+      "conformant": 0,
+      "groups": {
+        "advisors": {
+          "units": 4,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "api-ai": {
+          "units": 12,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "api-platform": {
+          "units": 85,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "api-v1": {
+          "units": 10,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "auth": {
+          "units": 18,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "database": {
+          "units": 23,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "editor": {
+          "units": 3,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "endpoints": {
+          "units": 22,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "functions": {
+          "units": 8,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "integrations": {
+          "units": 4,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "logs": {
+          "units": 19,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "observability": {
+          "units": 12,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "realtime": {
+          "units": 3,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "settings": {
+          "units": 14,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "sql": {
+          "units": 4,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        },
+        "storage": {
+          "units": 9,
+          "implemented": 0,
+          "tested": 0,
+          "conformant": 0
+        }
+      }
+    }
+  },
+  "units": {
+    "auth:grant-type:password": "conformant",
+    "auth:grant-type:pkce": "implemented",
+    "auth:grant-type:refresh_token": "conformant",
+    "auth:hook:custom_access_token": "implemented",
+    "auth:provider:azure": "implemented",
+    "auth:provider:bitbucket": "implemented",
+    "auth:provider:discord": "implemented",
+    "auth:provider:facebook": "implemented",
+    "auth:provider:figma": "implemented",
+    "auth:provider:fly": "implemented",
+    "auth:provider:github": "implemented",
+    "auth:provider:gitlab": "implemented",
+    "auth:provider:kakao": "implemented",
+    "auth:provider:keycloak": "implemented",
+    "auth:provider:linkedin": "implemented",
+    "auth:provider:notion": "implemented",
+    "auth:provider:slack": "implemented",
+    "auth:provider:slack_oidc": "implemented",
+    "auth:provider:snapchat": "implemented",
+    "auth:provider:spotify": "implemented",
+    "auth:provider:twitch": "implemented",
+    "auth:provider:workos": "implemented",
+    "auth:provider:x": "implemented",
+    "auth:provider:zoom": "implemented",
+    "auth:route:DELETE /auth/v1/admin/custom-providers/{identifier}": "conformant",
+    "auth:route:DELETE /auth/v1/admin/oauth/clients/{client_id}": "conformant",
+    "auth:route:DELETE /auth/v1/admin/sso/providers/{idp_id}": "conformant",
+    "auth:route:DELETE /auth/v1/admin/users/{user_id}": "conformant",
+    "auth:route:DELETE /auth/v1/admin/users/{user_id}/factors/{factor_id}": "conformant",
+    "auth:route:DELETE /auth/v1/admin/users/{user_id}/passkeys/{passkey_id}": "conformant",
+    "auth:route:DELETE /auth/v1/factors/recovery-codes": "implemented",
+    "auth:route:DELETE /auth/v1/factors/{factor_id}": "implemented",
+    "auth:route:DELETE /auth/v1/passkeys/{passkey_id}": "conformant",
+    "auth:route:DELETE /auth/v1/user/identities/{identity_id}": "conformant",
+    "auth:route:DELETE /auth/v1/user/oauth/grants": "conformant",
+    "auth:route:GET /.well-known/oauth-authorization-server": "implemented",
+    "auth:route:GET /auth/v1/.well-known/jwks.json": "implemented",
+    "auth:route:GET /auth/v1/.well-known/openid-configuration": "implemented",
+    "auth:route:GET /auth/v1/admin/audit": "conformant",
+    "auth:route:GET /auth/v1/admin/custom-providers": "conformant",
+    "auth:route:GET /auth/v1/admin/custom-providers/{identifier}": "conformant",
+    "auth:route:GET /auth/v1/admin/oauth/clients": "conformant",
+    "auth:route:GET /auth/v1/admin/oauth/clients/{client_id}": "conformant",
+    "auth:route:GET /auth/v1/admin/sso/providers": "conformant",
+    "auth:route:GET /auth/v1/admin/sso/providers/{idp_id}": "conformant",
+    "auth:route:GET /auth/v1/admin/users": "conformant",
+    "auth:route:GET /auth/v1/admin/users/{user_id}": "conformant",
+    "auth:route:GET /auth/v1/admin/users/{user_id}/factors": "conformant",
+    "auth:route:GET /auth/v1/admin/users/{user_id}/passkeys": "conformant",
+    "auth:route:GET /auth/v1/factors/recovery-codes": "implemented",
+    "auth:route:GET /auth/v1/health": "conformant",
+    "auth:route:GET /auth/v1/oauth/userinfo": "implemented",
+    "auth:route:GET /auth/v1/passkeys": "conformant",
+    "auth:route:GET /auth/v1/scim/v2/ResourceTypes": "conformant",
+    "auth:route:GET /auth/v1/scim/v2/Schemas": "conformant",
+    "auth:route:GET /auth/v1/scim/v2/ServiceProviderConfig": "conformant",
+    "auth:route:GET /auth/v1/settings": "conformant",
+    "auth:route:GET /auth/v1/user": "conformant",
+    "auth:route:GET /auth/v1/user/identities/authorize": "conformant",
+    "auth:route:GET /auth/v1/user/oauth/grants": "conformant",
+    "auth:route:GET /auth/v1/verify": "conformant",
+    "auth:route:PATCH /auth/v1/passkeys/{passkey_id}": "conformant",
+    "auth:route:POST /auth/v1/admin/custom-providers": "conformant",
+    "auth:route:POST /auth/v1/admin/generate_link": "conformant",
+    "auth:route:POST /auth/v1/admin/oauth/clients": "conformant",
+    "auth:route:POST /auth/v1/admin/oauth/clients/{client_id}/regenerate_secret": "conformant",
+    "auth:route:POST /auth/v1/admin/sso/providers": "conformant",
+    "auth:route:POST /auth/v1/admin/users": "conformant",
+    "auth:route:POST /auth/v1/invite": "conformant",
+    "auth:route:POST /auth/v1/logout": "conformant",
+    "auth:route:POST /auth/v1/magiclink": "implemented",
+    "auth:route:POST /auth/v1/oauth/clients/register": "implemented",
+    "auth:route:POST /auth/v1/recover": "implemented",
+    "auth:route:POST /auth/v1/signup": "conformant",
+    "auth:route:POST /auth/v1/token": "conformant",
+    "auth:route:POST /auth/v1/verify": "conformant",
+    "auth:route:PUT /auth/v1/admin/custom-providers/{identifier}": "conformant",
+    "auth:route:PUT /auth/v1/admin/oauth/clients/{client_id}": "conformant",
+    "auth:route:PUT /auth/v1/admin/sso/providers/{idp_id}": "conformant",
+    "auth:route:PUT /auth/v1/admin/users/{user_id}": "conformant",
+    "auth:route:PUT /auth/v1/admin/users/{user_id}/factors/{factor_id}": "conformant",
+    "auth:route:PUT /auth/v1/user": "conformant",
+    "auth:sql-function:auth.email()": "conformant",
+    "auth:sql-function:auth.jwt()": "conformant",
+    "auth:sql-function:auth.role()": "conformant",
+    "auth:sql-function:auth.uid()": "conformant",
+    "auth:sql-table:auth.audit_log_entries": "conformant",
+    "auth:sql-table:auth.custom_oauth_providers": "conformant",
+    "auth:sql-table:auth.flow_state": "conformant",
+    "auth:sql-table:auth.identities": "conformant",
+    "auth:sql-table:auth.instances": "conformant",
+    "auth:sql-table:auth.mfa_amr_claims": "conformant",
+    "auth:sql-table:auth.mfa_challenges": "conformant",
+    "auth:sql-table:auth.mfa_factors": "conformant",
+    "auth:sql-table:auth.mfa_recovery_code_sets": "conformant",
+    "auth:sql-table:auth.mfa_recovery_codes": "conformant",
+    "auth:sql-table:auth.oauth_authorizations": "conformant",
+    "auth:sql-table:auth.oauth_client_states": "conformant",
+    "auth:sql-table:auth.oauth_clients": "conformant",
+    "auth:sql-table:auth.oauth_consents": "conformant",
+    "auth:sql-table:auth.one_time_tokens": "conformant",
+    "auth:sql-table:auth.refresh_tokens": "conformant",
+    "auth:sql-table:auth.saml_providers": "conformant",
+    "auth:sql-table:auth.saml_relay_states": "conformant",
+    "auth:sql-table:auth.schema_migrations": "conformant",
+    "auth:sql-table:auth.scim_tokens": "conformant",
+    "auth:sql-table:auth.scim_users": "conformant",
+    "auth:sql-table:auth.sessions": "conformant",
+    "auth:sql-table:auth.sso_domains": "conformant",
+    "auth:sql-table:auth.sso_providers": "conformant",
+    "auth:sql-table:auth.sso_sessions": "conformant",
+    "auth:sql-table:auth.users": "conformant",
+    "auth:sql-table:auth.webauthn_challenges": "conformant",
+    "auth:sql-table:auth.webauthn_credentials": "conformant",
+    "auth:verify-type:email": "implemented",
+    "auth:verify-type:email_change": "conformant",
+    "auth:verify-type:invite": "conformant",
+    "auth:verify-type:magiclink": "implemented",
+    "auth:verify-type:phone_change": "implemented",
+    "auth:verify-type:recovery": "conformant",
+    "auth:verify-type:signup": "conformant",
+    "auth:verify-type:sms": "implemented",
+    "functions:op:op_delete_env": "implemented",
+    "functions:op:op_env": "implemented",
+    "functions:op:op_get_env": "implemented",
+    "functions:op:op_set_env": "implemented",
+    "functions:route:* /functions/v1/{function_name}": "conformant",
+    "meta:route:GET /pg/config/version": "conformant",
+    "meta:route:GET /pg/health": "conformant",
+    "realtime:client-event:access_token": "implemented",
+    "realtime:client-event:broadcast": "implemented",
+    "realtime:client-event:presence": "implemented",
+    "realtime:protocol-event:access_token": "implemented",
+    "realtime:protocol-event:phx_close": "implemented",
+    "realtime:protocol-event:phx_error": "implemented",
+    "realtime:protocol-event:phx_join": "implemented",
+    "realtime:protocol-event:phx_leave": "implemented",
+    "realtime:protocol-event:phx_reply": "implemented",
+    "realtime:route:GET /realtime/v1/api/ping": "conformant",
+    "realtime:route:GET /realtime/v1/websocket": "implemented",
+    "realtime:route:POST /realtime/v1/api/broadcast": "implemented",
+    "realtime:route:POST /realtime/v1/api/broadcast/{topic}/events/{event}": "implemented",
+    "realtime:server-event:broadcast": "implemented",
+    "realtime:server-event:disconnect": "implemented",
+    "realtime:server-event:postgres_changes": "implemented",
+    "realtime:server-event:presence_diff": "implemented",
+    "realtime:server-event:presence_state": "implemented",
+    "realtime:server-event:system": "implemented",
+    "rest:aggregate:avg": "conformant",
+    "rest:aggregate:count": "conformant",
+    "rest:aggregate:max": "conformant",
+    "rest:aggregate:min": "conformant",
+    "rest:aggregate:sum": "conformant",
+    "rest:embed-join:inner": "conformant",
+    "rest:embed-join:left": "conformant",
+    "rest:filter-operator:adj": "conformant",
+    "rest:filter-operator:all": "conformant",
+    "rest:filter-operator:any": "conformant",
+    "rest:filter-operator:cd": "conformant",
+    "rest:filter-operator:cs": "conformant",
+    "rest:filter-operator:eq": "conformant",
+    "rest:filter-operator:fts": "conformant",
+    "rest:filter-operator:gt": "conformant",
+    "rest:filter-operator:gte": "conformant",
+    "rest:filter-operator:ilike": "conformant",
+    "rest:filter-operator:imatch": "conformant",
+    "rest:filter-operator:in": "conformant",
+    "rest:filter-operator:is": "conformant",
+    "rest:filter-operator:isdistinct": "conformant",
+    "rest:filter-operator:like": "conformant",
+    "rest:filter-operator:lt": "conformant",
+    "rest:filter-operator:lte": "conformant",
+    "rest:filter-operator:match": "conformant",
+    "rest:filter-operator:neq": "conformant",
+    "rest:filter-operator:not": "conformant",
+    "rest:filter-operator:nxl": "conformant",
+    "rest:filter-operator:nxr": "conformant",
+    "rest:filter-operator:ov": "conformant",
+    "rest:filter-operator:phfts": "conformant",
+    "rest:filter-operator:plfts": "conformant",
+    "rest:filter-operator:sl": "conformant",
+    "rest:filter-operator:sr": "conformant",
+    "rest:filter-operator:wfts": "conformant",
+    "rest:logic-operator:and": "conformant",
+    "rest:logic-operator:not": "conformant",
+    "rest:logic-operator:or": "conformant",
+    "rest:media-type:*/*": "conformant",
+    "rest:media-type:application/geo+json": "conformant",
+    "rest:media-type:application/json": "conformant",
+    "rest:media-type:application/octet-stream": "conformant",
+    "rest:media-type:application/openapi+json": "conformant",
+    "rest:media-type:application/vnd.pgrst.array+json;nulls=stripped": "conformant",
+    "rest:media-type:application/vnd.pgrst.object+json": "conformant",
+    "rest:media-type:application/vnd.pgrst.object+json;nulls=stripped": "conformant",
+    "rest:media-type:application/vnd.pgrst.plan+{format}": "conformant",
+    "rest:media-type:application/x-www-form-urlencoded": "conformant",
+    "rest:media-type:text/csv": "conformant",
+    "rest:media-type:text/plain": "conformant",
+    "rest:media-type:text/xml": "conformant",
+    "rest:order-modifier:asc": "conformant",
+    "rest:order-modifier:desc": "conformant",
+    "rest:order-modifier:nullsfirst": "conformant",
+    "rest:order-modifier:nullslast": "conformant",
+    "rest:prefer:count=estimated": "conformant",
+    "rest:prefer:count=exact": "conformant",
+    "rest:prefer:count=planned": "conformant",
+    "rest:prefer:handling=lenient": "conformant",
+    "rest:prefer:handling=strict": "conformant",
+    "rest:prefer:max-affected=*": "conformant",
+    "rest:prefer:missing=default": "conformant",
+    "rest:prefer:missing=null": "conformant",
+    "rest:prefer:resolution=ignore-duplicates": "conformant",
+    "rest:prefer:resolution=merge-duplicates": "conformant",
+    "rest:prefer:return=headers-only": "conformant",
+    "rest:prefer:return=minimal": "conformant",
+    "rest:prefer:return=representation": "conformant",
+    "rest:prefer:timezone=*": "conformant",
+    "rest:prefer:tx=commit": "conformant",
+    "rest:prefer:tx=rollback": "conformant",
+    "rest:query-param:and": "conformant",
+    "rest:query-param:columns": "conformant",
+    "rest:query-param:limit": "conformant",
+    "rest:query-param:offset": "conformant",
+    "rest:query-param:on_conflict": "conformant",
+    "rest:query-param:or": "conformant",
+    "rest:query-param:order": "conformant",
+    "rest:query-param:select": "conformant",
+    "rest:route:DELETE /rest/v1/{relation}": "conformant",
+    "rest:route:GET /rest/v1/": "conformant",
+    "rest:route:GET /rest/v1/rpc/{function}": "conformant",
+    "rest:route:GET /rest/v1/{relation}": "conformant",
+    "rest:route:HEAD /rest/v1/": "conformant",
+    "rest:route:HEAD /rest/v1/rpc/{function}": "conformant",
+    "rest:route:HEAD /rest/v1/{relation}": "conformant",
+    "rest:route:OPTIONS /rest/v1/": "conformant",
+    "rest:route:OPTIONS /rest/v1/rpc/{function}": "conformant",
+    "rest:route:OPTIONS /rest/v1/{relation}": "conformant",
+    "rest:route:PATCH /rest/v1/{relation}": "conformant",
+    "rest:route:POST /rest/v1/rpc/{function}": "conformant",
+    "rest:route:POST /rest/v1/{relation}": "conformant",
+    "rest:route:PUT /rest/v1/{relation}": "conformant",
+    "storage:route:DELETE /storage/v1/bucket/{bucketId}": "implemented",
+    "storage:route:DELETE /storage/v1/bucket/{bucketId}/lifecycle": "implemented",
+    "storage:route:DELETE /storage/v1/cdn": "implemented",
+    "storage:route:DELETE /storage/v1/cdn/{bucketName}": "implemented",
+    "storage:route:DELETE /storage/v1/cdn/{bucketName}/{*}": "implemented",
+    "storage:route:DELETE /storage/v1/iceberg/bucket/{bucketName}": "implemented",
+    "storage:route:DELETE /storage/v1/iceberg/v1/{prefix}/namespaces/{namespace}": "implemented",
+    "storage:route:DELETE /storage/v1/iceberg/v1/{prefix}/namespaces/{namespace}/tables/{table}": "implemented",
+    "storage:route:DELETE /storage/v1/object/{bucketName}": "implemented",
+    "storage:route:DELETE /storage/v1/object/{bucketName}/{*}": "implemented",
+    "storage:route:DELETE /storage/v1/s3/{Bucket}": "conformant",
+    "storage:route:DELETE /storage/v1/s3/{Bucket}/{*}": "conformant",
+    "storage:route:DELETE /storage/v1/s3/{Bucket}/{*}?uploadId": "conformant",
+    "storage:route:DELETE /storage/v1/s3/{Bucket}?lifecycle": "conformant",
+    "storage:route:GET /storage/v1/bucket": "conformant",
+    "storage:route:GET /storage/v1/bucket/{bucketId}": "conformant",
+    "storage:route:GET /storage/v1/bucket/{bucketId}/lifecycle": "conformant",
+    "storage:route:GET /storage/v1/health": "implemented",
+    "storage:route:GET /storage/v1/iceberg/bucket": "implemented",
+    "storage:route:GET /storage/v1/iceberg/v1/config": "implemented",
+    "storage:route:GET /storage/v1/iceberg/v1/{prefix}/namespaces": "implemented",
+    "storage:route:GET /storage/v1/iceberg/v1/{prefix}/namespaces/{namespace}": "implemented",
+    "storage:route:GET /storage/v1/iceberg/v1/{prefix}/namespaces/{namespace}/tables": "implemented",
+    "storage:route:GET /storage/v1/iceberg/v1/{prefix}/namespaces/{namespace}/tables/{table}": "implemented",
+    "storage:route:GET /storage/v1/object/authenticated/{bucketName}/{*}": "implemented",
+    "storage:route:GET /storage/v1/object/info/authenticated/{bucketName}/{*}": "implemented",
+    "storage:route:GET /storage/v1/object/info/public/{bucketName}/{*}": "implemented",
+    "storage:route:GET /storage/v1/object/info/{bucketName}/{*}": "implemented",
+    "storage:route:GET /storage/v1/object/public/{bucketName}/{*}": "implemented",
+    "storage:route:GET /storage/v1/object/sign/{bucketName}/{*}": "implemented",
+    "storage:route:GET /storage/v1/object/{bucketName}/{*}": "implemented",
+    "storage:route:GET /storage/v1/render/image/authenticated/{bucketName}/{*}": "conformant",
+    "storage:route:GET /storage/v1/render/image/public/{bucketName}/{*}": "conformant",
+    "storage:route:GET /storage/v1/render/image/sign/{bucketName}/{*}": "conformant",
+    "storage:route:GET /storage/v1/s3": "conformant",
+    "storage:route:GET /storage/v1/s3/{Bucket}": "conformant",
+    "storage:route:GET /storage/v1/s3/{Bucket}/{*}": "conformant",
+    "storage:route:GET /storage/v1/s3/{Bucket}/{*}?tagging": "conformant",
+    "storage:route:GET /storage/v1/s3/{Bucket}/{*}?uploadId": "conformant",
+    "storage:route:GET /storage/v1/s3/{Bucket}?lifecycle": "conformant",
+    "storage:route:GET /storage/v1/s3/{Bucket}?list-type=2": "conformant",
+    "storage:route:GET /storage/v1/s3/{Bucket}?location": "conformant",
+    "storage:route:GET /storage/v1/s3/{Bucket}?uploads": "conformant",
+    "storage:route:GET /storage/v1/s3/{Bucket}?versioning": "conformant",
+    "storage:route:HEAD /storage/v1/iceberg/v1/{prefix}/namespaces/{namespace}": "implemented",
+    "storage:route:HEAD /storage/v1/iceberg/v1/{prefix}/namespaces/{namespace}/tables/{table}": "implemented",
+    "storage:route:HEAD /storage/v1/object/authenticated/{bucketName}/{*}": "implemented",
+    "storage:route:HEAD /storage/v1/s3/{Bucket}": "conformant",
+    "storage:route:HEAD /storage/v1/s3/{Bucket}/{*}": "conformant",
+    "storage:route:POST /storage/v1/bucket": "conformant",
+    "storage:route:POST /storage/v1/bucket/{bucketId}/empty": "implemented",
+    "storage:route:POST /storage/v1/iceberg/bucket": "implemented",
+    "storage:route:POST /storage/v1/iceberg/v1/{prefix}/namespaces": "implemented",
+    "storage:route:POST /storage/v1/iceberg/v1/{prefix}/namespaces/{namespace}/tables": "implemented",
+    "storage:route:POST /storage/v1/iceberg/v1/{prefix}/namespaces/{namespace}/tables/{table}": "implemented",
+    "storage:route:POST /storage/v1/object/copy": "implemented",
+    "storage:route:POST /storage/v1/object/list/{bucketName}": "implemented",
+    "storage:route:POST /storage/v1/object/move": "implemented",
+    "storage:route:POST /storage/v1/object/sign/{bucketName}": "implemented",
+    "storage:route:POST /storage/v1/object/sign/{bucketName}/{*}": "implemented",
+    "storage:route:POST /storage/v1/object/upload/sign/{bucketName}/{*}": "implemented",
+    "storage:route:POST /storage/v1/object/{bucketName}/{*}": "implemented",
+    "storage:route:POST /storage/v1/s3/{Bucket}/{*}?uploadId": "conformant",
+    "storage:route:POST /storage/v1/s3/{Bucket}/{*}?uploads": "conformant",
+    "storage:route:POST /storage/v1/s3/{Bucket}?delete": "conformant",
+    "storage:route:POST /storage/v1/s3/{Bucket}|content-type=multipart/form-data": "conformant",
+    "storage:route:POST /storage/v1/vector/CreateIndex": "implemented",
+    "storage:route:POST /storage/v1/vector/CreateVectorBucket": "implemented",
+    "storage:route:POST /storage/v1/vector/DeleteIndex": "implemented",
+    "storage:route:POST /storage/v1/vector/DeleteVectorBucket": "implemented",
+    "storage:route:POST /storage/v1/vector/DeleteVectors": "implemented",
+    "storage:route:POST /storage/v1/vector/GetIndex": "implemented",
+    "storage:route:POST /storage/v1/vector/GetVectorBucket": "implemented",
+    "storage:route:POST /storage/v1/vector/GetVectors": "implemented",
+    "storage:route:POST /storage/v1/vector/ListIndexes": "implemented",
+    "storage:route:POST /storage/v1/vector/ListVectorBuckets": "implemented",
+    "storage:route:PUT /storage/v1/bucket/{bucketId}": "conformant",
+    "storage:route:PUT /storage/v1/bucket/{bucketId}/lifecycle": "conformant",
+    "storage:route:PUT /storage/v1/object/{bucketName}/{*}": "implemented",
+    "storage:route:PUT /storage/v1/s3/{Bucket}": "conformant",
+    "storage:route:PUT /storage/v1/s3/{Bucket}/{*}": "conformant",
+    "storage:route:PUT /storage/v1/s3/{Bucket}/{*}?partNumber&uploadId|x-amz-copy-source": "conformant",
+    "storage:route:PUT /storage/v1/s3/{Bucket}/{*}?uploadId&partNumber": "conformant",
+    "storage:route:PUT /storage/v1/s3/{Bucket}/{*}|x-amz-copy-source": "conformant",
+    "storage:route:PUT /storage/v1/s3/{Bucket}?lifecycle": "conformant",
+    "storage:sql-function:storage.add_prefixes()": "implemented",
+    "storage:sql-function:storage.allow_any_operation()": "implemented",
+    "storage:sql-function:storage.allow_only_operation()": "implemented",
+    "storage:sql-function:storage.delete_leaf_prefixes()": "implemented",
+    "storage:sql-function:storage.delete_prefix()": "implemented",
+    "storage:sql-function:storage.delete_prefix_hierarchy_trigger()": "implemented",
+    "storage:sql-function:storage.enforce_bucket_lifecycle_service_role()": "implemented",
+    "storage:sql-function:storage.enforce_bucket_name_length()": "implemented",
+    "storage:sql-function:storage.extension()": "implemented",
+    "storage:sql-function:storage.filename()": "implemented",
+    "storage:sql-function:storage.foldername()": "implemented",
+    "storage:sql-function:storage.get_common_prefix()": "implemented",
+    "storage:sql-function:storage.protect_delete()": "implemented",
+    "storage:sql-function:storage.search()": "implemented",
+    "storage:sql-table:storage.objects": "implemented"
+  }
+}
