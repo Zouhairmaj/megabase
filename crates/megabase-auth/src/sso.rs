@@ -202,12 +202,10 @@ fn provider_id(raw: &Value) -> Option<Option<Uuid>> {
 async fn find_provider_by_id(state: &AuthState, id: Uuid) -> Result<Option<bool>, GoTrueError> {
     const FAILED: &str = "Unable to find SSO provider by ID";
     let pool = state.backend.pg_pool().ok_or_else(|| unexpected(FAILED))?;
-    let row: Option<(Option<bool>,)> =
-        sqlx::query_as("SELECT disabled FROM auth.sso_providers WHERE id = $1 LIMIT 1")
-            .bind(id)
-            .fetch_optional(&pool)
-            .await
-            .map_err(|error| lookup_failed(&error, FAILED))?;
+    let query = sqlx::query_as("SELECT disabled FROM auth.sso_providers WHERE id = $1 LIMIT 1")
+        .bind(id)
+        .fetch_optional(&pool);
+    let row: Option<(Option<bool>,)> = deadline(query, FAILED).await?;
     row.map(|(disabled,)| disabled).ok_or_else(|| {
         GoTrueError::new(
             StatusCode::NOT_FOUND,
@@ -224,15 +222,14 @@ async fn find_provider_by_domain(
 ) -> Result<Option<bool>, GoTrueError> {
     const FAILED: &str = "Unable to find SSO provider by domain";
     let pool = state.backend.pg_pool().ok_or_else(|| unexpected(FAILED))?;
-    let row: Option<(Option<bool>,)> = sqlx::query_as(
+    let query = sqlx::query_as(
         "SELECT p.disabled FROM auth.sso_domains d \
          JOIN auth.sso_providers p ON p.id = d.sso_provider_id \
          WHERE d.domain = $1 LIMIT 1",
     )
     .bind(domain)
-    .fetch_optional(&pool)
-    .await
-    .map_err(|error| lookup_failed(&error, FAILED))?;
+    .fetch_optional(&pool);
+    let row: Option<(Option<bool>,)> = deadline(query, FAILED).await?;
     row.map(|(disabled,)| disabled).ok_or_else(|| {
         GoTrueError::new(
             StatusCode::NOT_FOUND,
@@ -240,6 +237,18 @@ async fn find_provider_by_domain(
             "No SSO provider assigned for this domain",
         )
     })
+}
+
+/// Bounds a lookup by the shared auth query deadline so a stalled query
+/// releases its pool connection; a timeout maps to `lookup_failed` too.
+async fn deadline<T>(
+    query: impl std::future::Future<Output = Result<T, sqlx::Error>>,
+    message: &'static str,
+) -> Result<T, GoTrueError> {
+    match tokio::time::timeout(crate::store::QUERY_DEADLINE, query).await {
+        Ok(result) => result.map_err(|error| lookup_failed(&error, message)),
+        Err(_) => Err(lookup_failed(&sqlx::Error::PoolTimedOut, message)),
+    }
 }
 
 fn lookup_failed(error: &sqlx::Error, message: &'static str) -> GoTrueError {

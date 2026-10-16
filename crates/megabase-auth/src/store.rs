@@ -62,7 +62,7 @@ pub enum StoreError {
 
 /// Same bound the admin routes use for a connect. A stalled query fails
 /// instead of holding the Auth client forever.
-const QUERY_DEADLINE: Duration = Duration::from_secs(30);
+pub(crate) const QUERY_DEADLINE: Duration = Duration::from_secs(30);
 
 enum WriteError {
     Conflict,

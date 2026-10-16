@@ -3,7 +3,7 @@
   "totals": {
     "units": 1031,
     "implemented": 263,
-    "tested": 189,
+    "tested": 192,
     "conformant": 0
   },
   "percent": {
@@ -19,7 +19,7 @@
     "auth": {
       "units": 159,
       "implemented": 122,
-      "tested": 83,
+      "tested": 86,
       "conformant": 0,
       "groups": {
         "admin": {
@@ -73,7 +73,7 @@
         "scim": {
           "units": 3,
           "implemented": 3,
-          "tested": 0,
+          "tested": 3,
           "conformant": 0
         },
         "sso": {
@@ -615,9 +615,9 @@
     "auth:route:GET /auth/v1/health": "tested",
     "auth:route:GET /auth/v1/oauth/userinfo": "implemented",
     "auth:route:GET /auth/v1/passkeys": "tested",
-    "auth:route:GET /auth/v1/scim/v2/ResourceTypes": "implemented",
-    "auth:route:GET /auth/v1/scim/v2/Schemas": "implemented",
-    "auth:route:GET /auth/v1/scim/v2/ServiceProviderConfig": "implemented",
+    "auth:route:GET /auth/v1/scim/v2/ResourceTypes": "tested",
+    "auth:route:GET /auth/v1/scim/v2/Schemas": "tested",
+    "auth:route:GET /auth/v1/scim/v2/ServiceProviderConfig": "tested",
     "auth:route:GET /auth/v1/settings": "tested",
     "auth:route:GET /auth/v1/user": "tested",
     "auth:route:GET /auth/v1/user/identities/authorize": "tested",
