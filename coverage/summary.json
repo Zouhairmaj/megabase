@@ -2,12 +2,12 @@
   "schema": 1,
   "totals": {
     "units": 1031,
-    "implemented": 276,
+    "implemented": 286,
     "tested": 192,
     "conformant": 0
   },
   "percent": {
-    "coverage": 26.8,
+    "coverage": 27.7,
     "conformance": 0.0,
     "done": 0.0
   },
@@ -390,7 +390,7 @@
     },
     "storage": {
       "units": 149,
-      "implemented": 57,
+      "implemented": 67,
       "tested": 9,
       "conformant": 0,
       "groups": {
@@ -444,7 +444,7 @@
         },
         "s3": {
           "units": 26,
-          "implemented": 0,
+          "implemented": 10,
           "tested": 0,
           "conformant": 0
         },
@@ -787,6 +787,10 @@
     "storage:route:DELETE /storage/v1/iceberg/v1/{prefix}/namespaces/{namespace}/tables/{table}": "implemented",
     "storage:route:DELETE /storage/v1/object/{bucketName}": "implemented",
     "storage:route:DELETE /storage/v1/object/{bucketName}/{*}": "implemented",
+    "storage:route:DELETE /storage/v1/s3/{Bucket}": "implemented",
+    "storage:route:DELETE /storage/v1/s3/{Bucket}/{*}": "implemented",
+    "storage:route:DELETE /storage/v1/s3/{Bucket}/{*}?uploadId": "implemented",
+    "storage:route:DELETE /storage/v1/s3/{Bucket}?lifecycle": "implemented",
     "storage:route:GET /storage/v1/bucket": "tested",
     "storage:route:GET /storage/v1/bucket/{bucketId}": "tested",
     "storage:route:GET /storage/v1/bucket/{bucketId}/lifecycle": "tested",
@@ -807,6 +811,12 @@
     "storage:route:GET /storage/v1/render/image/authenticated/{bucketName}/{*}": "tested",
     "storage:route:GET /storage/v1/render/image/public/{bucketName}/{*}": "tested",
     "storage:route:GET /storage/v1/render/image/sign/{bucketName}/{*}": "tested",
+    "storage:route:GET /storage/v1/s3": "implemented",
+    "storage:route:GET /storage/v1/s3/{Bucket}": "implemented",
+    "storage:route:GET /storage/v1/s3/{Bucket}/{*}": "implemented",
+    "storage:route:GET /storage/v1/s3/{Bucket}/{*}?tagging": "implemented",
+    "storage:route:GET /storage/v1/s3/{Bucket}/{*}?uploadId": "implemented",
+    "storage:route:GET /storage/v1/s3/{Bucket}?lifecycle": "implemented",
     "storage:route:HEAD /storage/v1/iceberg/v1/{prefix}/namespaces/{namespace}": "implemented",
     "storage:route:HEAD /storage/v1/iceberg/v1/{prefix}/namespaces/{namespace}/tables/{table}": "implemented",
     "storage:route:HEAD /storage/v1/object/authenticated/{bucketName}/{*}": "implemented",
