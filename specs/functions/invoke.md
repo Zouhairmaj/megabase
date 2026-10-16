@@ -1,6 +1,6 @@
 # Functions: invoke an Edge Function (issue 381)
 
-Status: draft
+Status: complete
 Unit ids (`coverage/units.json`): `functions:route:* /functions/v1/{function_name}`
 Level: 4
 
@@ -72,6 +72,11 @@ Configuration (`docs/configuration.md`): `MEGABASE_FUNCTIONS_DIR` plays
    host, so `req.url` inside the function is `http://functions:9000/...`),
    and the body, streamed. The function's status, headers and body come
    back streamed; hop-by-hop headers are dropped both ways.
+   `UserWorker.fetch` drops the body (`new Response(null, ...)`) when the
+   status is 101, 204, 205, 304, 301, 302, 303, 307 or 308, or the method
+   is `HEAD` or `CONNECT` (`vendor/edge-runtime/ext/workers/user_workers.js:28`–`:35`,
+   `:107`–`:128`). Status and headers still pass; for a redirect or 205
+   the function's `Content-Length` is replaced by the empty body's `0`.
 5. **Environment** of the worker: Megabase's environment (upstream passes
    `Deno.env.toObject()`), plus `SUPABASE_URL`, `SUPABASE_ANON_KEY`,
    `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_DB_URL` when not already set
@@ -124,23 +129,34 @@ upstream's comes from edge-runtime internals (eszip build, V8 boot).
 - `SUPABASE_JWKS` / asymmetric verification, per-function `verify_jwt`
   (upstream TODO in the compose file), memory and CPU limits
   (`memoryLimitMb = 150`), worker idle timeout, import maps.
-- Kong's `X-Forwarded-*` request headers.
+- Kong's `X-Forwarded-*` / `X-Real-IP` request headers and `Via` /
+  `X-Kong-*` response headers: Kong itself is not in `vendor/`, the judge
+  normalizes the response ones, and no other Megabase route adds them.
+- The user worker's 60 s wall clock (`workerTimeoutMs`). The gateway
+  deadline is Kong's `read_timeout` (150 s, `MEGABASE_HTTP_TIMEOUT_MS`),
+  which answers 504.
+- edge-runtime's empty-bodied `x-served-by` 500 / 503 (`crates/base/src/server.rs:226`–`:248`):
+  they need the main worker to drop or cancel the request, which has no
+  Megabase equivalent.
 - WebSocket upgrades to a function (hop-by-hop `Upgrade` is dropped).
 - The edge-runtime ops (`functions:op:*`) are Deno internals, served by
   Deno itself, not by Megabase.
 
 ## Judge cases
 
-To add on `review/issue-381-cases` (needs a functions fixture directory for
-both stacks, `MEGABASE_FUNCTIONS_DIR` and Deno on the Megabase side, and
-`FUNCTIONS_VERIFY_JWT=true` for the 401 case):
+`judge/cases/functions.toml` invokes the vendored `hello` function on both
+stacks (reference `VERIFY_JWT=true`): `POST` with JSON, `GET` with a
+query, a sub-path, a missing function, an empty name, and the `verify_jwt`
+rejections (no header, `Basic x`, garbage, forged, expired) plus the
+`OPTIONS` preflight.
 
-- `POST /functions/v1/<echo>` with a JSON body and the anon key → 200 echo.
-- `GET /functions/v1/<echo>?a=1` → method and query echoed.
-- `POST /functions/v1/missing` → status and body of a missing function.
-- `verify_jwt`: no header, `Basic x`, garbage token, bad signature → 401.
-- A function that calls `${SUPABASE_URL}/rest/v1/...` with the forwarded
-  `Authorization` header.
-- Issue #400: a function using std@0.168.0 `serve()`, one using
+Not covered yet, because repository fixtures cannot add TypeScript
+(GOAL.md rule 1) and `hello` ignores its request:
+
+- headers, method and body as the function sees them (an echo function);
+- the dropped body of a redirect, a 205 or a `HEAD`;
+- a function that calls `${SUPABASE_URL}/rest/v1/...` with the forwarded
+  `Authorization` header;
+- issue #400: a function using std@0.168.0 `serve()`, one using
   `Deno.serve`, and two std-`serve()` functions invoked concurrently (both
   200, no `AddrInUse`).
