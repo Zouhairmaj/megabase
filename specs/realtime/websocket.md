@@ -1,15 +1,16 @@
 # Realtime: WebSocket endpoint (issue 70)
 
-Status: partial (connect, heartbeat, public join and leave; public
-broadcast; presence)
+Status: partial (connect, heartbeat, public join and leave; presence
+pushes)
 Unit ids (`coverage/units.json`): `realtime:route:GET /realtime/v1/websocket`,
-`realtime:client-event:broadcast`, `realtime:client-event:presence`,
 `realtime:server-event:presence_state`, `realtime:server-event:presence_diff`
 Level: 3
 
 The Phoenix socket supabase-js (`@supabase/realtime-js`) opens for
 channels. Kong strips `/realtime/v1/` and forwards to Realtime's
-`/socket/websocket`.
+`/socket/websocket`. The `broadcast`, `presence` and `access_token`
+events on a joined channel, and the V2 binary frames, are in
+[`client-events.md`](client-events.md).
 
 ## Upstream
 
@@ -27,15 +28,8 @@ channels. Kong strips `/realtime/v1/` and forwards to Realtime's
 | V2 text frames `[join_ref, ref, topic, event, payload]` | `vendor/realtime/lib/realtime_web/socket/v2_serializer.ex` |
 | Kong route: `key-auth`, `x-api-key` and `apikey` from `query_params.apikey` | `vendor/supabase/docker/volumes/api/kong.yml:217`–`:244` |
 | Client constants (`vsn` 2.0.0 default, `phx_*` events) | `vendor/supabase-js/packages/core/realtime-js/src/lib/constants.ts:14`–`:57` |
-| `handle_in("broadcast" …)` on a public channel | `vendor/realtime/lib/realtime_web/channels/realtime_channel.ex:505` |
-| Public broadcast: `self` (`pubsub_broadcast` vs `_from`), `ack` replies, payload size | `vendor/realtime/lib/realtime_web/channels/realtime_channel/broadcast_handler.ex:110`–`:171` |
-| Fan-out to subscribers, sender skipped, per-serializer encoding | `vendor/realtime/lib/realtime_web/channels/realtime_channel/message_dispatcher.ex:101`–`:200` |
-| V2 broadcast push `[null, null, topic, event, payload]`; non-map payload raises | `vendor/realtime/lib/realtime_web/socket/v2_serializer.ex:63`–`:70` |
-| `validate_payload_size/2`: `max_payload_size_in_kb * 1000 + 500` of `:erlang.external_size/1` | `vendor/realtime/lib/realtime/tenants.ex:539`–`:544` |
-| `handle_in("presence" …)` replies and shutdowns | `vendor/realtime/lib/realtime_web/channels/realtime_channel.ex:509`–`:537` |
-| `PresenceHandler.handle/2`: track, untrack, resync, unchanged payload, rate limit | `vendor/realtime/lib/realtime_web/channels/realtime_channel/presence_handler.ex:155`–`:356` |
 | `presence_key/1`: non-empty string, number or boolean, else `UUID.uuid1()` | `vendor/realtime/lib/realtime_web/channels/payloads/join.ex:41`–`:48` |
-| `CLIENT_PRESENCE_MAX_CALLS` 5, `CLIENT_PRESENCE_WINDOW_MS` 30000 | `vendor/realtime/config/runtime.exs:13`–`:14` |
+| `PresenceHandler.sync/1`: `presence_state` after a presence-enabled join | `vendor/realtime/lib/realtime_web/channels/realtime_channel/presence_handler.ex:92`–`:117` |
 | `shutdown_response/2`: `system` push then stop | `vendor/realtime/lib/realtime_web/channels/realtime_channel.ex:859`–`:888` |
 
 Heartbeat, unmatched-topic, duplicate-join and leave/close handling come
@@ -57,7 +51,8 @@ token is percent-decoded once more and stripped of whitespace
 
 ## Outputs
 
-101 Switching Protocols, then text frames. V2 encodes
+101 Switching Protocols, then text frames (and, on V2, the binary user
+broadcasts in `client-events.md`). V2 encodes
 `[join_ref, ref, topic, event, payload]`; V1 encodes
 `{"topic","event","payload","ref"}`.
 
@@ -67,9 +62,7 @@ token is percent-decoded once more and stripped of whitespace
 | `realtime:<t>` / `phx_join` (public, no postgres changes) | `phx_reply` ok `{"postgres_changes":[]}`; with `presence.enabled`, then `presence_state` |
 | `phx_join` on an already joined topic | `phx_close` for the old join, then the new join's reply |
 | joined topic / `phx_leave` | `phx_reply` ok `{}`, then `phx_close` `{}` with `ref` = `join_ref` |
-| joined topic / `broadcast` | the payload as a `broadcast` push to every other socket on the topic (and this one with `broadcast.self`), then `phx_reply` ok `{}` only with `broadcast.ack` |
-| joined topic / `presence` `track` | `phx_reply` ok `{}`; `presence_state` if presence was off; `presence_diff` to every socket on the topic |
-| joined topic / `presence` `untrack` | `phx_reply` ok `{}`; a `leaves` `presence_diff` if something was tracked |
+| joined topic / `broadcast`, `presence`, `access_token` | see `client-events.md` |
 | non-`realtime:` topic, or a non-join event on an unjoined topic | `phx_reply` error `{"reason":"unmatched topic"}` |
 | joined topic, `join_ref` differs from the current join | nothing |
 | joined topic, unknown event | nothing |
@@ -79,33 +72,6 @@ Pushes use `ref` null. `presence_state` and `system` carry the channel's
 `join_ref`; broadcasts and `presence_diff` (fastlane) carry `join_ref`
 null. Fastlane pushes go to every subscriber of the topic, whatever its
 own presence or broadcast config.
-
-Broadcast:
-
-- The payload goes out as received. A V2 socket skips a payload that is
-  not a JSON object (`fastlane!` raises); a V1 socket still gets it.
-- `self` and `ack` are `FlexibleBoolean`s.
-- A payload whose Erlang external size passes 3000500 bytes is not sent;
-  with `ack` the reply is `phx_reply` error `{"error":"payload_size_exceeded"}`.
-
-Presence:
-
-- The event is ASCII-lowercased. A payload without `event` replies ok and
-  does nothing.
-- Every event counts against the channel's client limit: 5 per 30 s
-  window, the window starting at the first event after the previous one
-  ends.
-- `track` stores `payload.payload` (default `{}`). The same payload as the
-  last track replies ok with no diff. A different one updates: the diff
-  joins the new meta (with `phx_ref_prev`) and leaves the old one.
-- Presence turns on for the channel at the first track even if the join
-  did not enable it; that track also pushes `presence_state`.
-- A channel's presence is untracked when it leaves, is rejoined, shuts
-  down, crashes or its socket closes; the other sockets get the `leaves`
-  diff.
-- The diff to the tracking socket is pushed after its reply (and after
-  the resync `presence_state`): Phoenix.Presence dispatches diffs
-  asynchronously.
 
 Slow consumers (Megabase hardening, no upstream counterpart): each
 socket queues at most 1024 pushes from other sockets. A socket whose
@@ -145,16 +111,6 @@ token), else the socket token:
 | Rounded `exp` not after now | `InvalidJWTToken: Token expiration time is invalid` |
 | Other token failures | `Unknown Error on Channel` |
 
-Presence (`phx_reply` unless noted):
-
-| When | Answer |
-|---|---|
-| `track` with a `payload` that is not an object | error `{"reason":"Presence track payload must be a map"}` |
-| Unknown presence event | error `{}` |
-| `event` not a string | the channel crashes: `phx_error` `{}` with `ref` = `join_ref` |
-| Over the client limit | `system` push `{"channel":<t>,"extension":"system","message":"Client presence rate limit exceeded","status":"error"}`, then `phx_close` |
-| `track` payload over 3000500 bytes | the same with `"Track message size exceeded"` |
-
 ## Edge cases
 
 - The self-hosted stack has one tenant (`realtime-dev`, not suspended,
@@ -185,7 +141,6 @@ Presence (`phx_reply` unless noted):
   `replication_ready`. These reply `phx_reply` error with a
   `MEGABASE_NOT_IMPLEMENTED` response (`reason`, `code`, `component`,
   `unit`).
-- Binary (V2 user broadcast) frames are ignored.
 - Server `disconnect` pushes; `system` pushes other than the presence and
   token shutdowns. `access_token` refreshes and token expiry are in
   [`protocol.md`](protocol.md).

@@ -1,14 +1,17 @@
-//! Phoenix channel protocol over the Realtime socket: frames, heartbeat,
-//! `phx_join` on `realtime:*` topics, public broadcast, presence,
-//! `access_token` refreshes, token expiry and `phx_leave`.
+//! Phoenix channel protocol over the Realtime socket: text and V2 binary
+//! frames, heartbeat, `phx_join` on `realtime:*` topics, public broadcast
+//! (user broadcasts included), presence, `access_token` refreshes, token
+//! expiry and `phx_leave`.
 
 // Ported from supabase/realtime lib/realtime_web/channels/realtime_channel.ex,
 // lib/realtime_web/channels/realtime_channel/broadcast_handler.ex,
 // lib/realtime_web/channels/realtime_channel/presence_handler.ex,
-// lib/realtime_web/socket/v2_serializer.ex and lib/realtime_web/socket.ex (Apache-2.0),
-// pin v2.143.3. Socket-level handling follows Phoenix 1.7 `Phoenix.Socket`, which
-// Realtime uses unchanged. Event names from supabase/supabase-js
-// packages/core/realtime-js/src/lib/constants.ts (MIT), pin v2.117.3.
+// lib/realtime_web/socket/v2_serializer.ex, lib/realtime_web/socket/user_broadcast.ex
+// and lib/realtime_web/socket.ex (Apache-2.0), pin v2.143.3. Socket-level handling
+// follows Phoenix 1.7 `Phoenix.Socket`, which Realtime uses unchanged. Event names
+// and the binary frame layout from supabase/supabase-js
+// packages/core/realtime-js/src/lib/constants.ts and src/lib/serializer.ts (MIT),
+// pin v2.117.3.
 
 use std::collections::HashMap;
 
@@ -16,7 +19,7 @@ use megabase_core::{Hs256, MegabaseNotImplemented};
 use serde_json::{json, Map, Value};
 
 use crate::hub::{ConnId, Hub, Outbox};
-use crate::term::{external_size, uuid1, MAX_PAYLOAD_SIZE};
+use crate::term::{binary_tuple_size, external_size, user_broadcast_size, uuid1, MAX_PAYLOAD_SIZE};
 use crate::token::{authorize_conn, TokenError};
 use crate::COMPONENT;
 
@@ -128,7 +131,186 @@ impl Frame {
     }
 }
 
+/// One encoded server message, as the socket sends it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Wire {
+    Text(String),
+    /// A `V2Serializer` binary frame.
+    Binary(Vec<u8>),
+}
+
+/// `V2Serializer` binary frame kinds.
+const KIND_PUSH: u8 = 0;
+const KIND_BROADCAST: u8 = 2;
+const KIND_USER_BROADCAST_PUSH: u8 = 3;
+const KIND_USER_BROADCAST: u8 = 4;
+
+/// What a `broadcast` carries to the topic's subscribers.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum Broadcast {
+    /// `%Phoenix.Socket.Broadcast{}` with a decoded JSON payload.
+    Json(Value),
+    /// `%Phoenix.Socket.Broadcast{payload: {:binary, data}}` from a `@push`
+    /// frame.
+    Binary(Vec<u8>),
+    /// `%UserBroadcast{}` from a `@user_broadcast_push` frame. `build_broadcast/2`
+    /// drops the client metadata, so none is relayed.
+    User {
+        event: String,
+        /// `user_payload_encoding`: `:json` (1) or `:binary` (0).
+        json: bool,
+        payload: Vec<u8>,
+    },
+}
+
+impl Broadcast {
+    /// `MessageDispatcher` `fastlane!/2` for a subscriber of `topic` using
+    /// `serializer`; `None` is a message that serializer cannot encode, which
+    /// the dispatcher skips.
+    pub(crate) fn fastlane(&self, serializer: Serializer, topic: &str) -> Option<Wire> {
+        match (self, serializer) {
+            (Self::Json(payload), _) => serializer
+                .fastlane(Frame::push(Value::Null, topic, "broadcast", payload))
+                .map(Wire::Text),
+            // The V1 serializer raises on a non-map payload.
+            (Self::Binary(_), Serializer::V1) => None,
+            (Self::Binary(data), Serializer::V2) => {
+                let mut bytes = vec![KIND_BROADCAST, byte_size(topic)?, byte_size("broadcast")?];
+                bytes.extend_from_slice(topic.as_bytes());
+                bytes.extend_from_slice(b"broadcast");
+                bytes.extend_from_slice(data);
+                Some(Wire::Binary(bytes))
+            }
+            // `UserBroadcast.convert_to_json_broadcast/1`: only a JSON payload
+            // that decodes, emitted verbatim.
+            (
+                Self::User {
+                    event,
+                    json,
+                    payload,
+                },
+                Serializer::V1,
+            ) => {
+                let raw = std::str::from_utf8(payload).ok().filter(|_| *json)?;
+                serde_json::from_str::<Value>(raw).ok()?;
+                Some(Wire::Text(format!(
+                    r#"{{"event":"broadcast","payload":{{"event":{},"payload":{raw},"type":"broadcast"}},"ref":null,"topic":{}}}"#,
+                    Value::from(event.as_str()),
+                    Value::from(topic),
+                )))
+            }
+            (
+                Self::User {
+                    event,
+                    json,
+                    payload,
+                },
+                Serializer::V2,
+            ) => {
+                let mut bytes = vec![
+                    KIND_USER_BROADCAST,
+                    byte_size(topic)?,
+                    byte_size(event)?,
+                    0,
+                    u8::from(*json),
+                ];
+                bytes.extend_from_slice(topic.as_bytes());
+                bytes.extend_from_slice(event.as_bytes());
+                bytes.extend_from_slice(payload);
+                Some(Wire::Binary(bytes))
+            }
+        }
+    }
+}
+
+/// `byte_size!/3`: a binary frame field is at most 255 bytes.
+fn byte_size(field: &str) -> Option<u8> {
+    u8::try_from(field.len()).ok()
+}
+
+/// A decoded `V2Serializer` binary frame.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct BinaryFrame {
+    pub join_ref: Value,
+    pub reference: Value,
+    pub topic: String,
+    pub event: String,
+    /// The payload, as a broadcast would relay it.
+    pub body: Broadcast,
+    /// `:erlang.external_size/1` of the decoded payload term.
+    pub size: usize,
+}
+
+/// Splits `len` bytes off the front of `bytes`.
+fn take<'b>(bytes: &mut &'b [u8], len: u8) -> Option<&'b [u8]> {
+    let (head, tail) = bytes.split_at_checked(usize::from(len))?;
+    *bytes = tail;
+    Some(head)
+}
+
+/// A binary field as a string; Megabase treats a field that is not UTF-8
+/// as a malformed frame.
+fn utf8(bytes: &[u8]) -> Option<String> {
+    String::from_utf8(bytes.to_vec()).ok()
+}
+
 impl Serializer {
+    /// `V2Serializer.decode!/2` for a binary frame; `None` is a frame no
+    /// clause matches, handled like a malformed text frame.
+    pub(crate) fn decode_binary(bytes: &[u8]) -> Option<BinaryFrame> {
+        let (&kind, mut rest) = bytes.split_first()?;
+        match kind {
+            KIND_PUSH => {
+                let [join_ref, reference, topic, event] = *take(&mut rest, 4)? else {
+                    return None;
+                };
+                let join_ref = utf8(take(&mut rest, join_ref)?)?;
+                let reference = utf8(take(&mut rest, reference)?)?;
+                let topic = utf8(take(&mut rest, topic)?)?;
+                let event = utf8(take(&mut rest, event)?)?;
+                Some(BinaryFrame {
+                    join_ref: Value::String(join_ref),
+                    reference: Value::String(reference),
+                    topic,
+                    event,
+                    size: binary_tuple_size(rest.len()),
+                    body: Broadcast::Binary(rest.to_vec()),
+                })
+            }
+            KIND_USER_BROADCAST_PUSH => {
+                let [join_ref, reference, topic, event, metadata, encoding] = *take(&mut rest, 6)?
+                else {
+                    return None;
+                };
+                let join_ref = utf8(take(&mut rest, join_ref)?)?;
+                let reference = utf8(take(&mut rest, reference)?)?;
+                let topic = utf8(take(&mut rest, topic)?)?;
+                let event = utf8(take(&mut rest, event)?)?;
+                let metadata = take(&mut rest, metadata)?;
+                // `Jason.decode!/1` raises on bad metadata.
+                let metadata = if metadata.is_empty() {
+                    Value::Object(Map::new())
+                } else {
+                    serde_json::from_slice(metadata).ok()?
+                };
+                let json = encoding != 0;
+                Some(BinaryFrame {
+                    join_ref: Value::String(join_ref),
+                    reference: Value::String(reference),
+                    topic,
+                    event: "broadcast".to_owned(),
+                    size: user_broadcast_size(&event, json, rest.len(), &metadata),
+                    body: Broadcast::User {
+                        event,
+                        json,
+                        payload: rest.to_vec(),
+                    },
+                })
+            }
+            _ => None,
+        }
+    }
+
     /// Decodes a text frame; `None` is a malformed message, which upstream
     /// logs and ignores.
     pub(crate) fn decode(self, text: &str) -> Option<Frame> {
@@ -266,6 +448,29 @@ impl Channel {
     }
 }
 
+/// `Phoenix.Socket` `handle_in/4`: where a message for a topic goes.
+enum Route {
+    /// The joined channel, with its join ref.
+    Channel(Value),
+    /// The client raced a server close: dropped without a reply.
+    Dropped,
+    /// No channel and not a join.
+    Unmatched,
+    /// A join, after the `phx_close` of a channel it replaces.
+    Join(Option<Frame>),
+}
+
+/// The `unmatched topic` error reply.
+fn unmatched(join_ref: Value, reference: Value, topic: &str) -> Frame {
+    Frame::reply(
+        join_ref,
+        reference,
+        topic,
+        "error",
+        json!({ "reason": "unmatched topic" }),
+    )
+}
+
 /// Per-connection channel state.
 pub(crate) struct Session<'a> {
     jwt: &'a Hs256,
@@ -311,46 +516,111 @@ impl<'a> Session<'a> {
 
     /// Frames to send back for one client frame, at Unix time `now_ms` in
     /// milliseconds. Pushes from other channels arrive on the outbox.
-    pub(crate) fn handle(&mut self, frame: Frame, now_ms: i64) -> Vec<Frame> {
+    pub(crate) fn handle(&mut self, frame: Frame, now_ms: i64) -> Vec<Wire> {
         if frame.topic == "phoenix" && frame.event == "heartbeat" {
-            return vec![Frame::reply(
+            return self.wire(vec![Frame::reply(
                 Value::Null,
                 frame.reference,
                 "phoenix",
                 "ok",
                 json!({}),
-            )];
+            )]);
         }
-        self.phx_join(frame, now_ms)
-    }
-
-    /// `phx_join`, or any event addressed to a channel topic.
-    // megabase:unit realtime:protocol-event:phx_join
-    fn phx_join(&mut self, frame: Frame, now_ms: i64) -> Vec<Frame> {
-        let mut out = Vec::new();
-        if let Some(current) = self.channels.get(&frame.topic) {
-            if frame.event == "phx_join" {
-                // Duplicate join: Phoenix shuts the existing channel down first.
-                out.push(Frame::close(&current.join_ref, &frame.topic));
-                self.stop(&frame.topic);
-            } else if !current.join_ref.is_null() && current.join_ref != frame.join_ref {
-                // The client raced a server close; Phoenix drops the message.
-                return out;
-            } else {
-                out.extend(self.channel_event(frame, now_ms));
-                return out;
-            }
-        }
-        if frame.event != "phx_join" || !frame.topic.starts_with("realtime:") {
-            out.push(Frame::reply(
+        match self.route(&frame.topic, &frame.event, &frame.join_ref) {
+            Route::Channel(join_ref) => self.channel_event(join_ref, frame, now_ms),
+            Route::Dropped => Vec::new(),
+            Route::Unmatched => self.wire(vec![unmatched(
                 frame.join_ref,
                 frame.reference,
                 &frame.topic,
-                "error",
-                json!({ "reason": "unmatched topic" }),
-            ));
-            return out;
+            )]),
+            Route::Join(closed) => {
+                let mut out = Vec::from_iter(closed);
+                out.extend(self.phx_join(frame, now_ms));
+                self.wire(out)
+            }
         }
+    }
+
+    /// Frames to send back for one binary frame from a V2 socket.
+    pub(crate) fn handle_binary(&mut self, frame: BinaryFrame) -> Vec<Wire> {
+        let BinaryFrame {
+            join_ref,
+            reference,
+            topic,
+            event,
+            body,
+            size,
+        } = frame;
+        match self.route(&topic, &event, &join_ref) {
+            Route::Channel(join_ref) => match event.as_str() {
+                "phx_leave" => {
+                    let out = self.phx_leave(&join_ref, &topic, reference);
+                    self.wire(out)
+                }
+                "broadcast" => self.broadcast(join_ref, &topic, reference, &body, size),
+                // `PresenceHandler.handle(_, socket)`: no `event` key.
+                "presence" => self.wire(vec![Frame::reply(
+                    join_ref,
+                    reference,
+                    &topic,
+                    "ok",
+                    json!({}),
+                )]),
+                _ => Vec::new(),
+            },
+            Route::Dropped => Vec::new(),
+            Route::Unmatched => self.wire(vec![unmatched(join_ref, reference, &topic)]),
+            // `RealtimeChannel.join/3` reads a map; Megabase does not model
+            // the crash a `{:binary, data}` join payload causes.
+            Route::Join(closed) => {
+                let mut out = Vec::from_iter(closed);
+                out.push(Frame::reply(
+                    join_ref,
+                    reference,
+                    &topic,
+                    "error",
+                    not_implemented("realtime:protocol-event:phx_join"),
+                ));
+                self.wire(out)
+            }
+        }
+    }
+
+    /// Encodes frames with this socket's serializer.
+    fn wire(&self, frames: Vec<Frame>) -> Vec<Wire> {
+        frames
+            .into_iter()
+            .map(|frame| Wire::Text(self.serializer.encode(frame)))
+            .collect()
+    }
+
+    /// `Phoenix.Socket` `handle_in/4`: where a message for `topic` goes.
+    fn route(&mut self, topic: &str, event: &str, join_ref: &Value) -> Route {
+        if let Some(current) = self.channels.get(topic) {
+            if event == "phx_join" {
+                // Duplicate join: Phoenix shuts the existing channel down first.
+                let close = Frame::close(&current.join_ref, topic);
+                self.stop(topic);
+                return Route::Join(Some(close));
+            }
+            if !current.join_ref.is_null() && current.join_ref != *join_ref {
+                // The client raced a server close; Phoenix drops the message.
+                return Route::Dropped;
+            }
+            return Route::Channel(current.join_ref.clone());
+        }
+        if event == "phx_join" && topic.starts_with("realtime:") {
+            Route::Join(None)
+        } else {
+            Route::Unmatched
+        }
+    }
+
+    /// `phx_join` on a topic with no running channel.
+    // megabase:unit realtime:protocol-event:phx_join
+    fn phx_join(&mut self, frame: Frame, now_ms: i64) -> Vec<Frame> {
+        let mut out = Vec::new();
         match self.join(&frame.topic, &frame.payload, now_ms) {
             Ok(config) => {
                 let presence_enabled = config.presence_enabled;
@@ -415,33 +685,29 @@ impl<'a> Session<'a> {
     }
 
     /// An event on the joined channel `frame.topic`.
-    fn channel_event(&mut self, frame: Frame, now_ms: i64) -> Vec<Frame> {
-        let Some(join_ref) = self.channels.get(&frame.topic).map(|c| c.join_ref.clone()) else {
-            return Vec::new();
-        };
-        match frame.event.as_str() {
-            "phx_leave" => self.phx_leave(&join_ref, frame),
-            "broadcast" => self.broadcast(join_ref, frame),
+    fn channel_event(&mut self, join_ref: Value, frame: Frame, now_ms: i64) -> Vec<Wire> {
+        let out = match frame.event.as_str() {
+            "phx_leave" => self.phx_leave(&join_ref, &frame.topic, frame.reference),
+            "broadcast" => {
+                let size = external_size(&frame.payload);
+                let body = Broadcast::Json(frame.payload);
+                return self.broadcast(join_ref, &frame.topic, frame.reference, &body, size);
+            }
             "presence" => self.presence(&join_ref, &frame, now_ms),
             "access_token" => self.access_token(frame, now_ms),
             // `handle_in/3` catch-all: logged, no reply.
             _ => Vec::new(),
-        }
+        };
+        self.wire(out)
     }
 
     /// `Phoenix.Socket` `handle_in` for `phx_leave`: reply ok, then close.
     // megabase:unit realtime:protocol-event:phx_leave
-    fn phx_leave(&mut self, join_ref: &Value, frame: Frame) -> Vec<Frame> {
-        self.stop(&frame.topic);
+    fn phx_leave(&mut self, join_ref: &Value, topic: &str, reference: Value) -> Vec<Frame> {
+        self.stop(topic);
         vec![
-            Frame::reply(
-                join_ref.clone(),
-                frame.reference,
-                &frame.topic,
-                "ok",
-                json!({}),
-            ),
-            Frame::close(join_ref, &frame.topic),
+            Frame::reply(join_ref.clone(), reference, topic, "ok", json!({})),
+            Frame::close(join_ref, topic),
         ]
     }
 
@@ -544,7 +810,7 @@ impl<'a> Session<'a> {
     }
 
     /// Fires the channel timers due at `now_ms`.
-    pub(crate) fn tick(&mut self, now_ms: i64) -> Vec<Frame> {
+    pub(crate) fn tick(&mut self, now_ms: i64) -> Vec<Wire> {
         let due: Vec<String> = self
             .channels
             .iter()
@@ -575,7 +841,7 @@ impl<'a> Session<'a> {
                 out.extend(self.reconfirm(&topic, now_ms));
             }
         }
-        out
+        self.wire(out)
     }
 
     /// `handle_info(:confirm_token, …)`: the current token again; expiry
@@ -605,37 +871,34 @@ impl<'a> Session<'a> {
     }
 
     /// `BroadcastHandler.handle/3` on a public channel: fan out to the other
-    /// subscribers (and this one with `self`), reply only with `ack`.
+    /// subscribers (and this one with `self`), reply only with `ack`. `size`
+    /// is the payload's external term size.
     // megabase:unit realtime:client-event:broadcast
-    fn broadcast(&mut self, join_ref: Value, frame: Frame) -> Vec<Frame> {
-        let Some(channel) = self.channels.get(&frame.topic) else {
+    fn broadcast(
+        &mut self,
+        join_ref: Value,
+        topic: &str,
+        reference: Value,
+        body: &Broadcast,
+        size: usize,
+    ) -> Vec<Wire> {
+        let Some(channel) = self.channels.get(topic) else {
             return Vec::new();
         };
         let mut out = Vec::new();
-        let (status, response) = if external_size(&frame.payload) > MAX_PAYLOAD_SIZE {
+        let (status, response) = if size > MAX_PAYLOAD_SIZE {
             ("error", json!({ "error": "payload_size_exceeded" }))
         } else {
-            self.hub.broadcast(&frame.topic, self.conn, &frame.payload);
-            if channel.config.self_broadcast
-                && (self.serializer == Serializer::V1 || frame.payload.is_object())
-            {
-                out.push(Frame::push(
-                    Value::Null,
-                    &frame.topic,
-                    "broadcast",
-                    &frame.payload,
-                ));
+            self.hub.broadcast(topic, self.conn, body);
+            // `pubsub_broadcast/5` reaches this socket's own fastlane first.
+            if channel.config.self_broadcast {
+                out.extend(body.fastlane(self.serializer, topic));
             }
             ("ok", json!({}))
         };
         if channel.config.ack_broadcast {
-            out.push(Frame::reply(
-                join_ref,
-                frame.reference,
-                &frame.topic,
-                status,
-                response,
-            ));
+            let reply = Frame::reply(join_ref, reference, topic, status, response);
+            out.push(Wire::Text(self.serializer.encode(reply)));
         }
         out
     }
@@ -936,27 +1199,33 @@ mod tests {
         jwt: &'a Hs256,
         hub: &'a Hub,
         serializer: Serializer,
-    ) -> (Session<'a>, Receiver<String>) {
+    ) -> (Session<'a>, Receiver<Wire>) {
         let (outbox, inbox) = Outbox::new(OUTBOX_CAPACITY);
         (Session::new(jwt, hub, serializer, anon(), outbox), inbox)
     }
 
-    fn run_at(session: &mut Session<'_>, text: &str, now_ms: i64) -> Vec<String> {
-        session
-            .handle(frame(text), now_ms)
+    fn texts(wires: Vec<Wire>) -> Vec<String> {
+        wires
             .into_iter()
-            .map(|f| Serializer::V2.encode(f))
+            .map(|wire| match wire {
+                Wire::Text(text) => text,
+                Wire::Binary(bytes) => panic!("unexpected binary {bytes:?}"),
+            })
             .collect()
+    }
+
+    fn run_at(session: &mut Session<'_>, text: &str, now_ms: i64) -> Vec<String> {
+        texts(session.handle(frame(text), now_ms))
     }
 
     fn run(session: &mut Session<'_>, text: &str) -> Vec<String> {
         run_at(session, text, NOW * 1000)
     }
 
-    fn drain(inbox: &mut Receiver<String>) -> Vec<Value> {
+    fn drain(inbox: &mut Receiver<Wire>) -> Vec<Value> {
         let mut out = Vec::new();
-        while let Ok(text) = inbox.try_recv() {
-            out.push(serde_json::from_str(&text).unwrap());
+        while let Ok(wire) = inbox.try_recv() {
+            out.extend(values(&texts(vec![wire])));
         }
         out
     }
@@ -1245,7 +1514,7 @@ mod tests {
         let expired = token(&json!({"role": "anon", "exp": NOW - 1}));
         assert!(run_at(&mut session, &refresh(&json!(expired)), applied + 1).is_empty());
         let out = session.tick(applied + ACCESS_TOKEN_THROTTLE_MS);
-        let out: Vec<String> = out.into_iter().map(|f| Serializer::V2.encode(f)).collect();
+        let out = texts(out);
         assert_eq!(
             values(&out),
             system_close("Token has expired 21 seconds ago")
@@ -1263,11 +1532,7 @@ mod tests {
         let expiry = (NOW + 30) * 1000;
         assert_eq!(session.deadline(), Some(expiry));
         assert!(session.tick(expiry - 1).is_empty());
-        let out: Vec<String> = session
-            .tick(expiry)
-            .into_iter()
-            .map(|f| Serializer::V2.encode(f))
-            .collect();
+        let out = texts(session.tick(expiry));
         assert_eq!(
             values(&out),
             system_close("Token has expired 0 seconds ago")
@@ -1565,6 +1830,200 @@ mod tests {
         }
     }
 
+    /// realtime-js `_encodeUserBroadcastPush` for `channel.send(...)`.
+    fn user_push(reference: &str, topic: &str, event: &str, json: bool, payload: &[u8]) -> Vec<u8> {
+        let header = [
+            3,
+            1,
+            reference.len(),
+            topic.len(),
+            event.len(),
+            0,
+            usize::from(json),
+        ];
+        let mut bytes: Vec<u8> = header.iter().map(|b| u8::try_from(*b).unwrap()).collect();
+        for field in ["1", reference, topic, event] {
+            bytes.extend_from_slice(field.as_bytes());
+        }
+        bytes.extend_from_slice(payload);
+        bytes
+    }
+
+    fn user_frame(json: bool, payload: &[u8]) -> BinaryFrame {
+        Serializer::decode_binary(&user_push("2", "realtime:room", "e", json, payload)).unwrap()
+    }
+
+    #[test]
+    fn decodes_binary_frames() {
+        let frame = user_frame(true, br#"{"n":1}"#);
+        assert_eq!(frame.join_ref, json!("1"));
+        assert_eq!(frame.reference, json!("2"));
+        assert_eq!(frame.topic, "realtime:room");
+        assert_eq!(frame.event, "broadcast");
+        assert_eq!(
+            frame.body,
+            Broadcast::User {
+                event: "e".to_owned(),
+                json: true,
+                payload: br#"{"n":1}"#.to_vec()
+            }
+        );
+        assert_eq!(frame.size, user_broadcast_size("e", true, 7, &json!({})));
+
+        // Metadata counts toward the size and must be JSON.
+        let mut with_meta = vec![3, 0, 0, 1, 1, 7, 0];
+        with_meta.extend_from_slice(b"te{\"a\":1}");
+        let frame = Serializer::decode_binary(&with_meta).unwrap();
+        assert_eq!(
+            frame.size,
+            user_broadcast_size("e", false, 0, &json!({"a": 1}))
+        );
+        assert_eq!(frame.join_ref, json!(""));
+
+        // `@push`: any event with a `{:binary, data}` payload.
+        let push = [&[0, 1, 1, 1, 1][..], b"12tbxy"].concat();
+        let frame = Serializer::decode_binary(&push).unwrap();
+        assert_eq!((frame.topic.as_str(), frame.event.as_str()), ("t", "b"));
+        assert_eq!(frame.body, Broadcast::Binary(b"xy".to_vec()));
+        assert_eq!(frame.size, binary_tuple_size(2));
+
+        for bad in [
+            &b""[..],
+            &[1, 0, 0, 0, 0],
+            &[4, 0, 0, 0, 0],
+            &[3, 0, 0, 5, 0, 0, 0, b'a'],
+            &[3, 0, 0, 0, 0, 1, 0, b'{'],
+            &[0, 0, 0, 1],
+            &[0, 0, 0, 1, 0, 0xff],
+        ] {
+            assert!(Serializer::decode_binary(bad).is_none(), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn user_broadcast_fans_out_with_self_and_ack() {
+        let jwt = jwt();
+        let hub = Hub::default();
+        let (mut a, mut a_inbox) = open(&jwt, &hub, Serializer::V2);
+        let (mut b, mut b_inbox) = open(&jwt, &hub, Serializer::V2);
+        let (mut c, mut c_inbox) = open(&jwt, &hub, Serializer::V1);
+        run(
+            &mut a,
+            &join(&json!({"broadcast": {"self": true, "ack": true}})),
+        );
+        run(&mut b, JOIN);
+        let v1_join = Serializer::V1
+            .decode(
+                r#"{"topic":"realtime:room","event":"phx_join","payload":{"config":{}},"ref":"1"}"#,
+            )
+            .unwrap();
+        c.handle(v1_join, NOW * 1000);
+
+        let relayed = Wire::Binary([&[4, 13, 1, 0, 1][..], b"realtime:roome{\"n\":1}"].concat());
+        assert_eq!(
+            a.handle_binary(user_frame(true, br#"{"n":1}"#)),
+            [
+                relayed.clone(),
+                Wire::Text(
+                    r#"["1","2","realtime:room","phx_reply",{"response":{},"status":"ok"}]"#
+                        .to_owned()
+                ),
+            ]
+        );
+        assert!(a_inbox.try_recv().is_err());
+        assert_eq!(b_inbox.try_recv().unwrap(), relayed);
+        assert_eq!(
+            drain(&mut c_inbox),
+            [
+                json!({"event": "broadcast", "ref": null, "topic": "realtime:room",
+                "payload": {"event": "e", "payload": {"n": 1}, "type": "broadcast"}})
+            ]
+        );
+
+        // Without `ack` or `self`, b sends silently; a still receives.
+        assert!(b.handle_binary(user_frame(false, b"\x00\x01")).is_empty());
+        assert_eq!(
+            a_inbox.try_recv().unwrap(),
+            Wire::Binary([&[4, 13, 1, 0, 0][..], b"realtime:roome\x00\x01"].concat())
+        );
+        assert!(c_inbox.try_recv().is_err());
+    }
+
+    #[test]
+    fn user_broadcast_payload_size_limit() {
+        let jwt = jwt();
+        let hub = Hub::default();
+        let (mut a, _a_inbox) = open(&jwt, &hub, Serializer::V2);
+        let (mut b, mut b_inbox) = open(&jwt, &hub, Serializer::V2);
+        run(&mut a, &join(&json!({"broadcast": {"ack": true}})));
+        run(&mut b, JOIN);
+        let big = vec![b'0'; MAX_PAYLOAD_SIZE];
+        assert_eq!(
+            texts(a.handle_binary(user_frame(true, &big))),
+            [
+                r#"["1","2","realtime:room","phx_reply",{"response":{"error":"payload_size_exceeded"},"status":"error"}]"#
+            ]
+        );
+        assert!(b_inbox.try_recv().is_err());
+    }
+
+    #[test]
+    fn binary_frames_route_like_text_frames() {
+        let jwt = jwt();
+        let hub = Hub::default();
+        let (mut a, _a_inbox) = open(&jwt, &hub, Serializer::V2);
+        let (mut b, mut b_inbox) = open(&jwt, &hub, Serializer::V2);
+        // No channel yet.
+        assert_eq!(
+            texts(a.handle_binary(user_frame(true, b"{}"))),
+            [
+                r#"["1","2","realtime:room","phx_reply",{"response":{"reason":"unmatched topic"},"status":"error"}]"#
+            ]
+        );
+        run(
+            &mut a,
+            &join(&json!({"broadcast": {"ack": true, "self": true}})),
+        );
+        run(&mut b, JOIN);
+
+        // A stale join ref is dropped.
+        let mut stale = user_push("2", "realtime:room", "e", true, b"{}");
+        stale[7] = b'9';
+        let stale = Serializer::decode_binary(&stale).unwrap();
+        assert!(a.handle_binary(stale).is_empty());
+
+        // `@push` broadcast: kind 2 to V2 sockets, and the ack.
+        let push = |event: &str| {
+            let mut bytes = vec![0, 1, 1, 13, u8::try_from(event.len()).unwrap()];
+            bytes.extend_from_slice(format!("13realtime:room{event}xy").as_bytes());
+            Serializer::decode_binary(&bytes).unwrap()
+        };
+        let relayed = Wire::Binary([&[2, 13, 9][..], b"realtime:roombroadcastxy"].concat());
+        let ok3 = Wire::Text(
+            r#"["1","3","realtime:room","phx_reply",{"response":{},"status":"ok"}]"#.to_owned(),
+        );
+        assert_eq!(
+            a.handle_binary(push("broadcast")),
+            [relayed.clone(), ok3.clone()]
+        );
+        assert_eq!(b_inbox.try_recv().unwrap(), relayed);
+        // `presence` without an `event` key is a plain ok; others are ignored.
+        assert_eq!(a.handle_binary(push("presence")), [ok3]);
+        assert!(a.handle_binary(push("access_token")).is_empty());
+        // A binary join is not served: the old channel closes first.
+        let out = texts(a.handle_binary(push("phx_join")));
+        assert_eq!(out[0], r#"["1","1","realtime:room","phx_close",{}]"#);
+        assert!(out[1].contains("MEGABASE_NOT_IMPLEMENTED"), "{}", out[1]);
+
+        assert_eq!(
+            texts(b.handle_binary(push("phx_leave"))),
+            [
+                r#"["1","3","realtime:room","phx_reply",{"response":{},"status":"ok"}]"#,
+                r#"["1","1","realtime:room","phx_close",{}]"#
+            ]
+        );
+    }
+
     #[test]
     fn v1_frames() {
         let jwt = jwt();
@@ -1575,11 +2034,7 @@ mod tests {
                 r#"{"topic":"realtime:room","event":"phx_join","payload":{"config":{}},"ref":"1"}"#,
             )
             .unwrap();
-        let out: Vec<String> = session
-            .handle(frame, NOW * 1000)
-            .into_iter()
-            .map(|f| Serializer::V1.encode(f))
-            .collect();
+        let out = texts(session.handle(frame, NOW * 1000));
         assert_eq!(
             out,
             [

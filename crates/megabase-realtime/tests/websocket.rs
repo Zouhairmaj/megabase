@@ -122,6 +122,35 @@ async fn join(socket: &mut Socket, config: Value) -> Value {
     next_json(socket).await
 }
 
+/// realtime-js 2.x `channel.send({type: 'broadcast', event: 'cursor', payload: {x: 1}})`
+/// on a `vsn=2.0.0` socket: a binary `userBroadcastPush` frame.
+#[tokio::test]
+async fn supabase_js_binary_broadcast() {
+    let addr = serve().await;
+    let mut alice = connect(addr).await;
+    let mut bob = connect(addr).await;
+    let config = json!({"broadcast": {"ack": true, "self": false}});
+    assert_eq!(join(&mut alice, config).await[4]["status"], "ok");
+    assert_eq!(join(&mut bob, json!({})).await[4]["status"], "ok");
+
+    let mut push = vec![3, 1, 1, 13, 6, 0, 1];
+    push.extend_from_slice(br#"12realtime:roomcursor{"x":1}"#);
+    alice.send(Message::Binary(push)).await.unwrap();
+    assert_eq!(
+        next_json(&mut alice).await,
+        json!(["1", "2", "realtime:room", "phx_reply", {"status": "ok", "response": {}}])
+    );
+    let mut relayed = vec![4, 13, 6, 0, 1];
+    relayed.extend_from_slice(br#"realtime:roomcursor{"x":1}"#);
+    loop {
+        match bob.next().await.unwrap().unwrap() {
+            Message::Binary(bytes) => break assert_eq!(bytes, relayed),
+            Message::Ping(_) | Message::Pong(_) => continue,
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+}
+
 #[tokio::test]
 async fn broadcast_between_two_sockets() {
     let addr = serve().await;
