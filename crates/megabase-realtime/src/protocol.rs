@@ -1,13 +1,14 @@
 //! Phoenix channel protocol over the Realtime socket: frames, heartbeat,
-//! `phx_join` on `realtime:*` topics, public broadcast, presence and
-//! `phx_leave`.
+//! `phx_join` on `realtime:*` topics, public broadcast, presence,
+//! `access_token` refreshes, token expiry and `phx_leave`.
 
 // Ported from supabase/realtime lib/realtime_web/channels/realtime_channel.ex,
 // lib/realtime_web/channels/realtime_channel/broadcast_handler.ex,
 // lib/realtime_web/channels/realtime_channel/presence_handler.ex,
 // lib/realtime_web/socket/v2_serializer.ex and lib/realtime_web/socket.ex (Apache-2.0),
 // pin v2.143.3. Socket-level handling follows Phoenix 1.7 `Phoenix.Socket`, which
-// Realtime uses unchanged.
+// Realtime uses unchanged. Event names from supabase/supabase-js
+// packages/core/realtime-js/src/lib/constants.ts (MIT), pin v2.117.3.
 
 use std::collections::HashMap;
 
@@ -23,6 +24,10 @@ use crate::COMPONENT;
 const CLIENT_PRESENCE_MAX_CALLS: u32 = 5;
 /// `CLIENT_PRESENCE_WINDOW_MS` default.
 const CLIENT_PRESENCE_WINDOW_MS: i64 = 30_000;
+/// `ACCESS_TOKEN_THROTTLE_MS` default: one applied refresh per window.
+const ACCESS_TOKEN_THROTTLE_MS: i64 = 10_000;
+/// `@confirm_token_ms_max_interval`: the longest re-confirmation delay.
+const CONFIRM_TOKEN_MAX_INTERVAL_MS: i64 = 3_600_000;
 
 /// Negotiated `vsn` serializer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -66,6 +71,9 @@ pub(crate) struct Frame {
 }
 
 impl Frame {
+    /// `Phoenix.Socket` `reply/2`: `{"status", "response"}` under the
+    /// request's `ref`.
+    // megabase:unit realtime:protocol-event:phx_reply
     fn reply(
         join_ref: Value,
         reference: Value,
@@ -98,11 +106,13 @@ impl Frame {
     }
 
     /// `Phoenix.Socket` `encode_close/3`: `ref` is the join ref.
+    // megabase:unit realtime:protocol-event:phx_close
     fn close(join_ref: &Value, topic: &str) -> Self {
         Self::exit(join_ref, topic, "phx_close")
     }
 
     /// `Phoenix.Socket` `encode_on_exit/4` for a crashed channel.
+    // megabase:unit realtime:protocol-event:phx_error
     fn error(join_ref: &Value, topic: &str) -> Self {
         Self::exit(join_ref, topic, "phx_error")
     }
@@ -204,12 +214,32 @@ struct JoinConfig {
     self_broadcast: bool,
     presence_enabled: bool,
     presence_key: String,
+    /// `access_token`: the token the channel was confirmed with.
+    access_token: String,
+    /// `confirm_token_ref`: when `:confirm_token` fires (Unix ms).
+    confirm_token_at: i64,
+}
+
+/// Why `confirm_token/1` failed.
+#[derive(Debug, PartialEq)]
+enum Unconfirmed {
+    /// `authorize_conn/3` rejected the token.
+    Token(TokenError),
+    /// The rounded `exp` is not after now: `exp - now` (`None` when `exp` is
+    /// not an integer Megabase can represent).
+    ExpDiff(Option<i64>),
 }
 
 /// One joined channel (the channel process's assigns).
 struct Channel {
     join_ref: Value,
     config: JoinConfig,
+    /// `access_token_verified_at`: when a refresh was last applied.
+    access_token_verified_at: Option<i64>,
+    /// `pending_access_token`: a throttled refresh waiting to be applied.
+    pending_access_token: Option<String>,
+    /// `:apply_pending_access_token` timers still to fire (Unix ms).
+    apply_pending_at: Vec<i64>,
     /// `presence_track_payload`: the last tracked payload.
     presence_payload: Option<Value>,
     /// `presence_client_rate_limit`: calls in the window ending at `reset_at`.
@@ -282,7 +312,6 @@ impl<'a> Session<'a> {
     /// Frames to send back for one client frame, at Unix time `now_ms` in
     /// milliseconds. Pushes from other channels arrive on the outbox.
     pub(crate) fn handle(&mut self, frame: Frame, now_ms: i64) -> Vec<Frame> {
-        let now = now_ms.div_euclid(1000);
         if frame.topic == "phoenix" && frame.event == "heartbeat" {
             return vec![Frame::reply(
                 Value::Null,
@@ -292,6 +321,12 @@ impl<'a> Session<'a> {
                 json!({}),
             )];
         }
+        self.phx_join(frame, now_ms)
+    }
+
+    /// `phx_join`, or any event addressed to a channel topic.
+    // megabase:unit realtime:protocol-event:phx_join
+    fn phx_join(&mut self, frame: Frame, now_ms: i64) -> Vec<Frame> {
         let mut out = Vec::new();
         if let Some(current) = self.channels.get(&frame.topic) {
             if frame.event == "phx_join" {
@@ -316,7 +351,7 @@ impl<'a> Session<'a> {
             ));
             return out;
         }
-        match self.join(&frame.topic, &frame.payload, now) {
+        match self.join(&frame.topic, &frame.payload, now_ms) {
             Ok(config) => {
                 let presence_enabled = config.presence_enabled;
                 self.hub.subscribe(
@@ -330,6 +365,9 @@ impl<'a> Session<'a> {
                     Channel {
                         join_ref: frame.join_ref.clone(),
                         config,
+                        access_token_verified_at: None,
+                        pending_access_token: None,
+                        apply_pending_at: Vec::new(),
                         presence_payload: None,
                         presence_calls: 0,
                         presence_reset_at: None,
@@ -381,33 +419,189 @@ impl<'a> Session<'a> {
         let Some(join_ref) = self.channels.get(&frame.topic).map(|c| c.join_ref.clone()) else {
             return Vec::new();
         };
-        let unit = match frame.event.as_str() {
-            "phx_leave" => {
-                self.stop(&frame.topic);
-                return vec![
-                    Frame::reply(
-                        join_ref.clone(),
-                        frame.reference,
-                        &frame.topic,
-                        "ok",
-                        json!({}),
-                    ),
-                    Frame::close(&join_ref, &frame.topic),
-                ];
-            }
-            "broadcast" => return self.broadcast(join_ref, frame),
-            "presence" => return self.presence(&join_ref, &frame, now_ms),
-            "access_token" => "realtime:client-event:access_token",
+        match frame.event.as_str() {
+            "phx_leave" => self.phx_leave(&join_ref, frame),
+            "broadcast" => self.broadcast(join_ref, frame),
+            "presence" => self.presence(&join_ref, &frame, now_ms),
+            "access_token" => self.access_token(frame, now_ms),
             // `handle_in/3` catch-all: logged, no reply.
-            _ => return Vec::new(),
+            _ => Vec::new(),
+        }
+    }
+
+    /// `Phoenix.Socket` `handle_in` for `phx_leave`: reply ok, then close.
+    // megabase:unit realtime:protocol-event:phx_leave
+    fn phx_leave(&mut self, join_ref: &Value, frame: Frame) -> Vec<Frame> {
+        self.stop(&frame.topic);
+        vec![
+            Frame::reply(
+                join_ref.clone(),
+                frame.reference,
+                &frame.topic,
+                "ok",
+                json!({}),
+            ),
+            Frame::close(join_ref, &frame.topic),
+        ]
+    }
+
+    /// `handle_in("access_token", …)`: a refreshed token, never replied to.
+    // megabase:unit realtime:protocol-event:access_token
+    // megabase:unit realtime:client-event:access_token
+    fn access_token(&mut self, frame: Frame, now_ms: i64) -> Vec<Frame> {
+        // `nil`, a non-string, no `access_token` or a non-map payload: no-op.
+        let Value::Object(mut payload) = frame.payload else {
+            return Vec::new();
         };
-        vec![Frame::reply(
-            join_ref,
-            frame.reference,
-            &frame.topic,
-            "error",
-            not_implemented(unit),
-        )]
+        let Some(Value::String(token)) = payload.remove("access_token") else {
+            return Vec::new();
+        };
+        let Some(channel) = self.channels.get_mut(&frame.topic) else {
+            return Vec::new();
+        };
+        if token.starts_with("sb_")
+            || token == channel.config.access_token
+            || channel.pending_access_token.as_ref() == Some(&token)
+        {
+            return Vec::new();
+        }
+        match channel.access_token_verified_at {
+            // `hold_access_token/3`: the first hold of a window arms the timer.
+            Some(verified_at) if now_ms - verified_at < ACCESS_TOKEN_THROTTLE_MS => {
+                if channel.pending_access_token.is_none() {
+                    channel
+                        .apply_pending_at
+                        .push(verified_at + ACCESS_TOKEN_THROTTLE_MS);
+                }
+                channel.pending_access_token = Some(token);
+                Vec::new()
+            }
+            _ => self.apply_access_token(&frame.topic, token, frame.reference, now_ms),
+        }
+    }
+
+    /// `apply_access_token/3` on a public channel: confirm the token, or
+    /// shut the channel down with the reason.
+    fn apply_access_token(
+        &mut self,
+        topic: &str,
+        token: String,
+        reference: Value,
+        now_ms: i64,
+    ) -> Vec<Frame> {
+        let confirmed = self.confirm_token(&token, now_ms);
+        let Some(channel) = self.channels.get_mut(topic) else {
+            return Vec::new();
+        };
+        let message = match confirmed {
+            Ok(confirm_token_at) => {
+                channel.config.access_token = token;
+                channel.config.confirm_token_at = confirm_token_at;
+                channel.access_token_verified_at = Some(now_ms);
+                channel.pending_access_token = None;
+                return Vec::new();
+            }
+            Err(error) => error,
+        };
+        let join_ref = channel.join_ref.clone();
+        self.token_rejected(&join_ref, topic, &message, reference)
+    }
+
+    /// The `else` branch of `apply_access_token/3` (and of
+    /// `handle_info(:confirm_token, …)`): a `system` error, then the stop.
+    fn token_rejected(
+        &mut self,
+        join_ref: &Value,
+        topic: &str,
+        error: &Unconfirmed,
+        reference: Value,
+    ) -> Vec<Frame> {
+        match refresh_error(error) {
+            Some(message) => self.shutdown(join_ref, topic, &message),
+            None => vec![Frame::reply(
+                join_ref.clone(),
+                reference,
+                topic,
+                "error",
+                not_implemented("realtime:client-event:access_token"),
+            )],
+        }
+    }
+
+    /// The earliest channel timer (`:confirm_token`,
+    /// `:apply_pending_access_token`), in Unix milliseconds.
+    pub(crate) fn deadline(&self) -> Option<i64> {
+        self.channels
+            .values()
+            .flat_map(|channel| {
+                channel
+                    .apply_pending_at
+                    .iter()
+                    .copied()
+                    .chain([channel.config.confirm_token_at])
+            })
+            .min()
+    }
+
+    /// Fires the channel timers due at `now_ms`.
+    pub(crate) fn tick(&mut self, now_ms: i64) -> Vec<Frame> {
+        let due: Vec<String> = self
+            .channels
+            .iter()
+            .filter(|(_, channel)| {
+                channel.config.confirm_token_at <= now_ms
+                    || channel.apply_pending_at.iter().any(|at| *at <= now_ms)
+            })
+            .map(|(topic, _)| topic.to_owned())
+            .collect();
+        let mut out = Vec::new();
+        for topic in due {
+            let Some(channel) = self.channels.get_mut(&topic) else {
+                continue;
+            };
+            let armed = channel.apply_pending_at.len();
+            channel.apply_pending_at.retain(|at| *at > now_ms);
+            let applying = channel.apply_pending_at.len() < armed;
+            let confirming = channel.config.confirm_token_at <= now_ms;
+            // `:apply_pending_access_token`, and `:confirm_token` with a held
+            // token, apply it; the new confirmation re-arms `:confirm_token`.
+            if applying || confirming {
+                if let Some(token) = channel.pending_access_token.take() {
+                    out.extend(self.apply_access_token(&topic, token, Value::Null, now_ms));
+                    continue;
+                }
+            }
+            if confirming {
+                out.extend(self.reconfirm(&topic, now_ms));
+            }
+        }
+        out
+    }
+
+    /// `handle_info(:confirm_token, …)`: the current token again; expiry
+    /// shuts the channel down.
+    fn reconfirm(&mut self, topic: &str, now_ms: i64) -> Vec<Frame> {
+        let Some(channel) = self.channels.get(topic) else {
+            return Vec::new();
+        };
+        let confirmed = self.confirm_token(&channel.config.access_token, now_ms);
+        let join_ref = channel.join_ref.clone();
+        match confirmed {
+            Ok(confirm_token_at) => {
+                if let Some(channel) = self.channels.get_mut(topic) {
+                    channel.config.confirm_token_at = confirm_token_at;
+                }
+                Vec::new()
+            }
+            // No clause matches `{:error, :token_malformed, msg}`: the channel
+            // crashes. The token was confirmed before, so in practice only
+            // expiry is reachable.
+            Err(Unconfirmed::Token(TokenError::Malformed)) => {
+                self.stop(topic);
+                vec![Frame::error(&join_ref, topic)]
+            }
+            Err(error) => self.token_rejected(&join_ref, topic, &error, Value::Null),
+        }
     }
 
     /// `BroadcastHandler.handle/3` on a public channel: fan out to the other
@@ -535,14 +729,17 @@ impl<'a> Session<'a> {
     }
 
     /// `RealtimeChannel.join/3` for a public channel without Postgres changes.
-    fn join(&self, topic: &str, params: &Value, now: i64) -> Result<JoinConfig, Value> {
+    fn join(&self, topic: &str, params: &Value, now_ms: i64) -> Result<JoinConfig, Value> {
         let sub_topic = &topic["realtime:".len()..];
         if sub_topic.is_empty() {
             return Err(reason("TopicNameRequired: You must provide a topic name"));
         }
         let empty = Map::new();
         let params = params.as_object().unwrap_or(&empty);
-        self.confirm_token(params, now)?;
+        let access_token = self.assign_access_token(params);
+        let confirm_token_at = self
+            .confirm_token(access_token, now_ms)
+            .map_err(|error| join_error(&error))?;
 
         let config = params.get("config");
         let field = |path: &[&str]| -> Option<&Value> {
@@ -584,11 +781,14 @@ impl<'a> Session<'a> {
             // The self-hosted tenant has `presence_enabled` false.
             presence_enabled: flag(&["presence", "enabled"]),
             presence_key,
+            access_token: access_token.to_owned(),
+            confirm_token_at,
         })
     }
 
-    /// `assign_access_token/2` then `confirm_token/1`.
-    fn confirm_token(&self, params: &Map<String, Value>, now: i64) -> Result<(), Value> {
+    /// `assign_access_token/2`: `user_token`, else `access_token` (an `sb_`
+    /// key means the socket token), else the socket token.
+    fn assign_access_token<'p>(&'p self, params: &'p Map<String, Value>) -> &'p str {
         let string = |key: &str| params.get(key).and_then(Value::as_str);
         let sb_key = params
             .get("access_token")
@@ -596,40 +796,89 @@ impl<'a> Session<'a> {
             .or_else(|| params.get("user_token"))
             .and_then(Value::as_str)
             .is_some_and(|token| token.starts_with("sb_"));
-        let token = if sb_key {
+        if sb_key {
             self.socket_token.as_str()
         } else {
             string("user_token")
                 .or_else(|| string("access_token"))
                 .unwrap_or(&self.socket_token)
-        };
-        let claims = authorize_conn(self.jwt, token, now).map_err(|error| match error {
-            TokenError::Expired(seconds) => reason(&format!(
-                "InvalidJWTToken: Token has expired {seconds} seconds ago"
-            )),
-            TokenError::MissingClaims => reason(
-                "InvalidJWTToken: Fields `role` and `exp` are required in JWT",
-            ),
-            TokenError::Malformed => {
-                reason("MalformedJWT: The token provided is not a valid JWT")
-            }
-            TokenError::Signature => {
-                reason("JwtSignatureError: Failed to validate JWT signature")
-            }
-            TokenError::Signer => reason(
-                "JwtSignerError: Failed to generate JWT signer, check your JWT secret or JWKS configuration",
-            ),
-            TokenError::UnsupportedAlgorithm => {
-                not_implemented("realtime:protocol-event:phx_join")
-            }
-            TokenError::Other => reason("Unknown Error on Channel"),
-        })?;
-        match claims.get("exp").and_then(Value::as_i64) {
-            Some(exp) if exp > now => Ok(()),
-            Some(_) => Err(reason("InvalidJWTToken: Token expiration time is invalid")),
-            None => Err(reason("Unknown Error on Channel")),
         }
     }
+
+    /// `confirm_token/1` at Unix time `now_ms`: when the `:confirm_token`
+    /// timer fires next, `min(1 h, exp - now)` from now.
+    fn confirm_token(&self, token: &str, now_ms: i64) -> Result<i64, Unconfirmed> {
+        let now = now_ms.div_euclid(1000);
+        let claims = authorize_conn(self.jwt, token, now).map_err(Unconfirmed::Token)?;
+        let Some(exp) = claims.get("exp").and_then(Value::as_i64) else {
+            return Err(Unconfirmed::ExpDiff(None));
+        };
+        let exp_diff = exp.saturating_sub(now);
+        if exp_diff <= 0 {
+            return Err(Unconfirmed::ExpDiff(Some(exp_diff)));
+        }
+        let interval = exp_diff
+            .saturating_mul(1000)
+            .min(CONFIRM_TOKEN_MAX_INTERVAL_MS);
+        Ok(now_ms.saturating_add(interval))
+    }
+}
+
+/// The join's `phx_reply` error response for a token `confirm_token/1`
+/// rejected (`log_error/3` reasons).
+fn join_error(error: &Unconfirmed) -> Value {
+    match error {
+        Unconfirmed::Token(TokenError::Expired(seconds)) => reason(&format!(
+            "InvalidJWTToken: Token has expired {seconds} seconds ago"
+        )),
+        Unconfirmed::Token(TokenError::MissingClaims) => {
+            reason("InvalidJWTToken: Fields `role` and `exp` are required in JWT")
+        }
+        Unconfirmed::Token(TokenError::Malformed) => {
+            reason("MalformedJWT: The token provided is not a valid JWT")
+        }
+        Unconfirmed::Token(TokenError::Signature) => {
+            reason("JwtSignatureError: Failed to validate JWT signature")
+        }
+        Unconfirmed::Token(TokenError::Signer) => reason(
+            "JwtSignerError: Failed to generate JWT signer, check your JWT secret or JWKS configuration",
+        ),
+        Unconfirmed::Token(TokenError::UnsupportedAlgorithm) => {
+            not_implemented("realtime:protocol-event:phx_join")
+        }
+        Unconfirmed::ExpDiff(Some(_)) => {
+            reason("InvalidJWTToken: Token expiration time is invalid")
+        }
+        Unconfirmed::Token(TokenError::Other) | Unconfirmed::ExpDiff(None) => {
+            reason("Unknown Error on Channel")
+        }
+    }
+}
+
+/// The `system` message `apply_access_token/3` shuts the channel down
+/// with; `None` where the upstream text is an `inspect/1` of a term
+/// Megabase does not model.
+fn refresh_error(error: &Unconfirmed) -> Option<String> {
+    let message = match error {
+        Unconfirmed::Token(TokenError::Expired(seconds)) => {
+            format!("Token has expired {seconds} seconds ago")
+        }
+        Unconfirmed::Token(TokenError::MissingClaims) => {
+            "Fields `role` and `exp` are required in JWT".to_owned()
+        }
+        Unconfirmed::Token(TokenError::Malformed) => {
+            "The token provided is not a valid JWT".to_owned()
+        }
+        Unconfirmed::Token(TokenError::Signer) => {
+            "Failed to generate JWT signer, check your JWT secret or JWKS configuration".to_owned()
+        }
+        // `inspect(:signature_error)` and `inspect(exp_diff)`.
+        Unconfirmed::Token(TokenError::Signature) => ":signature_error".to_owned(),
+        Unconfirmed::ExpDiff(Some(exp_diff)) => exp_diff.to_string(),
+        Unconfirmed::Token(TokenError::UnsupportedAlgorithm | TokenError::Other)
+        | Unconfirmed::ExpDiff(None) => return None,
+    };
+    Some(message)
 }
 
 /// `FlexibleBoolean.cast/1` yielding `true`.
@@ -883,17 +1132,167 @@ mod tests {
     }
 
     #[test]
-    fn channel_events() {
+    fn unknown_channel_events_are_ignored() {
         let jwt = jwt();
         let hub = Hub::default();
         let (mut session, _inbox) = open(&jwt, &hub, Serializer::V2);
         run(&mut session, JOIN);
-        let out = run(
-            &mut session,
-            r#"["1","2","realtime:room","access_token",{"access_token":"x"}]"#,
-        );
-        assert!(out[0].contains("realtime:client-event:access_token"));
         assert!(run(&mut session, r#"["1","3","realtime:room","whatever",{}]"#).is_empty());
+    }
+
+    fn refresh(token: &Value) -> String {
+        json!(["1", "2", "realtime:room", "access_token", { "access_token": token }]).to_string()
+    }
+
+    fn system_close(message: &str) -> Vec<Value> {
+        vec![
+            json!(["1", null, "realtime:room", "system", {"channel": "room",
+                "extension": "system", "message": message, "status": "error"}]),
+            json!(["1", "1", "realtime:room", "phx_close", {}]),
+        ]
+    }
+
+    #[test]
+    fn access_token_refresh_is_silent_and_moves_the_expiry() {
+        let jwt = jwt();
+        let hub = Hub::default();
+        let (mut session, _inbox) = open(&jwt, &hub, Serializer::V2);
+        run(&mut session, JOIN);
+        // `min(1 h, exp - now)`: the anon token expires in exactly an hour.
+        assert_eq!(session.deadline(), Some((NOW + 3600) * 1000));
+
+        let later = token(&json!({"role": "authenticated", "exp": NOW + 600}));
+        assert!(run(&mut session, &refresh(&json!(later))).is_empty());
+        assert_eq!(session.deadline(), Some((NOW + 600) * 1000));
+
+        // The same token, `null`, an `sb_` key, a non-string and a payload
+        // without `access_token` are no-ops.
+        for payload in [
+            refresh(&json!(later)),
+            refresh(&Value::Null),
+            refresh(&json!("sb_publishable_x")),
+            refresh(&json!(5)),
+            r#"["1","2","realtime:room","access_token",{}]"#.to_owned(),
+            r#"["1","2","realtime:room","access_token","x"]"#.to_owned(),
+        ] {
+            assert!(run(&mut session, &payload).is_empty(), "{payload}");
+        }
+        assert_eq!(session.deadline(), Some((NOW + 600) * 1000));
+    }
+
+    #[test]
+    fn access_token_errors_shut_the_channel_down() {
+        let jwt = jwt();
+        let other = Hs256::new("another-secret-that-is-at-least-32-bytes!!")
+            .unwrap()
+            .sign(&json!({"role": "anon", "exp": NOW + 60}))
+            .unwrap();
+        for (refreshed, message) in [
+            (
+                token(&json!({"role": "anon", "exp": NOW - 7})),
+                "Token has expired 7 seconds ago",
+            ),
+            (
+                token(&json!({"exp": NOW + 60})),
+                "Fields `role` and `exp` are required in JWT",
+            ),
+            ("nope".to_owned(), "The token provided is not a valid JWT"),
+            (other.as_str().to_owned(), ":signature_error"),
+            (
+                // Rounds down to `now`: `inspect(exp_diff)`.
+                token(&json!({"role": "anon", "exp": NOW as f64 + 0.25})),
+                "0",
+            ),
+        ] {
+            let hub = Hub::default();
+            let (mut session, _inbox) = open(&jwt, &hub, Serializer::V2);
+            run(&mut session, JOIN);
+            assert_eq!(
+                values(&run(&mut session, &refresh(&json!(refreshed)))),
+                system_close(message)
+            );
+            assert!(run(&mut session, BROADCAST)[0].contains("unmatched topic"));
+            assert_eq!(session.deadline(), None);
+        }
+    }
+
+    #[test]
+    fn access_token_refreshes_are_throttled() {
+        let jwt = jwt();
+        let hub = Hub::default();
+        let (mut session, _inbox) = open(&jwt, &hub, Serializer::V2);
+        run(&mut session, JOIN);
+        let start = NOW * 1000;
+        let first = token(&json!({"role": "anon", "exp": NOW + 1000}));
+        assert!(run_at(&mut session, &refresh(&json!(first)), start).is_empty());
+
+        // Inside the window the token is held, the timer armed once.
+        let held = token(&json!({"role": "anon", "exp": NOW + 2000}));
+        let last = token(&json!({"role": "anon", "exp": NOW + 3000}));
+        assert!(run_at(&mut session, &refresh(&json!(held)), start + 4000).is_empty());
+        assert!(run_at(&mut session, &refresh(&json!(last)), start + 5000).is_empty());
+        assert_eq!(session.deadline(), Some(start + ACCESS_TOKEN_THROTTLE_MS));
+        assert!(session
+            .tick(start + ACCESS_TOKEN_THROTTLE_MS - 1)
+            .is_empty());
+
+        // The timer applies the last held token: it expires 2990 s later.
+        assert!(session.tick(start + ACCESS_TOKEN_THROTTLE_MS).is_empty());
+        let applied = start + ACCESS_TOKEN_THROTTLE_MS;
+        assert_eq!(session.deadline(), Some(applied + 2_990_000));
+
+        // A held token that turns out invalid shuts the channel down.
+        let expired = token(&json!({"role": "anon", "exp": NOW - 1}));
+        assert!(run_at(&mut session, &refresh(&json!(expired)), applied + 1).is_empty());
+        let out = session.tick(applied + ACCESS_TOKEN_THROTTLE_MS);
+        let out: Vec<String> = out.into_iter().map(|f| Serializer::V2.encode(f)).collect();
+        assert_eq!(
+            values(&out),
+            system_close("Token has expired 21 seconds ago")
+        );
+    }
+
+    #[test]
+    fn token_expiry_shuts_the_channel_down() {
+        let jwt = jwt();
+        let hub = Hub::default();
+        let (outbox, _inbox) = Outbox::new(OUTBOX_CAPACITY);
+        let short = token(&json!({"role": "anon", "exp": NOW + 30}));
+        let mut session = Session::new(&jwt, &hub, Serializer::V2, short, outbox);
+        run(&mut session, JOIN);
+        let expiry = (NOW + 30) * 1000;
+        assert_eq!(session.deadline(), Some(expiry));
+        assert!(session.tick(expiry - 1).is_empty());
+        let out: Vec<String> = session
+            .tick(expiry)
+            .into_iter()
+            .map(|f| Serializer::V2.encode(f))
+            .collect();
+        assert_eq!(
+            values(&out),
+            system_close("Token has expired 0 seconds ago")
+        );
+        assert_eq!(session.deadline(), None);
+    }
+
+    #[test]
+    fn far_expiry_is_reconfirmed_hourly() {
+        let jwt = jwt();
+        let hub = Hub::default();
+        let (mut session, _inbox) = open(&jwt, &hub, Serializer::V2);
+        let config = json!({});
+        let long = token(&json!({"role": "anon", "exp": NOW + 10 * 3600}));
+        let text = json!(["1", "1", "realtime:room", "phx_join",
+            {"config": config, "access_token": long}])
+        .to_string();
+        run(&mut session, &text);
+        let first = NOW * 1000 + CONFIRM_TOKEN_MAX_INTERVAL_MS;
+        assert_eq!(session.deadline(), Some(first));
+        assert!(session.tick(first).is_empty());
+        assert_eq!(
+            session.deadline(),
+            Some(first + CONFIRM_TOKEN_MAX_INTERVAL_MS)
+        );
     }
 
     const BROADCAST: &str = r#"["1","2","realtime:room","broadcast",{"type":"broadcast","event":"e","payload":{"n":1}}]"#;
@@ -1148,7 +1547,7 @@ mod tests {
         let (session, _inbox) = open(&jwt, &hub, Serializer::V2);
         let key = |config: Value| {
             session
-                .join("realtime:room", &json!({ "config": config }), NOW)
+                .join("realtime:room", &json!({ "config": config }), NOW * 1000)
                 .unwrap()
                 .presence_key
         };

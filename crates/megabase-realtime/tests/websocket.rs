@@ -235,3 +235,37 @@ async fn supabase_js_join_heartbeat_leave() {
     );
     socket.close(None).await.unwrap();
 }
+
+#[tokio::test]
+async fn refreshed_token_expiry_closes_the_channel() {
+    let addr = serve().await;
+    let mut socket = connect(addr).await;
+    assert_eq!(join(&mut socket, json!({})).await[4]["status"], "ok");
+
+    // realtime-js `setAuth`: a token that expires within two seconds.
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let short = jwt()
+        .sign(&json!({"role": "authenticated", "exp": now + 2}))
+        .unwrap();
+    send(
+        &mut socket,
+        json!(["1", "2", "realtime:room", "access_token", {"access_token": short.as_str()}]),
+    )
+    .await;
+
+    // No reply to the refresh; the `:confirm_token` timer shuts the channel.
+    let system = next_json(&mut socket).await;
+    assert_eq!(system[0], "1");
+    assert_eq!(system[1], Value::Null);
+    assert_eq!(system[3], "system");
+    assert_eq!(system[4]["status"], "error");
+    let message = system[4]["message"].as_str().unwrap();
+    assert!(message.starts_with("Token has expired "), "{message}");
+    assert_eq!(
+        next_json(&mut socket).await,
+        json!(["1", "1", "realtime:room", "phx_close", {}])
+    );
+}
