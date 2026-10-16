@@ -9,7 +9,9 @@
 //! `MEGABASE_NOT_IMPLEMENTED` 501. The `DELETE /cdn` purge routes answer as
 //! storage-api does without a CDN purge endpoint (`specs/storage/cdn.md`),
 //! and the `/iceberg` routes as it does without the Iceberg catalog
-//! (`specs/storage/iceberg.md`).
+//! (`specs/storage/iceberg.md`). The `GET` and `DELETE` `/s3` routes answer
+//! requests without an AWS Signature V4; signed ones are a 501
+//! (`specs/storage/s3.md`).
 //! The `GET /render/image` routes answer their signature, key, bucket and
 //! object errors; the transformation itself is a 501
 //! (`specs/storage/render.md`). The `/object` upload, download, info, sign,
@@ -44,6 +46,7 @@ mod mime;
 mod multipart;
 mod object;
 mod render;
+mod s3;
 mod schema;
 
 pub use schema::{install_schema, SchemaError};
@@ -115,6 +118,9 @@ pub fn router_with_state(state: StorageState) -> Router {
         .route("/storage/v1/iceberg", any(iceberg::catalog_disabled))
         .route("/storage/v1/iceberg/", any(iceberg::catalog_disabled))
         .route("/storage/v1/iceberg/*rest", any(iceberg::catalog_disabled))
+        .route("/storage/v1/s3", any(s3::unsigned))
+        .route("/storage/v1/s3/", any(s3::unsigned))
+        .route("/storage/v1/s3/*rest", any(s3::unsigned))
         .route("/storage/v1/cdn", delete(cdn::purge_cache))
         .route("/storage/v1/cdn/", delete(cdn::purge_cache))
         .route("/storage/v1/cdn/:bucket_name", delete(cdn::purge_cache))
