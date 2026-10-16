@@ -2,12 +2,12 @@
   "schema": 1,
   "totals": {
     "units": 1036,
-    "implemented": 320,
+    "implemented": 322,
     "tested": 218,
     "conformant": 0
   },
   "percent": {
-    "coverage": 30.9,
+    "coverage": 31.1,
     "conformance": 0.0,
     "done": 0.0
   },
@@ -284,7 +284,7 @@
     },
     "realtime": {
       "units": 19,
-      "implemented": 2,
+      "implemented": 4,
       "tested": 1,
       "conformant": 0,
       "groups": {
@@ -296,7 +296,7 @@
         },
         "http-api": {
           "units": 3,
-          "implemented": 1,
+          "implemented": 3,
           "tested": 1,
           "conformant": 0
         },
@@ -689,6 +689,8 @@
     "meta:route:GET /pg/health": "tested",
     "realtime:route:GET /realtime/v1/api/ping": "tested",
     "realtime:route:GET /realtime/v1/websocket": "implemented",
+    "realtime:route:POST /realtime/v1/api/broadcast": "implemented",
+    "realtime:route:POST /realtime/v1/api/broadcast/{topic}/events/{event}": "implemented",
     "rest:aggregate:avg": "tested",
     "rest:aggregate:count": "tested",
     "rest:aggregate:max": "tested",
