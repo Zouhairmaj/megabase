@@ -545,6 +545,27 @@ impl Backend {
         }
     }
 
+    /// `auth.sessions.scopes` for a session (`Session.Scopes`). `None` when
+    /// the column is NULL or the session is gone. In-memory sessions never
+    /// carry scopes: only the OAuth token grant sets them.
+    pub async fn session_scopes(&self, session_id: Uuid) -> Result<Option<String>, StoreError> {
+        match &self.inner {
+            BackendKind::None => Err(StoreError::Unavailable),
+            BackendKind::Memory(_) => Ok(None),
+            BackendKind::Postgres(pg) => {
+                timed(async {
+                    let scopes: Option<Option<String>> =
+                        sqlx::query_scalar("SELECT scopes FROM auth.sessions WHERE id = $1::uuid")
+                            .bind(session_id)
+                            .fetch_optional(&pg.pool)
+                            .await?;
+                    Ok(scopes.flatten())
+                })
+                .await
+            }
+        }
+    }
+
     pub async fn logout(
         &self,
         user_id: Uuid,
