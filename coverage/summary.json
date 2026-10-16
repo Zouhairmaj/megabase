@@ -2,12 +2,12 @@
   "schema": 1,
   "totals": {
     "units": 1031,
-    "implemented": 263,
+    "implemented": 276,
     "tested": 192,
     "conformant": 0
   },
   "percent": {
-    "coverage": 25.5,
+    "coverage": 26.8,
     "conformance": 0.0,
     "done": 0.0
   },
@@ -390,7 +390,7 @@
     },
     "storage": {
       "units": 149,
-      "implemented": 44,
+      "implemented": 57,
       "tested": 9,
       "conformant": 0,
       "groups": {
@@ -420,7 +420,7 @@
         },
         "iceberg": {
           "units": 13,
-          "implemented": 0,
+          "implemented": 13,
           "tested": 0,
           "conformant": 0
         },
@@ -784,12 +784,19 @@
     "storage:route:DELETE /storage/v1/cdn": "implemented",
     "storage:route:DELETE /storage/v1/cdn/{bucketName}": "implemented",
     "storage:route:DELETE /storage/v1/cdn/{bucketName}/{*}": "implemented",
+    "storage:route:DELETE /storage/v1/iceberg/v1/{prefix}/namespaces/{namespace}/tables/{table}": "implemented",
     "storage:route:DELETE /storage/v1/object/{bucketName}": "implemented",
     "storage:route:DELETE /storage/v1/object/{bucketName}/{*}": "implemented",
     "storage:route:GET /storage/v1/bucket": "tested",
     "storage:route:GET /storage/v1/bucket/{bucketId}": "tested",
     "storage:route:GET /storage/v1/bucket/{bucketId}/lifecycle": "tested",
     "storage:route:GET /storage/v1/health": "implemented",
+    "storage:route:GET /storage/v1/iceberg/bucket": "implemented",
+    "storage:route:GET /storage/v1/iceberg/v1/config": "implemented",
+    "storage:route:GET /storage/v1/iceberg/v1/{prefix}/namespaces": "implemented",
+    "storage:route:GET /storage/v1/iceberg/v1/{prefix}/namespaces/{namespace}": "implemented",
+    "storage:route:GET /storage/v1/iceberg/v1/{prefix}/namespaces/{namespace}/tables": "implemented",
+    "storage:route:GET /storage/v1/iceberg/v1/{prefix}/namespaces/{namespace}/tables/{table}": "implemented",
     "storage:route:GET /storage/v1/object/authenticated/{bucketName}/{*}": "implemented",
     "storage:route:GET /storage/v1/object/info/authenticated/{bucketName}/{*}": "implemented",
     "storage:route:GET /storage/v1/object/info/public/{bucketName}/{*}": "implemented",
@@ -800,8 +807,14 @@
     "storage:route:GET /storage/v1/render/image/authenticated/{bucketName}/{*}": "tested",
     "storage:route:GET /storage/v1/render/image/public/{bucketName}/{*}": "tested",
     "storage:route:GET /storage/v1/render/image/sign/{bucketName}/{*}": "tested",
+    "storage:route:HEAD /storage/v1/iceberg/v1/{prefix}/namespaces/{namespace}": "implemented",
+    "storage:route:HEAD /storage/v1/iceberg/v1/{prefix}/namespaces/{namespace}/tables/{table}": "implemented",
     "storage:route:HEAD /storage/v1/object/authenticated/{bucketName}/{*}": "implemented",
     "storage:route:POST /storage/v1/bucket": "tested",
+    "storage:route:POST /storage/v1/iceberg/bucket": "implemented",
+    "storage:route:POST /storage/v1/iceberg/v1/{prefix}/namespaces": "implemented",
+    "storage:route:POST /storage/v1/iceberg/v1/{prefix}/namespaces/{namespace}/tables": "implemented",
+    "storage:route:POST /storage/v1/iceberg/v1/{prefix}/namespaces/{namespace}/tables/{table}": "implemented",
     "storage:route:POST /storage/v1/object/list/{bucketName}": "implemented",
     "storage:route:POST /storage/v1/object/sign/{bucketName}": "implemented",
     "storage:route:POST /storage/v1/object/sign/{bucketName}/{*}": "implemented",

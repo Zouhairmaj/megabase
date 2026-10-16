@@ -7,7 +7,9 @@
 //! (`specs/storage/health.md`). A missing or invalid JWT, other roles on the
 //! bucket routes, and every other route return the structured
 //! `MEGABASE_NOT_IMPLEMENTED` 501. The `DELETE /cdn` purge routes answer as
-//! storage-api does without a CDN purge endpoint (`specs/storage/cdn.md`).
+//! storage-api does without a CDN purge endpoint (`specs/storage/cdn.md`),
+//! and the `/iceberg` routes as it does without the Iceberg catalog
+//! (`specs/storage/iceberg.md`).
 //! The `GET /render/image` routes answer their signature, key, bucket and
 //! object errors; the transformation itself is a 501
 //! (`specs/storage/render.md`). The `/object` upload, download, info, sign,
@@ -27,7 +29,7 @@ use axum::{
     extract::{OriginalUri, Path, State},
     http::{header, HeaderMap, Method, StatusCode},
     response::{IntoResponse, Response},
-    routing::{delete, get, post},
+    routing::{any, delete, get, post},
     Router,
 };
 use chrono::{DateTime, Utc};
@@ -36,6 +38,7 @@ use serde_json::{json, Map, Value};
 
 mod bucket;
 mod cdn;
+mod iceberg;
 mod limits;
 mod mime;
 mod multipart;
@@ -109,6 +112,9 @@ pub fn router_with_state(state: StorageState) -> Router {
         )
         .route("/storage/v1/health", get(healthcheck))
         .route("/storage/v1/health/", get(healthcheck))
+        .route("/storage/v1/iceberg", any(iceberg::catalog_disabled))
+        .route("/storage/v1/iceberg/", any(iceberg::catalog_disabled))
+        .route("/storage/v1/iceberg/*rest", any(iceberg::catalog_disabled))
         .route("/storage/v1/cdn", delete(cdn::purge_cache))
         .route("/storage/v1/cdn/", delete(cdn::purge_cache))
         .route("/storage/v1/cdn/:bucket_name", delete(cdn::purge_cache))
