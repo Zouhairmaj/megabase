@@ -14,10 +14,13 @@
 // pin v2.117.3.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use megabase_core::{Hs256, MegabaseNotImplemented};
 use serde_json::{json, Map, Value};
+use uuid::Uuid;
 
+use crate::cdc::{params_id, Cdc, Pending, Subscriber};
 use crate::hub::{ConnId, Hub, Outbox};
 use crate::term::{binary_tuple_size, external_size, user_broadcast_size, uuid1, MAX_PAYLOAD_SIZE};
 use crate::token::{authorize_conn, TokenError};
@@ -401,6 +404,10 @@ struct JoinConfig {
     access_token: String,
     /// `confirm_token_ref`: when `:confirm_token` fires (Unix ms).
     confirm_token_at: i64,
+    /// `new_api?/1`: the join payload has a `config`.
+    is_new_api: bool,
+    /// `pg_change_params/5`: the `postgres_changes` entries.
+    postgres_changes: Vec<Value>,
 }
 
 /// Why `confirm_token/1` failed.
@@ -486,14 +493,17 @@ pub(crate) struct Session<'a> {
     channels: HashMap<String, Channel>,
     /// A channel sent the transport `%Broadcast{event: "disconnect"}`.
     disconnect: bool,
+    /// The tenant's `postgres_cdc_rls` extension; `None` without a database.
+    cdc: Option<Arc<Cdc>>,
 }
 
 impl Drop for Session<'_> {
     /// The transport went away: every channel stops, which unsubscribes it
     /// and untracks its presence.
     fn drop(&mut self) {
-        for topic in self.channels.keys() {
-            self.hub.unsubscribe(topic, self.conn);
+        let topics: Vec<String> = self.channels.keys().cloned().collect();
+        for topic in topics {
+            self.stop(&topic);
         }
     }
 }
@@ -515,7 +525,15 @@ impl<'a> Session<'a> {
             socket_token,
             channels: HashMap::new(),
             disconnect: false,
+            cdc: None,
         }
+    }
+
+    /// The session with the tenant's Postgres changes extension.
+    #[must_use]
+    pub(crate) fn with_cdc(mut self, cdc: Option<Arc<Cdc>>) -> Self {
+        self.cdc = cdc;
+        self
     }
 
     /// Whether the socket must close once the replies so far are sent:
@@ -636,7 +654,7 @@ impl<'a> Session<'a> {
             return out;
         }
         match self.join(&frame.topic, &frame.payload, now_ms) {
-            Ok(config) => {
+            Ok(mut config) => {
                 let presence_enabled = config.presence_enabled;
                 self.hub.subscribe(
                     &frame.topic,
@@ -644,6 +662,7 @@ impl<'a> Session<'a> {
                     self.serializer,
                     self.outbox.clone(),
                 );
+                let postgres_changes = self.postgres_cdc_subscribe(&frame, &mut config, now_ms);
                 self.channels.insert(
                     frame.topic.clone(),
                     Channel {
@@ -662,7 +681,7 @@ impl<'a> Session<'a> {
                     frame.reference,
                     &frame.topic,
                     "ok",
-                    json!({ "postgres_changes": [] }),
+                    json!({ "postgres_changes": postgres_changes }),
                 ));
                 // `send(self(), :sync_presence)` right after the join.
                 if presence_enabled {
@@ -678,6 +697,58 @@ impl<'a> Session<'a> {
             )),
         }
         out
+    }
+
+    /// `postgres_cdc_subscribe/2` and `start_postgres_subscribe/4`: the
+    /// channel's fastlane subscription to the tenant's changes, then
+    /// `:postgres_subscribe` in the background. Returns the reply's
+    /// `postgres_changes` (`add_id_to_postgres_changes/1`).
+    fn postgres_cdc_subscribe(
+        &self,
+        frame: &Frame,
+        config: &mut JoinConfig,
+        now_ms: i64,
+    ) -> Vec<Value> {
+        let params = std::mem::take(&mut config.postgres_changes);
+        let Some(cdc) = self.cdc.as_ref().filter(|_| !params.is_empty()) else {
+            return Vec::new();
+        };
+        let claims = authorize_conn(self.jwt, &config.access_token, now_ms.div_euclid(1000))
+            .map(Value::Object)
+            .unwrap_or_default();
+        let ids: Vec<(Uuid, u32)> = params
+            .iter()
+            .map(|params| (Uuid::new_v4(), params_id(params)))
+            .collect();
+        cdc.subscribe(Subscriber {
+            conn: self.conn,
+            topic: frame.topic.clone(),
+            serializer: self.serializer,
+            outbox: self.outbox.clone(),
+            is_new_api: config.is_new_api,
+            ids: ids.clone(),
+        });
+        let reply = params
+            .iter()
+            .zip(&ids)
+            .map(|(params, (_, id))| {
+                let mut entry = params.as_object().cloned().unwrap_or_default();
+                entry.insert("id".to_owned(), Value::from(*id));
+                Value::Object(entry)
+            })
+            .collect();
+        let pending = Pending {
+            conn: self.conn,
+            topic: frame.topic.clone(),
+            join_ref: frame.join_ref.clone(),
+            serializer: self.serializer,
+            outbox: self.outbox.clone(),
+            claims,
+            ids,
+            params,
+        };
+        tokio::spawn(Arc::clone(cdc).postgres_subscribe(pending));
+        reply
     }
 
     /// `limit_joins/2`, the first join step that can fail on the
@@ -706,6 +777,9 @@ impl<'a> Session<'a> {
     fn stop(&mut self, topic: &str) {
         self.channels.remove(topic);
         self.hub.unsubscribe(topic, self.conn);
+        if let Some(cdc) = &self.cdc {
+            cdc.forget(cdc.unsubscribe(self.conn, topic));
+        }
     }
 
     /// `presence_state` push with the topic's grouped presences.
@@ -1048,9 +1122,30 @@ impl<'a> Session<'a> {
                 .try_fold(config?, |value, key| value.as_object()?.get(*key))
         };
         let flag = |path: &[&str]| field(path).is_some_and(flexible_true);
-        let unit = if config.is_none() {
-            // Old API: the topic itself names a Postgres subscription.
+        // `pg_change_params/5`. The new API takes the non-null entries of a
+        // non-empty `postgres_changes` list; the old API reads the topic.
+        let postgres_changes: Vec<Value> = match config {
+            None => {
+                let mut parts = sub_topic.splitn(3, ':');
+                let mut params = Map::new();
+                for key in ["schema", "table", "filter"] {
+                    if let Some(part) = parts.next() {
+                        params.insert(key.to_owned(), Value::from(part));
+                    }
+                }
+                vec![Value::Object(params)]
+            }
+            Some(_) => match field(&["postgres_changes"]) {
+                Some(Value::Array(changes)) => {
+                    changes.iter().filter(|c| !c.is_null()).cloned().collect()
+                }
+                _ => Vec::new(),
+            },
+        };
+        let unit = if config.is_none() && self.cdc.is_none() {
             Some("realtime:server-event:postgres_changes")
+        } else if config.is_none() {
+            None
         } else if flag(&["private"]) {
             Some("realtime:protocol-event:phx_join")
         } else if field(&["broadcast"])
@@ -1062,10 +1157,8 @@ impl<'a> Session<'a> {
             return Err(reason(
                 "UnableToReplayMessages: Replay is not allowed for public channels",
             ));
-        } else if field(&["postgres_changes"])
-            .and_then(Value::as_array)
-            .is_some_and(|changes| changes.iter().any(|c| !c.is_null()))
-        {
+        } else if self.cdc.is_none() && !postgres_changes.is_empty() {
+            // No tenant database to subscribe in.
             Some("realtime:server-event:postgres_changes")
         } else if flag(&["broadcast", "replication_ready"]) {
             Some("realtime:server-event:system")
@@ -1091,6 +1184,8 @@ impl<'a> Session<'a> {
             presence_key,
             access_token: access_token.to_owned(),
             confirm_token_at,
+            is_new_api: config.is_some(),
+            postgres_changes,
         })
     }
 

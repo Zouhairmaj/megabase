@@ -19,13 +19,18 @@ use axum::{
 };
 use megabase_core::Hs256;
 
+mod cdc;
 mod http_api;
 mod hub;
 mod protocol;
 mod rate;
+mod schema;
+mod subscriptions;
 mod term;
 mod token;
 mod websocket;
+
+pub use schema::{install_schema, SchemaError};
 
 pub const COMPONENT: &str = "realtime";
 
@@ -35,6 +40,8 @@ pub const COMPONENT: &str = "realtime";
 pub struct RealtimeState {
     jwt: Option<Hs256>,
     hub: Arc<hub::Hub>,
+    /// Postgres changes of the tenant database (`DATABASE_URL`).
+    cdc: Option<Arc<cdc::Cdc>>,
 }
 
 impl RealtimeState {
@@ -45,7 +52,20 @@ impl RealtimeState {
         Self {
             jwt,
             hub: Arc::default(),
+            cdc: None,
         }
+    }
+
+    /// The state with the tenant database: channels may join with
+    /// `postgres_changes`, and the replication poller starts on the current
+    /// Tokio runtime. `slot_name_suffix` is `SLOT_NAME_SUFFIX`; the slot name
+    /// is cluster-wide, so a second Realtime on the same cluster needs one.
+    #[must_use]
+    pub fn with_pool(mut self, pool: sqlx::PgPool, slot_name_suffix: Option<&str>) -> Self {
+        let cdc = Arc::new(cdc::Cdc::new(pool, slot_name_suffix));
+        tokio::spawn(Arc::clone(&cdc).run());
+        self.cdc = Some(cdc);
+        self
     }
 }
 

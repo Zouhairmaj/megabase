@@ -127,7 +127,8 @@ async fn serve(
     };
     let (outbox, mut inbox) = Outbox::new(OUTBOX_CAPACITY);
     let evicted = outbox.evicted();
-    let mut session = Session::new(jwt, &state.hub, serializer, token, outbox);
+    let mut session = Session::new(jwt, &state.hub, serializer, token, outbox)
+        .with_cdc(state.cdc.as_ref().map(Arc::clone));
     loop {
         let wait = session.deadline().map(|at| {
             Duration::from_millis(u64::try_from(at.saturating_sub(unix_now_ms())).unwrap_or(0))
