@@ -2,12 +2,12 @@
   "schema": 1,
   "totals": {
     "units": 1031,
-    "implemented": 260,
+    "implemented": 263,
     "tested": 186,
     "conformant": 0
   },
   "percent": {
-    "coverage": 25.2,
+    "coverage": 25.5,
     "conformance": 0.0,
     "done": 0.0
   },
@@ -18,7 +18,7 @@
   "components": {
     "auth": {
       "units": 159,
-      "implemented": 119,
+      "implemented": 122,
       "tested": 80,
       "conformant": 0,
       "groups": {
@@ -72,7 +72,7 @@
         },
         "scim": {
           "units": 3,
-          "implemented": 0,
+          "implemented": 3,
           "tested": 0,
           "conformant": 0
         },
@@ -615,6 +615,9 @@
     "auth:route:GET /auth/v1/health": "tested",
     "auth:route:GET /auth/v1/oauth/userinfo": "implemented",
     "auth:route:GET /auth/v1/passkeys": "implemented",
+    "auth:route:GET /auth/v1/scim/v2/ResourceTypes": "implemented",
+    "auth:route:GET /auth/v1/scim/v2/Schemas": "implemented",
+    "auth:route:GET /auth/v1/scim/v2/ServiceProviderConfig": "implemented",
     "auth:route:GET /auth/v1/settings": "tested",
     "auth:route:GET /auth/v1/user": "tested",
     "auth:route:GET /auth/v1/user/identities/authorize": "tested",

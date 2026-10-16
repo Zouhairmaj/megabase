@@ -47,6 +47,7 @@ mod recover;
 mod roles;
 mod routes;
 mod schema;
+mod scim;
 mod state;
 mod store;
 mod token;
@@ -75,20 +76,26 @@ pub fn router() -> Router {
 
 pub fn router_with_state(state: AuthState) -> Router {
     let passkeys_enabled = state.config.passkeys_enabled;
+    let scim_enabled = state.scim_enabled;
     admin::router(state.clone())
         .merge(factors::router(state.clone()))
         .merge(well_known::router(state.clone()))
         .merge(oauth_server::router(state.clone()))
         .merge(passkeys::router(state.clone()))
+        .merge(scim::router(state.clone()))
         .merge(routes::router(state))
         // Path match without a method handler is Axum 405; send those to the
         // same 501 as unknown paths (GOAL.md §3 rule 5).
         .method_not_allowed_fallback(not_implemented)
         .fallback(move |method: Method, uri: OriginalUri| async move {
-            match passkeys::fallback_gate(passkeys_enabled, uri.0.path()) {
-                Some(response) => response,
-                None => not_implemented(method, uri).await.into_response(),
+            let path = uri.0.path();
+            if let Some(response) = passkeys::fallback_gate(passkeys_enabled, path) {
+                return response;
             }
+            if let Some(response) = scim::fallback_gate(scim_enabled, path) {
+                return response;
+            }
+            not_implemented(method, uri).await.into_response()
         })
 }
 
