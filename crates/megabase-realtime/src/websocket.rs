@@ -100,6 +100,11 @@ pub(crate) async fn websocket(
             ),
         };
     }
+    // `TenantRateLimiters.check_tenant/1`; Megabase does not model the
+    // `max_concurrent_users` check that runs before it.
+    if state.hub.too_many_joins(unix_now_ms()) {
+        return connect_error(StatusCode::TOO_MANY_REQUESTS, "Too many joins per second");
+    }
     // Phoenix answers a failed upgrade with WebSockAdapter's 400 text, which
     // depends on the HTTP server; Megabase does not model it.
     let Ok(upgrade) = upgrade else {
@@ -149,6 +154,12 @@ async fn serve(
             },
         };
         if !send_all(&mut socket, &evicted, replies).await {
+            return;
+        }
+        // `Phoenix.Socket` `__info__/2` on `%Broadcast{event: "disconnect"}`:
+        // `{:stop, {:shutdown, :disconnected}, state}` closes the transport.
+        if session.disconnected() {
+            let _closed = socket.send(Message::Close(None)).await;
             return;
         }
     }
