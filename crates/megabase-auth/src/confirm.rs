@@ -135,6 +135,8 @@ pub(crate) async fn confirm_signup(
             auth_code_issued_at: None,
             referrer: None,
             linking_target_id: None,
+            email_optional: false,
+            oauth_client_state_id: None,
         })
     };
     cmd.flow = flow.as_ref();

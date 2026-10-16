@@ -2,12 +2,12 @@
   "schema": 1,
   "totals": {
     "units": 1031,
-    "implemented": 237,
+    "implemented": 260,
     "tested": 186,
     "conformant": 0
   },
   "percent": {
-    "coverage": 23.0,
+    "coverage": 25.2,
     "conformance": 0.0,
     "done": 0.0
   },
@@ -18,7 +18,7 @@
   "components": {
     "auth": {
       "units": 159,
-      "implemented": 96,
+      "implemented": 119,
       "tested": 80,
       "conformant": 0,
       "groups": {
@@ -60,13 +60,13 @@
         },
         "oauth-providers": {
           "units": 26,
-          "implemented": 0,
+          "implemented": 20,
           "tested": 0,
           "conformant": 0
         },
         "passkeys": {
           "units": 7,
-          "implemented": 0,
+          "implemented": 3,
           "tested": 0,
           "conformant": 0
         },
@@ -566,6 +566,26 @@
     "auth:grant-type:pkce": "implemented",
     "auth:grant-type:refresh_token": "tested",
     "auth:hook:custom_access_token": "implemented",
+    "auth:provider:azure": "implemented",
+    "auth:provider:bitbucket": "implemented",
+    "auth:provider:discord": "implemented",
+    "auth:provider:facebook": "implemented",
+    "auth:provider:figma": "implemented",
+    "auth:provider:fly": "implemented",
+    "auth:provider:github": "implemented",
+    "auth:provider:gitlab": "implemented",
+    "auth:provider:kakao": "implemented",
+    "auth:provider:keycloak": "implemented",
+    "auth:provider:linkedin": "implemented",
+    "auth:provider:notion": "implemented",
+    "auth:provider:slack": "implemented",
+    "auth:provider:slack_oidc": "implemented",
+    "auth:provider:snapchat": "implemented",
+    "auth:provider:spotify": "implemented",
+    "auth:provider:twitch": "implemented",
+    "auth:provider:workos": "implemented",
+    "auth:provider:x": "implemented",
+    "auth:provider:zoom": "implemented",
     "auth:route:DELETE /auth/v1/admin/custom-providers/{identifier}": "tested",
     "auth:route:DELETE /auth/v1/admin/oauth/clients/{client_id}": "tested",
     "auth:route:DELETE /auth/v1/admin/sso/providers/{idp_id}": "tested",
@@ -574,6 +594,7 @@
     "auth:route:DELETE /auth/v1/admin/users/{user_id}/passkeys/{passkey_id}": "tested",
     "auth:route:DELETE /auth/v1/factors/recovery-codes": "implemented",
     "auth:route:DELETE /auth/v1/factors/{factor_id}": "implemented",
+    "auth:route:DELETE /auth/v1/passkeys/{passkey_id}": "implemented",
     "auth:route:DELETE /auth/v1/user/identities/{identity_id}": "tested",
     "auth:route:DELETE /auth/v1/user/oauth/grants": "tested",
     "auth:route:GET /.well-known/oauth-authorization-server": "implemented",
@@ -593,11 +614,13 @@
     "auth:route:GET /auth/v1/factors/recovery-codes": "implemented",
     "auth:route:GET /auth/v1/health": "tested",
     "auth:route:GET /auth/v1/oauth/userinfo": "implemented",
+    "auth:route:GET /auth/v1/passkeys": "implemented",
     "auth:route:GET /auth/v1/settings": "tested",
     "auth:route:GET /auth/v1/user": "tested",
     "auth:route:GET /auth/v1/user/identities/authorize": "tested",
     "auth:route:GET /auth/v1/user/oauth/grants": "tested",
     "auth:route:GET /auth/v1/verify": "tested",
+    "auth:route:PATCH /auth/v1/passkeys/{passkey_id}": "implemented",
     "auth:route:POST /auth/v1/admin/custom-providers": "tested",
     "auth:route:POST /auth/v1/admin/generate_link": "tested",
     "auth:route:POST /auth/v1/admin/oauth/clients": "tested",

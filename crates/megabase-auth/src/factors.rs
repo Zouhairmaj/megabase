@@ -423,7 +423,7 @@ async fn recovery_codes_delete(State(state): State<AuthState>, headers: HeaderMa
 }
 
 /// `requireAuthentication` then `requireNotAnonymous`.
-async fn require_factor_user(
+pub(crate) async fn require_factor_user(
     state: &AuthState,
     headers: &HeaderMap,
 ) -> Result<Authed, Box<Response>> {
@@ -476,7 +476,7 @@ fn reject(response: impl IntoResponse) -> Box<Response> {
 
 /// gofrs `uuid.FromString`: canonical, braced, `urn:uuid:` prefixed, or
 /// 32 hex digits without hyphens.
-fn parse_gofrs_uuid(raw: &str) -> Option<Uuid> {
+pub(crate) fn parse_gofrs_uuid(raw: &str) -> Option<Uuid> {
     let canonical = |text: &str| -> Option<Uuid> {
         let bytes = text.as_bytes();
         let hyphenated =

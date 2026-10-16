@@ -46,7 +46,6 @@ use crate::COMPONENT;
 const UNIT_SIGNUP: &str = "auth:route:POST /auth/v1/signup";
 const UNIT_REAUTHENTICATE: &str = "auth:route:GET /auth/v1/reauthenticate";
 const UNIT_RESEND: &str = "auth:route:POST /auth/v1/resend";
-const UNIT_AUTHORIZE: &str = "auth:route:GET /auth/v1/authorize";
 
 pub(crate) const INVALID_CHANNEL: &str = "Invalid channel, supported values are 'sms' or 'whatsapp'. 'whatsapp' is only supported if Twilio or Twilio Verify is used as the provider.";
 
@@ -54,7 +53,7 @@ pub(crate) fn router(state: AuthState) -> Router {
     Router::new()
         .route("/auth/v1/health", get_only(get(health)))
         .route("/auth/v1/settings", get_only(get(settings)))
-        .route("/auth/v1/authorize", get(authorize))
+        .route("/auth/v1/authorize", get(crate::external::authorize))
         .route("/auth/v1/reauthenticate", get(reauthenticate))
         .route("/auth/v1/signup", post(signup))
         .route("/auth/v1/token", post(crate::token::token))
@@ -102,25 +101,6 @@ pub(crate) fn get_only(route: MethodRouter<AuthState>) -> MethodRouter<AuthState
 
 async fn chi_method_not_allowed() -> Response {
     (StatusCode::METHOD_NOT_ALLOWED, [(ALLOW, "GET")]).into_response()
-}
-
-/// `GET /authorize` (`ExternalProviderRedirect`) up to the provider lookup.
-///
-/// An unknown, disabled, or (with custom OAuth off) `custom:` provider is
-/// GoTrue's 400 `validation_failed`, before `redirect_to` is read, so no
-/// redirect is ever sent. An enabled provider needs the OAuth redirect flow,
-/// which is not ported, and stays 501. The route carries no `megabase:unit`
-/// marker for that reason.
-async fn authorize(State(state): State<AuthState>, uri: Uri) -> Response {
-    let provider = query_param(uri.query(), "provider").unwrap_or_default();
-    match crate::user::provider_decision(&state, &provider) {
-        crate::user::ProviderDecision::Reject(detail) => {
-            validation(format!("Unsupported provider: {detail}")).into_response()
-        }
-        crate::user::ProviderDecision::RedirectNotPorted => {
-            MegabaseNotImplemented::new(COMPONENT, UNIT_AUTHORIZE).into_response()
-        }
-    }
 }
 
 // megabase:unit auth:route:GET /auth/v1/health
@@ -889,8 +869,31 @@ mod tests {
             &[],
         )
         .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(body["msg"], "Unsupported provider: missing OAuth client ID");
+
+        // Apple's constructor fetches OIDC discovery, which is not ported.
+        let mut apple = AuthState::reference();
+        apple.config.external.apple = true;
+        apple.config.oauth_clients.set(
+            "apple",
+            crate::config::OAuthClient {
+                client_id: vec!["cid".into()],
+                secret: "s".into(),
+                redirect_uri: "http://localhost:8000/auth/v1/callback".into(),
+                ..Default::default()
+            },
+        );
+        let (status, body) = call(
+            router(apple),
+            "GET",
+            "/auth/v1/authorize?provider=apple",
+            None,
+            &[],
+        )
+        .await;
         assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
-        assert_eq!(body["unit"], UNIT_AUTHORIZE);
+        assert_eq!(body["unit"], "auth:route:GET /auth/v1/authorize");
     }
 
     #[tokio::test]

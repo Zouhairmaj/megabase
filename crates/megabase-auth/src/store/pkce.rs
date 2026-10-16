@@ -30,9 +30,10 @@ pub(super) async fn insert_flow_state(
              (id, user_id, auth_code, code_challenge_method, code_challenge,
               provider_type, provider_access_token, provider_refresh_token,
               created_at, updated_at, authentication_method,
-              auth_code_issued_at, referrer, linking_target_id)
+              auth_code_issued_at, referrer, linking_target_id, email_optional,
+              oauth_client_state_id)
          VALUES ($1::uuid, $2::uuid, $3, $4::auth.code_challenge_method, $5,
-                 $6, $7, $8, $9, $9, $10, $11, $12, $13::uuid)",
+                 $6, $7, $8, $9, $9, $10, $11, $12, $13::uuid, $14, $15::uuid)",
     )
     .bind(id)
     .bind(flow.user_id)
@@ -47,6 +48,8 @@ pub(super) async fn insert_flow_state(
     .bind(flow.auth_code_issued_at.map(ts))
     .bind(flow.referrer.as_deref())
     .bind(flow.linking_target_id)
+    .bind(flow.email_optional)
+    .bind(flow.oauth_client_state_id)
     .execute(&mut *conn)
     .await?;
     Ok(())
@@ -88,6 +91,57 @@ impl Backend {
                 })
                 .await
             }
+        }
+    }
+
+    /// `NewOAuthClientState` + `db.Create`: insert an
+    /// `auth.oauth_client_states` row with a new id and return it.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError`] when the database is missing or the insert fails.
+    pub async fn create_oauth_client_state(
+        &self,
+        provider_type: &str,
+        code_verifier: &str,
+    ) -> Result<Uuid, StoreError> {
+        let id = Uuid::new_v4();
+        match &self.inner {
+            BackendKind::None => Err(StoreError::Unavailable),
+            BackendKind::Memory(db) => {
+                db.lock()
+                    .await
+                    .oauth_client_states
+                    .insert(id, (provider_type.to_string(), code_verifier.to_string()));
+                Ok(id)
+            }
+            BackendKind::Postgres(pg) => {
+                timed(async {
+                    sqlx::query(
+                        "INSERT INTO auth.oauth_client_states
+                             (id, provider_type, code_verifier, created_at)
+                         VALUES ($1::uuid, $2, $3, $4)",
+                    )
+                    .bind(id)
+                    .bind(provider_type)
+                    .bind(code_verifier)
+                    .bind(ts(SystemTime::now()))
+                    .execute(&pg.pool)
+                    .await?;
+                    Ok(id)
+                })
+                .await
+            }
+        }
+    }
+
+    /// The `(provider_type, code_verifier)` of an in-memory
+    /// `auth.oauth_client_states` row.
+    #[cfg(test)]
+    pub(crate) async fn oauth_client_state_for_test(&self, id: Uuid) -> Option<(String, String)> {
+        match &self.inner {
+            BackendKind::Memory(db) => db.lock().await.oauth_client_states.get(&id).cloned(),
+            _ => None,
         }
     }
 

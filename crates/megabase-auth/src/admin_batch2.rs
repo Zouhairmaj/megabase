@@ -945,6 +945,22 @@ fn link_referrer(
     query_redirect: &str,
     body_redirect: &str,
 ) -> Result<String, RedirectAllowListUnsupported> {
+    let referrer = get_referrer(state, headers, query_redirect)?;
+    let allow = state.uri_allow_list.as_slice();
+    if redirect_ok(&state.config.site_url, body_redirect, allow)? {
+        return Ok(body_redirect.to_string());
+    }
+    Ok(referrer)
+}
+
+/// GoTrue `GetReferrer`: the `redirect_to` header, else `query_redirect`
+/// (`r.Form`), then the `Referer` header, each only when allowed; else the
+/// site URL.
+pub(crate) fn get_referrer(
+    state: &AuthState,
+    headers: &HeaderMap,
+    query_redirect: &str,
+) -> Result<String, RedirectAllowListUnsupported> {
     let header_redirect = headers
         .get("redirect_to")
         .and_then(|value| value.to_str().ok())
@@ -959,17 +975,13 @@ fn link_referrer(
         .and_then(|value| value.to_str().ok())
         .unwrap_or("");
     let allow = state.uri_allow_list.as_slice();
-    let mut referrer = if redirect_ok(&state.config.site_url, primary, allow)? {
+    Ok(if redirect_ok(&state.config.site_url, primary, allow)? {
         primary.to_string()
     } else if redirect_ok(&state.config.site_url, referer, allow)? {
         referer.to_string()
     } else {
         state.config.site_url.clone()
-    };
-    if redirect_ok(&state.config.site_url, body_redirect, allow)? {
-        referrer = body_redirect.to_string();
-    }
-    Ok(referrer)
+    })
 }
 
 /// GoTrue `IsRedirectURLValid` (`internal/utilities/request.go`).
