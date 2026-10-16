@@ -9,7 +9,7 @@ Sections: Features, Bug Fixes, Performance, Conformance/judge, Documentation.
 
 ### Features
 
-* **auth:** serve the oauth authorize redirect for eight built-in providers ([#426](https://github.com/Zouhairmaj/megabase/issues/426)) ([8273f49](https://github.com/Zouhairmaj/megabase/commit/8273f496b155a0d81e15009fce9c907c5044f216)), closes [#49](https://github.com/Zouhairmaj/megabase/issues/49)
+* **auth:** serve the oauth authorize redirect for eight built-in providers ([#426](https://github.com/Zouhairmaj/megabase/issues/426)) ([8273f49](https://github.com/Zouhairmaj/megabase/commit/8273f496b155a0d81e15009fce9c907c5044f216))
 
 ## [0.1.39](https://github.com/Zouhairmaj/megabase/compare/v0.1.38...v0.1.39) (2026-10-15)
 
