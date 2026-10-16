@@ -53,7 +53,7 @@ pub(crate) struct Subscriber {
 }
 
 /// A joined channel's `pg_change_params` waiting for `:postgres_subscribe`.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct Pending {
     pub conn: ConnId,
     pub topic: String,
@@ -101,6 +101,8 @@ pub(crate) struct Change {
 pub(crate) struct Cdc {
     pool: sqlx::PgPool,
     slot_name: String,
+    /// `SLOT_NAME_SUFFIX` is set: the cluster may host another server.
+    slot_suffixed: bool,
     subscribers: Mutex<Vec<Subscriber>>,
 }
 
@@ -114,6 +116,7 @@ impl Cdc {
         Self {
             pool,
             slot_name,
+            slot_suffixed: slot_name_suffix.is_some(),
             subscribers: Mutex::new(Vec::new()),
         }
     }
@@ -207,6 +210,22 @@ impl Cdc {
         }
     }
 
+    /// Stores the channel's subscriptions again with the claims of its
+    /// refreshed token (the insert's conflict path updates `claims`). A
+    /// failure keeps the previous claims and is logged.
+    pub(crate) async fn refresh_claims(self: Arc<Self>, pending: Pending) {
+        let Some(&(first, _)) = pending.ids.first() else {
+            return;
+        };
+        if let Err((message, _)) = self.subscribe_attempt(&pending).await {
+            tracing::warn!(%message, "could not refresh the claims of realtime subscriptions");
+        }
+        if !self.holds(pending.conn, &pending.topic, first) {
+            // The channel stopped while the rows were stored.
+            self.forget(pending.ids.iter().map(|(id, _)| *id).collect());
+        }
+    }
+
     /// `postgres_subscribe_attempt/2`: the error message and whether it is
     /// one of `@postgres_subscribe_fatal_reasons`.
     async fn subscribe_attempt(&self, pending: &Pending) -> Result<(), (String, bool)> {
@@ -260,19 +279,30 @@ impl Cdc {
         }
     }
 
-    /// Runs the `ReplicationPoller` until it gives up after `@max_retries`
-    /// consecutive failures.
+    /// Runs the `ReplicationPoller`. Upstream's supervisor restarts it after
+    /// it gives up, so it never returns: after `@max_retries` consecutive
+    /// failures it keeps retrying at the longest backoff and logs each one.
     pub(crate) async fn run(self: Arc<Self>) {
+        // Rows of a previous run would be checked by `apply_rls` for every
+        // change. With a slot suffix another server may own rows here.
+        if self.slot_suffixed {
+            tracing::debug!("keeping realtime.subscription rows: SLOT_NAME_SUFFIX is set");
+        } else if let Err(error) = sqlx::query("delete from realtime.subscription")
+            .execute(&self.pool)
+            .await
+        {
+            tracing::warn!(%error, "could not clear stale realtime subscriptions");
+        }
         let mut retries = 0;
         loop {
-            match self.poll_slot(&mut retries).await {
-                Ok(()) => return,
-                Err(_) if retries >= MAX_RETRIES => return,
-                Err(_) => {
-                    retries += 1;
-                    tokio::time::sleep(backoff(retries)).await;
-                }
+            let Err(error) = self.poll_slot(&mut retries).await else {
+                return;
+            };
+            retries = retries.saturating_add(1);
+            if retries >= MAX_RETRIES {
+                tracing::warn!(%error, retries, "realtime replication poller keeps failing; retrying");
             }
+            tokio::time::sleep(backoff(retries)).await;
         }
     }
 

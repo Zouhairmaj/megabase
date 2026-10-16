@@ -127,6 +127,18 @@ const STEPS: &[Step] = &[
     always("publication", include_str!("../sql/publication.sql")),
 ];
 
+/// `true` when the objects a guarded step may have skipped have the newest
+/// attributes the subscription SQL uses.
+const SHAPE_PROBE: &str = "SELECT
+  (SELECT count(*) = 4 FROM pg_attribute
+     WHERE attrelid = (SELECT typrelid FROM pg_type WHERE oid = 'realtime.user_defined_filter'::regtype)
+       AND attname IN ('column_name', 'op', 'value', 'negate') AND NOT attisdropped)
+  AND (SELECT count(*) = 2 FROM pg_attribute
+     WHERE attrelid = 'realtime.subscription'::regclass
+       AND attname IN ('selected_columns', 'action_filter') AND NOT attisdropped)
+  AND (SELECT count(*) = 2 FROM pg_enum
+     WHERE enumtypid = 'realtime.equality_op'::regtype AND enumlabel IN ('isdistinct', 'match'))";
+
 /// Failure installing the realtime schema. Display text does not include the URL.
 #[derive(Debug, thiserror::Error)]
 pub enum SchemaError {
@@ -136,6 +148,10 @@ pub enum SchemaError {
         /// The deadline that passed.
         timeout: Duration,
     },
+    /// A skipped object exists, but without the attributes the current
+    /// subscription SQL writes (a database from an older Realtime).
+    #[error("an existing realtime type or table has an outdated shape")]
+    OutdatedShape,
     /// PostgreSQL rejected a step (or the surrounding transaction).
     #[error("installing the realtime schema failed at {step}: {source}")]
     Sql {
@@ -194,6 +210,13 @@ async fn install(pool: &sqlx::PgPool) -> Result<(), SchemaError> {
             .execute(&mut *tx)
             .await
             .map_err(SchemaError::at(step.name))?;
+    }
+    let current: bool = sqlx::query_scalar(SHAPE_PROBE)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(SchemaError::at("shape"))?;
+    if !current {
+        return Err(SchemaError::OutdatedShape);
     }
     tx.commit().await.map_err(SchemaError::at("commit"))?;
     Ok(())

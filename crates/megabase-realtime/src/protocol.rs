@@ -435,6 +435,9 @@ struct Channel {
     /// `presence_client_rate_limit`: calls in the window ending at `reset_at`.
     presence_calls: u32,
     presence_reset_at: Option<i64>,
+    /// The channel's `postgres_changes` subscriptions, kept to store them
+    /// again with the claims of a refreshed token.
+    cdc: Option<Pending>,
 }
 
 impl Channel {
@@ -662,7 +665,8 @@ impl<'a> Session<'a> {
                     self.serializer,
                     self.outbox.clone(),
                 );
-                let postgres_changes = self.postgres_cdc_subscribe(&frame, &mut config, now_ms);
+                let (postgres_changes, cdc) =
+                    self.postgres_cdc_subscribe(&frame, &mut config, now_ms);
                 self.channels.insert(
                     frame.topic.clone(),
                     Channel {
@@ -674,6 +678,7 @@ impl<'a> Session<'a> {
                         presence_payload: None,
                         presence_calls: 0,
                         presence_reset_at: None,
+                        cdc,
                     },
                 );
                 out.push(Frame::reply(
@@ -708,10 +713,10 @@ impl<'a> Session<'a> {
         frame: &Frame,
         config: &mut JoinConfig,
         now_ms: i64,
-    ) -> Vec<Value> {
+    ) -> (Vec<Value>, Option<Pending>) {
         let params = std::mem::take(&mut config.postgres_changes);
         let Some(cdc) = self.cdc.as_ref().filter(|_| !params.is_empty()) else {
-            return Vec::new();
+            return (Vec::new(), None);
         };
         let claims = authorize_conn(self.jwt, &config.access_token, now_ms.div_euclid(1000))
             .map(Value::Object)
@@ -747,8 +752,8 @@ impl<'a> Session<'a> {
             ids,
             params,
         };
-        tokio::spawn(Arc::clone(cdc).postgres_subscribe(pending));
-        reply
+        tokio::spawn(Arc::clone(cdc).postgres_subscribe(pending.clone()));
+        (reply, Some(pending))
     }
 
     /// `limit_joins/2`, the first join step that can fail on the
@@ -870,6 +875,14 @@ impl<'a> Session<'a> {
         };
         let message = match confirmed {
             Ok(confirm_token_at) => {
+                // The stored subscriptions carry the claims `apply_rls` runs
+                // under, so they follow the refreshed token.
+                if let (Some(cdc), Some(pending)) = (self.cdc.as_ref(), channel.cdc.as_mut()) {
+                    if let Ok(claims) = authorize_conn(self.jwt, &token, now_ms.div_euclid(1000)) {
+                        pending.claims = Value::Object(claims);
+                        tokio::spawn(Arc::clone(cdc).refresh_claims(pending.clone()));
+                    }
+                }
                 channel.config.access_token = token;
                 channel.config.confirm_token_at = confirm_token_at;
                 channel.access_token_verified_at = Some(now_ms);

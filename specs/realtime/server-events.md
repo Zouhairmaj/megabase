@@ -119,7 +119,7 @@ The poller holds one connection with the temporary wal2json slot
 polls again at once after changes, after 100 ms (+50–100 ms jitter) when
 the slot had changes for no subscriber, and after 500 ms when idle. An
 empty publication creates no slot; the publication is checked every 60 s.
-It stops after 6 consecutive failures.
+Upstream stops it after 6 consecutive failures and its supervisor restarts it. Megabase never stops it: after 6 failures it keeps retrying at the longest backoff and logs each failure. At startup it also deletes the rows left in `realtime.subscription` (skipped when `SLOT_NAME_SUFFIX` is set). After a token refresh, Megabase stores the channel's subscriptions again with the new claims, which upstream does not do. The schema install fails when an existing type or table lacks the attributes the subscription SQL uses.
 
 Differences from upstream:
 
