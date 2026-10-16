@@ -46,7 +46,11 @@ pub(super) async fn catalog_disabled(
     OriginalUri(uri): OriginalUri,
     headers: HeaderMap,
 ) -> Response {
-    if !(method == Method::GET || method == Method::HEAD) && has_body(&headers) {
+    let parses_body = matches!(
+        method,
+        Method::POST | Method::PUT | Method::PATCH | Method::DELETE | Method::OPTIONS
+    );
+    if parses_body && has_body(&headers) {
         return not_implemented(&method, &uri);
     }
     fastify_json(StatusCode::NOT_FOUND, &route_not_found(&method, &uri))
