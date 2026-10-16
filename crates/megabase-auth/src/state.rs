@@ -19,6 +19,8 @@ pub struct AuthState {
     pub jwt: Option<Hs256>,
     pub database_url: Option<String>,
     pub oauth_server_enabled: bool,
+    /// `GOTRUE_EXPERIMENTAL_SCIM_ENABLED`. GoTrue default is false.
+    pub scim_enabled: bool,
     /// `GOTRUE_OAUTH_SERVER_ALLOW_DYNAMIC_REGISTRATION`. GoTrue default is false.
     pub oauth_dynamic_registration: bool,
     /// `GOTRUE_JWT_KEYS` is a non-empty value other than `[]`. Megabase signs
@@ -97,6 +99,7 @@ impl AuthState {
             jwt,
             database_url: lookup("DATABASE_URL").filter(|url| !url.is_empty()),
             oauth_server_enabled: env_bool(lookup("GOTRUE_OAUTH_SERVER_ENABLED").as_deref(), false),
+            scim_enabled: env_bool(lookup("GOTRUE_EXPERIMENTAL_SCIM_ENABLED").as_deref(), false),
             oauth_dynamic_registration: env_bool(
                 lookup("GOTRUE_OAUTH_SERVER_ALLOW_DYNAMIC_REGISTRATION").as_deref(),
                 false,
@@ -185,6 +188,7 @@ impl AuthState {
             jwt,
             database_url: None,
             oauth_server_enabled: defaults.oauth_server_enabled,
+            scim_enabled: defaults.scim_enabled,
             oauth_dynamic_registration: defaults.oauth_dynamic_registration,
             jwt_keys_configured: defaults.jwt_keys_configured,
             custom_oauth_enabled: defaults.custom_oauth_enabled,
