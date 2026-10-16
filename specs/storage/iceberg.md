@@ -69,17 +69,17 @@ answers as storage-api does with both unset. The database is not used.
 
 - `HEAD` gets the same status and headers; the body is dropped.
 - Methods without an upstream route (`PUT`, `PATCH`, …) get the same 404.
-- Fastify parses the body before the not-found handler for `POST`, `PUT`,
-  `PATCH`, `DELETE` and `OPTIONS` when the request has a `Content-Type`,
-  a `Transfer-Encoding`, or a non-zero `Content-Length`
+- Fastify parses the body before the not-found handler for `POST`, `PUT`
+  and `PATCH` when the request has a `Content-Type`, a `Transfer-Encoding`,
+  or a non-zero `Content-Length`, and for `DELETE` and `OPTIONS` only when
+  a `Content-Type` comes with a `Transfer-Encoding` or `Content-Length`
   (fastify `lib/handleRequest.js`). A parse failure (for example an empty
   `application/json` body, or an unknown media type) goes to the root
   error handler instead.
 
 ## Out of scope (501)
 
-- Requests other than `GET`/`HEAD` that carry a body or `Content-Type`
-  (the body-parsing path above).
+- Requests that Fastify body-parses (the path above).
 - The enabled catalog: analytics bucket storage (`storage.buckets_analytics`),
   the S3 Tables / REST catalog client with SigV4 or token auth, the
   namespace and table limits, and the nested error format. It needs a

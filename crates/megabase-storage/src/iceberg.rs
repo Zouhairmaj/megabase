@@ -46,11 +46,12 @@ pub(super) async fn catalog_disabled(
     OriginalUri(uri): OriginalUri,
     headers: HeaderMap,
 ) -> Response {
-    let parses_body = matches!(
-        method,
-        Method::POST | Method::PUT | Method::PATCH | Method::DELETE | Method::OPTIONS
-    );
-    if parses_body && has_body(&headers) {
+    let parses_body = match method {
+        Method::POST | Method::PUT | Method::PATCH => has_body(&headers),
+        Method::DELETE | Method::OPTIONS => has_framed_content_type(&headers),
+        _ => false,
+    };
+    if parses_body {
         return not_implemented(&method, &uri);
     }
     fastify_json(StatusCode::NOT_FOUND, &route_not_found(&method, &uri))
@@ -65,6 +66,14 @@ fn has_body(headers: &HeaderMap) -> bool {
         || headers
             .get(header::CONTENT_LENGTH)
             .is_some_and(|length| length.as_bytes() != b"0")
+}
+
+/// `DELETE` and `OPTIONS` are parsed only when a `Content-Type` comes with a
+/// `Transfer-Encoding` or a `Content-Length` (of any value, including `0`).
+fn has_framed_content_type(headers: &HeaderMap) -> bool {
+    headers.contains_key(header::CONTENT_TYPE)
+        && (headers.contains_key(header::TRANSFER_ENCODING)
+            || headers.contains_key(header::CONTENT_LENGTH))
 }
 
 /// `basic404`: `request.raw.url` is the path and query string after Kong
@@ -183,6 +192,21 @@ mod tests {
         ] {
             let (status, _, _) = send("POST", "/storage/v1/iceberg/bucket", &extra, body).await;
             assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
+        }
+        // `DELETE` and `OPTIONS` are parsed only with a Content-Type and framing.
+        for method in ["DELETE", "OPTIONS"] {
+            let path = "/storage/v1/iceberg/bucket";
+            let (status, _, _) = send(method, path, &[(header::CONTENT_LENGTH, "2")], "{}").await;
+            assert_eq!(status, StatusCode::NOT_FOUND, "{method} framing only");
+            let type_only = [(header::CONTENT_TYPE, "application/json")];
+            let (status, _, _) = send(method, path, &type_only, "").await;
+            assert_eq!(status, StatusCode::NOT_FOUND, "{method} type only");
+            let both = [
+                (header::CONTENT_TYPE, "application/json"),
+                (header::CONTENT_LENGTH, "2"),
+            ];
+            let (status, _, _) = send(method, path, &both, "{}").await;
+            assert_eq!(status, StatusCode::NOT_IMPLEMENTED, "{method} both");
         }
         // `GET` and `HEAD` are never parsed.
         let (status, _, _) = send(
