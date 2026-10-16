@@ -2,12 +2,12 @@
   "schema": 1,
   "totals": {
     "units": 1031,
-    "implemented": 312,
+    "implemented": 313,
     "tested": 218,
     "conformant": 0
   },
   "percent": {
-    "coverage": 30.3,
+    "coverage": 30.4,
     "conformance": 0.0,
     "done": 0.0
   },
@@ -284,7 +284,7 @@
     },
     "realtime": {
       "units": 19,
-      "implemented": 1,
+      "implemented": 2,
       "tested": 1,
       "conformant": 0,
       "groups": {
@@ -314,7 +314,7 @@
         },
         "websocket": {
           "units": 1,
-          "implemented": 0,
+          "implemented": 1,
           "tested": 0,
           "conformant": 0
         }
@@ -688,6 +688,7 @@
     "meta:route:GET /pg/config/version": "tested",
     "meta:route:GET /pg/health": "tested",
     "realtime:route:GET /realtime/v1/api/ping": "tested",
+    "realtime:route:GET /realtime/v1/websocket": "implemented",
     "rest:aggregate:avg": "tested",
     "rest:aggregate:count": "tested",
     "rest:aggregate:max": "tested",
