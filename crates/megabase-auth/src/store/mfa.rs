@@ -93,6 +93,49 @@ impl Backend {
         }
     }
 
+    /// `User.HasMFAEnabled` without an AAL2 session (`session_id` is the
+    /// JWT's session; `None` fails closed), the `requirePasskeyManagementAAL`
+    /// rejection.
+    ///
+    /// # Errors
+    /// Returns [`StoreError`] when the database cannot answer.
+    pub async fn passkey_management_needs_aal2(
+        &self,
+        user_id: Uuid,
+        session_id: Option<Uuid>,
+    ) -> Result<bool, StoreError> {
+        let verified = match &self.inner {
+            BackendKind::None => return Err(StoreError::Unavailable),
+            BackendKind::Memory(db) => db
+                .lock()
+                .await
+                .mfa
+                .factors
+                .iter()
+                .any(|factor| factor.user_id == user_id && factor.is_verified()),
+            BackendKind::Postgres(pg) => {
+                timed(async {
+                    let row = sqlx::query(
+                        "SELECT 1 FROM auth.mfa_factors
+                         WHERE user_id = $1 AND status::text = 'verified' LIMIT 1",
+                    )
+                    .bind(user_id)
+                    .fetch_optional(&pg.pool)
+                    .await?;
+                    Ok::<_, StoreError>(row.is_some())
+                })
+                .await?
+            }
+        };
+        if !verified {
+            return Ok(false);
+        }
+        match session_id {
+            None => Ok(true),
+            Some(session_id) => Ok(!self.session_is_aal2(session_id).await?),
+        }
+    }
+
     /// `User.FindOwnedFactorByID`.
     ///
     /// # Errors

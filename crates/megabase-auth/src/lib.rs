@@ -18,7 +18,8 @@
 //! an unreachable SMTP host. Issue #401 serves `POST /invite` the same way.
 //! Issue #55 serves the JWKS and OIDC / OAuth discovery documents. Issue #49
 //! serves the `GET /authorize` redirect for the providers whose constructor
-//! needs no network call.
+//! needs no network call. Issue #50 serves the `/passkeys` disabled gate and,
+//! with passkeys on, the passkey list, rename, and delete routes.
 //! Every other Auth path returns `MEGABASE_NOT_IMPLEMENTED`. Database objects
 //! listed in `specs/auth/database.md` are installed when `DATABASE_URL` is
 //! set, after the standard API roles in `specs/core/roles.md` and the
@@ -38,6 +39,7 @@ mod invite;
 mod jsonutil;
 mod oauth_server;
 mod otp;
+mod passkeys;
 mod platform;
 mod provider;
 mod ratelimit;
@@ -59,7 +61,7 @@ pub use schema::{install_schema, SchemaError};
 pub use state::{AuthState, MailConfig};
 pub use store::Backend;
 
-use axum::{extract::OriginalUri, http::Method, Router};
+use axum::{extract::OriginalUri, http::Method, response::IntoResponse, Router};
 use megabase_core::MegabaseNotImplemented;
 
 pub const COMPONENT: &str = "auth";
@@ -72,15 +74,22 @@ pub fn router() -> Router {
 }
 
 pub fn router_with_state(state: AuthState) -> Router {
+    let passkeys_enabled = state.config.passkeys_enabled;
     admin::router(state.clone())
         .merge(factors::router(state.clone()))
         .merge(well_known::router(state.clone()))
         .merge(oauth_server::router(state.clone()))
+        .merge(passkeys::router(state.clone()))
         .merge(routes::router(state))
         // Path match without a method handler is Axum 405; send those to the
         // same 501 as unknown paths (GOAL.md §3 rule 5).
         .method_not_allowed_fallback(not_implemented)
-        .fallback(not_implemented)
+        .fallback(move |method: Method, uri: OriginalUri| async move {
+            match passkeys::fallback_gate(passkeys_enabled, uri.0.path()) {
+                Some(response) => response,
+                None => not_implemented(method, uri).await.into_response(),
+            }
+        })
 }
 
 async fn not_implemented(method: Method, OriginalUri(uri): OriginalUri) -> MegabaseNotImplemented {
