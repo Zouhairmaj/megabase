@@ -16,8 +16,8 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use megabase_core::MegabaseNotImplemented;
-use tokio::sync::mpsc::unbounded_channel;
 
+use crate::hub::{Outbox, OUTBOX_CAPACITY};
 use crate::protocol::{Serializer, Session};
 use crate::token::{authorize_conn, TokenError};
 use crate::{RealtimeState, COMPONENT};
@@ -119,10 +119,13 @@ async fn serve(
     let Some(jwt) = state.jwt.as_ref() else {
         return;
     };
-    let (outbox, mut inbox) = unbounded_channel();
+    let (outbox, mut inbox) = Outbox::new(OUTBOX_CAPACITY);
+    let evicted = outbox.evicted();
     let mut session = Session::new(jwt, &state.hub, serializer, token, outbox);
     loop {
         let replies = tokio::select! {
+            // The hub dropped this socket for not draining its queue.
+            () = evicted.notified() => break,
             // Pushes from other channels (broadcasts, presence diffs).
             Some(text) = inbox.recv() => vec![text],
             message = socket.recv() => {
@@ -144,8 +147,14 @@ async fn serve(
             }
         };
         for text in replies {
-            if socket.send(Message::Text(text)).await.is_err() {
-                return;
+            // A client that stops reading blocks `send`; eviction must still win.
+            tokio::select! {
+                sent = socket.send(Message::Text(text)) => {
+                    if sent.is_err() {
+                        return;
+                    }
+                }
+                () = evicted.notified() => return,
             }
         }
     }

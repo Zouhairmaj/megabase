@@ -107,6 +107,11 @@ Presence:
   the resync `presence_state`): Phoenix.Presence dispatches diffs
   asynchronously.
 
+Slow consumers (Megabase hardening, no upstream counterpart): each
+socket queues at most 1024 pushes from other sockets. A socket whose
+queue is full is dropped from the topic, its presence is untracked and
+its connection is closed.
+
 ## Errors
 
 Handshake (before the upgrade):

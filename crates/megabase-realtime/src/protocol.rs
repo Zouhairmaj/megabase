@@ -13,9 +13,8 @@ use std::collections::HashMap;
 
 use megabase_core::{Hs256, MegabaseNotImplemented};
 use serde_json::{json, Map, Value};
-use tokio::sync::mpsc::UnboundedSender;
 
-use crate::hub::{ConnId, Hub};
+use crate::hub::{ConnId, Hub, Outbox};
 use crate::term::{external_size, uuid1, MAX_PAYLOAD_SIZE};
 use crate::token::{authorize_conn, TokenError};
 use crate::COMPONENT;
@@ -244,7 +243,7 @@ pub(crate) struct Session<'a> {
     conn: ConnId,
     serializer: Serializer,
     /// Where other sockets' pushes to this socket land.
-    outbox: UnboundedSender<String>,
+    outbox: Outbox,
     /// The socket's own token (`tenant_token`).
     socket_token: String,
     /// Joined topic -> its channel.
@@ -267,7 +266,7 @@ impl<'a> Session<'a> {
         hub: &'a Hub,
         serializer: Serializer,
         socket_token: String,
-        outbox: UnboundedSender<String>,
+        outbox: Outbox,
     ) -> Self {
         Self {
             jwt,
@@ -659,7 +658,9 @@ fn not_implemented(unit: &str) -> Value {
 
 #[cfg(test)]
 mod tests {
-    use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
+    use tokio::sync::mpsc::Receiver;
+
+    use crate::hub::OUTBOX_CAPACITY;
 
     use super::*;
 
@@ -686,8 +687,8 @@ mod tests {
         jwt: &'a Hs256,
         hub: &'a Hub,
         serializer: Serializer,
-    ) -> (Session<'a>, UnboundedReceiver<String>) {
-        let (outbox, inbox) = unbounded_channel();
+    ) -> (Session<'a>, Receiver<String>) {
+        let (outbox, inbox) = Outbox::new(OUTBOX_CAPACITY);
         (Session::new(jwt, hub, serializer, anon(), outbox), inbox)
     }
 
@@ -703,7 +704,7 @@ mod tests {
         run_at(session, text, NOW * 1000)
     }
 
-    fn drain(inbox: &mut UnboundedReceiver<String>) -> Vec<Value> {
+    fn drain(inbox: &mut Receiver<String>) -> Vec<Value> {
         let mut out = Vec::new();
         while let Ok(text) = inbox.try_recv() {
             out.push(serde_json::from_str(&text).unwrap());
