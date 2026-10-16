@@ -2,8 +2,9 @@
 
 Status: partial. The authorize redirect is served for azure, bitbucket,
 discord, facebook, figma, fly, github, gitlab, kakao, keycloak, linkedin,
-notion, slack, slack_oidc, snapchat and spotify. The provider code exchange
-on `/callback` stays 501 for every provider.
+notion, slack, slack_oidc, snapchat, spotify, twitch, workos, x and zoom.
+The provider code exchange on `/callback` stays 501 for every provider (see
+"Remaining work").
 Unit ids (`coverage/units.json`): `auth:provider:<name>` for the 25 built-in
 providers and `auth:provider:custom:{identifier}`.
 Level: 2
@@ -30,6 +31,7 @@ dependency is approved.
 | `NewFlowState`, `ParseCodeChallengeMethod` | `vendor/auth/internal/models/flow_state.go:105-140`, `:69-77` |
 | `GetReferrer`, `getRedirectTo` | `vendor/auth/internal/utilities/request.go:75-89`, `:142-153` |
 | Constructors | `vendor/auth/internal/api/provider/<name>.go` `New<Name>Provider` |
+| PKCE towards the provider (`RequiresPKCE`) | `vendor/auth/internal/api/external.go:93-104`, `vendor/auth/internal/models/oauth_client_state.go:14-31` |
 
 The authorize URL is the output of golang.org/x/oauth2 v0.36.0
 `Config.AuthCodeURL` (the version in `vendor/auth/go.mod`).
@@ -42,6 +44,8 @@ upper case (`LINKEDIN_OIDC`, `SLACK_OIDC`, `VERCEL_MARKETPLACE`, `X`).
 `CLIENT_ID` is a comma-separated list. A blank value is an empty list;
 parts are not trimmed. Only the first client id goes into the authorize URL.
 No redirect URI default exists. The reference stack enables no provider.
+`GOTRUE_EXTERNAL_X_ENABLED` and `..._VERCEL_MARKETPLACE_ENABLED` are read
+but `GET /settings` does not publish them.
 
 ## `ValidateOAuth`
 
@@ -83,21 +87,47 @@ defaults; empty parts stay and become extra spaces in `scope`.
 | slack_oidc | `chooseHost(url, slack.com)/openid/connect/authorize` | `profile email openid` | yes |
 | snapchat | `chooseHost(url, accounts.snapchat.com)/accounts/oauth2/auth` | `https://auth.snapchat.com/oauth2/api/user.external_id`, `…user.display_name`, `…user.bitmoji.avatar` | yes |
 | spotify | `chooseHost(url, accounts.spotify.com)/authorize` | `user-read-email` | yes |
+| twitch | `chooseHost(url, id.twitch.tv)/oauth2/authorize` | `user:read:email` | yes |
+| workos | `chooseHost(url, api.workos.com)/sso/authorize` | none (no `scope` parameter) | no |
+| x | `chooseHost(url, x.com)/i/oauth2/authorize` | `users.email tweet.read users.read offline.access` | yes |
+| zoom | `chooseHost(url, zoom.us)/oauth/authorize` | none (no `scope` parameter) | no |
 
 Keycloak has no default host: after `ValidateOAuth` passes, an empty `URL`
 is rejected with `unable to find URL for the Keycloak provider`
 (`vendor/auth/internal/api/provider/keycloak.go:64-66`), answered like a
 `ValidateOAuth` failure.
 
-None of them requires PKCE towards the provider, so no
-`auth.oauth_client_states` row is written.
+Only X requires PKCE towards the provider (`x.go` `RequiresPKCE`). After the
+step 5 parameters and before the flow state, `/authorize` then:
 
-Not ported (501 after `ValidateOAuth` passes): apple, google, linkedin_oidc
-and vercel_marketplace (their constructor calls `OIDCProviderCache.GetProvider`,
-which fetches the issuer's OIDC discovery document over HTTPS, for example
-`vendor/auth/internal/api/provider/google.go:58` and
-`linkedin_oidc.go:41`), twitter (OAuth 1.0 request token), every other
-built-in provider (follow-up PRs of issue 49), and `custom:` providers.
+1. generates a verifier (`oauth2.GenerateVerifier`: 32 random bytes,
+   base64url without padding, 43 characters);
+2. inserts an `auth.oauth_client_states` row (new UUID, `provider_type` as
+   sent, `code_verifier`, `created_at` now). An insert error is returned
+   unwrapped: 500 `unexpected_failure` / `Unexpected failure, please check
+   server logs for more information`;
+3. adds `code_challenge_method=S256` and `code_challenge` =
+   base64url-no-padding SHA-256 of the verifier to the provider parameters;
+4. stores the row id in `auth.flow_state.oauth_client_state_id`.
+
+The row is written before `code_challenge_method` is checked, so an invalid
+method still leaves it behind (GoTrue's cleanup removes it after 24 hours).
+The client's own `code_challenge` stays on the flow state; it never reaches
+the provider.
+
+## Remaining work
+
+These stay 501 after `ValidateOAuth` passes, and carry no unit marker:
+
+| Unit | Why |
+|---|---|
+| `auth:provider:apple`, `google`, `linkedin_oidc`, `vercel_marketplace` | The constructor calls `OIDCProviderCache.GetProvider`, which fetches the issuer's OIDC discovery document over HTTPS (`google.go:58`, `linkedin_oidc.go:41`, `vercel_marketplace.go:38`). |
+| `auth:provider:twitter` | OAuth 1.0a: `AuthCodeURL` fetches a request token from `api.twitter.com/oauth/request_token` before it can build the URL (`twitter.go:124-133`). |
+| `auth:provider:custom:{identifier}` | `loadCustomProvider` is not ported. |
+| `/callback` code exchange (every provider) | `GetOAuthToken` and `GetUserData` call the provider over HTTPS. |
+
+All of them need an outbound HTTPS client, which is not on the `deny.toml`
+allow list. Adding one is an ask-first dependency (AGENTS.md).
 
 ## `GET /authorize`
 
@@ -132,7 +162,8 @@ Query parsing follows `url.ParseQuery`. In order:
 
 `crates/megabase-auth/src/provider.rs` (validation order, URL encoding,
 `chooseHost`, Bitbucket and Notion ignoring `scopes`, the Keycloak `URL`
-check, the second batch of authorize URLs and scopes) and
-`crates/megabase-auth/src/external.rs` (flow state row, PKCE, reserved
-parameters, 501 paths). The judge stack enables no provider, so its cases
+check, the second and third batches of authorize URLs and scopes, the
+RFC 7636 S256 vector) and `crates/megabase-auth/src/external.rs` (flow
+state row, PKCE, the X client state and challenge, reserved parameters,
+501 paths). The judge stack enables no provider, so its cases
 can only check the rejection paths, which `auth.toml` already covers.

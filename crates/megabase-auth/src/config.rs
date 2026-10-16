@@ -71,6 +71,8 @@ pub struct AuthConfig {
     pub web3_solana: bool,
     /// `GOTRUE_EXTERNAL_WEB3_ETHEREUM_ENABLED`. Off on the reference stack.
     pub web3_ethereum: bool,
+    /// `GOTRUE_EXTERNAL_X_ENABLED`. `GET /settings` does not publish it.
+    pub x_enabled: bool,
 }
 
 /// `ExternalProviderConfiguration` fields the `id_token` grant reads and
@@ -339,6 +341,7 @@ impl AuthConfig {
             id_token: IdTokenConfig::default(),
             web3_solana: false,
             web3_ethereum: false,
+            x_enabled: false,
         }
     }
 
@@ -458,6 +461,7 @@ impl AuthConfig {
             },
             web3_solana: flag(&lookup, "GOTRUE_EXTERNAL_WEB3_SOLANA_ENABLED")?,
             web3_ethereum: flag(&lookup, "GOTRUE_EXTERNAL_WEB3_ETHEREUM_ENABLED")?,
+            x_enabled: flag(&lookup, "GOTRUE_EXTERNAL_X_ENABLED")?,
         })
     }
 }
@@ -621,7 +625,7 @@ mod tests {
     #[test]
     fn id_token_and_web3_settings() {
         let defaults = AuthConfig::reference_defaults();
-        assert!(!defaults.web3_solana && !defaults.web3_ethereum);
+        assert!(!defaults.web3_solana && !defaults.web3_ethereum && !defaults.x_enabled);
         assert_eq!(
             defaults.id_token.allowed_issuers,
             ["https://appleid.apple.com", "https://accounts.google.com"]
@@ -629,13 +633,14 @@ mod tests {
         let config = AuthConfig::from_lookup(|key| match key {
             "GOTRUE_EXTERNAL_WEB3_SOLANA_ENABLED" => Some("true".into()),
             "GOTRUE_EXTERNAL_VERCEL_MARKETPLACE_ENABLED" => Some("1".into()),
+            "GOTRUE_EXTERNAL_X_ENABLED" => Some("true".into()),
             "GOTRUE_EXTERNAL_KEYCLOAK_URL" => Some("https://kc.example/realms/a".into()),
             "GOTRUE_EXTERNAL_ALLOWED_ID_TOKEN_ISSUERS" => Some("https://a,https://b".into()),
             _ => None,
         })
         .unwrap();
         assert!(config.web3_solana && !config.web3_ethereum);
-        assert!(config.id_token.vercel_marketplace);
+        assert!(config.id_token.vercel_marketplace && config.x_enabled);
         assert_eq!(config.id_token.keycloak_url, "https://kc.example/realms/a");
         assert_eq!(config.id_token.allowed_issuers, ["https://a", "https://b"]);
     }

@@ -1,10 +1,11 @@
 // Ported from supabase/auth internal/api/external.go (`API.Provider`),
 // internal/conf/configuration.go (`ValidateOAuth`) and
 // internal/api/provider/{provider,azure,bitbucket,discord,facebook,figma,fly,github,gitlab,
-// kakao,keycloak,linkedin,notion,slack,slack_oidc,snapchat,spotify}.go
+// kakao,keycloak,linkedin,notion,slack,slack_oidc,snapchat,spotify,twitch,workos,x,zoom}.go
 // (MIT), pin v2.197.0. The authorize URL reproduces the output of
-// golang.org/x/oauth2 v0.36.0 `Config.AuthCodeURL` (the version in that
-// pin's go.mod); no oauth2 source is copied.
+// golang.org/x/oauth2 v0.36.0 `Config.AuthCodeURL`, `GenerateVerifier` and
+// `S256ChallengeOption` (the version in that pin's go.mod); no oauth2
+// source is copied.
 
 //! Built-in OAuth providers as far as the authorize redirect reads them.
 //!
@@ -12,8 +13,13 @@
 //! for a provider whose constructor needs no network call, returns the
 //! `oauth2.Config` the redirect builds its URL from. Apple, Google,
 //! LinkedIn (OIDC) and Vercel Marketplace fetch an OIDC discovery document
-//! in their constructor, and the code exchange of every provider calls the
-//! provider over HTTPS. Neither is ported.
+//! in their constructor, Twitter (OAuth 1.0a) fetches a request token to
+//! build its authorize URL, and the code exchange of every provider calls
+//! the provider over HTTPS. None of these is ported.
+
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use base64::Engine as _;
+use sha2::{Digest, Sha256};
 
 use crate::config::{AuthConfig, OAuthClient};
 use crate::external::{encode, set, Values};
@@ -25,6 +31,26 @@ pub(crate) struct AuthCodeConfig {
     client_id: String,
     redirect_uri: String,
     scopes: Vec<String>,
+    /// `OAuthProvider.RequiresPKCE`: the redirect stores a code verifier in
+    /// `auth.oauth_client_states` and sends its S256 challenge.
+    pub(crate) requires_pkce: bool,
+}
+
+/// `oauth2.GenerateVerifier`: 32 random bytes, base64url without padding.
+pub(crate) fn generate_verifier(random: &[u8; 32]) -> String {
+    URL_SAFE_NO_PAD.encode(random)
+}
+
+/// `oauth2.S256ChallengeOption(verifier)`: `code_challenge_method=S256`
+/// and the base64url (no padding) SHA-256 of the verifier.
+pub(crate) fn s256_challenge(verifier: &str) -> [(&'static str, String); 2] {
+    [
+        ("code_challenge_method", "S256".to_string()),
+        (
+            "code_challenge",
+            URL_SAFE_NO_PAD.encode(Sha256::digest(verifier.as_bytes())),
+        ),
+    ]
 }
 
 impl AuthCodeConfig {
@@ -92,8 +118,6 @@ pub(crate) fn provider(config: &AuthConfig, name: &str, scopes: &str) -> Provide
 }
 
 /// `OAuthProviderConfiguration.Enabled`, or `None` for an unknown name.
-/// X and Vercel Marketplace are not read from the environment yet, so they
-/// count as disabled.
 fn enabled(config: &AuthConfig, name: &str) -> Option<bool> {
     let external = &config.external;
     Some(match name {
@@ -118,9 +142,10 @@ fn enabled(config: &AuthConfig, name: &str) -> Option<bool> {
         "slack_oidc" => external.slack_oidc,
         "twitch" => external.twitch,
         "twitter" => external.twitter,
+        "vercel_marketplace" => config.id_token.vercel_marketplace,
         "workos" => external.workos,
+        "x" => config.x_enabled,
         "zoom" => external.zoom,
-        "x" | "vercel_marketplace" => false,
         _ => return None,
     })
 }
@@ -259,6 +284,26 @@ fn endpoint(
             &["user-read-email"],
             true,
         ),
+        // megabase:unit auth:provider:twitch
+        "twitch" => (
+            choose_host(url, "id.twitch.tv") + "/oauth2/authorize",
+            &["user:read:email"],
+            true,
+        ),
+        // megabase:unit auth:provider:workos
+        "workos" => (
+            choose_host(url, "api.workos.com") + "/sso/authorize",
+            &[],
+            false,
+        ),
+        // megabase:unit auth:provider:x
+        "x" => (
+            choose_host(url, "x.com") + "/i/oauth2/authorize",
+            &["users.email", "tweet.read", "users.read", "offline.access"],
+            true,
+        ),
+        // megabase:unit auth:provider:zoom
+        "zoom" => (choose_host(url, "zoom.us") + "/oauth/authorize", &[], false),
         _ => return Ok(None),
     };
     let mut scope_list: Vec<String> = default_scopes.iter().map(|s| (*s).to_string()).collect();
@@ -275,6 +320,7 @@ fn endpoint(
         client_id: client_id.clone(),
         redirect_uri: client.redirect_uri.clone(),
         scopes: scope_list,
+        requires_pkce: name == "x",
     }))
 }
 
@@ -477,5 +523,88 @@ mod tests {
         for name in ["google", "linkedin_oidc"] {
             assert!(matches!(build(name, "", ""), Provider::NotPorted), "{name}");
         }
+    }
+
+    #[test]
+    fn third_batch_constructors_match_upstream() {
+        let mut config = AuthConfig::reference_defaults();
+        config.external.twitch = true;
+        config.external.twitter = true;
+        config.external.workos = true;
+        config.external.zoom = true;
+        config.x_enabled = true;
+        config.id_token.vercel_marketplace = true;
+        let build = |config: &AuthConfig, name: &str, url: &str| {
+            let mut config = config.clone();
+            config.oauth_clients.set(
+                name,
+                OAuthClient {
+                    client_id: vec!["cid".into()],
+                    secret: "s".into(),
+                    redirect_uri: "http://localhost:8000/auth/v1/callback".into(),
+                    url: url.into(),
+                    email_optional: false,
+                },
+            );
+            provider(&config, name, "a,b")
+        };
+        let cases: [(&str, &str, &[&str], bool); 4] = [
+            (
+                "twitch",
+                "https://id.twitch.tv/oauth2/authorize",
+                &["user:read:email", "a", "b"],
+                false,
+            ),
+            ("workos", "https://api.workos.com/sso/authorize", &[], false),
+            (
+                "x",
+                "https://x.com/i/oauth2/authorize",
+                &[
+                    "users.email",
+                    "tweet.read",
+                    "users.read",
+                    "offline.access",
+                    "a",
+                    "b",
+                ],
+                true,
+            ),
+            ("zoom", "https://zoom.us/oauth/authorize", &[], false),
+        ];
+        for (name, auth_url, scopes, pkce) in cases {
+            let ready = ready(build(&config, name, ""));
+            assert_eq!(ready.auth_url, auth_url, "{name}");
+            assert_eq!(ready.scopes, scopes, "{name}");
+            assert_eq!(ready.requires_pkce, pkce, "{name}");
+        }
+        let zoom = ready(build(&config, "zoom", "https://zoom.example/"));
+        assert_eq!(zoom.auth_url, "https://zoom.example/oauth/authorize");
+        // Twitter fetches an OAuth 1.0a request token and Vercel Marketplace
+        // an OIDC discovery document, both after `ValidateOAuth`.
+        for name in ["twitter", "vercel_marketplace"] {
+            assert!(
+                matches!(build(&config, name, ""), Provider::NotPorted),
+                "{name}"
+            );
+        }
+        config.x_enabled = false;
+        assert!(matches!(
+            build(&config, "x", ""),
+            Provider::Rejected(reason) if reason == "provider is not enabled"
+        ));
+    }
+
+    #[test]
+    fn s256_challenge_matches_rfc_7636() {
+        // RFC 7636 appendix B.
+        let verifier = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
+        let [(method_key, method), (challenge_key, challenge)] = s256_challenge(verifier);
+        assert_eq!(
+            (method_key, method.as_str()),
+            ("code_challenge_method", "S256")
+        );
+        assert_eq!(challenge_key, "code_challenge");
+        assert_eq!(challenge, "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM");
+        assert_eq!(generate_verifier(&[0; 32]).len(), 43);
     }
 }

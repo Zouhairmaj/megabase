@@ -149,13 +149,15 @@ pub struct FlowStateRecord {
     pub linking_target_id: Option<Uuid>,
     /// The provider's `EMAIL_OPTIONAL` setting when the OAuth flow began.
     pub email_optional: bool,
+    /// The `auth.oauth_client_states` row of a provider that requires PKCE.
+    pub oauth_client_state_id: Option<Uuid>,
 }
 
 /// `auth.flow_state` columns [`flow_state_from_row`] reads.
 const FLOW_STATE_COLUMNS: &str = "id, provider_type, auth_code, code_challenge,
     code_challenge_method::text AS code_challenge_method, user_id, authentication_method,
     provider_access_token, provider_refresh_token, created_at, auth_code_issued_at,
-    referrer, linking_target_id, email_optional";
+    referrer, linking_target_id, email_optional, oauth_client_state_id";
 
 /// Map a [`FLOW_STATE_COLUMNS`] row. NULL provider tokens read as `""`, as
 /// the Go `string` fields do.
@@ -183,6 +185,7 @@ fn flow_state_from_row(row: &sqlx::postgres::PgRow) -> Result<FlowStateRecord, S
         referrer: row.try_get("referrer")?,
         linking_target_id: row.try_get("linking_target_id")?,
         email_optional: row.try_get("email_optional")?,
+        oauth_client_state_id: row.try_get("oauth_client_state_id")?,
     })
 }
 
@@ -415,6 +418,8 @@ struct MemoryDb {
     oauth_clients: HashMap<Uuid, MemoryClient>,
     oauth_consents: Vec<MemoryConsent>,
     flow_states: HashMap<Uuid, FlowStateRecord>,
+    /// `auth.oauth_client_states`: provider type and code verifier.
+    oauth_client_states: HashMap<Uuid, (String, String)>,
     /// Test stand-in for the custom access token hook function.
     access_token_hook: Option<Arc<MemoryHook>>,
     /// MFA factors, recovery-code sets, and AAL2 sessions (`mfa` module).
@@ -454,6 +459,7 @@ impl Backend {
                 oauth_clients: HashMap::new(),
                 oauth_consents: Vec::new(),
                 flow_states: HashMap::new(),
+                oauth_client_states: HashMap::new(),
                 access_token_hook: None,
                 mfa: mfa::MemoryMfa::default(),
             }))),
