@@ -121,7 +121,7 @@ Implemented and tested counts come from markers and `judge/cases/`. Live conform
 | Storage | cdn | 2 | 3 | 3 | 0 |
 | Storage | database | 2 | 46 | 15 | 0 |
 | Storage | health | 2 | 1 | 1 | 0 |
-| Storage | iceberg | 2 | 13 | 0 | 0 |
+| Storage | iceberg | 2 | 13 | 13 | 0 |
 | Storage | object | 2 | 22 | 16 | 0 |
 | Storage | render | 2 | 3 | 3 | 3 |
 | Storage | resumable | 2 | 16 | 0 | 0 |
