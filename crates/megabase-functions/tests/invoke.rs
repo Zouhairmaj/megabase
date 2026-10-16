@@ -209,6 +209,30 @@ async fn the_function_status_and_options_requests_pass_through() {
 }
 
 #[tokio::test]
+async fn redirect_and_reset_content_bodies_are_dropped_like_user_workers_fetch() {
+    let state = state(false, EchoRuntime::default());
+    for code in ["302", "307", "205"] {
+        let request = Request::builder()
+            .uri("/functions/v1/hello")
+            .header("x-status", code)
+            .body(Body::empty())
+            .unwrap();
+        let response = router(state.clone()).oneshot(request).await.unwrap();
+        assert_eq!(response.status().as_str(), code);
+        assert_eq!(response.headers()["x-function"], "hello", "{code}");
+        // The function's JSON length is gone; axum frames the empty body.
+        assert_eq!(response.headers()["content-length"], "0", "{code}");
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        assert!(bytes.is_empty(), "{code}");
+    }
+
+    let (status, headers, body) = send(&state, "HEAD", "/functions/v1/hello", &[], "").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(headers["x-function"], "hello");
+    assert_eq!(body, Value::Null);
+}
+
+#[tokio::test]
 async fn missing_function_is_a_worker_creation_error() {
     let runtime = EchoRuntime::default();
     let state = state(false, runtime.clone());
