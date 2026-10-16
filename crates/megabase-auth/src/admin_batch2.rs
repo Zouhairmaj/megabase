@@ -252,7 +252,7 @@ pub(crate) async fn post_oauth_client(
     limit_body(&body)?;
     let params: OAuthRegister = serde_json::from_slice(&body)
         .map_err(|_| AuthError::new(400, "bad_json", "Invalid JSON body"))?;
-    match register_oauth_client(&state, &params).await {
+    match register_oauth_client(&state, &params, "manual").await {
         Ok(body) => Ok(json_status(StatusCode::CREATED, &body)),
         Err(message) => Err(AuthError::validation(400, message)),
     }
@@ -1947,7 +1947,7 @@ struct DomainRow {
 }
 
 #[derive(Debug, Deserialize)]
-struct OAuthRegister {
+pub(crate) struct OAuthRegister {
     #[serde(default, deserialize_with = "null_as_default")]
     redirect_uris: Vec<String>,
     #[serde(default, deserialize_with = "null_as_default")]
@@ -1964,7 +1964,13 @@ struct OAuthRegister {
     logo_uri: String,
 }
 
-async fn register_oauth_client(state: &AuthState, params: &OAuthRegister) -> Result<Value, String> {
+/// `registerOAuthServerClient`. `registration_type` is `manual` (admin) or
+/// `dynamic` (`POST /oauth/clients/register`).
+pub(crate) async fn register_oauth_client(
+    state: &AuthState,
+    params: &OAuthRegister,
+    registration_type: &str,
+) -> Result<Value, String> {
     validate_oauth_register(params).map_err(|message| format!("400: {message}"))?;
     let grant_types = if params.grant_types.is_empty() {
         vec!["authorization_code".into(), "refresh_token".into()]
@@ -2004,7 +2010,7 @@ async fn register_oauth_client(state: &AuthState, params: &OAuthRegister) -> Res
             id, client_secret_hash, registration_type, redirect_uris, grant_types,
             client_name, client_uri, logo_uri, client_type, token_endpoint_auth_method
          ) VALUES (
-            $1, $2, 'manual'::auth.oauth_registration_type, $3, $4,
+            $1, $2, $10::auth.oauth_registration_type, $3, $4,
             $5, $6, $7, $8::auth.oauth_client_type, $9
          )
          RETURNING id, client_type::text AS client_type, redirect_uris, token_endpoint_auth_method,
@@ -2020,6 +2026,7 @@ async fn register_oauth_client(state: &AuthState, params: &OAuthRegister) -> Res
     .bind(empty_as_none(&params.logo_uri))
     .bind(&client_type)
     .bind(&auth_method)
+    .bind(registration_type)
     .fetch_one(&db)
     .await
     .map_err(|err| format!("failed to create OAuth client: {err}"))?;
@@ -2528,7 +2535,7 @@ fn validate_ip(ip: std::net::IpAddr) -> Result<(), AuthError> {
     Ok(())
 }
 
-fn limit_body(body: &Bytes) -> Result<(), AuthError> {
+pub(crate) fn limit_body(body: &Bytes) -> Result<(), AuthError> {
     if body.len() > MAX_BODY_BYTES {
         return Err(AuthError::new(
             413,
