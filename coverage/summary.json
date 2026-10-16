@@ -2,12 +2,12 @@
   "schema": 1,
   "totals": {
     "units": 1031,
-    "implemented": 253,
+    "implemented": 257,
     "tested": 186,
     "conformant": 0
   },
   "percent": {
-    "coverage": 24.5,
+    "coverage": 24.9,
     "conformance": 0.0,
     "done": 0.0
   },
@@ -18,7 +18,7 @@
   "components": {
     "auth": {
       "units": 159,
-      "implemented": 112,
+      "implemented": 116,
       "tested": 80,
       "conformant": 0,
       "groups": {
@@ -60,7 +60,7 @@
         },
         "oauth-providers": {
           "units": 26,
-          "implemented": 16,
+          "implemented": 20,
           "tested": 0,
           "conformant": 0
         },
@@ -582,6 +582,10 @@
     "auth:provider:slack_oidc": "implemented",
     "auth:provider:snapchat": "implemented",
     "auth:provider:spotify": "implemented",
+    "auth:provider:twitch": "implemented",
+    "auth:provider:workos": "implemented",
+    "auth:provider:x": "implemented",
+    "auth:provider:zoom": "implemented",
     "auth:route:DELETE /auth/v1/admin/custom-providers/{identifier}": "tested",
     "auth:route:DELETE /auth/v1/admin/oauth/clients/{client_id}": "tested",
     "auth:route:DELETE /auth/v1/admin/sso/providers/{idp_id}": "tested",

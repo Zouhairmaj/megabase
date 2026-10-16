@@ -253,6 +253,7 @@ mod tests {
             referrer: None,
             linking_target_id: None,
             email_optional: false,
+            oauth_client_state_id: None,
         }
     }
 

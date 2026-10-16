@@ -25,6 +25,7 @@ use uuid::Uuid;
 
 use crate::admin_batch2::get_referrer;
 use crate::error::{validation, GoTrueError};
+use crate::provider::{generate_verifier, s256_challenge};
 use crate::routes::{read_body, validate_pkce};
 use crate::state::AuthState;
 use crate::store::FlowStateRecord;
@@ -115,6 +116,41 @@ pub(crate) async fn authorize(
         set(&mut params, name, value);
     }
 
+    // A provider that requires PKCE on its end (X) gets an
+    // `auth.oauth_client_states` row with the code verifier, before the
+    // flow state's `code_challenge_method` is checked. GoTrue returns the
+    // insert error unwrapped, which answers the default 500.
+    let mut oauth_client_state_id = None;
+    if config.requires_pkce {
+        let unhandled = || {
+            crate::error::unexpected(
+                "Unexpected failure, please check server logs for more information",
+            )
+            .into_response()
+        };
+        let Ok(random) = crate::admin_batch2::random_bytes(32) else {
+            return unhandled();
+        };
+        let Ok(random) = <[u8; 32]>::try_from(random) else {
+            return unhandled();
+        };
+        let verifier = generate_verifier(&random);
+        match state
+            .backend
+            .create_oauth_client_state(provider_type, &verifier)
+            .await
+        {
+            Ok(id) => oauth_client_state_id = Some(id),
+            Err(error) => {
+                tracing::error!(%error, "creating the OAuth client state failed");
+                return unhandled();
+            }
+        }
+        for (key, value) in s256_challenge(&verifier) {
+            set(&mut params, key, &value);
+        }
+    }
+
     // `NewFlowState`: PKCE fields only with a code challenge.
     let (auth_code, challenge, method) = if code_challenge.is_empty() {
         (None, None, None)
@@ -144,6 +180,7 @@ pub(crate) async fn authorize(
         referrer: Some(referrer).filter(|referrer| !referrer.is_empty()),
         linking_target_id: None,
         email_optional,
+        oauth_client_state_id,
     };
     let id = match state.backend.create_flow_state(&flow).await {
         Ok(id) => id,
@@ -549,6 +586,7 @@ mod tests {
             referrer: Some("http://localhost:3000/after".into()),
             linking_target_id: None,
             email_optional: false,
+            oauth_client_state_id: None,
         }
     }
 
@@ -717,6 +755,61 @@ mod tests {
         assert!(flow.email_optional);
         assert!(!flow.is_pkce());
         assert!(flow.auth_code.is_none());
+    }
+
+    #[tokio::test]
+    async fn authorize_x_stores_a_client_state_and_sends_its_s256_challenge() {
+        let backend = Backend::memory();
+        let mut config = AuthConfig::reference_defaults();
+        config.x_enabled = true;
+        config.oauth_clients.set(
+            "x",
+            crate::config::OAuthClient {
+                client_id: vec!["cid".into()],
+                secret: "s".into(),
+                redirect_uri: "http://localhost:8000/auth/v1/callback".into(),
+                url: String::new(),
+                email_optional: false,
+            },
+        );
+        let app = app(config, backend.clone());
+        let own = "c".repeat(43);
+        let (status, headers, _) = get(
+            &app,
+            &format!(
+                "/auth/v1/authorize?provider=X&code_challenge={own}&code_challenge_method=S256"
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FOUND);
+        let location = headers[header::LOCATION].to_str().unwrap();
+        assert!(
+            location.starts_with("https://x.com/i/oauth2/authorize?"),
+            "{location}"
+        );
+        let query = parse_query(url_query(location));
+        assert_eq!(first(&query, "code_challenge_method"), "S256");
+        assert_eq!(
+            first(&query, "scope"),
+            "users.email tweet.read users.read offline.access"
+        );
+        let flow = backend
+            .find_flow_state(state_param(location))
+            .await
+            .unwrap()
+            .unwrap();
+        // The client's own challenge stays on the flow state; the provider
+        // gets the challenge of the stored verifier.
+        assert_eq!(flow.code_challenge.as_deref(), Some(own.as_str()));
+        let client_state = flow.oauth_client_state_id.unwrap();
+        let (provider_type, verifier) = backend
+            .oauth_client_state_for_test(client_state)
+            .await
+            .unwrap();
+        assert_eq!(provider_type, "X");
+        assert_eq!(verifier.len(), 43);
+        let [_, (_, challenge)] = s256_challenge(&verifier);
+        assert_eq!(first(&query, "code_challenge"), challenge);
     }
 
     #[tokio::test]
