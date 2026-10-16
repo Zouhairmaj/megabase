@@ -14,12 +14,12 @@
 //! A plain Deno 2 process binds the real port (two functions collide on
 //! `:8000`) and no longer has `Deno.serveHttp`. Megabase therefore runs
 //! [`module`] as the main module of `deno run` (Deno 2.1.4 has no
-//! `--preload`), which imports the function. `Deno.serve` already
-//! binds the worker's port through `DENO_SERVE_ADDRESS`; the bootstrap starts
-//! one such `Deno.serve` the first time the function calls `Deno.listen` for
-//! TCP, hands each request to that listener as a one-request connection, and
-//! answers `Deno.serveHttp` for those connections. Other transports and
-//! `Deno.serve` itself are untouched. See
+//! `--preload`), which imports the function. Deno 2.1.4 ignores
+//! `DENO_SERVE_ADDRESS`, so the bootstrap wraps `Deno.serve` to bind the
+//! worker's address whenever the function gives none. It starts one such
+//! server the first time the function calls `Deno.listen` for TCP, hands each
+//! request to that listener as a one-request connection, and answers
+//! `Deno.serveHttp` for those connections. Other transports are untouched. See
 //! `docs/decisions/0043-functions-listen-bootstrap.md`.
 
 use std::io::Write as _;
@@ -35,6 +35,7 @@ pub const FILE_NAME: &str = "megabase-worker-bootstrap.js";
 pub const SOURCE: &str = r#"// Megabase edge function worker bootstrap (crates/megabase-functions/src/bootstrap.rs).
 const nativeListen = Deno.listen;
 const nativeServeHttp = Deno.serveHttp;
+const nativeServe = Deno.serve;
 const REQUEST = Symbol("megabase.request");
 const listeners = [];
 let server;
@@ -143,6 +144,33 @@ class WorkerHttpConn {
   }
 }
 
+// Deno 2.1.4 ignores DENO_SERVE_ADDRESS and binds 0.0.0.0:8000 when
+// `Deno.serve` gets no address, so force the worker address in that case.
+const serveAddress = /^tcp:(.+):(\d+)$/.exec(Deno.env.get("DENO_SERVE_ADDRESS") ?? "");
+
+function hasAddress(options) {
+  return options.port !== undefined || options.hostname !== undefined ||
+    options.path !== undefined || options.cid !== undefined ||
+    options.transport !== undefined;
+}
+
+function withWorkerAddress(options) {
+  if (!serveAddress || !options || typeof options !== "object" || hasAddress(options)) {
+    return options;
+  }
+  return { ...options, hostname: serveAddress[1], port: Number(serveAddress[2]) };
+}
+
+Deno.serve = function serve(...args) {
+  if (typeof args[0] === "function") {
+    return nativeServe.call(Deno, withWorkerAddress({}), args[0]);
+  }
+  if (typeof args[1] === "function") {
+    return nativeServe.call(Deno, withWorkerAddress(args[0]), args[1]);
+  }
+  return nativeServe.call(Deno, withWorkerAddress(args[0]));
+};
+
 function workerServer() {
   server ??= Deno.serve({ onListen() {} }, (request, info) =>
     new Promise((resolve, reject) => {
@@ -240,6 +268,20 @@ mod tests {
         for path in [first, second] {
             std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
         }
+    }
+
+    #[test]
+    fn module_wraps_serve_for_every_overload_and_loads_the_entrypoint_last() {
+        let module = module();
+        assert!(module.contains("DENO_SERVE_ADDRESS"));
+        assert!(module.contains("Deno.serve = function serve(...args)"));
+        // serve(handler), serve(options, handler) and serve({ handler })
+        assert!(module.contains("typeof args[0] === \"function\""));
+        assert!(module.contains("typeof args[1] === \"function\""));
+        assert!(module.contains("nativeServe.call(Deno, withWorkerAddress(args[0]))"));
+        let wrap = module.find("Deno.serve = function").unwrap();
+        let import = module.find("await import(").unwrap();
+        assert!(wrap < import);
     }
 
     #[test]
