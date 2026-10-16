@@ -1830,3 +1830,67 @@ method = "POST"
 path = "/auth/v1/invite"
 key = "service_role"
 json = { email = "judge-invite-exists-{{run}}@example.com" }
+
+# Passkeys are disabled on the reference stack (GOTRUE_PASSKEY_ENABLED is
+# unset), so `requirePasskeyEnabled` answers 404 passkey_disabled on every
+# /passkeys route before authentication runs.
+[[case]]
+id = "auth.passkeys.list.disabled"
+description = "Passkey list is not found while passkeys are disabled"
+units = ["auth:route:GET /auth/v1/passkeys"]
+[[case.step]]
+method = "GET"
+path = "/auth/v1/passkeys"
+
+[[case]]
+id = "auth.passkeys.update.disabled"
+description = "Passkey rename is not found while passkeys are disabled"
+units = ["auth:route:PATCH /auth/v1/passkeys/{passkey_id}"]
+[[case.step]]
+method = "PATCH"
+path = "/auth/v1/passkeys/00000000-0000-0000-0000-000000000002"
+json = { friendly_name = "judge" }
+
+[[case]]
+id = "auth.passkeys.delete.disabled"
+description = "Passkey delete is not found while passkeys are disabled"
+units = ["auth:route:DELETE /auth/v1/passkeys/{passkey_id}"]
+[[case.step]]
+method = "DELETE"
+path = "/auth/v1/passkeys/00000000-0000-0000-0000-000000000002"
+
+[[case]]
+id = "auth.passkeys.authentication.options.disabled"
+description = "Passkey sign-in options are not found while passkeys are disabled"
+units = ["auth:route:POST /auth/v1/passkeys/authentication/options"]
+[[case.step]]
+method = "POST"
+path = "/auth/v1/passkeys/authentication/options"
+json = {}
+
+[[case]]
+id = "auth.passkeys.authentication.verify.disabled"
+description = "Passkey sign-in verify is not found while passkeys are disabled"
+units = ["auth:route:POST /auth/v1/passkeys/authentication/verify"]
+[[case.step]]
+method = "POST"
+path = "/auth/v1/passkeys/authentication/verify"
+json = {}
+
+[[case]]
+id = "auth.passkeys.registration.options.disabled"
+description = "Passkey registration options are not found while passkeys are disabled"
+units = ["auth:route:POST /auth/v1/passkeys/registration/options"]
+[[case.step]]
+method = "POST"
+path = "/auth/v1/passkeys/registration/options"
+json = {}
+
+[[case]]
+id = "auth.passkeys.registration.verify.disabled"
+description = "Passkey registration verify is not found while passkeys are disabled"
+units = ["auth:route:POST /auth/v1/passkeys/registration/verify"]
+[[case.step]]
+method = "POST"
+path = "/auth/v1/passkeys/registration/verify"
+json = {}
