@@ -4,6 +4,13 @@ All notable changes to Megabase are documented in this file.
 The format is produced by [release-please](https://github.com/googleapis/release-please).
 Sections: Features, Bug Fixes, Performance, Conformance/judge, Documentation.
 
+## [0.1.43](https://github.com/Zouhairmaj/megabase/compare/v0.1.42...v0.1.43) (2026-10-16)
+
+
+### Features
+
+* **storage:** answer unsigned s3 head, post and post policy requests ([#445](https://github.com/Zouhairmaj/megabase/issues/445)) ([0485433](https://github.com/Zouhairmaj/megabase/commit/04854339d4118f1d779606e0abbeb91a1ed85e74))
+
 ## [0.1.42](https://github.com/Zouhairmaj/megabase/compare/v0.1.41...v0.1.42) (2026-10-16)
 
 
