@@ -22,7 +22,7 @@ mod target;
 
 use megabase_core::Config;
 use tower::ServiceExt;
-use tracing::info;
+use tracing::{info, warn};
 
 pub use cors::{cors_applies, CORS_ALLOW_METHODS, ROUTES_WITHOUT_CORS};
 use key_auth::reject_missing_key;
@@ -226,6 +226,7 @@ pub async fn run(config: Config) -> std::io::Result<()> {
     // REST, Postgres Meta and Storage share one pool; each request that
     // changes session state does so with `SET LOCAL` inside a transaction.
     let mut pool = None;
+    let mut realtime = megabase_realtime::RealtimeState::new(config.jwt_hs256().ok());
     if let Some(url) = config.database_url.as_deref() {
         info!("connecting rest pool");
         let shared = megabase_rest::connect(url)
@@ -235,6 +236,17 @@ pub async fn run(config: Config) -> std::io::Result<()> {
         megabase_storage::install_schema(&shared)
             .await
             .map_err(std::io::Error::other)?;
+        // Only postgres_changes needs these objects; the rest of Realtime
+        // and every other component keep serving when the install fails.
+        info!("installing realtime cdc schema");
+        match megabase_realtime::install_schema(&shared).await {
+            Ok(()) => {
+                // Upstream `SLOT_NAME_SUFFIX` (`config/runtime.exs`).
+                let suffix = std::env::var("SLOT_NAME_SUFFIX").ok();
+                realtime = realtime.with_pool(shared.clone(), suffix.as_deref());
+            }
+            Err(err) => warn!("{err}; realtime postgres_changes is unavailable"),
+        }
         rest = rest.with_pool(shared.clone());
         pool = Some(shared);
     }
@@ -258,7 +270,7 @@ pub async fn run(config: Config) -> std::io::Result<()> {
             meta: &meta,
             storage: &storage,
             functions: &functions,
-            realtime: &megabase_realtime::RealtimeState::new(config.jwt_hs256().ok()),
+            realtime: &realtime,
         }),
         &config,
     );

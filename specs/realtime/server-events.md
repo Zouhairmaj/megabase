@@ -1,7 +1,7 @@
 # Realtime: server events (issue 69)
 
-Status: partial (`broadcast`, `disconnect`, `presence_diff`,
-`presence_state`, `system` served; `postgres_changes` not implemented)
+Status: served (`broadcast`, `disconnect`, `postgres_changes`,
+`presence_diff`, `presence_state`, `system`)
 Unit ids (`coverage/units.json`): `realtime:server-event:broadcast`,
 `realtime:server-event:disconnect`, `realtime:server-event:postgres_changes`,
 `realtime:server-event:presence_diff`, `realtime:server-event:presence_state`,
@@ -32,6 +32,13 @@ The handshake, join and frame encodings are in
 | `presence_state` push | `vendor/realtime/lib/realtime_web/channels/realtime_channel/presence_handler.ex:92`–`:117` |
 | `push_system_message/5` and `shutdown_response/2` | `vendor/realtime/lib/realtime_web/channels/realtime_channel.ex:859`–`:897` |
 | `postgres_changes` dispatch (`{"ids","data"}`; old API: the change type as event) | `vendor/realtime/lib/extensions/postgres_cdc_rls/message_dispatcher.ex:10`–`:44` |
+| `pg_change_params/5`, `postgres_cdc_subscribe/2`, `add_id_to_postgres_changes/1` | `vendor/realtime/lib/realtime_web/channels/realtime_channel.ex:116`–`:133`, `:899`–`:964`, `:1047`–`:1052` |
+| `:postgres_subscribe`, "Subscribed to PostgreSQL", retry 5–10 s, fatal reasons | `vendor/realtime/lib/realtime_web/channels/realtime_channel.ex:44`, `:359`–`:397`, `:696`–`:703`, `:966`–`:1045` |
+| Poll loop, `generate_record/1` | `vendor/realtime/lib/extensions/postgres_cdc_rls/replication_poller.ex` |
+| Slot SQL and `list_changes` query | `vendor/realtime/lib/extensions/postgres_cdc_rls/replications.ex` |
+| Defaults (`supabase_realtime`, `supabase_realtime_replication_slot`, 100 changes); self-hosted `poll_interval_ms` 100, `poll_max_record_bytes` 1048576 | `vendor/realtime/lib/extensions/postgres_cdc_rls/db_settings.ex:9`–`:12`, `vendor/realtime/priv/repo/seeds.exs:40`–`:41` |
+| Change JSON (sorted keys of the derived struct) | `vendor/realtime/lib/realtime/adapters/changes.ex:15`–`:59` |
+| Tenant CDC schema (`realtime.subscription`, `apply_rls`, `list_changes`, …) | `vendor/realtime/priv/repo/tenant_schema/realtime/` |
 
 `Phoenix.Socket` 1.7 (`__info__/2` on `%Broadcast{event: "disconnect"}`
 returns `{:stop, {:shutdown, :disconnected}, state}`) is not vendored.
@@ -88,13 +95,46 @@ Served as in [`websocket.md`](websocket.md) (grouping, `phx_ref`) and
 then `phx_close`. Served for the presence shutdowns (`client-events.md`)
 and token shutdowns (`protocol.md`).
 
+## postgres_changes
+
+Needs `DATABASE_URL`. At startup Megabase installs the CDC objects of the
+tenant schema (types, `realtime.subscription`, `apply_rls`,
+`list_changes`, …) and the `supabase_realtime` publication when missing.
+Without a database, or when that install fails, joins that would subscribe
+reply `MEGABASE_NOT_IMPLEMENTED`.
+
+| Step | Behavior |
+|---|---|
+| Join, new API (`config` present) | the non-null entries of a non-empty `config.postgres_changes` list |
+| Join, old API (no `config`) | one entry from the topic: `schema[:table[:filter]]` |
+| Join reply | `{"postgres_changes": [entry + {"id": n}, …]}` |
+| After the join | insert the subscriptions with the token's claims, then `system` `{"extension":"postgres_changes","status":"ok","message":"Subscribed to PostgreSQL","channel":<t>}` |
+| Subscribe error | `system` with `status` `"error"` and the message; malformed params and insert failures are final, other errors retry 5–10 s later |
+| Each change | for every channel with a matching subscription id: new API `postgres_changes` `{"data": change, "ids": [ids…]}` (ids in reverse join order), old API the change with its type (`INSERT`, `UPDATE`, `DELETE`) as the event |
+| Change JSON | `columns`, `commit_timestamp`, `errors` (null when empty), `old_record` (UPDATE, DELETE), `record` (INSERT, UPDATE), `schema`, `table`, `type`, in that order |
+| Leave or close | the channel's subscriptions are deleted |
+
+The poller holds one connection with the temporary wal2json slot
+`supabase_realtime_replication_slot` (`_<SLOT_NAME_SUFFIX>` when set). It
+polls again at once after changes, after 100 ms (+50–100 ms jitter) when
+the slot had changes for no subscriber, and after 500 ms when idle. An
+empty publication creates no slot; the publication is checked every 60 s.
+Upstream stops it after 6 consecutive failures and its supervisor restarts it. Megabase never stops it: after 6 failures it keeps retrying at the longest backoff and logs each failure. At startup it also deletes the rows left in `realtime.subscription` (skipped when `SLOT_NAME_SUFFIX` is set). After a token refresh, as upstream does (`realtime_channel.ex:618-632`), the channel's subscriptions are stored again with the new claims. Megabase also fails closed. From the refresh until the new claims are stored, the channel gets no changes. A failed write is logged and retried 5–10 s later, and a fatal error keeps the channel suspended. Writes for one channel run one at a time, so a write with older claims never resumes delivery after a newer refresh. The schema install fails when an existing type or table does not have the shape the subscription SQL uses. The check covers every `user_defined_filter` attribute and every `subscription` column with its exact type, the `equality_op` values, the unique index the insert's `on conflict` targets, and the `tr_check_filters` trigger.
+
+Differences from upstream:
+
+- `id` is `:erlang.phash2(params)` upstream. Megabase hashes the entry's
+  JSON (FNV-1a) into the same `0..2^27` range, so ids differ from
+  upstream's but match between the reply and the pushes. The reply entry's
+  keys are sorted (`id` among them); upstream puts `id` first.
+- The `ReplicationSlotBeingUsed` recovery (`pg_terminate_backend` on the
+  slot holder) is not ported: on a cluster shared with another Realtime it
+  would end that server's slot. Use `SLOT_NAME_SUFFIX` there.
+- The `db_events_per_second` and subscription-error rate counters are not
+  modeled; nor is `postgres_changes_wait_timeout` (the join never waits).
+
 ## Not implemented
 
-- `postgres_changes`: CDC from the tenant database (`postgres_cdc_rls`).
-  Joins with `postgres_changes` entries, or without `config` (the old
-  API), reply a `MEGABASE_NOT_IMPLEMENTED` response. So do the `system`
-  pushes with extension `postgres_changes` ("Subscribed to PostgreSQL",
-  subscribe errors).
 - `replication_ready`: the "Replication connection established" `system`
   push (`MEGABASE_NOT_IMPLEMENTED` join reply).
 - Replay pushes, which need private channels.

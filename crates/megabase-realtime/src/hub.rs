@@ -48,6 +48,14 @@ impl Outbox {
     pub(crate) fn evicted(&self) -> Arc<Notify> {
         Arc::clone(&self.evicted)
     }
+
+    /// Queues a push from outside the topic fan-out (Postgres changes, the
+    /// subscribe result). A full queue evicts the socket.
+    pub(crate) fn push(&self, wire: Wire) {
+        if let Err(TrySendError::Full(_)) = self.tx.try_send(wire) {
+            self.evicted.notify_one();
+        }
+    }
 }
 
 /// Subscribers and presences per joined topic (`realtime:<name>`).
