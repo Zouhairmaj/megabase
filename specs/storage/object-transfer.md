@@ -76,6 +76,11 @@ All are sent with HTTP 400.
   source row, where Megabase records them on upload.
 - Upstream takes an advisory lock (`waitObjectLock`) before the superuser
   write; Megabase relies on the `FOR UPDATE` row lock alone.
+- Hardening over upstream, which renames as the superuser: after the row lock
+  Megabase checks the row still has the version it copied (else `NoSuchKey`),
+  then applies the request scope in the same transaction and runs the rename
+  under RLS, so a change after the permission probe cannot widen what the
+  caller may rename.
 - The replaced and old files are removed after the commit; a removal
   failure is logged, as upstream's queued `ObjectAdminDelete`.
 

@@ -388,8 +388,19 @@ pub(crate) async fn move_object(
         else {
             return Ok(false);
         };
+        // The row was replaced since the file was copied: the copy is of
+        // another version, so do not rename over it.
+        let current_version: Option<String> = current.try_get("version")?;
+        if current_version != source_version {
+            return Ok(false);
+        }
         let metadata: Option<Value> = current.try_get("metadata")?;
         let head = head_metadata(metadata.as_ref().unwrap_or(&Value::Null), &copied);
+        // Hardening over upstream, which renames as the superuser: run the
+        // rename under the request's RLS while the row lock is held, so a
+        // change after the permission probe cannot widen what the caller
+        // may rename (as `delete_object` does).
+        scope.apply(&mut tx).await?;
         let updated = sqlx::query(MOVE_SQL)
             .bind(&input.destination_key)
             .bind(&input.destination_bucket)
