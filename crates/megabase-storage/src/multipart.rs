@@ -1,5 +1,6 @@
 //! `multipart/form-data` upload bodies, as `fileUploadFromRequest` reads
-//! them through `@fastify/multipart` (`specs/storage/object.md`).
+//! them through `@fastify/multipart` (`specs/storage/object.md`), and the
+//! S3 POST policy fields `extractSignature` reads (`specs/storage/s3.md`).
 //!
 //! Only the parts before (and including) the first file part matter: the
 //! fields that precede it are `formData.fields`, and later parts are never
@@ -31,6 +32,33 @@ pub(super) struct MultipartUpload {
 /// and `userMetadata` fields, a repeated `contentType` field, a file part
 /// without its own `Content-Type`).
 pub(super) fn parse(content_type: &str, body: &Bytes) -> Option<MultipartUpload> {
+    let form = read_form(content_type, body)?;
+    let (part, content) = form.file?;
+    upload(&form.fields, part, content)
+}
+
+/// The parts of a `multipart/form-data` body up to its first file part.
+pub(super) struct Form {
+    /// The text fields before the file part, in order.
+    pub(super) fields: Vec<(String, String)>,
+    /// The file part, if the form has one.
+    file: Option<(PartHeaders, Bytes)>,
+    /// The closing delimiter follows the file part (or the last field when
+    /// there is no file part), so no part comes after it.
+    pub(super) closed_after_file: bool,
+}
+
+impl Form {
+    /// The `name` of the file part.
+    pub(super) fn file_name(&self) -> Option<&str> {
+        self.file.as_ref().map(|(part, _)| part.name.as_str())
+    }
+}
+
+/// Reads `body` as `multipart/form-data` up to and including its first
+/// file part. `None` when the body is malformed or a part has headers
+/// [`PartHeaders::parse`] does not accept.
+pub(super) fn read_form(content_type: &str, body: &Bytes) -> Option<Form> {
     let boundary = boundary(content_type)?;
     let mut delimiter = Vec::with_capacity(boundary.len() + 4);
     delimiter.extend_from_slice(b"\r\n--");
@@ -47,7 +75,11 @@ pub(super) fn parse(content_type: &str, body: &Bytes) -> Option<MultipartUpload>
         // `--` closes the body; anything else must start a part.
         let rest = body.get(at..)?;
         if rest.starts_with(b"--") {
-            return None;
+            return Some(Form {
+                fields,
+                file: None,
+                closed_after_file: true,
+            });
         }
         at += line_end(rest)?;
         let headers_end = find(body, b"\r\n\r\n", at)?;
@@ -56,7 +88,14 @@ pub(super) fn parse(content_type: &str, body: &Bytes) -> Option<MultipartUpload>
         let content_start = headers_end + 4;
         let content_end = find(body, &delimiter, content_start)?;
         if part.is_file {
-            return upload(&fields, part, body.slice(content_start..content_end));
+            let closed_after_file = body
+                .get(content_end + delimiter.len()..)
+                .is_some_and(|rest| rest.starts_with(b"--"));
+            return Some(Form {
+                fields,
+                file: Some((part, body.slice(content_start..content_end))),
+                closed_after_file,
+            });
         }
         let value = std::str::from_utf8(body.get(content_start..content_end)?).ok()?;
         fields.push((part.name, value.to_string()));
@@ -356,6 +395,54 @@ mod tests {
         ] {
             assert!(parse(content_type, &body(&form)).is_none(), "{form}");
         }
+    }
+
+    #[test]
+    fn forms_end_at_the_first_file_part() {
+        let form = read_form(
+            TYPE,
+            &body(
+                "------b\n\
+                 Content-Disposition: form-data; name=\"key\"\n\
+                 \n\
+                 a.txt\n\
+                 ------b\n\
+                 Content-Disposition: form-data; name=\"file\"; filename=\"a.txt\"\n\
+                 \n\
+                 x\n\
+                 ------b--\n",
+            ),
+        )
+        .unwrap();
+        assert_eq!(form.fields, [("key".to_owned(), "a.txt".to_owned())]);
+        assert_eq!(form.file_name(), Some("file"));
+        assert!(form.closed_after_file);
+
+        let form = read_form(
+            TYPE,
+            &body(
+                "------b\n\
+                 Content-Disposition: form-data; name=\"file\"; filename=\"a.txt\"\n\
+                 \n\
+                 x\n\
+                 ------b\n\
+                 Content-Disposition: form-data; name=\"Policy\"\n\
+                 \n\
+                 p\n\
+                 ------b--\n",
+            ),
+        )
+        .unwrap();
+        assert!(form.fields.is_empty());
+        assert!(!form.closed_after_file);
+
+        let form = read_form(
+            TYPE,
+            &body("------b\nContent-Disposition: form-data; name=\"a\"\n\nv\n------b--\n"),
+        )
+        .unwrap();
+        assert_eq!(form.file_name(), None);
+        assert!(form.closed_after_file);
     }
 
     #[test]
