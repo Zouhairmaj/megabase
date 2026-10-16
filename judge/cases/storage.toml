@@ -163,3 +163,261 @@ units = ["storage:route:GET /storage/v1/render/image/authenticated/{bucketName}/
 method = "GET"
 path = "/storage/v1/render/image/authenticated/judge-render/bad%23name.png"
 key = "service_role"
+
+# S3 protocol, unsigned requests (specs/storage/s3.md, issue 64). The
+# self-hosted stack registers the S3 routes, and `signatureV4` runs as a
+# preHandler before any command is picked or the database is used. A
+# request with no AWS SigV4 signature is therefore `AccessDenied` /
+# `Missing signature` (HTTP 403, S3 XML) whatever its query or headers
+# would select, and the bucket need not exist. One case per unit. No step
+# sends a body except the POST policy form, so Fastify parses nothing.
+
+[[case]]
+id = "storage.s3.unsigned.list-buckets"
+description = "Unsigned ListBuckets is AccessDenied with an empty Resource"
+units = ["storage:route:GET /storage/v1/s3"]
+[[case.step]]
+method = "GET"
+path = "/storage/v1/s3"
+key = "none"
+
+[[case]]
+id = "storage.s3.unsigned.get-bucket"
+description = "Unsigned GET on a bucket is AccessDenied"
+units = ["storage:route:GET /storage/v1/s3/{Bucket}"]
+[[case.step]]
+method = "GET"
+path = "/storage/v1/s3/judge-s3"
+key = "none"
+
+[[case]]
+id = "storage.s3.unsigned.list-objects-v2"
+description = "Unsigned ListObjectsV2 is AccessDenied"
+units = ["storage:route:GET /storage/v1/s3/{Bucket}?list-type=2"]
+[[case.step]]
+method = "GET"
+path = "/storage/v1/s3/judge-s3?list-type=2&prefix=dir%2F"
+key = "none"
+
+[[case]]
+id = "storage.s3.unsigned.get-bucket-location"
+description = "Unsigned GetBucketLocation is AccessDenied"
+units = ["storage:route:GET /storage/v1/s3/{Bucket}?location"]
+[[case.step]]
+method = "GET"
+path = "/storage/v1/s3/judge-s3?location"
+key = "none"
+
+[[case]]
+id = "storage.s3.unsigned.get-bucket-versioning"
+description = "Unsigned GetBucketVersioning is AccessDenied"
+units = ["storage:route:GET /storage/v1/s3/{Bucket}?versioning"]
+[[case.step]]
+method = "GET"
+path = "/storage/v1/s3/judge-s3?versioning"
+key = "none"
+
+[[case]]
+id = "storage.s3.unsigned.list-multipart-uploads"
+description = "Unsigned ListMultipartUploads is AccessDenied"
+units = ["storage:route:GET /storage/v1/s3/{Bucket}?uploads"]
+[[case.step]]
+method = "GET"
+path = "/storage/v1/s3/judge-s3?uploads"
+key = "none"
+
+[[case]]
+id = "storage.s3.unsigned.get-bucket-lifecycle"
+description = "Unsigned GetBucketLifecycleConfiguration is AccessDenied"
+units = ["storage:route:GET /storage/v1/s3/{Bucket}?lifecycle"]
+[[case.step]]
+method = "GET"
+path = "/storage/v1/s3/judge-s3?lifecycle"
+key = "none"
+
+[[case]]
+id = "storage.s3.unsigned.get-object"
+description = "Unsigned GetObject is AccessDenied; Resource is bucket/key"
+units = ["storage:route:GET /storage/v1/s3/{Bucket}/{*}"]
+[[case.step]]
+method = "GET"
+path = "/storage/v1/s3/judge-s3/dir/file.txt"
+key = "none"
+
+[[case]]
+id = "storage.s3.unsigned.get-object-bearer"
+description = "A Supabase bearer token is not a SigV4 signature, so GetObject is still AccessDenied"
+units = ["storage:route:GET /storage/v1/s3/{Bucket}/{*}"]
+[[case.step]]
+method = "GET"
+path = "/storage/v1/s3/judge-s3/file.txt"
+key = "service_role"
+
+[[case]]
+id = "storage.s3.unsigned.get-object-tagging"
+description = "Unsigned GetObjectTagging is AccessDenied"
+units = ["storage:route:GET /storage/v1/s3/{Bucket}/{*}?tagging"]
+[[case.step]]
+method = "GET"
+path = "/storage/v1/s3/judge-s3/dir/file.txt?tagging"
+key = "none"
+
+[[case]]
+id = "storage.s3.unsigned.list-parts"
+description = "Unsigned ListParts is AccessDenied"
+units = ["storage:route:GET /storage/v1/s3/{Bucket}/{*}?uploadId"]
+[[case.step]]
+method = "GET"
+path = "/storage/v1/s3/judge-s3/dir/file.txt?uploadId=judge-upload"
+key = "none"
+
+[[case]]
+id = "storage.s3.unsigned.head-bucket"
+description = "Unsigned HeadBucket is 403 with the XML content type and no body"
+units = ["storage:route:HEAD /storage/v1/s3/{Bucket}"]
+[[case.step]]
+method = "HEAD"
+path = "/storage/v1/s3/judge-s3"
+key = "none"
+
+[[case]]
+id = "storage.s3.unsigned.head-object"
+description = "Unsigned HeadObject is 403 with the XML content type and no body"
+units = ["storage:route:HEAD /storage/v1/s3/{Bucket}/{*}"]
+[[case.step]]
+method = "HEAD"
+path = "/storage/v1/s3/judge-s3/dir/file.txt"
+key = "none"
+
+[[case]]
+id = "storage.s3.unsigned.delete-bucket"
+description = "Unsigned DeleteBucket is AccessDenied"
+units = ["storage:route:DELETE /storage/v1/s3/{Bucket}"]
+[[case.step]]
+method = "DELETE"
+path = "/storage/v1/s3/judge-s3"
+key = "none"
+
+[[case]]
+id = "storage.s3.unsigned.delete-bucket-lifecycle"
+description = "Unsigned DeleteBucketLifecycle is AccessDenied"
+units = ["storage:route:DELETE /storage/v1/s3/{Bucket}?lifecycle"]
+[[case.step]]
+method = "DELETE"
+path = "/storage/v1/s3/judge-s3?lifecycle"
+key = "none"
+
+[[case]]
+id = "storage.s3.unsigned.delete-object"
+description = "Unsigned DeleteObject is AccessDenied"
+units = ["storage:route:DELETE /storage/v1/s3/{Bucket}/{*}"]
+[[case.step]]
+method = "DELETE"
+path = "/storage/v1/s3/judge-s3/dir/file.txt"
+key = "none"
+
+[[case]]
+id = "storage.s3.unsigned.abort-multipart-upload"
+description = "Unsigned AbortMultipartUpload is AccessDenied"
+units = ["storage:route:DELETE /storage/v1/s3/{Bucket}/{*}?uploadId"]
+[[case.step]]
+method = "DELETE"
+path = "/storage/v1/s3/judge-s3/dir/file.txt?uploadId=judge-upload"
+key = "none"
+
+[[case]]
+id = "storage.s3.unsigned.delete-objects"
+description = "Unsigned bodiless DeleteObjects is AccessDenied"
+units = ["storage:route:POST /storage/v1/s3/{Bucket}?delete"]
+[[case.step]]
+method = "POST"
+path = "/storage/v1/s3/judge-s3?delete"
+key = "none"
+
+[[case]]
+id = "storage.s3.unsigned.post-policy"
+description = "A POST policy form without the signature fields is InvalidSignature"
+units = ["storage:route:POST /storage/v1/s3/{Bucket}|content-type=multipart/form-data"]
+[[case.step]]
+method = "POST"
+path = "/storage/v1/s3/judge-s3"
+key = "none"
+headers = { "Content-Type" = "multipart/form-data; boundary=judge-s3-boundary" }
+body = "--judge-s3-boundary\r\nContent-Disposition: form-data; name=\"key\"\r\n\r\ndir/file.txt\r\n--judge-s3-boundary\r\nContent-Disposition: form-data; name=\"file\"; filename=\"file.txt\"\r\nContent-Type: text/plain\r\n\r\nhello\r\n--judge-s3-boundary--\r\n"
+
+[[case]]
+id = "storage.s3.unsigned.create-multipart-upload"
+description = "Unsigned bodiless CreateMultipartUpload is AccessDenied"
+units = ["storage:route:POST /storage/v1/s3/{Bucket}/{*}?uploads"]
+[[case.step]]
+method = "POST"
+path = "/storage/v1/s3/judge-s3/dir/file.txt?uploads"
+key = "none"
+
+[[case]]
+id = "storage.s3.unsigned.complete-multipart-upload"
+description = "Unsigned bodiless CompleteMultipartUpload is AccessDenied"
+units = ["storage:route:POST /storage/v1/s3/{Bucket}/{*}?uploadId"]
+[[case.step]]
+method = "POST"
+path = "/storage/v1/s3/judge-s3/dir/file.txt?uploadId=judge-upload"
+key = "none"
+
+# The PUT units are served by #450. Bodiless, so the preHandler answers
+# before the command or its `x-amz-copy-source` header matters.
+
+[[case]]
+id = "storage.s3.unsigned.create-bucket"
+description = "Unsigned bodiless CreateBucket is AccessDenied"
+units = ["storage:route:PUT /storage/v1/s3/{Bucket}"]
+[[case.step]]
+method = "PUT"
+path = "/storage/v1/s3/judge-s3"
+key = "none"
+
+[[case]]
+id = "storage.s3.unsigned.put-bucket-lifecycle"
+description = "Unsigned bodiless PutBucketLifecycleConfiguration is AccessDenied"
+units = ["storage:route:PUT /storage/v1/s3/{Bucket}?lifecycle"]
+[[case.step]]
+method = "PUT"
+path = "/storage/v1/s3/judge-s3?lifecycle"
+key = "none"
+
+[[case]]
+id = "storage.s3.unsigned.put-object"
+description = "Unsigned bodiless PutObject is AccessDenied"
+units = ["storage:route:PUT /storage/v1/s3/{Bucket}/{*}"]
+[[case.step]]
+method = "PUT"
+path = "/storage/v1/s3/judge-s3/dir/file.txt"
+key = "none"
+
+[[case]]
+id = "storage.s3.unsigned.copy-object"
+description = "Unsigned bodiless CopyObject is AccessDenied"
+units = ["storage:route:PUT /storage/v1/s3/{Bucket}/{*}|x-amz-copy-source"]
+[[case.step]]
+method = "PUT"
+path = "/storage/v1/s3/judge-s3/dir/copy.txt"
+key = "none"
+headers = { "x-amz-copy-source" = "judge-s3/dir/file.txt" }
+
+[[case]]
+id = "storage.s3.unsigned.upload-part"
+description = "Unsigned bodiless UploadPart is AccessDenied"
+units = ["storage:route:PUT /storage/v1/s3/{Bucket}/{*}?uploadId&partNumber"]
+[[case.step]]
+method = "PUT"
+path = "/storage/v1/s3/judge-s3/dir/file.txt?uploadId=judge-upload&partNumber=1"
+key = "none"
+
+[[case]]
+id = "storage.s3.unsigned.upload-part-copy"
+description = "Unsigned bodiless UploadPartCopy is AccessDenied"
+units = ["storage:route:PUT /storage/v1/s3/{Bucket}/{*}?partNumber&uploadId|x-amz-copy-source"]
+[[case.step]]
+method = "PUT"
+path = "/storage/v1/s3/judge-s3/dir/file.txt?partNumber=1&uploadId=judge-upload"
+key = "none"
+headers = { "x-amz-copy-source" = "judge-s3/dir/other.txt" }

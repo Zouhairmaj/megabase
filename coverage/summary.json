@@ -3,7 +3,7 @@
   "totals": {
     "units": 1031,
     "implemented": 306,
-    "tested": 192,
+    "tested": 212,
     "conformant": 0
   },
   "percent": {
@@ -12,7 +12,7 @@
     "done": 0.0
   },
   "judge": {
-    "cases": 420,
+    "cases": 447,
     "passing": 0
   },
   "components": {
@@ -391,7 +391,7 @@
     "storage": {
       "units": 149,
       "implemented": 87,
-      "tested": 9,
+      "tested": 29,
       "conformant": 0,
       "groups": {
         "bucket": {
@@ -445,7 +445,7 @@
         "s3": {
           "units": 26,
           "implemented": 20,
-          "tested": 0,
+          "tested": 20,
           "conformant": 0
         },
         "vector": {
@@ -787,10 +787,10 @@
     "storage:route:DELETE /storage/v1/iceberg/v1/{prefix}/namespaces/{namespace}/tables/{table}": "implemented",
     "storage:route:DELETE /storage/v1/object/{bucketName}": "implemented",
     "storage:route:DELETE /storage/v1/object/{bucketName}/{*}": "implemented",
-    "storage:route:DELETE /storage/v1/s3/{Bucket}": "implemented",
-    "storage:route:DELETE /storage/v1/s3/{Bucket}/{*}": "implemented",
-    "storage:route:DELETE /storage/v1/s3/{Bucket}/{*}?uploadId": "implemented",
-    "storage:route:DELETE /storage/v1/s3/{Bucket}?lifecycle": "implemented",
+    "storage:route:DELETE /storage/v1/s3/{Bucket}": "tested",
+    "storage:route:DELETE /storage/v1/s3/{Bucket}/{*}": "tested",
+    "storage:route:DELETE /storage/v1/s3/{Bucket}/{*}?uploadId": "tested",
+    "storage:route:DELETE /storage/v1/s3/{Bucket}?lifecycle": "tested",
     "storage:route:GET /storage/v1/bucket": "tested",
     "storage:route:GET /storage/v1/bucket/{bucketId}": "tested",
     "storage:route:GET /storage/v1/bucket/{bucketId}/lifecycle": "tested",
@@ -811,21 +811,21 @@
     "storage:route:GET /storage/v1/render/image/authenticated/{bucketName}/{*}": "tested",
     "storage:route:GET /storage/v1/render/image/public/{bucketName}/{*}": "tested",
     "storage:route:GET /storage/v1/render/image/sign/{bucketName}/{*}": "tested",
-    "storage:route:GET /storage/v1/s3": "implemented",
-    "storage:route:GET /storage/v1/s3/{Bucket}": "implemented",
-    "storage:route:GET /storage/v1/s3/{Bucket}/{*}": "implemented",
-    "storage:route:GET /storage/v1/s3/{Bucket}/{*}?tagging": "implemented",
-    "storage:route:GET /storage/v1/s3/{Bucket}/{*}?uploadId": "implemented",
-    "storage:route:GET /storage/v1/s3/{Bucket}?lifecycle": "implemented",
-    "storage:route:GET /storage/v1/s3/{Bucket}?list-type=2": "implemented",
-    "storage:route:GET /storage/v1/s3/{Bucket}?location": "implemented",
-    "storage:route:GET /storage/v1/s3/{Bucket}?uploads": "implemented",
-    "storage:route:GET /storage/v1/s3/{Bucket}?versioning": "implemented",
+    "storage:route:GET /storage/v1/s3": "tested",
+    "storage:route:GET /storage/v1/s3/{Bucket}": "tested",
+    "storage:route:GET /storage/v1/s3/{Bucket}/{*}": "tested",
+    "storage:route:GET /storage/v1/s3/{Bucket}/{*}?tagging": "tested",
+    "storage:route:GET /storage/v1/s3/{Bucket}/{*}?uploadId": "tested",
+    "storage:route:GET /storage/v1/s3/{Bucket}?lifecycle": "tested",
+    "storage:route:GET /storage/v1/s3/{Bucket}?list-type=2": "tested",
+    "storage:route:GET /storage/v1/s3/{Bucket}?location": "tested",
+    "storage:route:GET /storage/v1/s3/{Bucket}?uploads": "tested",
+    "storage:route:GET /storage/v1/s3/{Bucket}?versioning": "tested",
     "storage:route:HEAD /storage/v1/iceberg/v1/{prefix}/namespaces/{namespace}": "implemented",
     "storage:route:HEAD /storage/v1/iceberg/v1/{prefix}/namespaces/{namespace}/tables/{table}": "implemented",
     "storage:route:HEAD /storage/v1/object/authenticated/{bucketName}/{*}": "implemented",
-    "storage:route:HEAD /storage/v1/s3/{Bucket}": "implemented",
-    "storage:route:HEAD /storage/v1/s3/{Bucket}/{*}": "implemented",
+    "storage:route:HEAD /storage/v1/s3/{Bucket}": "tested",
+    "storage:route:HEAD /storage/v1/s3/{Bucket}/{*}": "tested",
     "storage:route:POST /storage/v1/bucket": "tested",
     "storage:route:POST /storage/v1/iceberg/bucket": "implemented",
     "storage:route:POST /storage/v1/iceberg/v1/{prefix}/namespaces": "implemented",
@@ -836,10 +836,10 @@
     "storage:route:POST /storage/v1/object/sign/{bucketName}/{*}": "implemented",
     "storage:route:POST /storage/v1/object/upload/sign/{bucketName}/{*}": "implemented",
     "storage:route:POST /storage/v1/object/{bucketName}/{*}": "implemented",
-    "storage:route:POST /storage/v1/s3/{Bucket}/{*}?uploadId": "implemented",
-    "storage:route:POST /storage/v1/s3/{Bucket}/{*}?uploads": "implemented",
-    "storage:route:POST /storage/v1/s3/{Bucket}?delete": "implemented",
-    "storage:route:POST /storage/v1/s3/{Bucket}|content-type=multipart/form-data": "implemented",
+    "storage:route:POST /storage/v1/s3/{Bucket}/{*}?uploadId": "tested",
+    "storage:route:POST /storage/v1/s3/{Bucket}/{*}?uploads": "tested",
+    "storage:route:POST /storage/v1/s3/{Bucket}?delete": "tested",
+    "storage:route:POST /storage/v1/s3/{Bucket}|content-type=multipart/form-data": "tested",
     "storage:route:POST /storage/v1/vector/CreateIndex": "implemented",
     "storage:route:POST /storage/v1/vector/CreateVectorBucket": "implemented",
     "storage:route:POST /storage/v1/vector/DeleteIndex": "implemented",
