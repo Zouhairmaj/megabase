@@ -74,8 +74,8 @@ fn has_framed_content_type(headers: &HeaderMap) -> bool {
 
 /// Paths find-my-way matches to an S3 route without its not-found or
 /// bad-URL answer: `/s3`, `/s3/`, or a non-empty bucket of at most
-/// `maxParamLength` plain characters followed by an optional key whose
-/// percent-encoding decodes to UTF-8.
+/// `maxParamLength` characters followed by an optional key; the bucket and
+/// the key must have percent-encoding that decodes to UTF-8.
 fn routable(path: &str) -> bool {
     let Some(rest) = path
         .strip_prefix(KONG_PREFIX)
@@ -92,7 +92,7 @@ fn routable(path: &str) -> bool {
     let (bucket, key) = rest.split_once('/').unwrap_or((rest, ""));
     !bucket.is_empty()
         && bucket.len() <= MAX_PARAM_LENGTH
-        && !bucket.contains('%')
+        && decodes_to_utf8(bucket)
         && decodes_to_utf8(key)
 }
 
@@ -240,7 +240,7 @@ mod tests {
         )
     }
 
-    const ROUTES: [(&str, &str, &str); 12] = [
+    const ROUTES: [(&str, &str, &str); 13] = [
         ("GET", "/s3", ""),
         ("GET", "/s3/", ""),
         ("GET", "/s3/photos", "photos"),
@@ -253,6 +253,7 @@ mod tests {
         ("DELETE", "/s3/photos?lifecycle", "photos"),
         ("DELETE", "/s3/photos//a%20b.png", "photos/a%20b.png"),
         ("DELETE", "/s3/photos/a.png?uploadId=u1", "photos/a.png"),
+        ("GET", "/s3/ph%6Ftos", "ph%6Ftos"),
     ];
 
     #[tokio::test]
@@ -314,7 +315,8 @@ mod tests {
             ("POST", "/s3/photos?delete".to_owned(), vec![]),
             ("GET", "/s3//key".to_owned(), vec![]),
             ("GET", format!("/s3/{long}"), vec![]),
-            ("GET", "/s3/ph%6Ftos".to_owned(), vec![]),
+            ("GET", "/s3/ph%zztos".to_owned(), vec![]),
+            ("GET", "/s3/ph%ff".to_owned(), vec![]),
             ("GET", "/s3/photos/%ff".to_owned(), vec![]),
             ("GET", "/s3/photos/%zz".to_owned(), vec![]),
             ("GET", "/s3x/photos".to_owned(), vec![]),
