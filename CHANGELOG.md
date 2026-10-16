@@ -4,6 +4,13 @@ All notable changes to Megabase are documented in this file.
 The format is produced by [release-please](https://github.com/googleapis/release-please).
 Sections: Features, Bug Fixes, Performance, Conformance/judge, Documentation.
 
+## [0.1.40](https://github.com/Zouhairmaj/megabase/compare/v0.1.39...v0.1.40) (2026-10-16)
+
+
+### Features
+
+* **auth:** serve the oauth authorize redirect for eight built-in providers ([#426](https://github.com/Zouhairmaj/megabase/issues/426)) ([8273f49](https://github.com/Zouhairmaj/megabase/commit/8273f496b155a0d81e15009fce9c907c5044f216)), closes [#49](https://github.com/Zouhairmaj/megabase/issues/49)
+
 ## [0.1.39](https://github.com/Zouhairmaj/megabase/compare/v0.1.38...v0.1.39) (2026-10-15)
 
 
