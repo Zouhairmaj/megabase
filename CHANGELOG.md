@@ -4,6 +4,13 @@ All notable changes to Megabase are documented in this file.
 The format is produced by [release-please](https://github.com/googleapis/release-please).
 Sections: Features, Bug Fixes, Performance, Conformance/judge, Documentation.
 
+## [0.1.46](https://github.com/Zouhairmaj/megabase/compare/v0.1.45...v0.1.46) (2026-10-16)
+
+
+### Features
+
+* **realtime:** serve the broadcast http api ([#466](https://github.com/Zouhairmaj/megabase/issues/466)) ([c0e5d02](https://github.com/Zouhairmaj/megabase/commit/c0e5d02b83b5bfdfd6b9669d10e920072e725bfd))
+
 ## [0.1.45](https://github.com/Zouhairmaj/megabase/compare/v0.1.44...v0.1.45) (2026-10-16)
 
 
