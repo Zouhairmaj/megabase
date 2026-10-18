@@ -2230,3 +2230,205 @@ method = "POST"
 path = "/rest/v1/rpc/add_numbers"
 headers = { Accept = "application/vnd.pgrst.object+json" }
 json = { a = 2, b = 3 }
+
+# Text and full-text modifiers. Fixture titles: "write the spec", "port the unit",
+# "run the judge". `not.` negates. `like`/`ilike` take `(any)` and `(all)`; `*`
+# becomes `%` and `_` stays a single-character wildcard. `match`/`imatch` take
+# the same quantifiers and keep `*` as a POSIX quantifier. `fts`/`plfts`/`phfts`/
+# `wfts` take an optional `(regconfig)`.
+
+[[case]]
+id = "rest.filter.ilike.not"
+description = "Negated ilike. not.ilike.*spec drops the spec row; not.ilike.*THE* drops every row."
+units = ["rest:filter-operator:ilike"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?title=not.ilike.*spec&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?title=not.ilike.*THE*&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?title=not.ilike.zzzz&order=id"
+
+[[case]]
+id = "rest.filter.ilike.quant"
+description = "ilike (any) and (all), and a single-character _ wildcard"
+units = ["rest:filter-operator:ilike"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?title=ilike(any).%7B*SPEC,RUN*%7D&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?title=ilike(all).%7B*THE*,*UNIT%7D&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?title=ilike.*un_t&order=id"
+
+[[case]]
+id = "rest.filter.match.not"
+description = "Negated POSIX match. * stays a regex quantifier."
+units = ["rest:filter-operator:match"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?title=not.match.spec&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?title=not.match.%5Eport&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?title=match.p.*t&order=id"
+
+[[case]]
+id = "rest.filter.match.quant"
+description = "match with the (any) and (all) modifiers"
+units = ["rest:filter-operator:match"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?title=match(any).%7B%5Eport,judge%7D&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?title=match(all).%7Bthe,unit%7D&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?title=match(all).%7Bspec,unit%7D&order=id"
+
+[[case]]
+id = "rest.filter.imatch.not"
+description = "Negated case-insensitive POSIX match"
+units = ["rest:filter-operator:imatch"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?title=not.imatch.%5EPORT&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?title=not.imatch.SPEC&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?title=not.imatch.THE&order=id"
+
+[[case]]
+id = "rest.filter.imatch.quant"
+description = "imatch with the (any) and (all) modifiers"
+units = ["rest:filter-operator:imatch"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?title=imatch(any).%7B%5EPORT,JUDGE%7D&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?title=imatch(all).%7BTHE,UNIT%7D&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?title=imatch(all).%7BSPEC,UNIT%7D&order=id"
+
+[[case]]
+id = "rest.filter.fts.not"
+description = "Negated to_tsquery with the default config and an explicit english config"
+units = ["rest:filter-operator:fts"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?title=not.fts(english).spec&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?title=not.fts.unit&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?title=not.fts(english).missing&order=id"
+
+[[case]]
+id = "rest.filter.fts.query"
+description = "to_tsquery boolean operators and the simple regconfig"
+units = ["rest:filter-operator:fts"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?title=fts(english).spec%20%26%20write&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?title=fts(english).spec%20%7C%20unit&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?title=fts(simple).spec&order=id"
+
+[[case]]
+id = "rest.filter.plfts.not"
+description = "Negated plainto_tsquery with the default config and an explicit english config"
+units = ["rest:filter-operator:plfts"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?title=not.plfts(english).spec&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?title=not.plfts.unit&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?title=not.plfts(english).missing&order=id"
+
+[[case]]
+id = "rest.filter.plfts.and"
+description = "plainto_tsquery ANDs words. english drops the stop word the; simple keeps it."
+units = ["rest:filter-operator:plfts"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?title=plfts(english).write%20spec&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?title=plfts(english).write%20unit&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?title=plfts(simple).the%20spec&order=id"
+
+[[case]]
+id = "rest.filter.phfts.not"
+description = "Negated phraseto_tsquery. The stop word the still selects the spec row before negation."
+units = ["rest:filter-operator:phfts"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?title=not.phfts(english).the%20spec&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?title=not.phfts(english).unit&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?title=not.phfts.missing&order=id"
+
+[[case]]
+id = "rest.filter.phfts.phrase"
+description = "phraseto_tsquery keeps word order. A reversed phrase matches nothing."
+units = ["rest:filter-operator:phfts"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?title=phfts(english).write%20the%20spec&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?title=phfts(english).spec%20the%20write&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?title=phfts(simple).port%20the%20unit&order=id"
+
+[[case]]
+id = "rest.filter.wfts.not"
+description = "Negated websearch_to_tsquery with the default config and an explicit english config"
+units = ["rest:filter-operator:wfts"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?title=not.wfts(english).spec&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?title=not.wfts.unit&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?title=not.wfts(english).missing&order=id"
+
+[[case]]
+id = "rest.filter.wfts.websearch"
+description = "websearch or, an excluded term, and a quoted phrase"
+units = ["rest:filter-operator:wfts"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?title=wfts(english).spec%20or%20unit&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?title=wfts(english).the%20-spec&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?title=wfts(english).%22port%20the%20unit%22&order=id"
