@@ -265,9 +265,6 @@ pub(crate) async fn call(
         Ok(session) => session,
         Err(response) => return *response,
     };
-    if let Err(response) = enforce_db_role(state.pool.as_ref(), &session).await {
-        return *response;
-    }
     session.timezone = Prefer::from_headers(headers).timezone;
     let schema = match negotiated_schema(method, headers) {
         Ok(schema) => schema,
@@ -278,7 +275,11 @@ pub(crate) async fn call(
     }
     if method == Method::OPTIONS {
         // megabase:unit rest:route:OPTIONS /rest/v1/rpc/{function}
+        // Volatility is read as the pool user. The JWT role is not applied.
         return routine_options(state, method, uri, &session, &schema, function).await;
+    }
+    if let Err(response) = enforce_db_role(state.pool.as_ref(), &session).await {
+        return *response;
     }
     if let Some(unit) = Prefer::from_headers(headers).rpc_unserved() {
         return unimplemented_unit(method, path, unit);

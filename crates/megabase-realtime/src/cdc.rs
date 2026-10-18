@@ -8,11 +8,10 @@
 // lib/extensions/postgres_cdc_rls/db_settings.ex and lib/realtime/adapters/changes.ex
 // (Apache-2.0), pin v2.143.3.
 
+use std::borrow::Cow;
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
-
-use std::borrow::Cow;
 
 use megabase_core::{db_role, ApiRoles, ROLE_EXISTS_SQL};
 use serde_json::Value;
@@ -140,7 +139,7 @@ pub(crate) struct Cdc {
     /// `SLOT_NAME_SUFFIX` is set: the cluster may host another server.
     slot_suffixed: bool,
     subscribers: Mutex<Vec<Subscriber>>,
-    roles: ApiRoles,
+    roles: Arc<Mutex<ApiRoles>>,
 }
 
 /// `claims ->> 'role'`: JSON null and a missing key are SQL NULL. A string
@@ -159,7 +158,11 @@ fn fatal_insert(error: &subscriptions::CreateError) -> (String, bool) {
 
 impl Cdc {
     /// The extension for `pool`; `slot_name_suffix` is `SLOT_NAME_SUFFIX`.
-    pub(crate) fn new(pool: sqlx::PgPool, slot_name_suffix: Option<&str>, roles: ApiRoles) -> Self {
+    pub(crate) fn new(
+        pool: sqlx::PgPool,
+        slot_name_suffix: Option<&str>,
+        roles: Arc<Mutex<ApiRoles>>,
+    ) -> Self {
         let slot_name = match slot_name_suffix {
             Some(suffix) => format!("{SLOT_NAME}_{suffix}"),
             None => SLOT_NAME.to_owned(),
@@ -171,6 +174,15 @@ impl Cdc {
             subscribers: Mutex::new(Vec::new()),
             roles,
         }
+    }
+
+    /// Whether `role` is on the shared allow-list.
+    #[cfg(test)]
+    pub(crate) fn allows_role(&self, role: &str) -> bool {
+        self.roles
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .allows(role)
     }
 
     fn subscribers(&self) -> MutexGuard<'_, Vec<Subscriber>> {
@@ -361,7 +373,11 @@ impl Cdc {
         let Some(role) = claim_role_text(claims) else {
             return Err(fatal_insert(&subscriptions::null_claims_role(params)));
         };
-        if db_role(role.as_ref(), &self.roles).is_ok() {
+        let allowed = {
+            let roles = self.roles.lock().unwrap_or_else(PoisonError::into_inner);
+            db_role(role.as_ref(), &roles).is_ok()
+        };
+        if allowed {
             return Ok(());
         }
         let exists = match sqlx::query_scalar::<_, bool>(ROLE_EXISTS_SQL)
@@ -720,9 +736,26 @@ pub(crate) fn params_id(params: &Value) -> u32 {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{Arc, Mutex, PoisonError};
+
     use super::*;
     use crate::hub::OUTBOX_CAPACITY;
     use serde_json::json;
+
+    fn shared_roles() -> Arc<Mutex<megabase_core::ApiRoles>> {
+        Arc::new(Mutex::new(megabase_core::ApiRoles::default()))
+    }
+
+    #[tokio::test]
+    async fn role_list_is_shared_with_the_caller() {
+        let roles = shared_roles();
+        let cdc = Cdc::new(lazy_pool(), None, Arc::clone(&roles));
+        assert!(cdc.allows_role("anon"));
+        assert!(!cdc.allows_role("reporter"));
+        *roles.lock().unwrap_or_else(PoisonError::into_inner) =
+            megabase_core::ApiRoles::new(["reporter"]);
+        assert!(cdc.allows_role("reporter"));
+    }
 
     fn lazy_pool() -> sqlx::PgPool {
         sqlx::postgres::PgPoolOptions::new()
@@ -773,7 +806,7 @@ mod tests {
 
     #[tokio::test]
     async fn dispatch_pushes_matching_ids_per_api() {
-        let cdc = Cdc::new(lazy_pool(), None, megabase_core::ApiRoles::default());
+        let cdc = Cdc::new(lazy_pool(), None, shared_roles());
         let (a, b, c) = (Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4());
         let (new_box, mut new_rx) = Outbox::new(OUTBOX_CAPACITY);
         let (old_box, mut old_rx) = Outbox::new(OUTBOX_CAPACITY);
@@ -845,7 +878,7 @@ mod tests {
             .acquire_timeout(Duration::from_millis(200))
             .connect_lazy("postgres://megabase@127.0.0.1:1/megabase")
             .unwrap();
-        let cdc = Cdc::new(pool, None, megabase_core::ApiRoles::default());
+        let cdc = Cdc::new(pool, None, shared_roles());
         let id = Uuid::new_v4();
         let (outbox, mut rx) = Outbox::new(OUTBOX_CAPACITY);
         cdc.subscribe(Subscriber {
@@ -895,7 +928,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_stored_refresh_resumes_only_at_the_latest_generation() {
-        let cdc = Cdc::new(lazy_pool(), None, megabase_core::ApiRoles::default());
+        let cdc = Cdc::new(lazy_pool(), None, shared_roles());
         let id = Uuid::new_v4();
         let (outbox, mut rx) = Outbox::new(OUTBOX_CAPACITY);
         cdc.subscribe(Subscriber {
@@ -938,11 +971,11 @@ mod tests {
             .unwrap();
         let _guard = rt.enter();
         assert_eq!(
-            Cdc::new(lazy_pool(), None, megabase_core::ApiRoles::default()).slot_name,
+            Cdc::new(lazy_pool(), None, shared_roles()).slot_name,
             SLOT_NAME
         );
         assert_eq!(
-            Cdc::new(lazy_pool(), Some("dev"), megabase_core::ApiRoles::default()).slot_name,
+            Cdc::new(lazy_pool(), Some("dev"), shared_roles()).slot_name,
             "supabase_realtime_replication_slot_dev"
         );
         assert_eq!(backoff(1), Duration::from_millis(200));

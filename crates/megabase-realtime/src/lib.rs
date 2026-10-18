@@ -9,7 +9,7 @@
 
 // Ported from supabase/realtime lib/realtime_web/controllers/ping_controller.ex (Apache-2.0), pin v2.143.3.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
 
 use axum::{
     http::header,
@@ -36,13 +36,21 @@ pub const COMPONENT: &str = "realtime";
 
 /// What the Realtime routes need: the tenant's JWT secret and the topics
 /// every socket shares. Clones share the topics.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct RealtimeState {
     jwt: Option<Hs256>,
     hub: Arc<hub::Hub>,
     /// Postgres changes of the tenant database (`DATABASE_URL`).
     cdc: Option<Arc<cdc::Cdc>>,
-    api_roles: ApiRoles,
+    /// Shared with [`cdc::Cdc`] once `with_pool` runs, so a later
+    /// `with_api_roles` updates the checker the poller already holds.
+    api_roles: Arc<Mutex<ApiRoles>>,
+}
+
+impl Default for RealtimeState {
+    fn default() -> Self {
+        Self::new(None)
+    }
 }
 
 impl RealtimeState {
@@ -54,14 +62,20 @@ impl RealtimeState {
             jwt,
             hub: Arc::default(),
             cdc: None,
-            api_roles: ApiRoles::default(),
+            api_roles: Arc::new(Mutex::new(ApiRoles::default())),
         }
     }
 
     /// Roles a channel token may apply when `postgres_changes` stores claims.
+    ///
+    /// Updates the list [`cdc::Cdc`] shares, including when `with_pool` already
+    /// ran.
     #[must_use]
-    pub fn with_api_roles(mut self, roles: ApiRoles) -> Self {
-        self.api_roles = roles;
+    pub fn with_api_roles(self, roles: ApiRoles) -> Self {
+        *self
+            .api_roles
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = roles;
         self
     }
 
@@ -74,7 +88,7 @@ impl RealtimeState {
         let cdc = Arc::new(cdc::Cdc::new(
             pool,
             slot_name_suffix,
-            self.api_roles.clone(),
+            Arc::clone(&self.api_roles),
         ));
         tokio::spawn(Arc::clone(&cdc).run());
         self.cdc = Some(cdc);

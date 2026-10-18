@@ -166,6 +166,25 @@ impl From<sqlx::Error> for ApplyError {
 ///
 /// `42501` is `AccessDenied` (HTTP 400, body status `403`). Any other
 /// SQLSTATE from this check is `DatabaseError` (`errors.ts` default).
+/// Rejects a verified request role that [`db_role`] does not allow, before
+/// a public-bucket lookup switches to `service_role`.
+async fn enforce_request_role(
+    pool: &sqlx::PgPool,
+    roles: &megabase_core::ApiRoles,
+    claims: &JwtClaims,
+) -> Result<(), Box<Response>> {
+    let role = claims.role.as_deref().unwrap_or("anon");
+    let Err(rejected) = db_role(role, roles) else {
+        return Ok(());
+    };
+    let exists: bool = sqlx::query_scalar(ROLE_EXISTS_SQL)
+        .bind(rejected.role())
+        .fetch_one(pool)
+        .await
+        .map_err(|error| Box::new(apply_response(ApplyError::from(error))))?;
+    Err(Box::new(storage_role_response(&rejected.failure(exists))))
+}
+
 fn storage_role_response(failure: &RoleFailure) -> Response {
     if failure.sqlstate == "42501" {
         return StorageError::access_denied(Cow::Owned(failure.message.clone())).into_response();
@@ -1033,6 +1052,11 @@ async fn get_object(
         operation: OP_GET_AUTHENTICATED,
         roles: &state.api_roles,
     };
+    if authenticated {
+        if let Err(response) = enforce_request_role(pool, &state.api_roles, claims).await {
+            return *response;
+        }
+    }
     let public = match bucket_is_public(pool, &scope, &bucket_id).await {
         Ok(public) => public,
         Err(error) => return apply_response(error),
@@ -1787,6 +1811,13 @@ pub(super) async fn list_objects(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_request_role_outside_the_allow_list_is_not_configured() {
+        let roles = megabase_core::ApiRoles::default();
+        assert!(megabase_core::db_role("authenticated", &roles).is_ok());
+        assert!(megabase_core::db_role("postgres", &roles).is_err());
+    }
 
     #[tokio::test]
     async fn unconfigured_role_responses_match_storage_api() {

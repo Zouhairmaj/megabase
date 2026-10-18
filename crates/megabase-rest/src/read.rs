@@ -192,9 +192,6 @@ async fn relation_route(
         Ok(session) => session,
         Err(response) => return *response,
     };
-    if let Err(response) = enforce_db_role(state.pool.as_ref(), &session).await {
-        return *response;
-    }
     let prefer = Prefer::from_headers(headers);
     session.timezone = prefer.timezone.clone();
     let schema = match negotiated_schema(method, headers) {
@@ -203,7 +200,11 @@ async fn relation_route(
     };
     if method == Method::OPTIONS {
         // megabase:unit rest:route:OPTIONS /rest/v1/{relation}
+        // Privileges are read as the pool user. The JWT role is not applied.
         return relation_options(state, &schema, relation, session.anon).await;
+    }
+    if let Err(response) = enforce_db_role(state.pool.as_ref(), &session).await {
+        return *response;
     }
     if !matches!(
         method,
@@ -624,7 +625,7 @@ fn session_from_claims(
 /// statement runs as that role.
 ///
 /// With a pool, `pg_roles` chooses the PostgreSQL error. Without one, the
-/// name is reported as missing: there is no catalog to find it in.
+/// catalog cannot be read, so the answer is [`database_unavailable`].
 pub(crate) async fn enforce_db_role(
     pool: Option<&sqlx::PgPool>,
     session: &Session,
@@ -632,18 +633,15 @@ pub(crate) async fn enforce_db_role(
     let Err(rejected) = db_role(&session.role, &session.api_roles) else {
         return Ok(());
     };
-    let failure = match pool {
-        None => RoleFailure::from_catalog(rejected.role(), false),
-        Some(pool) => {
-            let exists: bool = sqlx::query_scalar(ROLE_EXISTS_SQL)
-                .bind(rejected.role())
-                .fetch_one(pool)
-                .await
-                .map_err(|error| Box::new(query_failure(&error, session.anon)))?;
-            rejected.failure(exists)
-        }
+    let Some(pool) = pool else {
+        return Err(Box::new(database_unavailable()));
     };
-    Err(Box::new(postgrest_role_response(&failure)))
+    let exists: bool = sqlx::query_scalar(ROLE_EXISTS_SQL)
+        .bind(rejected.role())
+        .fetch_one(pool)
+        .await
+        .map_err(|error| Box::new(query_failure(&error, session.anon)))?;
+    Err(Box::new(postgrest_role_response(&rejected.failure(exists))))
 }
 
 /// PostgREST body for a [`RoleFailure`]: `code` is the SQLSTATE, `details`
@@ -2589,7 +2587,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn unconfigured_role_is_the_postgrest_missing_role_error() {
+    async fn unconfigured_role_without_a_pool_is_unavailable() {
         let app = router(state_with_secret(SECRET));
         let token = sign(SECRET, &json!({"role": "not existing"}));
         let request = Request::builder()
@@ -2598,16 +2596,24 @@ mod tests {
             .body(Body::empty())
             .unwrap();
         let (status, body, _) = send(app, request).await;
-        assert_eq!(status, StatusCode::UNAUTHORIZED);
-        assert_eq!(
-            body,
-            json!({
-                "code": "22023",
-                "message": "role \"not existing\" does not exist",
-                "details": null,
-                "hint": null,
-            })
-        );
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(body["code"], "PGRST000");
+    }
+
+    #[tokio::test]
+    async fn options_does_not_apply_the_role_check() {
+        let app = router(state_with_secret(SECRET));
+        let token = sign(SECRET, &json!({"role": "not existing"}));
+        let request = Request::builder()
+            .method("OPTIONS")
+            .uri("/rest/v1/todos")
+            .header(header::AUTHORIZATION, format!("Bearer {token}"))
+            .body(Body::empty())
+            .unwrap();
+        let (status, body, _) = send(app, request).await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(body["code"], "PGRST000");
+        assert_ne!(body["code"], "22023");
     }
 
     #[tokio::test]
@@ -2617,8 +2623,7 @@ mod tests {
         assert_eq!(response.status(), StatusCode::FORBIDDEN);
         let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
         let body: Value = serde_json::from_slice(&bytes).unwrap();
-        // The HTTP test above covers the missing-role path. This is the body
-        // `enforce_db_role` returns when `pg_roles` contains the name.
+        // `enforce_db_role` returns this body when `pg_roles` contains the name.
         assert_eq!(
             body,
             json!({

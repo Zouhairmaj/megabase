@@ -2,10 +2,12 @@
 //!
 //! PostgREST connects as `authenticator` and applies the claim with
 //! `set_config` (`Query/PreQuery.hs`). PostgreSQL then rejects a missing
-//! role and a role that session user cannot become (`check_role` in
-//! `src/backend/commands/variable.c`). `Error.hs` `mapSQLtoHTTP` turns those
-//! failures into HTTP 401 and 403. Megabase's pool is the `DATABASE_URL`
-//! role, so the same rejection is decided here before `set_config` runs.
+//! role and a role that session user cannot become (`check_role`).
+//! `Error.hs` `mapSQLtoHTTP` turns those failures into HTTP 401 and 403.
+//! Megabase decides the same rejection before `set_config` runs.
+
+// Ported from postgrest src/library/PostgREST/Query/PreQuery.hs (MIT), pin v16.4,
+// and postgrest src/library/PostgREST/Error.hs (MIT), pin v16.4.
 
 use axum::http::StatusCode;
 
@@ -47,10 +49,14 @@ impl ApiRoles {
     }
 
     /// Whether `role` may be applied. Comparison is exact, as `pg_roles.rolname` is.
+    ///
+    /// The setting value `none` is never applied: PostgreSQL's `check_role`
+    /// treats that string as clearing the current role.
     #[must_use]
     pub fn allows(&self, role: &str) -> bool {
-        matches!(role, ANON | AUTHENTICATED | SERVICE_ROLE)
-            || self.extra.iter().any(|extra| extra == role)
+        role != "none"
+            && (matches!(role, ANON | AUTHENTICATED | SERVICE_ROLE)
+                || self.extra.iter().any(|extra| extra == role))
     }
 }
 
@@ -158,6 +164,8 @@ mod tests {
         assert!(db_role("postgres", &roles).is_err());
         assert!(db_role("Anon", &roles).is_err());
         assert!(db_role("not existing", &roles).is_err());
+        assert!(!ApiRoles::new(["none"]).allows("none"));
+        assert!(db_role("none", &ApiRoles::new(["none"])).is_err());
     }
 
     #[test]

@@ -63,7 +63,8 @@ statement runs after `SET LOCAL` role, `request.jwt.claims`,
 and `search_path` to the negotiated schema. The role applied is `anon`,
 `authenticated`, `service_role`, or a name in `MEGABASE_DB_EXTRA_ROLES`.
 Any other claim is rejected before `set_config('role', …)`, with the
-PostgreSQL error PostgREST returns for that name. Reads use a read-only
+PostgreSQL error PostgREST returns for that name. `OPTIONS` still reads
+privileges as the pool user and does not apply that rejection. Reads use a read-only
 transaction. Catalog lookups (existence, columns, privileges, primary key)
 run before `SET ROLE`.
 

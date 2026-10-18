@@ -191,6 +191,11 @@ async fn object_info(
         operation: request.operation,
         roles: &state.api_roles,
     };
+    if let (false, Some((claims, _))) = (public_route, &jwt) {
+        if let Err(response) = super::enforce_request_role(pool, &state.api_roles, claims).await {
+            return *response;
+        }
+    }
     let public = match bucket_is_public(pool, &scope, &bucket_id).await {
         Ok(public) => public,
         Err(error) => return super::apply_response(error),
