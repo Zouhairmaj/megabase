@@ -70,7 +70,18 @@ Do not start a level until the previous threshold holds.
 ### Level 1 validation
 
 Requirements: [decision 0036](docs/decisions/0036-level-1-validation-requirements.md).
-Level 1 is not yet validated.
+Level 1 is not yet validated. Auth SQL tables follow
+[decision 0046](docs/decisions/0046-feature-auth-tables-follow-feature-level.md):
+the nineteen MFA, OAuth, SAML, SSO, SCIM, passkey, and custom OAuth
+provider tables are Level 2. The Level 1 case minimum covers units at
+level 1.
+
+The regression baseline `coverage/judge-results.json` records the live
+Judge publication on `gh-pages` for commit
+`7d8923bf535016d8bc8fcda8c8fa8ef532ad9ae0` (447 passing cases). That
+recording is the deliberate baseline update in
+[decision 0030](docs/decisions/0030-conformance-is-the-live-judge-score.md).
+The live score remains the publication.
 
 ## Decisions
 

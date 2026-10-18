@@ -2,124 +2,1792 @@
   "schema": 1,
   "cases": [
     {
+      "id": "auth.admin.audit.anon",
+      "pass": true
+    },
+    {
+      "id": "auth.admin.audit.bad-page",
+      "pass": true
+    },
+    {
+      "id": "auth.admin.audit.bad-query",
+      "pass": true
+    },
+    {
+      "id": "auth.admin.audit.list",
+      "pass": true
+    },
+    {
+      "id": "auth.admin.custom-providers.anon",
+      "pass": true
+    },
+    {
+      "id": "auth.admin.custom-providers.create.anon",
+      "pass": true
+    },
+    {
+      "id": "auth.admin.custom-providers.create.invalid",
+      "pass": true
+    },
+    {
+      "id": "auth.admin.custom-providers.delete.anon",
+      "pass": true
+    },
+    {
+      "id": "auth.admin.custom-providers.delete.missing",
+      "pass": true
+    },
+    {
+      "id": "auth.admin.custom-providers.get.anon",
+      "pass": true
+    },
+    {
+      "id": "auth.admin.custom-providers.get.missing",
+      "pass": true
+    },
+    {
+      "id": "auth.admin.custom-providers.get.prefix",
+      "pass": true
+    },
+    {
+      "id": "auth.admin.custom-providers.list",
+      "pass": true
+    },
+    {
+      "id": "auth.admin.custom-providers.put.anon",
+      "pass": true
+    },
+    {
+      "id": "auth.admin.custom-providers.put.missing",
+      "pass": true
+    },
+    {
+      "id": "auth.admin.generate-link.anon",
+      "pass": true
+    },
+    {
+      "id": "auth.admin.generate-link.invalid",
+      "pass": true
+    },
+    {
+      "id": "auth.admin.oauth.clients.anon",
+      "pass": true
+    },
+    {
+      "id": "auth.admin.oauth.clients.create.anon",
+      "pass": true
+    },
+    {
+      "id": "auth.admin.oauth.clients.create.disabled",
+      "pass": true
+    },
+    {
+      "id": "auth.admin.oauth.clients.delete.anon",
+      "pass": true
+    },
+    {
+      "id": "auth.admin.oauth.clients.delete.disabled",
+      "pass": true
+    },
+    {
+      "id": "auth.admin.oauth.clients.disabled",
+      "pass": true
+    },
+    {
+      "id": "auth.admin.oauth.clients.get.anon",
+      "pass": true
+    },
+    {
+      "id": "auth.admin.oauth.clients.get.disabled",
+      "pass": true
+    },
+    {
+      "id": "auth.admin.oauth.clients.put.anon",
+      "pass": true
+    },
+    {
+      "id": "auth.admin.oauth.clients.put.disabled",
+      "pass": true
+    },
+    {
+      "id": "auth.admin.oauth.clients.regenerate.anon",
+      "pass": true
+    },
+    {
+      "id": "auth.admin.oauth.clients.regenerate.disabled",
+      "pass": true
+    },
+    {
+      "id": "auth.admin.sso.providers.create.anon",
+      "pass": true
+    },
+    {
+      "id": "auth.admin.sso.providers.create.invalid",
+      "pass": true
+    },
+    {
+      "id": "auth.admin.sso.providers.delete.anon",
+      "pass": true
+    },
+    {
+      "id": "auth.admin.sso.providers.delete.bad-id",
+      "pass": true
+    },
+    {
+      "id": "auth.admin.sso.providers.delete.missing",
+      "pass": true
+    },
+    {
+      "id": "auth.admin.sso.providers.get.anon",
+      "pass": true
+    },
+    {
+      "id": "auth.admin.sso.providers.get.missing",
+      "pass": true
+    },
+    {
+      "id": "auth.admin.sso.providers.list",
+      "pass": true
+    },
+    {
+      "id": "auth.admin.sso.providers.list.anon",
+      "pass": true
+    },
+    {
+      "id": "auth.admin.sso.providers.put.anon",
+      "pass": true
+    },
+    {
+      "id": "auth.admin.sso.providers.put.invalid",
+      "pass": true
+    },
+    {
       "id": "auth.admin.users.anon",
-      "pass": false
+      "pass": true
+    },
+    {
+      "id": "auth.admin.users.create.anon",
+      "pass": true
+    },
+    {
+      "id": "auth.admin.users.create.empty",
+      "pass": true
+    },
+    {
+      "id": "auth.admin.users.delete.anon",
+      "pass": true
+    },
+    {
+      "id": "auth.admin.users.delete.bad-id",
+      "pass": true
+    },
+    {
+      "id": "auth.admin.users.delete.missing",
+      "pass": true
+    },
+    {
+      "id": "auth.admin.users.factors.delete.anon",
+      "pass": true
+    },
+    {
+      "id": "auth.admin.users.factors.delete.bad-user",
+      "pass": true
+    },
+    {
+      "id": "auth.admin.users.factors.delete.missing-user",
+      "pass": true
+    },
+    {
+      "id": "auth.admin.users.factors.list.anon",
+      "pass": true
+    },
+    {
+      "id": "auth.admin.users.factors.list.missing-user",
+      "pass": true
+    },
+    {
+      "id": "auth.admin.users.factors.put.anon",
+      "pass": true
+    },
+    {
+      "id": "auth.admin.users.factors.put.missing-user",
+      "pass": true
+    },
+    {
+      "id": "auth.admin.users.get.anon",
+      "pass": true
+    },
+    {
+      "id": "auth.admin.users.get.missing",
+      "pass": true
     },
     {
       "id": "auth.admin.users.list",
-      "pass": false
+      "pass": true
+    },
+    {
+      "id": "auth.admin.users.passkeys.delete.anon",
+      "pass": true
+    },
+    {
+      "id": "auth.admin.users.passkeys.delete.bad-user",
+      "pass": true
+    },
+    {
+      "id": "auth.admin.users.passkeys.delete.missing-user",
+      "pass": true
+    },
+    {
+      "id": "auth.admin.users.passkeys.list.anon",
+      "pass": true
+    },
+    {
+      "id": "auth.admin.users.passkeys.list.missing-user",
+      "pass": true
+    },
+    {
+      "id": "auth.admin.users.put.anon",
+      "pass": true
+    },
+    {
+      "id": "auth.admin.users.put.missing",
+      "pass": true
+    },
+    {
+      "id": "auth.adversarial.body.signup-email-and-phone",
+      "pass": true
+    },
+    {
+      "id": "auth.adversarial.body.signup-email-type",
+      "pass": true
+    },
+    {
+      "id": "auth.adversarial.body.signup-empty",
+      "pass": true
+    },
+    {
+      "id": "auth.adversarial.body.signup-not-json",
+      "pass": true
+    },
+    {
+      "id": "auth.adversarial.body.signup-password-type",
+      "pass": true
+    },
+    {
+      "id": "auth.adversarial.body.token-empty",
+      "pass": true
+    },
+    {
+      "id": "auth.adversarial.body.token-grant",
+      "pass": true
+    },
+    {
+      "id": "auth.adversarial.body.token-not-json",
+      "pass": true
+    },
+    {
+      "id": "auth.adversarial.jwt.alg-none",
+      "pass": true
+    },
+    {
+      "id": "auth.adversarial.jwt.expired",
+      "pass": true
+    },
+    {
+      "id": "auth.adversarial.jwt.forged",
+      "pass": true
+    },
+    {
+      "id": "auth.adversarial.jwt.malformed",
+      "pass": true
+    },
+    {
+      "id": "auth.adversarial.jwt.role-escalation",
+      "pass": true
+    },
+    {
+      "id": "auth.adversarial.jwt.tampered-role",
+      "pass": true
+    },
+    {
+      "id": "auth.adversarial.jwt.truncated",
+      "pass": true
+    },
+    {
+      "id": "auth.adversarial.rate-limit.token",
+      "pass": true
+    },
+    {
+      "id": "auth.adversarial.redirect.authorize",
+      "pass": true
+    },
+    {
+      "id": "auth.adversarial.redirect.decimal-ip",
+      "pass": true
+    },
+    {
+      "id": "auth.adversarial.redirect.external",
+      "pass": true
+    },
+    {
+      "id": "auth.adversarial.redirect.javascript",
+      "pass": true
+    },
+    {
+      "id": "auth.adversarial.redirect.protocol-relative",
+      "pass": true
+    },
+    {
+      "id": "auth.adversarial.redirect.same-origin",
+      "pass": true
+    },
+    {
+      "id": "auth.adversarial.redirect.scheme",
+      "pass": true
+    },
+    {
+      "id": "auth.adversarial.redirect.suffix-host",
+      "pass": true
+    },
+    {
+      "id": "auth.adversarial.redirect.userinfo",
+      "pass": true
     },
     {
       "id": "auth.health",
-      "pass": false
+      "pass": true
+    },
+    {
+      "id": "auth.health.head",
+      "pass": true
+    },
+    {
+      "id": "auth.health.no-key",
+      "pass": true
+    },
+    {
+      "id": "auth.health.post",
+      "pass": true
+    },
+    {
+      "id": "auth.invite.anon",
+      "pass": true
+    },
+    {
+      "id": "auth.invite.email-exists",
+      "pass": true
+    },
+    {
+      "id": "auth.invite.invalid-email",
+      "pass": true
+    },
+    {
+      "id": "auth.invite.no-bearer",
+      "pass": true
     },
     {
       "id": "auth.logout",
-      "pass": false
+      "pass": true
+    },
+    {
+      "id": "auth.logout.invalid-bearer",
+      "pass": true
+    },
+    {
+      "id": "auth.logout.no-bearer",
+      "pass": true
+    },
+    {
+      "id": "auth.logout.scope-invalid",
+      "pass": true
+    },
+    {
+      "id": "auth.logout.scope-others",
+      "pass": true
+    },
+    {
+      "id": "auth.passkeys.authentication.options.disabled",
+      "pass": true
+    },
+    {
+      "id": "auth.passkeys.authentication.verify.disabled",
+      "pass": true
+    },
+    {
+      "id": "auth.passkeys.delete.disabled",
+      "pass": true
+    },
+    {
+      "id": "auth.passkeys.list.disabled",
+      "pass": true
+    },
+    {
+      "id": "auth.passkeys.registration.options.disabled",
+      "pass": true
+    },
+    {
+      "id": "auth.passkeys.registration.verify.disabled",
+      "pass": true
+    },
+    {
+      "id": "auth.passkeys.update.disabled",
+      "pass": true
+    },
+    {
+      "id": "auth.scim.resource-types.disabled",
+      "pass": true
+    },
+    {
+      "id": "auth.scim.schemas.disabled",
+      "pass": true
+    },
+    {
+      "id": "auth.scim.service-provider-config.disabled",
+      "pass": true
     },
     {
       "id": "auth.settings",
-      "pass": false
+      "pass": true
+    },
+    {
+      "id": "auth.settings.accept-text",
+      "pass": true
+    },
+    {
+      "id": "auth.settings.no-key",
+      "pass": true
+    },
+    {
+      "id": "auth.settings.post",
+      "pass": true
+    },
+    {
+      "id": "auth.signup.all-optional-null",
+      "pass": true
+    },
+    {
+      "id": "auth.signup.null-password",
+      "pass": true
     },
     {
       "id": "auth.signup.password",
-      "pass": false
+      "pass": true
+    },
+    {
+      "id": "auth.signup.supabase-js-null-fields",
+      "pass": true
     },
     {
       "id": "auth.signup.weak-password",
-      "pass": false
+      "pass": true
+    },
+    {
+      "id": "auth.sql.function.email",
+      "pass": true
+    },
+    {
+      "id": "auth.sql.function.jwt",
+      "pass": true
+    },
+    {
+      "id": "auth.sql.function.role",
+      "pass": true
+    },
+    {
+      "id": "auth.sql.function.uid",
+      "pass": true
+    },
+    {
+      "id": "auth.sql.table.audit_log_entries",
+      "pass": true
+    },
+    {
+      "id": "auth.sql.table.custom_oauth_providers",
+      "pass": true
+    },
+    {
+      "id": "auth.sql.table.flow_state",
+      "pass": true
+    },
+    {
+      "id": "auth.sql.table.identities",
+      "pass": true
+    },
+    {
+      "id": "auth.sql.table.instances",
+      "pass": true
+    },
+    {
+      "id": "auth.sql.table.mfa_amr_claims",
+      "pass": true
+    },
+    {
+      "id": "auth.sql.table.mfa_challenges",
+      "pass": true
+    },
+    {
+      "id": "auth.sql.table.mfa_factors",
+      "pass": true
+    },
+    {
+      "id": "auth.sql.table.mfa_recovery_code_sets",
+      "pass": true
+    },
+    {
+      "id": "auth.sql.table.mfa_recovery_codes",
+      "pass": true
+    },
+    {
+      "id": "auth.sql.table.oauth_authorizations",
+      "pass": true
+    },
+    {
+      "id": "auth.sql.table.oauth_client_states",
+      "pass": true
+    },
+    {
+      "id": "auth.sql.table.oauth_clients",
+      "pass": true
+    },
+    {
+      "id": "auth.sql.table.oauth_consents",
+      "pass": true
+    },
+    {
+      "id": "auth.sql.table.one_time_tokens",
+      "pass": true
+    },
+    {
+      "id": "auth.sql.table.refresh_tokens",
+      "pass": true
+    },
+    {
+      "id": "auth.sql.table.saml_providers",
+      "pass": true
+    },
+    {
+      "id": "auth.sql.table.saml_relay_states",
+      "pass": true
+    },
+    {
+      "id": "auth.sql.table.schema_migrations",
+      "pass": true
+    },
+    {
+      "id": "auth.sql.table.scim_tokens",
+      "pass": true
+    },
+    {
+      "id": "auth.sql.table.scim_users",
+      "pass": true
+    },
+    {
+      "id": "auth.sql.table.sessions",
+      "pass": true
+    },
+    {
+      "id": "auth.sql.table.sso_domains",
+      "pass": true
+    },
+    {
+      "id": "auth.sql.table.sso_providers",
+      "pass": true
+    },
+    {
+      "id": "auth.sql.table.sso_sessions",
+      "pass": true
+    },
+    {
+      "id": "auth.sql.table.users",
+      "pass": true
+    },
+    {
+      "id": "auth.sql.table.webauthn_challenges",
+      "pass": true
+    },
+    {
+      "id": "auth.sql.table.webauthn_credentials",
+      "pass": true
     },
     {
       "id": "auth.token.password",
-      "pass": false
+      "pass": true
+    },
+    {
+      "id": "auth.token.password.supabase-js-null-fields",
+      "pass": true
     },
     {
       "id": "auth.token.refresh",
-      "pass": false
+      "pass": true
+    },
+    {
+      "id": "auth.token.refresh.invalid",
+      "pass": true
+    },
+    {
+      "id": "auth.token.refresh.missing-token",
+      "pass": true
+    },
+    {
+      "id": "auth.token.refresh.reuse",
+      "pass": true
     },
     {
       "id": "auth.token.wrong-password",
-      "pass": false
+      "pass": true
     },
     {
       "id": "auth.user.anon-key",
-      "pass": false
+      "pass": true
     },
     {
       "id": "auth.user.get",
-      "pass": false
+      "pass": true
+    },
+    {
+      "id": "auth.user.identity.authorize-disabled",
+      "pass": true
+    },
+    {
+      "id": "auth.user.identity.unlink-disabled",
+      "pass": true
+    },
+    {
+      "id": "auth.user.oauth.grants-disabled",
+      "pass": true
+    },
+    {
+      "id": "auth.user.put-metadata",
+      "pass": true
+    },
+    {
+      "id": "auth.user.put-password",
+      "pass": true
+    },
+    {
+      "id": "auth.user.put-phone",
+      "pass": true
+    },
+    {
+      "id": "auth.user.put-same-password",
+      "pass": true
+    },
+    {
+      "id": "auth.user.put.null-update-fields",
+      "pass": true
+    },
+    {
+      "id": "auth.user.put.supabase-js-null-fields",
+      "pass": true
+    },
+    {
+      "id": "auth.verify.get.email-change-expired",
+      "pass": true
+    },
+    {
+      "id": "auth.verify.get.invalid-type",
+      "pass": true
+    },
+    {
+      "id": "auth.verify.get.invite-expired",
+      "pass": true
+    },
+    {
+      "id": "auth.verify.get.missing-token",
+      "pass": true
+    },
+    {
+      "id": "auth.verify.get.missing-type",
+      "pass": true
+    },
+    {
+      "id": "auth.verify.get.recovery-expired",
+      "pass": true
+    },
+    {
+      "id": "auth.verify.get.signup-expired",
+      "pass": true
+    },
+    {
+      "id": "auth.verify.post.both-tokens",
+      "pass": true
+    },
+    {
+      "id": "auth.verify.post.email-change-expired",
+      "pass": true
+    },
+    {
+      "id": "auth.verify.post.hash-with-email",
+      "pass": true
+    },
+    {
+      "id": "auth.verify.post.invalid-email",
+      "pass": true
+    },
+    {
+      "id": "auth.verify.post.invalid-type",
+      "pass": true
+    },
+    {
+      "id": "auth.verify.post.invite-expired",
+      "pass": true
+    },
+    {
+      "id": "auth.verify.post.missing-type",
+      "pass": true
+    },
+    {
+      "id": "auth.verify.post.recovery-expired",
+      "pass": true
+    },
+    {
+      "id": "auth.verify.post.signup-expired",
+      "pass": true
+    },
+    {
+      "id": "auth.verify.post.token-without-address",
+      "pass": true
+    },
+    {
+      "id": "auth.verify.post.token-xor",
+      "pass": true
+    },
+    {
+      "id": "functions.invoke.get-query",
+      "pass": true
+    },
+    {
+      "id": "functions.invoke.missing",
+      "pass": true
+    },
+    {
+      "id": "functions.invoke.no-name",
+      "pass": true
+    },
+    {
+      "id": "functions.invoke.post-json",
+      "pass": true
+    },
+    {
+      "id": "functions.invoke.subpath",
+      "pass": true
+    },
+    {
+      "id": "functions.verify-jwt.expired",
+      "pass": true
+    },
+    {
+      "id": "functions.verify-jwt.forged",
+      "pass": true
+    },
+    {
+      "id": "functions.verify-jwt.garbage",
+      "pass": true
+    },
+    {
+      "id": "functions.verify-jwt.missing-header",
+      "pass": true
+    },
+    {
+      "id": "functions.verify-jwt.not-bearer",
+      "pass": true
+    },
+    {
+      "id": "functions.verify-jwt.options-skips",
+      "pass": true
     },
     {
       "id": "meta.config.version",
-      "pass": false
+      "pass": true
     },
     {
       "id": "meta.health",
-      "pass": false
+      "pass": true
     },
     {
       "id": "realtime.ping",
-      "pass": false
+      "pass": true
+    },
+    {
+      "id": "rest.adversarial.jwt.alg-none",
+      "pass": true
+    },
+    {
+      "id": "rest.adversarial.jwt.expired",
+      "pass": true
+    },
+    {
+      "id": "rest.adversarial.jwt.forged",
+      "pass": true
+    },
+    {
+      "id": "rest.adversarial.jwt.malformed",
+      "pass": true
+    },
+    {
+      "id": "rest.adversarial.jwt.tampered-role",
+      "pass": true
+    },
+    {
+      "id": "rest.adversarial.rls.anon",
+      "pass": true
+    },
+    {
+      "id": "rest.adversarial.rls.anon-embed",
+      "pass": true
+    },
+    {
+      "id": "rest.adversarial.rls.apikey-role",
+      "pass": true
+    },
+    {
+      "id": "rest.adversarial.rls.cross-user-comment",
+      "pass": true
+    },
+    {
+      "id": "rest.adversarial.rls.cross-user-delete",
+      "pass": true
+    },
+    {
+      "id": "rest.adversarial.rls.cross-user-insert",
+      "pass": true
+    },
+    {
+      "id": "rest.adversarial.rls.cross-user-not",
+      "pass": true
+    },
+    {
+      "id": "rest.adversarial.rls.cross-user-or",
+      "pass": true
+    },
+    {
+      "id": "rest.adversarial.rls.cross-user-read",
+      "pass": true
+    },
+    {
+      "id": "rest.adversarial.rls.cross-user-update",
+      "pass": true
+    },
+    {
+      "id": "rest.adversarial.rls.embed",
+      "pass": true
+    },
+    {
+      "id": "rest.adversarial.rls.embed-comments",
+      "pass": true
+    },
+    {
+      "id": "rest.adversarial.rls.embed-inner",
+      "pass": true
+    },
+    {
+      "id": "rest.adversarial.rls.filter-drop",
+      "pass": true
+    },
+    {
+      "id": "rest.adversarial.rls.filter-quote",
+      "pass": true
+    },
+    {
+      "id": "rest.adversarial.rls.owner-insert",
+      "pass": true
+    },
+    {
+      "id": "rest.adversarial.rls.owner-read",
+      "pass": true
+    },
+    {
+      "id": "rest.adversarial.rls.service-role",
+      "pass": true
+    },
+    {
+      "id": "rest.aggregate.avg",
+      "pass": true
+    },
+    {
+      "id": "rest.aggregate.avg-alias-cast",
+      "pass": true
+    },
+    {
+      "id": "rest.aggregate.avg-grouped",
+      "pass": true
+    },
+    {
+      "id": "rest.aggregate.count",
+      "pass": true
+    },
+    {
+      "id": "rest.aggregate.count-filtered",
+      "pass": true
+    },
+    {
+      "id": "rest.aggregate.count-grouped",
+      "pass": true
+    },
+    {
+      "id": "rest.aggregate.max",
+      "pass": true
+    },
+    {
+      "id": "rest.aggregate.max-grouped",
+      "pass": true
+    },
+    {
+      "id": "rest.aggregate.max-text",
+      "pass": true
+    },
+    {
+      "id": "rest.aggregate.min",
+      "pass": true
+    },
+    {
+      "id": "rest.aggregate.min-grouped",
+      "pass": true
+    },
+    {
+      "id": "rest.aggregate.min-text",
+      "pass": true
+    },
+    {
+      "id": "rest.aggregate.sum",
+      "pass": true
+    },
+    {
+      "id": "rest.aggregate.sum-alias-cast",
+      "pass": true
+    },
+    {
+      "id": "rest.aggregate.sum-grouped",
+      "pass": true
     },
     {
       "id": "rest.count.exact",
-      "pass": false
+      "pass": true
+    },
+    {
+      "id": "rest.embed.alias",
+      "pass": true
+    },
+    {
+      "id": "rest.embed.column-hint-alias",
+      "pass": true
+    },
+    {
+      "id": "rest.embed.column-hint-ambiguous",
+      "pass": true
+    },
+    {
+      "id": "rest.embed.column-hint-inner",
+      "pass": true
+    },
+    {
+      "id": "rest.embed.column-hint-key",
+      "pass": true
+    },
+    {
+      "id": "rest.embed.column-hint-not-a-key",
+      "pass": true
+    },
+    {
+      "id": "rest.embed.constraint-target",
+      "pass": true
+    },
+    {
+      "id": "rest.embed.inner-filters-parents",
+      "pass": true
+    },
+    {
+      "id": "rest.embed.left-many-to-one",
+      "pass": true
+    },
+    {
+      "id": "rest.embed.left-one-to-many",
+      "pass": true
+    },
+    {
+      "id": "rest.embed.no-relationship",
+      "pass": true
+    },
+    {
+      "id": "rest.filter.adj",
+      "pass": true
+    },
+    {
+      "id": "rest.filter.all",
+      "pass": true
+    },
+    {
+      "id": "rest.filter.any",
+      "pass": true
+    },
+    {
+      "id": "rest.filter.cd",
+      "pass": true
+    },
+    {
+      "id": "rest.filter.cs",
+      "pass": true
     },
     {
       "id": "rest.filter.eq",
-      "pass": false
+      "pass": true
+    },
+    {
+      "id": "rest.filter.fts",
+      "pass": true
     },
     {
       "id": "rest.filter.gt-lt",
-      "pass": false
+      "pass": true
+    },
+    {
+      "id": "rest.filter.gte",
+      "pass": true
+    },
+    {
+      "id": "rest.filter.ilike",
+      "pass": true
+    },
+    {
+      "id": "rest.filter.imatch",
+      "pass": true
     },
     {
       "id": "rest.filter.in",
-      "pass": false
+      "pass": true
+    },
+    {
+      "id": "rest.filter.is",
+      "pass": true
+    },
+    {
+      "id": "rest.filter.isdistinct",
+      "pass": true
+    },
+    {
+      "id": "rest.filter.like",
+      "pass": true
+    },
+    {
+      "id": "rest.filter.lte",
+      "pass": true
+    },
+    {
+      "id": "rest.filter.match",
+      "pass": true
+    },
+    {
+      "id": "rest.filter.neq",
+      "pass": true
+    },
+    {
+      "id": "rest.filter.nxl",
+      "pass": true
+    },
+    {
+      "id": "rest.filter.nxr",
+      "pass": true
+    },
+    {
+      "id": "rest.filter.ov",
+      "pass": true
+    },
+    {
+      "id": "rest.filter.phfts",
+      "pass": true
+    },
+    {
+      "id": "rest.filter.plfts",
+      "pass": true
+    },
+    {
+      "id": "rest.filter.sl",
+      "pass": true
+    },
+    {
+      "id": "rest.filter.sr",
+      "pass": true
     },
     {
       "id": "rest.filter.unknown-operator",
-      "pass": false
+      "pass": true
+    },
+    {
+      "id": "rest.filter.wfts",
+      "pass": true
+    },
+    {
+      "id": "rest.head.relation",
+      "pass": true
+    },
+    {
+      "id": "rest.head.relation-bad-filter",
+      "pass": true
+    },
+    {
+      "id": "rest.head.relation-count",
+      "pass": true
+    },
+    {
+      "id": "rest.head.relation-missing",
+      "pass": true
     },
     {
       "id": "rest.insert.rls-denied",
-      "pass": false
+      "pass": true
     },
     {
       "id": "rest.limit-offset",
-      "pass": false
+      "pass": true
+    },
+    {
+      "id": "rest.logic.and",
+      "pass": true
+    },
+    {
+      "id": "rest.logic.empty-tree",
+      "pass": true
+    },
+    {
+      "id": "rest.logic.leaf-not",
+      "pass": true
+    },
+    {
+      "id": "rest.logic.nested",
+      "pass": true
+    },
+    {
+      "id": "rest.logic.nested-not",
+      "pass": true
+    },
+    {
+      "id": "rest.logic.not-and",
+      "pass": true
+    },
+    {
+      "id": "rest.logic.not-or",
+      "pass": true
+    },
+    {
+      "id": "rest.logic.or",
+      "pass": true
+    },
+    {
+      "id": "rest.logic.unclosed",
+      "pass": true
+    },
+    {
+      "id": "rest.media-type.any.fallback",
+      "pass": true
+    },
+    {
+      "id": "rest.media-type.any.get",
+      "pass": true
+    },
+    {
+      "id": "rest.media-type.any.head",
+      "pass": true
+    },
+    {
+      "id": "rest.media-type.csv.filtered",
+      "pass": true
+    },
+    {
+      "id": "rest.media-type.csv.get",
+      "pass": true
+    },
+    {
+      "id": "rest.media-type.csv.head",
+      "pass": true
+    },
+    {
+      "id": "rest.media-type.form-urlencoded.patch",
+      "pass": true
+    },
+    {
+      "id": "rest.media-type.form-urlencoded.post",
+      "pass": true
+    },
+    {
+      "id": "rest.media-type.form-urlencoded.rpc",
+      "pass": true
+    },
+    {
+      "id": "rest.media-type.geojson.filtered",
+      "pass": true
+    },
+    {
+      "id": "rest.media-type.geojson.get",
+      "pass": true
+    },
+    {
+      "id": "rest.media-type.geojson.head",
+      "pass": true
+    },
+    {
+      "id": "rest.media-type.geojson.mixed",
+      "pass": true
+    },
+    {
+      "id": "rest.media-type.json.explicit",
+      "pass": true
+    },
+    {
+      "id": "rest.media-type.json.head",
+      "pass": true
+    },
+    {
+      "id": "rest.media-type.json.none",
+      "pass": true
+    },
+    {
+      "id": "rest.media-type.json.unsupported",
+      "pass": true
+    },
+    {
+      "id": "rest.media-type.octet-stream.get",
+      "pass": true
+    },
+    {
+      "id": "rest.media-type.octet-stream.head",
+      "pass": true
+    },
+    {
+      "id": "rest.media-type.octet-stream.mixed",
+      "pass": true
+    },
+    {
+      "id": "rest.media-type.octet-stream.rpc.bytea",
+      "pass": true
+    },
+    {
+      "id": "rest.media-type.octet-stream.rpc.no-bytea-param",
+      "pass": true
+    },
+    {
+      "id": "rest.media-type.openapi-json.root",
+      "pass": true
+    },
+    {
+      "id": "rest.media-type.plain.get",
+      "pass": true
+    },
+    {
+      "id": "rest.media-type.plain.head",
+      "pass": true
+    },
+    {
+      "id": "rest.media-type.plain.mixed",
+      "pass": true
+    },
+    {
+      "id": "rest.media-type.plan.fallback",
+      "pass": true
+    },
+    {
+      "id": "rest.media-type.plan.json.disabled",
+      "pass": true
+    },
+    {
+      "id": "rest.media-type.plan.text.disabled",
+      "pass": true
+    },
+    {
+      "id": "rest.media-type.xml.get",
+      "pass": true
+    },
+    {
+      "id": "rest.media-type.xml.head",
+      "pass": true
+    },
+    {
+      "id": "rest.media-type.xml.mixed",
+      "pass": true
+    },
+    {
+      "id": "rest.media.array-nulls-stripped",
+      "pass": true
+    },
+    {
+      "id": "rest.media.object-nulls-stripped",
+      "pass": true
+    },
+    {
+      "id": "rest.media.object-nulls-stripped-multiple-rows",
+      "pass": true
+    },
+    {
+      "id": "rest.media.object.delete",
+      "pass": true
+    },
+    {
+      "id": "rest.media.object.insert",
+      "pass": true
+    },
+    {
+      "id": "rest.media.object.patch-minimal-two-rows-rolls-back",
+      "pass": true
+    },
+    {
+      "id": "rest.media.object.patch-no-rows",
+      "pass": true
+    },
+    {
+      "id": "rest.media.object.patch-two-rows-rolls-back",
+      "pass": true
+    },
+    {
+      "id": "rest.media.object.rpc",
+      "pass": true
     },
     {
       "id": "rest.missing-table",
-      "pass": false
+      "pass": true
     },
     {
       "id": "rest.object.single",
-      "pass": false
+      "pass": true
+    },
+    {
+      "id": "rest.options.relation",
+      "pass": true
+    },
+    {
+      "id": "rest.options.relation-cors-preflight",
+      "pass": true
+    },
+    {
+      "id": "rest.options.relation-service-role",
+      "pass": true
+    },
+    {
+      "id": "rest.order.asc",
+      "pass": true
+    },
+    {
+      "id": "rest.order.asc-nullsfirst",
+      "pass": true
+    },
+    {
+      "id": "rest.order.asc-text",
+      "pass": true
+    },
+    {
+      "id": "rest.order.desc",
+      "pass": true
+    },
+    {
+      "id": "rest.order.desc-nullslast",
+      "pass": true
+    },
+    {
+      "id": "rest.order.desc-text",
+      "pass": true
+    },
+    {
+      "id": "rest.order.multi-term",
+      "pass": true
+    },
+    {
+      "id": "rest.order.nullsfirst",
+      "pass": true
+    },
+    {
+      "id": "rest.order.nullslast",
+      "pass": true
+    },
+    {
+      "id": "rest.prefer.count.estimated",
+      "pass": true
+    },
+    {
+      "id": "rest.prefer.count.planned",
+      "pass": true
+    },
+    {
+      "id": "rest.prefer.handling.lenient",
+      "pass": true
+    },
+    {
+      "id": "rest.prefer.handling.strict",
+      "pass": true
+    },
+    {
+      "id": "rest.prefer.max-affected",
+      "pass": true
+    },
+    {
+      "id": "rest.prefer.missing.default",
+      "pass": true
+    },
+    {
+      "id": "rest.prefer.missing.null",
+      "pass": true
+    },
+    {
+      "id": "rest.prefer.resolution.ignore-duplicates",
+      "pass": true
+    },
+    {
+      "id": "rest.prefer.resolution.merge-duplicates",
+      "pass": true
+    },
+    {
+      "id": "rest.prefer.return.headers-only.delete",
+      "pass": true
+    },
+    {
+      "id": "rest.prefer.return.headers-only.insert",
+      "pass": true
+    },
+    {
+      "id": "rest.prefer.return.headers-only.update",
+      "pass": true
+    },
+    {
+      "id": "rest.prefer.return.minimal.delete",
+      "pass": true
+    },
+    {
+      "id": "rest.prefer.return.minimal.insert",
+      "pass": true
+    },
+    {
+      "id": "rest.prefer.return.minimal.update",
+      "pass": true
+    },
+    {
+      "id": "rest.prefer.return.representation.delete",
+      "pass": true
+    },
+    {
+      "id": "rest.prefer.return.representation.delete.existing",
+      "pass": true
+    },
+    {
+      "id": "rest.prefer.return.representation.insert",
+      "pass": true
+    },
+    {
+      "id": "rest.prefer.return.representation.update",
+      "pass": true
+    },
+    {
+      "id": "rest.prefer.timezone.invalid",
+      "pass": true
+    },
+    {
+      "id": "rest.prefer.timezone.named",
+      "pass": true
+    },
+    {
+      "id": "rest.prefer.timezone.read",
+      "pass": true
+    },
+    {
+      "id": "rest.prefer.timezone.rpc",
+      "pass": true
+    },
+    {
+      "id": "rest.prefer.tx.commit",
+      "pass": true
+    },
+    {
+      "id": "rest.prefer.tx.commit.read",
+      "pass": true
+    },
+    {
+      "id": "rest.prefer.tx.rollback",
+      "pass": true
+    },
+    {
+      "id": "rest.prefer.tx.rollback.read",
+      "pass": true
+    },
+    {
+      "id": "rest.prefer.tx.rollback.update",
+      "pass": true
+    },
+    {
+      "id": "rest.put.anon-denied",
+      "pass": true
+    },
+    {
+      "id": "rest.put.insert",
+      "pass": true
+    },
+    {
+      "id": "rest.put.key-mismatch",
+      "pass": true
+    },
+    {
+      "id": "rest.put.limit",
+      "pass": true
+    },
+    {
+      "id": "rest.put.no-filter",
+      "pass": true
+    },
+    {
+      "id": "rest.put.update",
+      "pass": true
+    },
+    {
+      "id": "rest.query.and",
+      "pass": true
+    },
+    {
+      "id": "rest.query.columns",
+      "pass": true
+    },
+    {
+      "id": "rest.query.on-conflict",
+      "pass": true
+    },
+    {
+      "id": "rest.query.or",
+      "pass": true
+    },
+    {
+      "id": "rest.root.get",
+      "pass": true
+    },
+    {
+      "id": "rest.root.get-accept-openapi",
+      "pass": true
+    },
+    {
+      "id": "rest.root.get-accept-unsupported",
+      "pass": true
+    },
+    {
+      "id": "rest.root.head",
+      "pass": true
+    },
+    {
+      "id": "rest.root.head-accept-openapi",
+      "pass": true
+    },
+    {
+      "id": "rest.root.head-accept-unsupported",
+      "pass": true
+    },
+    {
+      "id": "rest.root.options",
+      "pass": true
+    },
+    {
+      "id": "rest.root.options-cors-preflight",
+      "pass": true
+    },
+    {
+      "id": "rest.root.options-service-role",
+      "pass": true
     },
     {
       "id": "rest.rpc.get",
-      "pass": false
+      "pass": true
+    },
+    {
+      "id": "rest.rpc.head.no-args",
+      "pass": true
+    },
+    {
+      "id": "rest.rpc.head.query",
+      "pass": true
+    },
+    {
+      "id": "rest.rpc.head.unknown",
+      "pass": true
+    },
+    {
+      "id": "rest.rpc.options.known",
+      "pass": true
+    },
+    {
+      "id": "rest.rpc.options.query",
+      "pass": true
+    },
+    {
+      "id": "rest.rpc.options.unknown",
+      "pass": true
     },
     {
       "id": "rest.rpc.post",
-      "pass": false
+      "pass": true
     },
     {
       "id": "rest.select.all",
-      "pass": false
+      "pass": true
     },
     {
       "id": "rest.select.columns",
-      "pass": false
+      "pass": true
     },
     {
       "id": "storage.bucket.list",
-      "pass": false
+      "pass": true
     },
     {
       "id": "storage.bucket.missing",
-      "pass": false
+      "pass": true
+    },
+    {
+      "id": "storage.bucket.write.create",
+      "pass": true
+    },
+    {
+      "id": "storage.bucket.write.create-duplicate",
+      "pass": true
+    },
+    {
+      "id": "storage.bucket.write.create-invalid-name",
+      "pass": true
+    },
+    {
+      "id": "storage.bucket.write.create-options",
+      "pass": true
+    },
+    {
+      "id": "storage.bucket.write.create-too-large",
+      "pass": true
+    },
+    {
+      "id": "storage.bucket.write.lifecycle-get",
+      "pass": true
+    },
+    {
+      "id": "storage.bucket.write.lifecycle-put",
+      "pass": true
+    },
+    {
+      "id": "storage.bucket.write.update",
+      "pass": true
+    },
+    {
+      "id": "storage.bucket.write.update-missing",
+      "pass": true
+    },
+    {
+      "id": "storage.render.authenticated_invalid_key",
+      "pass": true
+    },
+    {
+      "id": "storage.render.public_invalid_key",
+      "pass": true
+    },
+    {
+      "id": "storage.render.sign_wrong_url",
+      "pass": true
+    },
+    {
+      "id": "storage.s3.unsigned.abort-multipart-upload",
+      "pass": true
+    },
+    {
+      "id": "storage.s3.unsigned.complete-multipart-upload",
+      "pass": true
+    },
+    {
+      "id": "storage.s3.unsigned.copy-object",
+      "pass": true
+    },
+    {
+      "id": "storage.s3.unsigned.create-bucket",
+      "pass": true
+    },
+    {
+      "id": "storage.s3.unsigned.create-multipart-upload",
+      "pass": true
+    },
+    {
+      "id": "storage.s3.unsigned.delete-bucket",
+      "pass": true
+    },
+    {
+      "id": "storage.s3.unsigned.delete-bucket-lifecycle",
+      "pass": true
+    },
+    {
+      "id": "storage.s3.unsigned.delete-object",
+      "pass": true
+    },
+    {
+      "id": "storage.s3.unsigned.delete-objects",
+      "pass": true
+    },
+    {
+      "id": "storage.s3.unsigned.get-bucket",
+      "pass": true
+    },
+    {
+      "id": "storage.s3.unsigned.get-bucket-lifecycle",
+      "pass": true
+    },
+    {
+      "id": "storage.s3.unsigned.get-bucket-location",
+      "pass": true
+    },
+    {
+      "id": "storage.s3.unsigned.get-bucket-versioning",
+      "pass": true
+    },
+    {
+      "id": "storage.s3.unsigned.get-object",
+      "pass": true
+    },
+    {
+      "id": "storage.s3.unsigned.get-object-bearer",
+      "pass": true
+    },
+    {
+      "id": "storage.s3.unsigned.get-object-tagging",
+      "pass": true
+    },
+    {
+      "id": "storage.s3.unsigned.head-bucket",
+      "pass": true
+    },
+    {
+      "id": "storage.s3.unsigned.head-object",
+      "pass": true
+    },
+    {
+      "id": "storage.s3.unsigned.list-buckets",
+      "pass": true
+    },
+    {
+      "id": "storage.s3.unsigned.list-multipart-uploads",
+      "pass": true
+    },
+    {
+      "id": "storage.s3.unsigned.list-objects-v2",
+      "pass": true
+    },
+    {
+      "id": "storage.s3.unsigned.list-parts",
+      "pass": true
+    },
+    {
+      "id": "storage.s3.unsigned.post-policy",
+      "pass": true
+    },
+    {
+      "id": "storage.s3.unsigned.put-bucket-lifecycle",
+      "pass": true
+    },
+    {
+      "id": "storage.s3.unsigned.put-object",
+      "pass": true
+    },
+    {
+      "id": "storage.s3.unsigned.upload-part",
+      "pass": true
+    },
+    {
+      "id": "storage.s3.unsigned.upload-part-copy",
+      "pass": true
     }
   ]
 }
