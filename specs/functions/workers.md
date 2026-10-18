@@ -96,7 +96,9 @@ Input: `method` (bytes), `url` (string), `headers` (list of pairs),
 
 - An empty header name is skipped.
 - A header value that is not a legal HTTP value becomes an empty value
-  (`unwrap_or` of `HeaderValue::from_static("")`).
+  (`HeaderValue::from_bytes` failing, then `HeaderValue::from_static("")`).
+  Bytes that `HeaderValue` accepts, including obs-text (`0x80`–`0xFF`),
+  are forwarded unchanged.
 - A header name that is not a legal HTTP name is skipped. The op
   `unwrap`s and panics; Megabase does not panic on a request.
 - When `hasBody` is false, the method is `POST` or `PUT`, and a
@@ -142,11 +144,13 @@ many workers acknowledged early drop (`lib.rs:696`–`:718`,
 `strategy_per_worker.rs:472`–`:482`).
 
 A worker acknowledges when it has no in-flight request and has not already
-acknowledged. The ack is sent before the process is stopped, so a `timeoutMs`
-of `0` still counts an ack that is already ready (the oneshot is sent, then
-waited on). A busy worker is not counted and is not stopped. Each
-acknowledged worker is then retired and stopped, and leaves the pool.
-Workers that were already removed are not part of the scan.
+acknowledged. The retired check and the in-flight increment in `fetch_send`
+share one lock with that ack, so a request that has passed the retired
+check cannot be cleaned up. The ack is sent before the process is stopped,
+so a `timeoutMs` of `0` still counts an ack that is already ready (the
+oneshot is sent, then waited on). A busy worker is not counted and is not
+stopped. Each acknowledged worker is then retired and stopped, and leaves
+the pool. Workers that were already removed are not part of the scan.
 
 `main` never calls this. The gateway exposes it on the pool.
 

@@ -8,7 +8,7 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
@@ -169,8 +169,8 @@ pub(crate) struct FetchBuildInput<'a> {
     pub method: &'a [u8],
     /// Request URL or request-target.
     pub url: &'a str,
-    /// Header pairs in order. Empty names are skipped.
-    pub headers: &'a [(String, String)],
+    /// Header name and value bytes, in order. Empty names are skipped.
+    pub headers: &'a [(Vec<u8>, Vec<u8>)],
     /// Whether the JS request has a body.
     pub has_body: bool,
 }
@@ -190,11 +190,10 @@ pub(crate) fn fetch_build(input: &FetchBuildInput<'_>) -> Result<BuiltRequest, B
         if name.is_empty() {
             continue;
         }
-        let Ok(name) = HeaderName::try_from(name.as_str()) else {
+        let Ok(name) = HeaderName::from_bytes(name) else {
             continue;
         };
-        let mut value =
-            HeaderValue::try_from(value.as_str()).unwrap_or(HeaderValue::from_static(""));
+        let mut value = HeaderValue::from_bytes(value).unwrap_or(HeaderValue::from_static(""));
         if zero_length && name == header::CONTENT_LENGTH {
             value = HeaderValue::from_static("0");
         }
@@ -207,6 +206,23 @@ pub(crate) fn fetch_build(input: &FetchBuildInput<'_>) -> Result<BuiltRequest, B
     })
 }
 
+/// Retired flag and in-flight count. `fetch_send` and idle-ack share this
+/// lock so a request that has passed the retired check cannot be cleaned up.
+struct Activity {
+    retired: bool,
+    removed: bool,
+    in_flight: usize,
+    early_drop_pending: bool,
+}
+
+/// Test seam: `begin_request` waits here while it still holds [`Activity`],
+/// after the retired check and before `in_flight` is incremented.
+#[cfg(test)]
+struct EnterGap {
+    started: Arc<std::sync::Barrier>,
+    release: Arc<std::sync::Barrier>,
+}
+
 struct Slot {
     key: Uuid,
     pool_key: String,
@@ -217,11 +233,10 @@ struct Slot {
     created_ms: u64,
     /// `None` when the wall clock is disabled (`workerTimeoutMs == 0`).
     limit: Option<Duration>,
-    retired: AtomicBool,
-    removed: AtomicBool,
-    in_flight: AtomicUsize,
-    early_drop_pending: AtomicBool,
+    activity: Mutex<Activity>,
     handle: tokio::sync::Mutex<Option<WorkerHandle>>,
+    #[cfg(test)]
+    enter_gap: Mutex<Option<EnterGap>>,
 }
 
 struct Catalog {
@@ -307,6 +322,10 @@ impl Pool {
             .pool_key
             .clone()
             .unwrap_or_else(|| opts.service_path.clone());
+        // Resolve the entrypoint before inserting a gate. A missing name
+        // must not grow `gates` (the old `Workers::address` checked first).
+        let name = function_name(&opts.service_path)?;
+        let entry = entrypoint(&self.inner.dir, name)?;
         let gate = self.gate(&pool_key);
         let _hold = gate.lock().await;
         self.sweep().await;
@@ -319,16 +338,23 @@ impl Pool {
             return Ok(CreateResult { key, reused: true });
         }
 
-        let name = function_name(&opts.service_path)?;
-        let entry = entrypoint(&self.inner.dir, name)?;
-        let handle = self
+        let handle = match self
             .inner
             .runtime
             .start(WorkerSpec {
                 name,
                 entrypoint: &entry,
             })
-            .await?;
+            .await
+        {
+            Ok(handle) => handle,
+            Err(error) => {
+                drop(_hold);
+                drop(gate);
+                self.inner.drop_gate_if_unused(&pool_key);
+                return Err(error);
+            }
+        };
         let key = Uuid::new_v4();
         let memory_limit_mb = opts.memory_limit_mb.unwrap_or(DEFAULT_MEMORY_LIMIT_MB);
         let worker_timeout_ms = opts.worker_timeout_ms.unwrap_or(DEFAULT_WORKER_TIMEOUT_MS);
@@ -341,11 +367,15 @@ impl Pool {
             worker_timeout_ms,
             created_ms: self.now_ms(),
             limit: wall_clock_limit(worker_timeout_ms),
-            retired: AtomicBool::new(false),
-            removed: AtomicBool::new(false),
-            in_flight: AtomicUsize::new(0),
-            early_drop_pending: AtomicBool::new(true),
+            activity: Mutex::new(Activity {
+                retired: false,
+                removed: false,
+                in_flight: 0,
+                early_drop_pending: true,
+            }),
             handle: tokio::sync::Mutex::new(Some(handle)),
+            #[cfg(test)]
+            enter_gap: Mutex::new(None),
         });
         {
             let mut catalog = self.catalog();
@@ -384,15 +414,7 @@ impl Pool {
                 "user worker not available".to_owned(),
             )));
         };
-        if slot.removed.load(Ordering::Acquire) {
-            return Err(map_supervisor_reject(SupervisorReject::Other(
-                "user worker not available".to_owned(),
-            )));
-        }
-        if slot.retired.load(Ordering::Acquire) {
-            return Err(map_supervisor_reject(SupervisorReject::Retired));
-        }
-        let _in_flight = InFlight::enter(Arc::clone(&slot));
+        let _in_flight = begin_request(&slot)?;
         let addr = slot.addr;
         proxy::forward(addr, request, target)
             .await
@@ -409,7 +431,7 @@ impl Pool {
             catalog
                 .workers
                 .values()
-                .filter(|slot| !slot.removed.load(Ordering::Acquire))
+                .filter(|slot| !activity(slot).removed)
                 .map(Arc::clone)
                 .collect()
         };
@@ -440,7 +462,7 @@ impl Pool {
         catalog
             .workers
             .values()
-            .filter(|slot| !slot.removed.load(Ordering::Acquire))
+            .filter(|slot| !activity(slot).removed)
             .map(|slot| {
                 (
                     slot.key.to_string(),
@@ -459,16 +481,26 @@ impl Pool {
     pub(crate) async fn worker_info(&self, key: Uuid) -> Option<WorkerInfo> {
         self.sweep().await;
         let slot = self.slot(key)?;
-        if slot.removed.load(Ordering::Acquire) {
+        let activity = activity(&slot);
+        if activity.removed {
             return None;
         }
         Some(WorkerInfo {
             service_path: slot.service_path.clone(),
             memory_limit_mb: slot.memory_limit_mb,
             worker_timeout_ms: slot.worker_timeout_ms,
-            retired: slot.retired.load(Ordering::Acquire),
-            in_flight: slot.in_flight.load(Ordering::Acquire),
+            retired: activity.retired,
+            in_flight: activity.in_flight,
         })
+    }
+
+    #[cfg(test)]
+    fn gate_count(&self) -> usize {
+        self.inner
+            .gates
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .len()
     }
 
     fn gate(&self, pool_key: &str) -> Arc<tokio::sync::Mutex<()>> {
@@ -508,7 +540,11 @@ impl Pool {
                 .unwrap_or_default()
         };
         for slot in slots {
-            if slot.removed.load(Ordering::Acquire) || slot.retired.load(Ordering::Acquire) {
+            let inactive = {
+                let activity = activity(&slot);
+                activity.removed || activity.retired
+            };
+            if inactive {
                 continue;
             }
             let running = slot
@@ -548,10 +584,21 @@ impl Pool {
             let period = limit.checked_div(2).unwrap_or(Duration::from_millis(1));
             let full = period.saturating_add(period);
             let elapsed = Duration::from_millis(now.saturating_sub(slot.created_ms));
-            if elapsed >= full {
+            let stop = {
+                let mut activity = activity(&slot);
+                if activity.removed {
+                    false
+                } else if elapsed >= full {
+                    true
+                } else {
+                    if elapsed >= period {
+                        activity.retired = true;
+                    }
+                    false
+                }
+            };
+            if stop {
                 self.shutdown(slot.key).await;
-            } else if elapsed >= period {
-                slot.retired.store(true, Ordering::Release);
             }
         }
     }
@@ -563,7 +610,7 @@ impl Pool {
 
 impl PoolInner {
     async fn shutdown(&self, key: Uuid) {
-        let slot = {
+        let (slot, empty, pool_key) = {
             let mut catalog = self.catalog.lock().unwrap_or_else(PoisonError::into_inner);
             let Some(slot) = catalog.workers.remove(&key) else {
                 return;
@@ -572,20 +619,39 @@ impl PoolInner {
             if let Some(ids) = catalog.by_pool.get_mut(&pool_key) {
                 ids.retain(|id| *id != key);
             }
-            if catalog
+            let empty = catalog
                 .by_pool
                 .get(&pool_key)
-                .is_some_and(|ids| ids.is_empty())
-            {
+                .is_some_and(|ids| ids.is_empty());
+            if empty {
                 catalog.by_pool.remove(&pool_key);
             }
-            slot
+            (slot, empty, pool_key)
         };
-        slot.removed.store(true, Ordering::Release);
-        slot.retired.store(true, Ordering::Release);
+        {
+            let mut activity = activity(&slot);
+            activity.removed = true;
+            activity.retired = true;
+        }
+        if empty {
+            self.drop_gate_if_unused(&pool_key);
+        }
         let handle = slot.handle.lock().await.take();
         if let Some(handle) = handle {
             handle.stop().await;
+        }
+    }
+
+    /// Remove `pool_key`'s gate when this map entry is the only owner.
+    /// A `create` that already cloned the `Arc` keeps its lock; the next
+    /// idle moment drops the entry.
+    fn drop_gate_if_unused(&self, pool_key: &str) {
+        let mut gates = self.gates.lock().unwrap_or_else(PoisonError::into_inner);
+        let unused = gates
+            .get(pool_key)
+            .is_some_and(|gate| Arc::strong_count(gate) == 1);
+        if unused {
+            gates.remove(pool_key);
         }
     }
 }
@@ -609,46 +675,69 @@ fn function_name(service_path: &str) -> Result<&str, BootError> {
     Ok(name)
 }
 
+fn activity(slot: &Slot) -> std::sync::MutexGuard<'_, Activity> {
+    slot.activity.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
 fn acknowledge(slot: &Slot) -> bool {
-    if slot.removed.load(Ordering::Acquire) || slot.in_flight.load(Ordering::Acquire) != 0 {
+    let mut activity = activity(slot);
+    if activity.removed || activity.in_flight != 0 || !activity.early_drop_pending {
         return false;
     }
-    if slot
-        .early_drop_pending
-        .compare_exchange(true, false, Ordering::AcqRel, Ordering::Acquire)
-        .is_err()
-    {
-        return false;
-    }
-    slot.retired.store(true, Ordering::Release);
+    activity.early_drop_pending = false;
+    activity.retired = true;
     true
 }
 
 struct InFlight(Arc<Slot>);
 
-impl InFlight {
-    fn enter(slot: Arc<Slot>) -> Self {
-        slot.in_flight.fetch_add(1, Ordering::AcqRel);
-        Self(slot)
+/// Mark one request in flight, or refuse a missing or retired worker.
+///
+/// The retired check and the `in_flight` increment hold [`Activity`] together.
+/// Idle cleanup takes the same lock, so it cannot ack a worker that has
+/// already passed the retired check.
+fn begin_request(slot: &Arc<Slot>) -> Result<InFlight, SendError> {
+    let mut activity = activity(slot);
+    if activity.removed {
+        return Err(map_supervisor_reject(SupervisorReject::Other(
+            "user worker not available".to_owned(),
+        )));
     }
+    if activity.retired {
+        return Err(map_supervisor_reject(SupervisorReject::Retired));
+    }
+    #[cfg(test)]
+    {
+        let gap = slot
+            .enter_gap
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take();
+        if let Some(gap) = gap {
+            gap.started.wait();
+            gap.release.wait();
+        }
+    }
+    activity.in_flight += 1;
+    Ok(InFlight(Arc::clone(slot)))
 }
 
 impl Drop for InFlight {
     fn drop(&mut self) {
-        self.0.in_flight.fetch_sub(1, Ordering::AcqRel);
+        let mut activity = activity(&self.0);
+        activity.in_flight = activity.in_flight.saturating_sub(1);
     }
 }
 
 /// Header pairs from a request map, in iteration order.
-pub(crate) fn header_pairs(headers: &HeaderMap) -> Vec<(String, String)> {
+///
+/// Values stay as raw bytes. `HeaderValue::to_str` rejects obs-text
+/// (`0x80`–`0xFF`), which is legal in a header value, so the bytes are
+/// copied instead of being replaced with an empty string.
+pub(crate) fn header_pairs(headers: &HeaderMap) -> Vec<(Vec<u8>, Vec<u8>)> {
     headers
         .iter()
-        .map(|(name, value)| {
-            (
-                name.as_str().to_owned(),
-                value.to_str().unwrap_or("").to_owned(),
-            )
-        })
+        .map(|(name, value)| (name.as_str().as_bytes().to_vec(), value.as_bytes().to_vec()))
         .collect()
 }
 
@@ -725,18 +814,26 @@ mod tests {
         HttpRequest::builder().body(Body::empty()).unwrap()
     }
 
+    fn header_list(pairs: &[(&str, &str)]) -> Vec<(Vec<u8>, Vec<u8>)> {
+        pairs
+            .iter()
+            .map(|(name, value)| (name.as_bytes().to_vec(), value.as_bytes().to_vec()))
+            .collect()
+    }
+
     #[test]
     fn fetch_build_zeros_content_length_for_post_and_put_without_a_body() {
+        let headers = header_list(&[
+            ("content-length", "12"),
+            ("x-bad", "a\nb"),
+            ("", "skip"),
+            ("not a header", "skip"),
+            ("authorization", "Bearer t"),
+        ]);
         let built = fetch_build(&FetchBuildInput {
             method: b"POST",
             url: "/hello?a=1",
-            headers: &[
-                ("content-length".into(), "12".into()),
-                ("x-bad".into(), "a\nb".into()),
-                (String::new(), "skip".into()),
-                ("not a header".into(), "skip".into()),
-                ("authorization".into(), "Bearer t".into()),
-            ],
+            headers: &headers,
             has_body: false,
         })
         .unwrap();
@@ -747,32 +844,53 @@ mod tests {
         assert_eq!(built.headers[header::AUTHORIZATION], "Bearer t");
         assert!(!built.headers.contains_key("not a header"));
 
+        let put_headers = header_list(&[("Content-Length", "4")]);
         let put = fetch_build(&FetchBuildInput {
             method: b"PUT",
             url: "/hello",
-            headers: &[("Content-Length".into(), "4".into())],
+            headers: &put_headers,
             has_body: false,
         })
         .unwrap();
         assert_eq!(put.headers[header::CONTENT_LENGTH], "0");
 
+        let kept_headers = header_list(&[("content-length", "4")]);
         let kept = fetch_build(&FetchBuildInput {
             method: b"POST",
             url: "/hello",
-            headers: &[("content-length".into(), "4".into())],
+            headers: &kept_headers,
             has_body: true,
         })
         .unwrap();
         assert_eq!(kept.headers[header::CONTENT_LENGTH], "4");
 
+        let get_headers = header_list(&[("content-length", "4")]);
         let get = fetch_build(&FetchBuildInput {
             method: b"GET",
             url: "/hello",
-            headers: &[("content-length".into(), "4".into())],
+            headers: &get_headers,
             has_body: false,
         })
         .unwrap();
         assert_eq!(get.headers[header::CONTENT_LENGTH], "4");
+    }
+
+    #[test]
+    fn fetch_build_keeps_obs_text_header_bytes() {
+        let mut headers = HeaderMap::new();
+        headers.append(
+            HeaderName::from_static("x-obs"),
+            HeaderValue::from_bytes(&[b'a', 0xff, b'b']).unwrap(),
+        );
+        let pairs = header_pairs(&headers);
+        let built = fetch_build(&FetchBuildInput {
+            method: b"GET",
+            url: "/hello",
+            headers: &pairs,
+            has_body: false,
+        })
+        .unwrap();
+        assert_eq!(built.headers["x-obs"].as_bytes(), &[b'a', 0xff, b'b']);
     }
 
     #[test]
@@ -901,8 +1019,79 @@ mod tests {
         assert!(matches!(error, BootError::NoEntrypoint));
         assert_eq!(starts.load(Ordering::SeqCst), 0);
         assert!(pool.mem_stats().await.is_empty());
+        assert_eq!(pool.gate_count(), 0);
+        for index in 0..8 {
+            let error = pool
+                .create(&opts(&format!("missing-{index}")))
+                .await
+                .unwrap_err();
+            assert!(matches!(error, BootError::NoEntrypoint));
+        }
+        assert_eq!(pool.gate_count(), 0);
         let error = pool.create(&opts("")).await.unwrap_err();
         assert!(matches!(error, BootError::NoEntrypoint));
+        assert_eq!(pool.gate_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn the_gate_is_dropped_when_the_last_worker_stops() {
+        let dir = temp_dir("gate");
+        let (runtime, _) = runtime();
+        let pool = Pool::new(dir, Box::new(runtime));
+        let created = pool.create(&opts("hello")).await.unwrap();
+        assert_eq!(pool.gate_count(), 1);
+        assert!(pool.worker_info(created.key).await.is_some());
+        assert_eq!(pool.cleanup_idle_workers(0).await, 1);
+        assert!(pool.worker_info(created.key).await.is_none());
+        assert_eq!(pool.gate_count(), 0);
+    }
+
+    #[test]
+    fn cleanup_cannot_ack_a_request_that_passed_the_retired_check() {
+        let started = Arc::new(std::sync::Barrier::new(2));
+        let release = Arc::new(std::sync::Barrier::new(2));
+        let slot = Arc::new(Slot {
+            key: Uuid::nil(),
+            pool_key: "hello".into(),
+            service_path: "hello".into(),
+            addr: std::net::SocketAddr::from(([127, 0, 0, 1], 9)),
+            memory_limit_mb: 150,
+            worker_timeout_ms: 0,
+            created_ms: 0,
+            limit: None,
+            activity: Mutex::new(Activity {
+                retired: false,
+                removed: false,
+                in_flight: 0,
+                early_drop_pending: true,
+            }),
+            handle: tokio::sync::Mutex::new(None),
+            enter_gap: Mutex::new(Some(EnterGap {
+                started: Arc::clone(&started),
+                release: Arc::clone(&release),
+            })),
+        });
+
+        let fetching = Arc::clone(&slot);
+        let fetcher = std::thread::spawn(move || begin_request(&fetching));
+        started.wait();
+
+        let acking = Arc::clone(&slot);
+        let acker = std::thread::spawn(move || acknowledge(&acking));
+        std::thread::sleep(Duration::from_millis(50));
+        assert!(
+            !acker.is_finished(),
+            "idle-ack ran between the retired check and the in_flight increment"
+        );
+
+        release.wait();
+        let in_flight = fetcher.join().unwrap().unwrap();
+        assert!(!acker.join().unwrap());
+        assert_eq!(activity(&slot).in_flight, 1);
+        assert!(!activity(&slot).retired);
+        drop(in_flight);
+        assert_eq!(activity(&slot).in_flight, 0);
+        assert!(acknowledge(&slot));
     }
 
     #[tokio::test]
