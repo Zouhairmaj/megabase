@@ -133,7 +133,7 @@ Implemented and tested counts come from markers and `judge/cases/`. Live conform
 | Functions | invoke | 4 | 1 | 1 | 1 |
 | Functions | node | 4 | 233 | 0 | 0 |
 | Functions | os | 4 | 1 | 0 | 0 |
-| Functions | runtime | 4 | 25 | 0 | 0 |
+| Functions | runtime | 4 | 25 | 1 | 0 |
 | Functions | workers | 4 | 5 | 0 | 0 |
 | Pooler | clusters | 4 | 3 | 0 | 0 |
 | Pooler | endpoints | 4 | 4 | 0 | 0 |

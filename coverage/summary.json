@@ -2,12 +2,12 @@
   "schema": 1,
   "totals": {
     "units": 1036,
-    "implemented": 346,
+    "implemented": 347,
     "tested": 218,
     "conformant": 0
   },
   "percent": {
-    "coverage": 33.4,
+    "coverage": 33.5,
     "conformance": 0.0,
     "done": 0.0
   },
@@ -110,7 +110,7 @@
     },
     "functions": {
       "units": 276,
-      "implemented": 5,
+      "implemented": 6,
       "tested": 1,
       "conformant": 0,
       "groups": {
@@ -152,7 +152,7 @@
         },
         "runtime": {
           "units": 25,
-          "implemented": 0,
+          "implemented": 1,
           "tested": 0,
           "conformant": 0
         },
@@ -687,6 +687,7 @@
     "functions:op:op_delete_env": "implemented",
     "functions:op:op_env": "implemented",
     "functions:op:op_get_env": "implemented",
+    "functions:op:op_runtime_memory_usage": "implemented",
     "functions:op:op_set_env": "implemented",
     "functions:route:* /functions/v1/{function_name}": "tested",
     "meta:route:DELETE /pg/policies/{id}": "implemented",
