@@ -95,7 +95,7 @@ An id of `0` (including `00`) never reaches a query: JavaScript treats it as
 missing, so retrieve returns `Invalid parameters on table retrieve`. Get
 answers 404. Patch and delete answer 400.
 
-Schema failures use Fastify's default Ajv text (`body must have required property 'name'`, `body/name must be string`, `body/replica_identity must match a schema in anyOf`, `querystring/limit must be integer`, `params/id must be integer`, and the same shape for the other fields). The pinned `setErrorHandler` sends that text as 500 `{"error":"..."}`.
+Schema failures use Fastify's default Ajv text (`body must have required property 'name'`, `body/name must be string`, `body/replica_identity must match a schema in anyOf`, `querystring/limit must be integer`, `params/id must be integer`, and the same shape for the other fields). Query booleans (`include_system_schemas`, `include_columns`, `cascade`) accept only the strings `true` and `false`. `cascade=1` and `cascade=0` are `querystring/cascade must be boolean`. The pinned `setErrorHandler` sends that text as 500 `{"error":"..."}`.
 
 A body that is not a JSON object uses `body must be object`. A body that is
 not JSON at all uses serde_json's parse error in that same 500 body. V8's

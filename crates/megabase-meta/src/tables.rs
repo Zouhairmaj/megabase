@@ -1120,9 +1120,10 @@ fn one<'a>(
 }
 
 fn parse_bool(raw: &str) -> Option<bool> {
+    // Ajv `coerceTypes` accepts only the strings `true` and `false`.
     match raw {
-        "true" | "1" => Some(true),
-        "false" | "0" => Some(false),
+        "true" => Some(true),
+        "false" => Some(false),
         _ => None,
     }
 }
@@ -1544,6 +1545,21 @@ mod tests {
         .await;
         assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
         assert_eq!(body["error"], "querystring/cascade must be boolean");
+        for cascade in ["1", "0"] {
+            let (status, body) = call(
+                app(Some(lazy_pool())),
+                "DELETE",
+                &format!("/pg/tables/1?cascade={cascade}"),
+                Some(&admin),
+                None,
+            )
+            .await;
+            assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR, "{cascade}");
+            assert_eq!(
+                body["error"], "querystring/cascade must be boolean",
+                "{cascade}"
+            );
+        }
         let huge = "9".repeat(20);
         let (status, body) = call(
             app(Some(lazy_pool())),
