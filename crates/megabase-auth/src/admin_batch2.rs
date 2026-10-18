@@ -30,6 +30,7 @@ use megabase_core::MegabaseNotImplemented;
 use serde::Deserialize;
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha224, Sha256};
+use url::{Host, Url};
 use uuid::Uuid;
 
 use crate::admin::{
@@ -984,38 +985,159 @@ pub(crate) fn get_referrer(
     })
 }
 
-/// GoTrue `IsRedirectURLValid` (`internal/utilities/request.go`).
+/// GoTrue `IsRedirectURLValid` (`internal/utilities/request.go`), with the
+/// candidate parsed by the WHATWG URL standard.
+///
+/// A value that does not parse, contains a backslash or userinfo, or spells
+/// an IPv4 address in anything other than dotted decimal is rejected. Hosts
+/// are compared after that canonicalization. A rejected candidate falls
+/// through to the site URL in [`get_referrer`].
 pub(crate) fn redirect_ok(
     site_url: &str,
     redirect: &str,
     allow: &[String],
 ) -> Result<bool, RedirectAllowListUnsupported> {
-    if redirect.is_empty() {
+    if redirect.is_empty() || redirect.contains('\\') || authority_has_userinfo(redirect) {
         return Ok(false);
     }
-    let Ok(base) = url_parts(site_url) else {
+    let Ok(base) = Url::parse(site_url) else {
         return Ok(false);
     };
-    let Ok(target) = url_parts(redirect) else {
+    let Ok(target) = Url::parse(redirect) else {
         return Ok(false);
     };
-    if base.host == target.host
-        && base.scheme == target.scheme
-        && (base.port == target.port || go_is_localhost(&target.host))
+    if target.host().is_none()
+        || !target.username().is_empty()
+        || target.password().is_some()
+        || noncanonical_ipv4(redirect, &target)
+    {
+        return Ok(false);
+    }
+    if base.scheme() == target.scheme()
+        && same_host(&base, &target)
+        && (raw_port(site_url) == raw_port(redirect) || host_is_localhost(&target))
     {
         return Ok(true);
     }
-    let host = target.host.as_str();
-    if host.chars().all(|ch| ch.is_ascii_digit()) {
-        return Ok(false);
-    }
-    if let Ok(ip) = host.parse::<std::net::IpAddr>() {
-        return Ok(ip.is_loopback());
-    }
-    if (target.scheme == "http" || target.scheme == "https") && !regular_hostname(host) {
-        return Ok(false);
+    match target.host() {
+        Some(Host::Ipv4(ip)) => return Ok(ip.is_loopback()),
+        Some(Host::Ipv6(ip)) => return Ok(ip.is_loopback()),
+        Some(Host::Domain(domain)) => {
+            if domain.chars().all(|ch| ch.is_ascii_digit()) {
+                return Ok(false);
+            }
+            if (target.scheme() == "http" || target.scheme() == "https")
+                && !regular_hostname(domain)
+            {
+                return Ok(false);
+            }
+        }
+        None => return Ok(false),
     }
     allow_list_matches(allow, redirect)
+}
+
+/// `@` in the authority is userinfo, including an empty user. `@` in the
+/// path or query is left alone.
+fn authority_has_userinfo(raw: &str) -> bool {
+    let Some((_, rest)) = raw.split_once("://") else {
+        return false;
+    };
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or(rest);
+    authority.contains('@')
+}
+
+fn same_host(left: &Url, right: &Url) -> bool {
+    match (left.host(), right.host()) {
+        (Some(Host::Domain(left)), Some(Host::Domain(right))) => left == right,
+        (Some(Host::Ipv4(left)), Some(Host::Ipv4(right))) => left == right,
+        (Some(Host::Ipv6(left)), Some(Host::Ipv6(right))) => left == right,
+        _ => false,
+    }
+}
+
+/// The WHATWG parser rewrites hex, octal, and integer IPv4 spellings to
+/// dotted decimal. Only the dotted form is accepted.
+fn noncanonical_ipv4(raw: &str, url: &Url) -> bool {
+    let Some(Host::Ipv4(ip)) = url.host() else {
+        return false;
+    };
+    let Some(authority) = raw_authority(raw) else {
+        return true;
+    };
+    authority.host != ip.to_string()
+}
+
+fn host_is_localhost(url: &Url) -> bool {
+    match url.host() {
+        Some(Host::Domain(name)) => go_is_localhost(name),
+        Some(Host::Ipv4(ip)) => {
+            let text = ip.to_string();
+            go_is_localhost(&text)
+        }
+        Some(Host::Ipv6(ip)) => {
+            let text = ip.to_string();
+            go_is_localhost(&text)
+        }
+        None => false,
+    }
+}
+
+struct RawAuthority<'a> {
+    host: &'a str,
+    port: &'a str,
+}
+
+fn raw_port(raw: &str) -> &str {
+    raw_authority(raw)
+        .map(|authority| authority.port)
+        .unwrap_or("")
+}
+
+/// Host and port as written, before WHATWG canonicalization. The port is
+/// empty when the authority omits it, matching Go `URL.Port`.
+fn raw_authority(raw: &str) -> Option<RawAuthority<'_>> {
+    let (_, rest) = raw.split_once("://")?;
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or(rest);
+    if authority.is_empty() {
+        return None;
+    }
+    let hostport = authority
+        .rsplit_once('@')
+        .map_or(authority, |(_, host)| host);
+    if hostport.is_empty() {
+        return None;
+    }
+    if let Some(rest) = hostport.strip_prefix('[') {
+        let (host, after) = rest.split_once(']')?;
+        if host.is_empty() {
+            return None;
+        }
+        let port = if let Some(port) = after.strip_prefix(':') {
+            if port.is_empty() || !port.bytes().all(|byte| byte.is_ascii_digit()) {
+                return None;
+            }
+            port
+        } else if after.is_empty() {
+            ""
+        } else {
+            return None;
+        };
+        return Some(RawAuthority { host, port });
+    }
+    if let Some((host, port)) = hostport.rsplit_once(':') {
+        if !host.is_empty()
+            && !host.contains(':')
+            && !port.is_empty()
+            && port.bytes().all(|byte| byte.is_ascii_digit())
+        {
+            return Some(RawAuthority { host, port });
+        }
+    }
+    Some(RawAuthority {
+        host: hostport,
+        port: "",
+    })
 }
 
 /// `url_validator.go` `isLocalhost`. Used only to skip the port check.
@@ -1045,11 +1167,16 @@ fn regular_hostname(host: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || *byte == b'.' || *byte == b'-')
 }
 
+/// Glob the scheme, host, and path. Query and fragment are not part of the
+/// match text. Separators stay `.` and `/`, as in GoTrue's gobwas/glob.
 fn allow_list_matches(
     allow: &[String],
     redirect: &str,
 ) -> Result<bool, RedirectAllowListUnsupported> {
-    let target = redirect.split_once('#').map_or(redirect, |(head, _)| head);
+    let without_fragment = redirect.split_once('#').map_or(redirect, |(head, _)| head);
+    let target = without_fragment
+        .split_once('?')
+        .map_or(without_fragment, |(head, _)| head);
     let mut unsupported = false;
     for pattern in allow {
         match glob_match(pattern, target) {
@@ -1169,6 +1296,9 @@ fn is_glob_sep(byte: u8) -> bool {
 struct UrlParts {
     scheme: String,
     host: String,
+    // Redirect checks read the port from the raw authority. This field stays
+    // so the OAuth parser tests can see which port `url_parts` kept.
+    #[allow(dead_code)]
     port: String,
 }
 
@@ -2763,7 +2893,7 @@ mod tests {
     }
 
     #[test]
-    fn redirect_checks_ignore_userinfo() {
+    fn redirect_rejects_userinfo_and_backslash() {
         let allow = Vec::<String>::new();
         assert!(!redirect_ok(
             "http://localhost:3000",
@@ -2777,13 +2907,36 @@ mod tests {
             &allow
         )
         .unwrap());
-        assert!(redirect_ok("https://127.0.0.1", "https://a.com:443@127.0.0.1/", &allow).unwrap());
+        assert!(!redirect_ok("https://127.0.0.1", "https://a.com:443@127.0.0.1/", &allow).unwrap());
+        assert!(!redirect_ok(
+            "https://example.com",
+            "https://user@example.com/path",
+            &allow
+        )
+        .unwrap());
+        assert!(!redirect_ok("https://example.com", "https://@example.com/path", &allow).unwrap());
         assert!(!redirect_ok(
             "http://localhost:3000",
             r"http://localhost\evil.com/cb",
             &allow
         )
         .unwrap());
+        assert!(
+            !redirect_ok("https://127.0.0.1", r"https://evil.com\@127.0.0.1/", &allow).unwrap()
+        );
+        assert!(!redirect_ok(
+            "https://example.com",
+            r"https://example.com\@welcome",
+            &allow
+        )
+        .unwrap());
+        assert!(redirect_ok(
+            "https://example.com",
+            "https://example.com/callback?email=a@b.com",
+            &allow
+        )
+        .unwrap());
+        assert!(redirect_ok("https://example.com", "https://example.com/@user", &allow).unwrap());
     }
 
     fn gotrue_allow_list() -> Vec<String> {
@@ -2912,7 +3065,14 @@ mod tests {
         assert!(redirect_ok("https://example.com", "http://127.0.0.2:9/cb", &allow).unwrap());
         assert!(redirect_ok("http://0.0.0.0:3000", "http://0.0.0.0:9/cb", &allow).unwrap());
         assert!(!redirect_ok("https://example.com", "http://0.0.0.0/cb", &allow).unwrap());
-        assert!(!redirect_ok("http://localhost:3000", "http://LocalHost:9/cb", &allow).unwrap());
+        assert!(redirect_ok("http://localhost:3000", "http://LocalHost:9/cb", &allow).unwrap());
+        assert!(redirect_ok("https://example.com", "https://Example.COM/dash", &allow).unwrap());
+        assert!(!redirect_ok(
+            "https://example.com",
+            "https://example.com:443/dash",
+            &allow
+        )
+        .unwrap());
         assert!(redirect_ok(
             "http://app.localhost:3000",
             "http://app.localhost:9/cb",
@@ -2924,6 +3084,89 @@ mod tests {
         assert!(!redirect_ok("https://example.com", "http://8.8.8.8/path", &ip_glob).unwrap());
         let digit = vec!["http://2130706433/*".to_string()];
         assert!(!redirect_ok("https://example.com", "http://2130706433/path", &digit).unwrap());
+    }
+
+    #[test]
+    fn redirect_canonical_ipv4_and_glob_path() {
+        let allow = Vec::<String>::new();
+        for raw in [
+            "http://0x7f.0.0.1/path",
+            "http://0X7F000001/path",
+            "http://0177.0.0.1/cb",
+            "http://127.1/cb",
+            "http://127.0.0.1./cb",
+            "http://2130706433/path",
+        ] {
+            assert!(
+                !redirect_ok("http://127.0.0.1:3000", raw, &allow).unwrap(),
+                "{raw}"
+            );
+        }
+        assert!(redirect_ok("https://example.com", "http://127.0.0.1/cb", &allow).unwrap());
+        assert!(redirect_ok(
+            "https://example.com",
+            "http://[0:0:0:0:0:0:0:1]:12345/path",
+            &allow
+        )
+        .unwrap());
+
+        let hex = vec!["http://0x08080808/*".to_string()];
+        assert!(!redirect_ok("https://example.com", "http://0x08080808/path", &hex).unwrap());
+        let octal = vec!["http://010.010.010.010/*".to_string()];
+        assert!(
+            !redirect_ok("https://example.com", "http://010.010.010.010/path", &octal).unwrap()
+        );
+        assert!(!redirect_ok("https://example.com", "http://8.8.8.8/path", &hex).unwrap());
+
+        let state = referrer_state(gotrue_allow_list());
+        let rejected = [
+            "http://evil?.localhost:8000/path",
+            "http://not-localhost?.localhost:8000/x",
+            r"https://evil.com\@127.0.0.1/",
+            "https://a.com:443@127.0.0.1/",
+            "http://0x7f.0.0.1/path",
+            "http://0177.0.0.1/cb",
+            "http://2130706433/phish",
+        ];
+        for raw in rejected {
+            let got = link_referrer(&state, &HeaderMap::new(), raw, "").unwrap();
+            assert_eq!(got, "https://example.com", "{raw}");
+        }
+
+        let wide = vec!["http://**:12345/*".to_string()];
+        assert!(redirect_ok("https://example.com", "http://a.b:12345/path", &wide).unwrap());
+        assert!(!redirect_ok(
+            "https://example.com",
+            "http://evil.example/steal?next=:12345/path",
+            &wide
+        )
+        .unwrap());
+        let star = vec!["http://*.localhost:8000/*".to_string()];
+        assert!(redirect_ok(
+            "https://example.com",
+            "http://foo.localhost:8000/path?param=1",
+            &star
+        )
+        .unwrap());
+        assert!(!redirect_ok(
+            "https://example.com",
+            "http://evil?.localhost:8000/path",
+            &star
+        )
+        .unwrap());
+        let literal = vec!["http://example.com/*".to_string()];
+        assert!(redirect_ok(
+            "https://app.test",
+            "http://example.com/a?b=1#section",
+            &literal
+        )
+        .unwrap());
+        assert!(!redirect_ok(
+            "https://app.test",
+            "http://evil.com/?http://example.com/a",
+            &literal
+        )
+        .unwrap());
     }
 
     #[test]
