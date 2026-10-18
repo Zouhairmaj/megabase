@@ -2,12 +2,12 @@
   "schema": 1,
   "totals": {
     "units": 1036,
-    "implemented": 342,
+    "implemented": 352,
     "tested": 218,
     "conformant": 0
   },
   "percent": {
-    "coverage": 33.0,
+    "coverage": 34.0,
     "conformance": 0.0,
     "done": 0.0
   },
@@ -390,7 +390,7 @@
     },
     "storage": {
       "units": 154,
-      "implemented": 100,
+      "implemented": 110,
       "tested": 35,
       "conformant": 0,
       "groups": {
@@ -408,7 +408,7 @@
         },
         "database": {
           "units": 46,
-          "implemented": 15,
+          "implemented": 25,
           "tested": 0,
           "conformant": 0
         },
@@ -892,6 +892,7 @@
     "storage:sql-function:storage.add_prefixes()": "implemented",
     "storage:sql-function:storage.allow_any_operation()": "implemented",
     "storage:sql-function:storage.allow_only_operation()": "implemented",
+    "storage:sql-function:storage.can_insert_object()": "implemented",
     "storage:sql-function:storage.delete_leaf_prefixes()": "implemented",
     "storage:sql-function:storage.delete_prefix()": "implemented",
     "storage:sql-function:storage.delete_prefix_hierarchy_trigger()": "implemented",
@@ -901,8 +902,17 @@
     "storage:sql-function:storage.filename()": "implemented",
     "storage:sql-function:storage.foldername()": "implemented",
     "storage:sql-function:storage.get_common_prefix()": "implemented",
+    "storage:sql-function:storage.get_size_by_bucket()": "implemented",
+    "storage:sql-function:storage.list_multipart_uploads_with_delimiter()": "implemented",
+    "storage:sql-function:storage.list_objects_with_delimiter()": "implemented",
+    "storage:sql-function:storage.operation()": "implemented",
+    "storage:sql-function:storage.protect_bucket_control_columns()": "implemented",
     "storage:sql-function:storage.protect_delete()": "implemented",
     "storage:sql-function:storage.search()": "implemented",
-    "storage:sql-table:storage.objects": "implemented"
+    "storage:sql-function:storage.search_by_timestamp()": "implemented",
+    "storage:sql-function:storage.search_v2()": "implemented",
+    "storage:sql-table:storage.objects": "implemented",
+    "storage:sql-table:storage.s3_multipart_uploads": "implemented",
+    "storage:sql-table:storage.s3_multipart_uploads_parts": "implemented"
   }
 }

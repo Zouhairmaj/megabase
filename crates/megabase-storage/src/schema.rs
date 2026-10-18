@@ -3,8 +3,9 @@
 //! The SQL is ported from the storage-api tenant migrations; each file under
 //! `sql/` names its upstream migration. The full `storage` schema is not
 //! installed (`specs/storage/database.md`), so the
-//! `storage:sql-table:storage.buckets` unit carries no marker;
-//! `storage.objects` is installed in its final shape.
+//! `storage:sql-table:storage.buckets` unit carries no marker.
+//! `storage.objects` and the S3 multipart tables are installed in their
+//! final shape.
 
 use std::time::Duration;
 
@@ -25,7 +26,7 @@ const OBJECTS_TABLE: &str = include_str!("../sql/objects.sql");
 // megabase:unit storage:sql-function:storage.filename()
 const PATH_FUNCTIONS: &str = include_str!("../sql/path_functions.sql");
 
-/// Dependency of the operation helpers; the unit itself is not claimed yet.
+// megabase:unit storage:sql-function:storage.operation()
 const OPERATION: &str = include_str!("../sql/operation.sql");
 
 // megabase:unit storage:sql-function:storage.allow_only_operation()
@@ -36,6 +37,10 @@ const ALLOW_ANY_OPERATION: &str = include_str!("../sql/allow_any_operation.sql")
 
 // megabase:unit storage:sql-function:storage.enforce_bucket_name_length()
 const ENFORCE_BUCKET_NAME_LENGTH: &str = include_str!("../sql/enforce_bucket_name_length.sql");
+
+// megabase:unit storage:sql-function:storage.protect_bucket_control_columns()
+const PROTECT_BUCKET_CONTROL_COLUMNS: &str =
+    include_str!("../sql/protect_bucket_control_columns.sql");
 
 // megabase:unit storage:sql-function:storage.enforce_bucket_lifecycle_service_role()
 const ENFORCE_BUCKET_LIFECYCLE_SERVICE_ROLE: &str =
@@ -51,12 +56,41 @@ const EXTENSION: &str = include_str!("../sql/extension.sql");
 // megabase:unit storage:sql-function:storage.delete_leaf_prefixes()
 const DROPPED_PREFIX_FUNCTIONS: &str = include_str!("../sql/dropped_prefix_functions.sql");
 
+// megabase:unit storage:sql-function:storage.can_insert_object()
+const CAN_INSERT_OBJECT: &str = include_str!("../sql/can_insert_object.sql");
+
+// megabase:unit storage:sql-table:storage.s3_multipart_uploads
+// megabase:unit storage:sql-table:storage.s3_multipart_uploads_parts
+const S3_MULTIPART: &str = include_str!("../sql/s3_multipart.sql");
+
+// megabase:unit storage:sql-function:storage.list_multipart_uploads_with_delimiter()
+const LIST_MULTIPART: &str = include_str!("../sql/list_multipart_uploads_with_delimiter.sql");
+
 // megabase:unit storage:sql-function:storage.get_common_prefix()
 // megabase:unit storage:sql-function:storage.search()
 const SEARCH: &str = include_str!("../sql/search.sql");
 
+// megabase:unit storage:sql-function:storage.list_objects_with_delimiter()
+const LIST_OBJECTS: &str = include_str!("../sql/list_objects_with_delimiter.sql");
+
+// megabase:unit storage:sql-function:storage.search_by_timestamp()
+const SEARCH_BY_TIMESTAMP: &str = include_str!("../sql/search_by_timestamp.sql");
+
+// megabase:unit storage:sql-function:storage.search_v2()
+const SEARCH_V2: &str = include_str!("../sql/search_v2.sql");
+
+// megabase:unit storage:sql-function:storage.get_size_by_bucket()
+const GET_SIZE_BY_BUCKET: &str = include_str!("../sql/get_size_by_bucket.sql");
+
+/// Assigns owners when `supabase_storage_admin` (or `storage.super_user`)
+/// already exists. Issue #493 creates that role; this file does not.
+const FUNCTION_OWNERS: &str = include_str!("../sql/function_owners.sql");
+
 /// Install order: the table before its triggers, `storage.operation()`
-/// before the `LANGUAGE sql` helpers that call it.
+/// before the `LANGUAGE sql` helpers that call it, and
+/// `storage.s3_multipart_uploads` before the `LANGUAGE sql` list function
+/// that reads it. `storage.search_v2` is installed after the two functions
+/// it calls.
 const OBJECTS: &[&str] = &[
     BUCKETS,
     OBJECTS_TABLE,
@@ -65,10 +99,19 @@ const OBJECTS: &[&str] = &[
     ALLOW_ONLY_OPERATION,
     ALLOW_ANY_OPERATION,
     ENFORCE_BUCKET_NAME_LENGTH,
+    PROTECT_BUCKET_CONTROL_COLUMNS,
     ENFORCE_BUCKET_LIFECYCLE_SERVICE_ROLE,
     EXTENSION,
     DROPPED_PREFIX_FUNCTIONS,
+    CAN_INSERT_OBJECT,
+    S3_MULTIPART,
+    LIST_MULTIPART,
     SEARCH,
+    LIST_OBJECTS,
+    SEARCH_BY_TIMESTAMP,
+    SEARCH_V2,
+    GET_SIZE_BY_BUCKET,
+    FUNCTION_OWNERS,
 ];
 
 /// Failure installing the storage schema. Display text does not include the URL.
@@ -147,10 +190,53 @@ mod tests {
         }
         for trigger in [
             "trigger enforce_bucket_name_length_trigger",
+            "TRIGGER protect_bucket_control_insert",
+            "TRIGGER protect_bucket_control_update ",
             "TRIGGER protect_bucket_control_update_role",
         ] {
             assert!(buckets < position(&sql, trigger), "{trigger}");
         }
+        let uploads = position(
+            &sql,
+            "CREATE TABLE IF NOT EXISTS storage.s3_multipart_uploads",
+        );
+        let parts = position(
+            &sql,
+            "CREATE TABLE IF NOT EXISTS storage.s3_multipart_uploads_parts",
+        );
+        assert!(buckets < uploads, "multipart uploads reference buckets");
+        assert!(uploads < parts, "parts reference uploads");
+        assert!(
+            parts
+                < position(
+                    &sql,
+                    "CREATE OR REPLACE FUNCTION storage.list_multipart_uploads_with_delimiter("
+                ),
+            "the list function is LANGUAGE sql and needs the table at CREATE"
+        );
+        let common = position(
+            &sql,
+            "CREATE OR REPLACE FUNCTION storage.get_common_prefix(",
+        );
+        let list_objects = position(
+            &sql,
+            "CREATE OR REPLACE FUNCTION storage.list_objects_with_delimiter(",
+        );
+        let by_timestamp = position(
+            &sql,
+            "CREATE OR REPLACE FUNCTION storage.search_by_timestamp(",
+        );
+        let search_v2 = position(&sql, "CREATE OR REPLACE FUNCTION storage.search_v2(");
+        assert!(common < list_objects);
+        assert!(list_objects < by_timestamp);
+        assert!(by_timestamp < search_v2);
+        assert!(
+            search_v2
+                < position(
+                    &sql,
+                    "ALTER FUNCTION storage.search_v2(text, text, integer, integer, text, text, text, text, text, text, timestamptz, text, boolean)"
+                )
+        );
     }
 
     #[test]
@@ -173,5 +259,58 @@ mod tests {
                 "{function} is created"
             );
         }
+    }
+
+    fn vendor_lines(file: &str, start: usize, end: usize) -> String {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../vendor/storage/migrations/tenant")
+            .join(file);
+        let text = std::fs::read_to_string(&path)
+            .unwrap_or_else(|err| panic!("reading {}: {err}", path.display()));
+        let lines: Vec<_> = text.lines().collect();
+        let mut body = lines[start - 1..end].join("\n");
+        body.push('\n');
+        body
+    }
+
+    #[test]
+    fn route_and_rls_functions_match_the_pinned_migrations() {
+        let sql = install_sql();
+        for (file, start, end) in [
+            ("0070-list-objects-with-versions.sql", 18, 87),
+            ("0070-list-objects-with-versions.sql", 112, 761),
+            ("0070-list-objects-with-versions.sql", 1345, 1536),
+            ("0070-list-objects-with-versions.sql", 1538, 1629),
+            ("0070-list-objects-with-versions.sql", 1631, 1662),
+            ("0068-bucket-lifecycle-configuration.sql", 61, 113),
+            ("0015-add-can-insert-object-function.sql", 1, 12),
+            ("0024-operation-function.sql", 1, 6),
+        ] {
+            let slice = vendor_lines(file, start, end);
+            assert!(
+                sql.contains(slice.trim_end()),
+                "{file}:{start}-{end} is not installed verbatim"
+            );
+        }
+        for older in [
+            "DROP FUNCTION IF EXISTS storage.list_objects_with_delimiter(text, text, text, integer, text, text);",
+            "DROP FUNCTION IF EXISTS storage.search_v2(text, text, integer, integer, text);",
+            "DROP FUNCTION IF EXISTS storage.get_size_by_bucket();",
+        ] {
+            assert!(sql.contains(older), "{older}");
+        }
+        assert!(
+            sql.contains("IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = super_user) THEN")
+        );
+        assert!(sql.contains("in_progress_size bigint NOT NULL DEFAULT 0"));
+        assert!(sql.contains("size bigint NOT NULL DEFAULT 0"));
+        assert!(sql.contains("GRANT SELECT ON TABLE storage.s3_multipart_uploads TO "));
+        assert!(sql.contains("GRANT ALL ON TABLE storage.s3_multipart_uploads_parts TO "));
+        assert!(!sql
+            .to_lowercase()
+            .contains("create role supabase_storage_admin"));
+        assert!(!sql
+            .to_lowercase()
+            .contains("create user supabase_storage_admin"));
     }
 }

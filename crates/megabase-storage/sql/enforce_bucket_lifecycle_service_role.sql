@@ -2,9 +2,9 @@
 -- migrations/tenant/0068-bucket-lifecycle-configuration.sql:115 and :155
 -- (Apache-2.0), pin v1.80.2.
 --
--- Only the AFTER UPDATE role check. The BEFORE triggers that run
--- `storage.protect_bucket_control_columns()` are a separate unit and are not
--- installed yet (specs/storage/database.md).
+-- The AFTER UPDATE role check. The BEFORE triggers that run
+-- `storage.protect_bucket_control_columns()` are installed by
+-- `protect_bucket_control_columns.sql` (specs/storage/database.md).
 
 CREATE OR REPLACE FUNCTION storage.enforce_bucket_lifecycle_service_role()
 RETURNS trigger
