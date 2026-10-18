@@ -202,14 +202,16 @@ Deno.serveHttp = function serveHttp(conn) {
 
 /// The main module of every worker: [`SOURCE`], the read of the function's
 /// entrypoint (path in `MEGABASE_FUNCTION_ENTRYPOINT`, removed from the
-/// environment), the user-worker `Deno.env` ([`crate::env::SOURCE`]), and
-/// finally the import of the entrypoint.
+/// environment), the user-worker `Deno.env` ([`crate::env::SOURCE`]), the
+/// runtime shims ([`crate::runtime::SOURCE`]), the user-worker console
+/// ([`crate::event_worker::SOURCE`]), and finally the import of the entrypoint.
 #[must_use]
 pub fn module() -> String {
     format!(
-        "{SOURCE}{ENTRYPOINT}{env}{runtime}{IMPORT}",
+        "{SOURCE}{ENTRYPOINT}{env}{runtime}{events}{IMPORT}",
         env = crate::env::SOURCE,
-        runtime = crate::runtime::SOURCE
+        runtime = crate::runtime::SOURCE,
+        events = crate::event_worker::SOURCE
     )
 }
 
