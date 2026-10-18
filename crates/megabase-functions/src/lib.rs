@@ -14,6 +14,7 @@
 pub mod bootstrap;
 pub mod env;
 pub mod gate;
+pub mod os;
 pub mod proxy;
 pub mod runtime;
 mod user_workers;
