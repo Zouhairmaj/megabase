@@ -1,4 +1,4 @@
-# Functions: runtime ops (issue 77, PR 1 of 3)
+# Functions: runtime ops (issue 77, PRs 1 and 2 of 3)
 
 Status: draft
 Level: 4
@@ -31,6 +31,30 @@ Pin edge-runtime `v1.77.4`.
 | `op_http_upgrade_raw2` | raw `Upgrade` stream (`ext/runtime/ops/http.rs:280`) | Yes: `Deno.upgradeHttpRaw` | Same gateway limit. Not served |
 | `op_http_upgrade_raw2_fence` | waits for the upgrade response (`ext/runtime/ops/http.rs:375`) | Yes, with the op above | Same gateway limit. Not served |
 | `op_is_runtime_init` | `RuntimeState::is_init()` (`ext/runtime/lib.rs:281`); gates `bootstrap.js:752`, `:763` | No: worker lifecycle plumbing | Not served |
+
+PR 2 units: `functions:op:op_is_terminal`, `op_main_module`, `op_mi_collect`,
+`op_net_accept`, `op_net_listen`, `op_net_unsupported`, `op_raise_segfault`,
+`op_read_line_prompt`, `op_runtime_memory_usage`, `op_runtime_metrics`.
+Only `op_runtime_memory_usage` is served and marked (`runtime.rs`).
+
+| Unit | Upstream behavior (file:line) | Observable by a function? | Megabase |
+|---|---|---|---|
+| `op_is_terminal` | commented out (`ext/runtime/lib.rs:275`), not registered (`:498`); no behavior | No | Not served |
+| `op_main_module` | the service main module after a read-permission check (`ext/runtime/ops/bootstrap.rs:26`); `Deno.mainModule` (`js/bootstrap.js:579`) | Yes, but the value is edge-runtime's service path; Megabase's main module is its generated bootstrap file, and a faithful value needs the reference stack | Not served |
+| `op_mi_collect` | forces an mimalloc collect if the symbol exists (`lib.rs:446`) | No: `EdgeRuntime.miCollect` is on the `main` worker only (`js/namespaces.js:36`) | Not served |
+| `op_net_listen` | no-op listener on `0.0.0.0:9999` (`ops/net.rs:114`) | Only as `Deno.serveHttp` plumbing | Not served; the bootstrap serves HTTP itself (see `op_http_start`) |
+| `op_net_accept` | receives the next in-memory duplex stream (`ops/net.rs:130`) | Same | Not served |
+| `op_net_unsupported` | `not_supported` error (`ops/net.rs:231`) | Replaces other net APIs; which ones is not verified against the reference | Not served |
+| `op_raise_segfault` | null dereference (`lib.rs:382`) | No: `main` worker only (`js/namespaces.js:35`) | Not served; the crate forbids `unsafe` |
+| `op_read_line_prompt` | returns `None` (`lib.rs:355`), registered at `:502` | No caller found in the vendored JS | Not served |
+| `op_runtime_memory_usage` | `{rss: 0, heapTotal, heapUsed, external}` from V8 heap statistics (`lib.rs:339`); replaces `Deno.memoryUsage` (`js/bootstrap.js:719`) | Yes: `Deno.memoryUsage()` | Served: keeps Deno's heap numbers, `rss: 0` |
+| `op_runtime_metrics` | heap and shared statistics (`lib.rs:303`) | No: `EdgeRuntime.getRuntimeMetrics`, `main` worker only (`js/namespaces.js:32`) | Not served |
+
+## Memory usage
+
+`Deno.memoryUsage()` returns a new `{ rss: 0, heapTotal, heapUsed, external }`
+object; the last three come from Deno's own call. Upstream hardcodes `rss`
+to 0 "for security". Deno's result has the same four keys.
 
 ## Console size
 
