@@ -64,20 +64,20 @@ supabase-js
   vendor/supabase-js  https://github.com/supabase/supabase-js
   LICENSES/supabase-js.txt
 
+pg-format (identifier and literal quoting for Postgres Meta SQL)
+  SPDX-License-Identifier: MIT
+  Copyright (c) 2014 Datalanche, Inc.
+  https://github.com/datalanche/node-pg-format  1.0.4, as required by
+  vendor/postgres-meta/package.json
+  crates/megabase-meta/src/pg_format.rs
+  LICENSES/pg-format.txt
+
 golang-jwt (Auth JWT parse and validation errors)
   SPDX-License-Identifier: MIT
   Copyright (c) 2012 Dave Grijalva
   Copyright (c) 2021 golang-jwt maintainers
   https://github.com/golang-jwt/jwt  v5.3.1, as pinned in vendor/auth/go.mod
   LICENSES/golang-jwt.txt
-
-node-pg-format (policy identifier and literal quoting)
-  SPDX-License-Identifier: MIT
-  Copyright (c) 2014 Datalanche, Inc.
-  https://github.com/datalanche/node-pg-format  1.0.4, as used by
-  vendor/postgres-meta
-  crates/megabase-meta/src/pg_format.rs
-  LICENSES/pg-format.txt
 
 fuzzyset (Haskell; fuzzy matching behind PostgREST relationship hints)
   SPDX-License-Identifier: BSD-3-Clause (as listed on Hackage; the LICENSE text

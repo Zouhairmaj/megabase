@@ -14,7 +14,7 @@ use axum::Router;
 use serde_json::{json, Map, Value};
 use sqlx::{Connection, PgConnection};
 
-use crate::pg_format::{quote_ident, quote_literal};
+use crate::pg_format::{ident as quote_ident, literal as quote_literal};
 use crate::{close_meta_connection, fastify_json, open_meta_connection, MetaState};
 
 const SYSTEM_SCHEMAS: &[&str] = &["information_schema", "pg_catalog", "pg_toast"];
@@ -881,7 +881,7 @@ mod tests {
     use tower::ServiceExt;
 
     use super::*;
-    use crate::pg_format::{quote_ident, quote_literal};
+    use crate::pg_format::{ident as quote_ident, literal as quote_literal};
     use crate::{router_with_state, MetaState};
     use megabase_core::Hs256;
 

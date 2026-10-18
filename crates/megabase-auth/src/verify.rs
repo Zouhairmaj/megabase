@@ -25,6 +25,7 @@ use serde_json::json;
 use crate::error::{bad_json, unexpected, validation, GoTrueError};
 use crate::hooks::TokenHookCall;
 use crate::jsonutil::{session_claims, session_json, unix_secs};
+use crate::ratelimit::perform_rate_limiting;
 use crate::routes::{insert_header, query_param, read_body, request_aud, validate_email, JsonOk};
 use crate::state::AuthState;
 use crate::store::StoreError;
@@ -64,6 +65,14 @@ pub(crate) async fn verify_get(
     headers: HeaderMap,
     uri: axum::http::Uri,
 ) -> Response {
+    if let Err(error) = perform_rate_limiting(
+        &state.verify_limiter,
+        state.sb_forwarded_for_enabled,
+        &state.rate_limit_header,
+        &headers,
+    ) {
+        return error.into_response();
+    }
     let query = uri.query();
     let params = Params {
         kind: query_param(query, "type").unwrap_or_default(),
@@ -133,7 +142,11 @@ pub(crate) async fn verify_get(
     }
     let now = unix_secs(SystemTime::now());
     let hook = otp_hook(&state, &headers, now);
-    match state.backend.verify(&request, hook.as_ref()).await {
+    match state
+        .backend
+        .verify(&request, hook.as_ref(), state.otp_max_failed_attempts)
+        .await
+    {
         Ok(VerifyOutcome::Rejected {
             status,
             error_code,
@@ -173,6 +186,14 @@ pub(crate) async fn verify_post(
     headers: HeaderMap,
     body: Body,
 ) -> Response {
+    if let Err(error) = perform_rate_limiting(
+        &state.verify_limiter,
+        state.sb_forwarded_for_enabled,
+        &state.rate_limit_header,
+        &headers,
+    ) {
+        return error.into_response();
+    }
     let bytes = match read_body(body).await {
         Ok(bytes) => bytes,
         Err(error) => return error.into_response(),
@@ -230,7 +251,11 @@ pub(crate) async fn verify_post(
     }
     let now = unix_secs(SystemTime::now());
     let hook = otp_hook(&state, &headers, now);
-    match state.backend.verify(&request, hook.as_ref()).await {
+    match state
+        .backend
+        .verify(&request, hook.as_ref(), state.otp_max_failed_attempts)
+        .await
+    {
         Ok(VerifyOutcome::Rejected {
             status,
             error_code,
@@ -1654,5 +1679,292 @@ mod tests {
         .await;
         assert_eq!(status, StatusCode::OK, "{body}");
         assert_eq!(body["user"]["email"], "keep@example.com");
+    }
+
+    fn limited_state(backend: Backend) -> AuthState {
+        let mut config = AuthConfig::reference_defaults();
+        config.mailer_autoconfirm = true;
+        let jwt = Hs256::new(SECRET.as_bytes()).unwrap();
+        let mut state = AuthState::new(config, Some(jwt), backend);
+        state.rate_limit_header = "x-rate-key".into();
+        state.verify_limiter = std::sync::Arc::new(crate::ratelimit::KeyedLimiter::new(0.0, 1.0));
+        state
+    }
+
+    #[tokio::test]
+    async fn verify_is_rate_limited_like_gotrue() {
+        let state = limited_state(Backend::memory());
+        let router = crate::routes::router(state);
+        let send = |router: Router, headers: &[(&str, &str)]| {
+            let router = router;
+            let headers: Vec<(String, String)> = headers
+                .iter()
+                .map(|(name, value)| ((*name).to_string(), (*value).to_string()))
+                .collect();
+            async move {
+                let mut builder = Request::builder()
+                    .method("POST")
+                    .uri("/auth/v1/verify")
+                    .header("content-type", "application/json");
+                for (name, value) in headers {
+                    builder = builder.header(name, value);
+                }
+                let request = builder.body(Body::from("{}")).unwrap();
+                let response = router.oneshot(request).await.unwrap();
+                let status = response.status();
+                let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+                let json = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
+                (status, json)
+            }
+        };
+        let (status, _) = send(router.clone(), &[("x-rate-key", "k1")]).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        let (status, body) = send(router.clone(), &[("x-rate-key", "k1")]).await;
+        assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
+        assert_eq!(body["code"], 429);
+        assert_eq!(body["error_code"], "over_request_rate_limit");
+        assert_eq!(body["msg"], "Request rate limit reached");
+        let (status, _) = send(router.clone(), &[("x-rate-key", "k2")]).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+
+        // Sb-Forwarded-For and X-Forwarded-For are not keys while the flag is off.
+        let (status, _) = send(
+            router.clone(),
+            &[
+                ("sb-forwarded-for", "203.0.113.5"),
+                ("x-forwarded-for", "198.51.100.8"),
+            ],
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        let (status, _) = send(router, &[("x-forwarded-for", "198.51.100.8")]).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+
+        let mut state = limited_state(Backend::memory());
+        state.sb_forwarded_for_enabled = true;
+        let router = crate::routes::router(state);
+        let (status, _) = send(
+            router.clone(),
+            &[
+                ("sb-forwarded-for", "203.0.113.5"),
+                ("x-rate-key", "unused"),
+            ],
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        let (status, body) = send(
+            router.clone(),
+            &[("sb-forwarded-for", "203.0.113.5"), ("x-rate-key", "other")],
+        )
+        .await;
+        assert_eq!(status, StatusCode::TOO_MANY_REQUESTS, "{body}");
+        assert_eq!(body["error_code"], "over_request_rate_limit");
+        let (status, _) = send(
+            router,
+            &[("sb-forwarded-for", "203.0.113.9"), ("x-rate-key", "fresh")],
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+
+    fn attempt_router(backend: Backend, max_failed: u32) -> Router {
+        let mut config = AuthConfig::reference_defaults();
+        config.mailer_autoconfirm = true;
+        let jwt = Hs256::new(SECRET.as_bytes()).unwrap();
+        let mut state = AuthState::new(config, Some(jwt), backend);
+        state.otp_max_failed_attempts = max_failed;
+        crate::routes::router(state)
+    }
+
+    #[tokio::test]
+    async fn repeated_failures_clear_the_email_code_when_enabled() {
+        let email = "tries@example.com";
+        let backend = Backend::memory();
+        backend
+            .plant_verification_for_test(
+                email,
+                &email_otp_hash(email, "123456"),
+                PlantFlags::default(),
+            )
+            .await;
+        let router = attempt_router(backend, 5);
+        let wrong = format!(r#"{{"type":"signup","token":"000000","email":"{email}"}}"#);
+        for _ in 0..5 {
+            let (status, body, _, _) =
+                call(router.clone(), "POST", "/auth/v1/verify", Some(&wrong)).await;
+            assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+            assert_eq!(body["error_code"], "otp_expired");
+            assert_eq!(body["msg"], "Token has expired or is invalid");
+        }
+        let (status, body, _, _) = call(
+            router,
+            "POST",
+            "/auth/v1/verify",
+            Some(&format!(
+                r#"{{"type":"signup","token":"123456","email":"{email}"}}"#
+            )),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+        assert_eq!(body["error_code"], "otp_expired");
+        assert_eq!(body["msg"], "Token has expired or is invalid");
+    }
+
+    #[tokio::test]
+    async fn a_code_still_works_before_the_attempt_limit() {
+        let email = "almost@example.com";
+        let backend = Backend::memory();
+        backend
+            .plant_verification_for_test(
+                email,
+                &email_otp_hash(email, "123456"),
+                PlantFlags::default(),
+            )
+            .await;
+        let router = attempt_router(backend, 5);
+        let wrong = format!(r#"{{"type":"signup","token":"000000","email":"{email}"}}"#);
+        for _ in 0..4 {
+            let (status, _, _, _) =
+                call(router.clone(), "POST", "/auth/v1/verify", Some(&wrong)).await;
+            assert_eq!(status, StatusCode::FORBIDDEN);
+        }
+        let (status, body, _, _) = call(
+            router,
+            "POST",
+            "/auth/v1/verify",
+            Some(&format!(
+                r#"{{"type":"signup","token":"123456","email":"{email}"}}"#
+            )),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(body["user"]["email"], email);
+    }
+
+    #[tokio::test]
+    async fn failed_checks_leave_the_code_in_place_by_default() {
+        let email = "keepcode@example.com";
+        let backend = Backend::memory();
+        backend
+            .plant_verification_for_test(
+                email,
+                &email_otp_hash(email, "123456"),
+                PlantFlags::default(),
+            )
+            .await;
+        let router = app(true, backend);
+        let wrong = format!(r#"{{"type":"signup","token":"000000","email":"{email}"}}"#);
+        for _ in 0..6 {
+            let (status, body, _, _) =
+                call(router.clone(), "POST", "/auth/v1/verify", Some(&wrong)).await;
+            assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+            assert_eq!(body["msg"], "Token has expired or is invalid");
+        }
+        let (status, body, _, _) = call(
+            router,
+            "POST",
+            "/auth/v1/verify",
+            Some(&format!(
+                r#"{{"type":"signup","token":"123456","email":"{email}"}}"#
+            )),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(body["user"]["email"], email);
+    }
+
+    #[tokio::test]
+    async fn a_new_code_clears_failed_checks() {
+        let email = "renew@example.com";
+        let backend = Backend::memory();
+        backend
+            .plant_verification_for_test(
+                email,
+                &email_otp_hash(email, "111111"),
+                PlantFlags {
+                    kind: VerifyKind::Recovery,
+                    confirmed: true,
+                    password_hash: "hash".into(),
+                    ..PlantFlags::default()
+                },
+            )
+            .await;
+        let router = attempt_router(backend.clone(), 2);
+        let wrong = format!(r#"{{"type":"recovery","token":"000000","email":"{email}"}}"#);
+        let (status, _, _, _) = call(router.clone(), "POST", "/auth/v1/verify", Some(&wrong)).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        let user = backend
+            .find_login_user(crate::store::LoginChannel::Email, email, "authenticated")
+            .await
+            .unwrap()
+            .unwrap();
+        backend
+            .save_recovery(&user, &email_otp_hash(email, "222222"), SystemTime::now())
+            .await
+            .unwrap();
+        let (status, _, _, _) = call(router.clone(), "POST", "/auth/v1/verify", Some(&wrong)).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        let (status, body, _, _) = call(
+            router,
+            "POST",
+            "/auth/v1/verify",
+            Some(&format!(
+                r#"{{"type":"recovery","token":"222222","email":"{email}"}}"#
+            )),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(body["user"]["email"], email);
+    }
+
+    #[tokio::test]
+    async fn mailer_otp_exp_defaults_to_one_day() {
+        let within_a_day = SystemTime::now() - std::time::Duration::from_secs(3_601);
+        let backend = Backend::memory();
+        backend
+            .plant_verification_for_test(
+                "day@example.com",
+                "dayhash",
+                PlantFlags {
+                    sent_at: within_a_day,
+                    ..PlantFlags::default()
+                },
+            )
+            .await;
+        let (status, body, _, _) = call(
+            app(true, backend),
+            "POST",
+            "/auth/v1/verify",
+            Some(r#"{"type":"signup","token_hash":"dayhash"}"#),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+
+        let mut config = AuthConfig::reference_defaults();
+        config.mailer_autoconfirm = true;
+        config.mailer_otp_exp_seconds = 1_000;
+        let jwt = Hs256::new(SECRET.as_bytes()).unwrap();
+        let backend = Backend::memory();
+        backend
+            .plant_verification_for_test(
+                "short@example.com",
+                "shorthash",
+                PlantFlags {
+                    sent_at: within_a_day,
+                    ..PlantFlags::default()
+                },
+            )
+            .await;
+        let router = crate::routes::router(AuthState::new(config, Some(jwt), backend));
+        let (status, body, _, _) = call(
+            router,
+            "POST",
+            "/auth/v1/verify",
+            Some(r#"{"type":"signup","token_hash":"shorthash"}"#),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_eq!(body["error_code"], "otp_expired");
+        assert_eq!(body["msg"], LINK_EXPIRED);
     }
 }

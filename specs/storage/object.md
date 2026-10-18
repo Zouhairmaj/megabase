@@ -115,10 +115,17 @@ for a binary body.
 - Both: bucket missing (or private when unauthenticated) is `NoSuchBucket`;
   then `InvalidKey`; a public bucket reads the row as superuser, a private
   one under RLS; no row is `NoSuchKey`.
-- `GET /object/public/:bucket/*`: `InvalidKey` first, then bucket (public
-  only) and row as superuser. Row found but bucket missing or private is
-  `NoSuchBucket`; bucket public and no row is `NoSuchKey`; both missing is a
-  501 (storage-api races the two lookups).
+- `GET /object/public/:bucket/*`: `InvalidKey` first. Upstream runs
+  `findBucket(id, 'id,public', { isPublic: true })` and `findObject` in
+  `Promise.all` (`vendor/storage/src/http/routes/object/getPublicObject.ts:58`).
+  The `isPublic` filter throws `NoSuchBucket` when the bucket is missing or
+  not public (`vendor/storage/src/storage/database/pg.ts:514`). `findObject`
+  throws `NoSuchKey` when the row is missing. When the row exists, only the
+  bucket lookup rejects, so the response is `NoSuchBucket`. When both
+  reject, storage-api reports whichever query settles first. Megabase reads
+  the bucket first and answers `NoSuchBucket` for a missing or non-public
+  bucket, which is one of those outcomes, and does not answer 501. It reads
+  the object row only when the bucket is public; no row is `NoSuchKey`.
 - `GET /object/sign/:bucket/*?token=&download=`: jose 6.2.3 verification
   (`InvalidJWT`: `Invalid Compact JWS` for a token that is not three
   `.`-separated segments, empty included; `signature verification failed`;
