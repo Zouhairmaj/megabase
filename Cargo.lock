@@ -1249,6 +1249,7 @@ dependencies = [
  "tokio-postgres",
  "tower",
  "tracing",
+ "tracing-subscriber",
  "uuid",
 ]
 
