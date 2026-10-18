@@ -361,11 +361,15 @@ body and no `Content-Type`. In order:
    format and the channel check (`channel` defaults to `sms`), then 501.
    Neither: 400 `One of email or phone must be set`.
 
-The magic link and OTP rate limiters (`limitHandler`) are not served.
+`POST /magiclink` and `POST /otp` apply `GOTRUE_RATE_LIMIT_OTP` (default 30
+per five minutes, burst 30) before the handler, keyed like `/verify`
+([`verify.md`](verify.md)): client IP, else `GOTRUE_RATE_LIMIT_HEADER`, and
+after a valid email or phone a second bucket on that address. Over the
+limit is 429 `over_request_rate_limit` / `Request rate limit reached`.
 
 ## Out of scope
 
-`GET /user`, admin routes, captcha, rate limits, hooks, mail, and SMS.
+`GET /user`, admin routes, captcha, hooks, mail, and SMS.
 `POST /token` for the password and refresh-token grants is specified in
 [`token.md`](token.md). The other grant types on that route stay 501.
 Judge cases `auth.user.*` and `auth.admin.*` still fail until those units

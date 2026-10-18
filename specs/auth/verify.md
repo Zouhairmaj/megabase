@@ -155,8 +155,25 @@ already confirmed user writes `login` / `account`. Email change writes
 | Banned (`banned_until` in the future), checked before expiry | 403 | `user_banned` / `User is banned` |
 | No database | 500 | `unexpected_failure` / `Database error finding user from email link` on the hash path, `Database error finding user` on the email path (GET redirects this) |
 | `JWT_SECRET` missing | 500 | `unexpected_failure` / `Server lacks JWT secret`, before the one-time token is read (GET redirects this) |
+| `GOTRUE_RATE_LIMIT_VERIFY` (default 30 per five minutes, burst 30) | 429 | `over_request_rate_limit` / `Request rate limit reached` |
 
-Expiry is strict: the token is expired only when now is after `sent_at + GOTRUE_MAILER_OTP_EXP` seconds. `0` means 86400.
+The verify limiter runs before the body is read, as `limitHandler` on `/verify`
+([`internal/api/api.go:270`](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/api.go#L270),
+[`internal/api/apilimiter/apilimiter.go:202`](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/apilimiter/apilimiter.go#L202)).
+The key is the leftmost `Sb-Forwarded-For` address when it parses, otherwise
+the leftmost `X-Forwarded-For` address, otherwise the
+`GOTRUE_RATE_LIMIT_HEADER` value ([`internal/api/middleware.go:123`](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/middleware.go#L123)).
+POST with an email or phone also spends a bucket on that address. A request
+with none of those keys is not counted. GET failures after this check stay
+303 redirects; the 429 itself is JSON on both methods.
+
+Five failed checks of one live email or phone code clear that code
+(`confirmation`, `recovery`, email-change, and phone-change tokens, and the
+user's `auth.one_time_tokens` rows). Further checks, including the original
+code, get the same 403 `otp_expired` as a bad token. A new code starts the
+count again. A hash that matches nobody is not counted.
+
+Expiry is strict: the token is expired only when now is after `sent_at + GOTRUE_MAILER_OTP_EXP` seconds. Unset or `0` means 3600. A positive value is kept.
 
 ## Edge cases
 
