@@ -28,6 +28,8 @@ const ROLES_NULL: &str = "Cannot read properties of null (reading 'map')";
 const ROLES_NOT_FN: &str = "roles.map is not a function";
 const INVALID_RETRIEVE: &str = "Invalid parameters on policy retrieve";
 const EMPTY_JSON: &str = "Body cannot be empty when content-type is set to 'application/json'";
+const INCLUDED_SPLIT: &str = "request.query.included_schemas?.split is not a function";
+const EXCLUDED_SPLIT: &str = "request.query.excluded_schemas?.split is not a function";
 
 /// `/:id(\\d+)` and the list/create collection.
 pub(crate) fn routes() -> Router<MetaState> {
@@ -53,6 +55,11 @@ async fn list(
     let Some(pool) = state.pool.as_ref() else {
         return missing_connection();
     };
+    // Fastify's `fast-querystring` turns a repeated key into an array.
+    // `included_schemas?.split(',')` then throws; `setErrorHandler` sends 500.
+    if let Some(message) = duplicate_split_error(query.as_deref()) {
+        return fail(StatusCode::INTERNAL_SERVER_ERROR, message);
+    }
     let sql = list_sql(query.as_deref());
     match fetch_policies(pool, &sql).await {
         Ok(rows) => ok_json(&rows),
@@ -417,6 +424,33 @@ FROM
   LEFT JOIN pg_namespace n ON n.oid = c.relnamespace
 WHERE
 ";
+
+/// Repeated `included_schemas` / `excluded_schemas` match Fastify arrays.
+/// The handler splits `included_schemas` first, then `excluded_schemas`.
+fn duplicate_split_error(query: Option<&str>) -> Option<&'static str> {
+    let mut included = 0usize;
+    let mut excluded = 0usize;
+    let query = query.filter(|query| !query.is_empty())?;
+    for pair in query.split('&') {
+        if pair.is_empty() {
+            continue;
+        }
+        let key = pair.split_once('=').map_or(pair, |(key, _)| key);
+        let key = percent_decode(key);
+        if key == "included_schemas" {
+            included += 1;
+        } else if key == "excluded_schemas" {
+            excluded += 1;
+        }
+    }
+    if included > 1 {
+        Some(INCLUDED_SPLIT)
+    } else if excluded > 1 {
+        Some(EXCLUDED_SPLIT)
+    } else {
+        None
+    }
+}
 
 fn query_map(query: Option<&str>) -> HashMap<String, String> {
     let mut map = HashMap::new();
@@ -928,11 +962,26 @@ mod tests {
         assert!(!system.contains("pg_catalog"));
         let empty = list_sql(Some("included_schemas="));
         assert!(empty.contains("n.nspname IN ('')"));
-        let last_duplicate = list_sql(Some("included_schemas=secret&included_schemas=public"));
-        assert!(last_duplicate.contains("n.nspname IN ('public')"));
-        assert!(!last_duplicate.contains("secret"));
         let zero = list_sql(Some("limit=0"));
         assert!(zero.contains("limit '0'\n"), "{zero}");
+        assert_eq!(
+            duplicate_split_error(Some("included_schemas=secret&included_schemas=public")),
+            Some(INCLUDED_SPLIT)
+        );
+        assert_eq!(
+            duplicate_split_error(Some("excluded_schemas=a&excluded_schemas=b")),
+            Some(EXCLUDED_SPLIT)
+        );
+        assert_eq!(
+            duplicate_split_error(Some(
+                "excluded_schemas=a&excluded_schemas=b&included_schemas=c&included_schemas=d"
+            )),
+            Some(INCLUDED_SPLIT)
+        );
+        assert_eq!(
+            duplicate_split_error(Some("included_schemas=public,core")),
+            None
+        );
     }
 
     #[test]
@@ -1006,6 +1055,7 @@ mod tests {
         messy.push_str("%zz%a+&a=1&a=2&included_schemas=%ff");
         let _ = percent_decode(&messy);
         let _ = query_map(Some(&messy));
+        let _ = duplicate_split_error(Some(&messy));
         let _ = list_sql(Some(&messy));
         let _ = list_sql(None);
     }
@@ -1236,6 +1286,34 @@ mod tests {
         .await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
         assert_eq!(body["error"], "connection failed");
+    }
+
+    #[tokio::test]
+    async fn repeated_schema_filters_match_fastify_split_typeerror() {
+        let admin = key("service_role");
+        let pool = Some(unreachable());
+        let (status, body) = call(
+            pool.clone(),
+            Method::GET,
+            "/pg/policies?included_schemas=secret&included_schemas=public",
+            Some(&admin),
+            None,
+            "",
+        )
+        .await;
+        assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(body["error"], INCLUDED_SPLIT);
+        let (status, body) = call(
+            pool,
+            Method::GET,
+            "/pg/policies?excluded_schemas=a&excluded_schemas=b",
+            Some(&admin),
+            None,
+            "",
+        )
+        .await;
+        assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(body["error"], EXCLUDED_SPLIT);
     }
 
     #[tokio::test]

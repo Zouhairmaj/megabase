@@ -32,10 +32,11 @@ Pin: postgres-meta `v0.100.0` (`vendor.toml`).
 
 `apikey` must be the service-role key.
 
-`GET /pg/policies` query string (Megabase parser, last duplicate wins):
-
-Megabase keeps the last value for duplicate keys. Node `querystring` and
-Fastify's default `fast-querystring` parser represent duplicate keys as arrays.
+`GET /pg/policies` query string follows Fastify 4 / `fast-querystring`. A
+repeated `included_schemas` or `excluded_schemas` key becomes an array; the
+handler then calls `.split(',')` and throws. Postgres Meta's error handler
+returns HTTP 500 with that TypeError message. A single comma-separated value
+is the documented form (`included_schemas=public,core`).
 
 - `include_system_schemas` — only the exact string `true` includes system schemas.
 - `included_schemas` — comma-separated list. When non-empty it wins over excludes.
@@ -87,6 +88,8 @@ before `DROP POLICY`.
 | JSON `null` body on create or update | 500 | `{"error":"Cannot destructure property 'name' of 'null' as it is null."}` |
 | Missing `name` or `table` on create | 500 | `{"error":"SQL identifier cannot be null or undefined"}` |
 | Unsupported content type | 500 | `{"error":"Unsupported Media Type: <header>"}` |
+| Repeated `included_schemas` query key | 500 | `{"error":"request.query.included_schemas?.split is not a function"}` |
+| Repeated `excluded_schemas` query key | 500 | `{"error":"request.query.excluded_schemas?.split is not a function"}` |
 | Query fails before PostgreSQL returns an error | 500 / 400 / 404 | `{"error":"connection failed"}` on the route's status |
 
 A missing database is the `onRequest` throw, formatted by `setErrorHandler`.
