@@ -66,6 +66,16 @@ const LIST_COLUMNS: &str = "id, name, public, owner::text AS owner, created_at, 
 const GET_COLUMNS: &str = "id, name, owner::text AS owner, public, created_at, updated_at, \
      file_size_limit, allowed_mime_types";
 
+/// Bucket and object rows a unit test supplies instead of Postgres.
+/// `buckets` maps an id to its `public` flag. `objects` maps a bucket id
+/// to the object names that exist in it.
+#[cfg(test)]
+#[derive(Clone, Debug, Default)]
+pub(crate) struct RouteRows {
+    pub buckets: std::collections::HashMap<String, bool>,
+    pub objects: std::collections::HashMap<String, std::collections::HashSet<String>>,
+}
+
 /// Database pool and JWT verifier for `/storage/v1`.
 #[derive(Clone, Default)]
 pub struct StorageState {
@@ -75,6 +85,8 @@ pub struct StorageState {
     /// JWT roles object scope may apply. The three API roles, plus any
     /// extras from configuration.
     api_roles: ApiRoles,
+    #[cfg(test)]
+    rows: Option<Arc<RouteRows>>,
 }
 
 impl StorageState {
@@ -86,6 +98,8 @@ impl StorageState {
             jwt: jwt.map(Arc::new),
             files: None,
             api_roles: ApiRoles::default(),
+            #[cfg(test)]
+            rows: None,
         }
     }
 
@@ -102,6 +116,53 @@ impl StorageState {
     pub fn with_file_root(mut self, root: Option<&std::path::Path>) -> Self {
         self.files = root.map(Arc::from);
         self
+    }
+
+    /// Answer bucket and object lookups from `rows` instead of Postgres.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn with_route_rows(mut self, rows: RouteRows) -> Self {
+        self.rows = Some(Arc::new(rows));
+        self
+    }
+
+    /// `Some` when test rows are installed: the inner value is the bucket's
+    /// `public` flag, or `None` when that bucket row is absent.
+    pub(crate) fn scripted_bucket(&self, bucket_id: &str) -> Option<Option<bool>> {
+        self.rows_bucket(bucket_id)
+    }
+
+    /// `Some` when test rows are installed: whether that object name exists.
+    pub(crate) fn scripted_object(&self, bucket_id: &str, object_name: &str) -> Option<bool> {
+        self.rows_object(bucket_id, object_name)
+    }
+
+    #[cfg(test)]
+    fn rows_bucket(&self, bucket_id: &str) -> Option<Option<bool>> {
+        self.rows
+            .as_ref()
+            .map(|rows| rows.buckets.get(bucket_id).copied())
+    }
+
+    #[cfg(not(test))]
+    fn rows_bucket(&self, bucket_id: &str) -> Option<Option<bool>> {
+        let _ = bucket_id;
+        None
+    }
+
+    #[cfg(test)]
+    fn rows_object(&self, bucket_id: &str, object_name: &str) -> Option<bool> {
+        self.rows.as_ref().map(|rows| {
+            rows.objects
+                .get(bucket_id)
+                .is_some_and(|names| names.contains(object_name))
+        })
+    }
+
+    #[cfg(not(test))]
+    fn rows_object(&self, bucket_id: &str, object_name: &str) -> Option<bool> {
+        let _ = (bucket_id, object_name);
+        None
     }
 }
 
