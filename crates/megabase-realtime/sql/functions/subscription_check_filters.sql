@@ -27,6 +27,26 @@ declare
     selected_col text;
 begin
     for filter in select * from unnest(new.filters) loop
+        if filter.op not in (
+            'eq'::realtime.equality_op,
+            'neq'::realtime.equality_op,
+            'lt'::realtime.equality_op,
+            'lte'::realtime.equality_op,
+            'gt'::realtime.equality_op,
+            'gte'::realtime.equality_op,
+            'in'::realtime.equality_op
+        ) then
+            raise exception 'unsupported equality operator: %', filter.op::text;
+        end if;
+
+        if octet_length(filter.value) > 4096 then
+            raise exception 'filter value exceeds the maximum length';
+        end if;
+
+        if filter.column_name !~ '^[A-Za-z_][A-Za-z0-9_$]{0,62}$' then
+            raise exception 'invalid column for filter %', filter.column_name;
+        end if;
+
         if not filter.column_name = any(col_names) then
             raise exception 'invalid column for filter %', filter.column_name;
         end if;
@@ -87,8 +107,20 @@ begin
                 raise exception 'invalid regular expression for % filter: %', filter.op::text, sqlerrm;
             end;
         else
-            -- eq/neq/lt/lte/gt/gte: value must be coercable to the type
-            perform realtime.cast(filter.value, col_type);
+            -- eq/neq/lt/lte/gt/gte: value must be coercable to the type.
+            -- realtime.cast leaves bytea unchanged, so cast it here.
+            if col_type = 'bytea'::regtype then
+                begin
+                    perform filter.value::bytea;
+                exception
+                    when query_canceled then
+                        raise;
+                    when others then
+                        raise exception 'invalid input syntax for type bytea';
+                end;
+            else
+                perform realtime.cast(filter.value, col_type);
+            end if;
         end if;
     end loop;
 

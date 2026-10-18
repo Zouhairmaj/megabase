@@ -130,6 +130,15 @@ Differences from upstream:
 - The `ReplicationSlotBeingUsed` recovery (`pg_terminate_backend` on the
   slot holder) is not ported: on a cluster shared with another Realtime it
   would end that server's slot. Use `SLOT_NAME_SUFFIX` there.
+- A `postgres_changes` filter accepts `eq`, `neq`, `lt`, `lte`, `gt`,
+  `gte`, and `in`. The column must be an identifier of at most 63 bytes,
+  and the value is at most 4096 bytes (`in` lists at most 100 values).
+  An operator outside that set is rejected with upstream's
+  `Error parsing \`filter\` params: …` message. A column that is not an
+  identifier uses that same prefix. A value that does not match the
+  column type fails the insert with upstream's exception text.
+  Evaluating one subscription's filters cannot fail the shared poll:
+  that subscription does not receive the change, and the others still do.
 - The `db_events_per_second` and subscription-error rate counters are not
   modeled; nor is `postgres_changes_wait_timeout` (the join never waits).
 

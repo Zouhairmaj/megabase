@@ -3,8 +3,12 @@
 //! Installs the `realtime` tenant schema subset that Postgres CDC
 //! (`postgres_changes`) needs, plus the `supabase_realtime` publication.
 //!
-//! Each file under `sql/` is a verbatim copy of its upstream
-//! `tenant_schema/realtime/<path>` file. The upstream `create schema`,
+//! Each file under `sql/` starts from its upstream
+//! `tenant_schema/realtime/<path>` file. `check_equality_op` and
+//! `is_visible_through_filters` catch an evaluation error and return no
+//! match for that subscription, so the shared poll continues for the
+//! others. `subscription_check_filters` rejects an operator, column name,
+//! or value the subscribe path does not accept. The upstream `create schema`,
 //! `create type` and `create table` statements are not idempotent, so each
 //! of those steps carries a catalog probe and is skipped when its object
 //! already exists (a restart, or a database whose Realtime migrations
@@ -393,6 +397,20 @@ mod tests {
         assert!(probe.contains("count(*) = 9 FROM pg_attribute"));
         assert!(probe.contains("a.atttypid = e.typ::regtype"));
         assert!(probe.contains(SUBSCRIPTION_UNIQUE_INDEX));
+    }
+
+    #[test]
+    fn filter_evaluation_errors_stay_on_one_subscription() {
+        let op = STEPS[index("functions/check_equality_op")].sql;
+        assert!(op.contains("when others then"));
+        assert!(op.contains("return null"));
+        let visible = STEPS[index("functions/is_visible_through_filters")].sql;
+        assert!(visible.contains("when others then"));
+        assert!(visible.contains("return false"));
+        let check = STEPS[index("functions/subscription_check_filters")].sql;
+        assert!(check.contains("filter value exceeds the maximum length"));
+        assert!(check.contains("'eq'::realtime.equality_op"));
+        assert!(check.contains("'in'::realtime.equality_op"));
     }
 
     #[test]

@@ -469,7 +469,17 @@ impl Cdc {
                 continue;
             };
             processed += 1;
-            if let Some(change) = row.generate_record() {
+            if let Some(mut change) = row.generate_record() {
+                // `list_changes` already omitted subscriptions whose filters
+                // failed. Dropping a failed id here keeps one subscription
+                // from removing the others if a later check reports an error.
+                change.subscription_ids = subscriptions_receiving(
+                    change
+                        .subscription_ids
+                        .iter()
+                        .copied()
+                        .map(|id| (id, Ok::<bool, &str>(true))),
+                );
                 self.dispatch(&change);
             }
         }
@@ -645,6 +655,22 @@ fn fastlane(serializer: Serializer, topic: &str, event: &str, payload: &str) -> 
     })
 }
 
+/// Subscription ids that receive a change.
+///
+/// `Ok(false)` and `Err` omit that subscription. The function does not
+/// return the error, so one subscription cannot fail the caller.
+pub(crate) fn subscriptions_receiving<E>(
+    results: impl IntoIterator<Item = (Uuid, Result<bool, E>)>,
+) -> HashSet<Uuid> {
+    results
+        .into_iter()
+        .filter_map(|(id, matched)| match matched {
+            Ok(true) => Some(id),
+            Ok(false) | Err(_) => None,
+        })
+        .collect()
+}
+
 /// The `id` the join reply and every push carry for one `postgres_changes`
 /// entry. Upstream uses `:erlang.phash2(params)`, a value in `0..2^27`;
 /// Megabase hashes the entry's JSON encoding (FNV-1a) into the same range.
@@ -768,6 +794,47 @@ mod tests {
         cdc.dispatch(&change);
         assert!(drain(&mut new_rx).is_empty());
         assert_eq!(drain(&mut old_rx).len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_failed_filter_does_not_stop_other_subscribers() {
+        let cdc = Cdc::new(lazy_pool(), None);
+        let good = Uuid::new_v4();
+        let bad = Uuid::new_v4();
+        let (good_box, mut good_rx) = Outbox::new(OUTBOX_CAPACITY);
+        let (bad_box, mut bad_rx) = Outbox::new(OUTBOX_CAPACITY);
+        cdc.subscribe(Subscriber {
+            conn: 1,
+            topic: "realtime:good".to_owned(),
+            serializer: Serializer::V2,
+            outbox: good_box,
+            is_new_api: true,
+            ids: vec![(good, 11)],
+            auth: stored_auth(),
+        });
+        cdc.subscribe(Subscriber {
+            conn: 2,
+            topic: "realtime:bad".to_owned(),
+            serializer: Serializer::V2,
+            outbox: bad_box,
+            is_new_api: true,
+            ids: vec![(bad, 22)],
+            auth: stored_auth(),
+        });
+        let visible = subscriptions_receiving([
+            (good, Ok(true)),
+            (bad, Err("filter evaluation failed")),
+            (Uuid::nil(), Ok(false)),
+        ]);
+        assert!(visible.contains(&good));
+        assert!(!visible.contains(&bad));
+        cdc.dispatch(&Change {
+            kind: "INSERT".to_owned(),
+            payload: r#"{"type":"INSERT"}"#.to_owned(),
+            subscription_ids: visible,
+        });
+        assert_eq!(drain(&mut good_rx).len(), 1);
+        assert!(drain(&mut bad_rx).is_empty());
     }
 
     /// Claims whose rows are already stored.
