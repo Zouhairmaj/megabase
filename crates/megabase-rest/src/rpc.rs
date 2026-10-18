@@ -23,10 +23,10 @@ use crate::params::parse_get_query;
 use crate::prefer::Prefer;
 use crate::query::{percent_decode, query_parts};
 use crate::read::{
-    begin, content_range, database_unavailable, negotiate_write, negotiated_schema,
-    not_implemented, options_response, pgrst, profile_header, query_fail, query_failure,
-    reject_accept, session, set_request_context, singular_check, unimplemented_unit, unsafe_type,
-    ReadShape, Session, JSON_UTF8,
+    begin, content_range, database_unavailable, enforce_db_role, negotiate_write,
+    negotiated_schema, not_implemented, options_response, pgrst, profile_header, query_fail,
+    query_failure, reject_accept, session, set_request_context, singular_check, unimplemented_unit,
+    unsafe_type, ReadShape, Session, JSON_UTF8,
 };
 use crate::RestState;
 
@@ -265,6 +265,9 @@ pub(crate) async fn call(
         Ok(session) => session,
         Err(response) => return *response,
     };
+    if let Err(response) = enforce_db_role(state.pool.as_ref(), &session).await {
+        return *response;
+    }
     session.timezone = Prefer::from_headers(headers).timezone;
     let schema = match negotiated_schema(method, headers) {
         Ok(schema) => schema,

@@ -189,6 +189,23 @@ impl CreateError {
     }
 }
 
+/// Final subscribe error when the claims role cannot be applied.
+///
+/// The text matches an insert exception: the PostgreSQL message is the
+/// `Exception:` tail, and the error is fatal so the channel does not retry.
+pub(crate) fn role_rejected(
+    failure: &megabase_core::RoleFailure,
+    params: &SubscriptionParams,
+) -> CreateError {
+    CreateError::SubscriptionInsertFailed(format!(
+        "Unable to subscribe to changes with given parameters. An exception happened so please check your connect parameters: [{}]. Exception: ERROR {} ({}) {}",
+        params_to_log(params),
+        failure.sqlstate,
+        condition_name(failure.sqlstate),
+        failure.message,
+    ))
+}
+
 /// Parses one `postgres_changes` params object (`parse_subscription_params/1`).
 ///
 /// # Errors
@@ -844,6 +861,29 @@ fn inspect_float(value: f64) -> String {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn rejected_role_is_a_fatal_subscribe_error() {
+        let params = parse_subscription_params(&json!({"schema": "public", "table": "todos"}))
+            .expect("params");
+        let missing = role_rejected(
+            &megabase_core::RoleFailure::from_catalog("not existing", false),
+            &params,
+        );
+        assert!(missing.fatal());
+        let message = missing.to_string();
+        assert!(message.contains("ERROR 22023 (invalid_parameter_value)"));
+        assert!(message.contains("role \"not existing\" does not exist"));
+
+        let denied = role_rejected(
+            &megabase_core::RoleFailure::from_catalog("postgres", true),
+            &params,
+        );
+        assert!(denied.fatal());
+        let message = denied.to_string();
+        assert!(message.contains("ERROR 42501 (insufficient_privilege)"));
+        assert!(message.contains("permission denied to set role \"postgres\""));
+    }
 
     #[allow(clippy::needless_pass_by_value)] // Lets call sites pass `json!(..)` directly.
     fn parse(value: Value) -> Result<SubscriptionParams, ParamsError> {

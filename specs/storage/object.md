@@ -73,7 +73,12 @@ Every query runs in a transaction that first runs `scope.ts`'s
 `set_config` statement. Request routes use the JWT `role` (default
 `anon`), the raw token, `sub`, the claims JSON, the request headers as a
 JSON object, the method, the path after `/storage/v1` with its query, and
-the route's operation. Superuser queries use `service_role` and the claims
+the route's operation. That role must be `anon`, `authenticated`,
+`service_role`, or a name in `MEGABASE_DB_EXTRA_ROLES`. A missing role is
+storage-api's `DatabaseError` (`database error, code: 22023`, HTTP 500).
+A role that exists in `pg_roles` is `AccessDenied` with PostgreSQL's
+`permission denied to set role` message (HTTP 400, body `statusCode`
+`403`). Superuser queries use `service_role` and the claims
 `{"role":"service_role"}` (storage-api uses its service key's payload).
 
 ## Upload — `POST` / `PUT /object/:bucketName/*`

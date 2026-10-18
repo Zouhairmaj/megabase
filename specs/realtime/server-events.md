@@ -108,7 +108,7 @@ reply `MEGABASE_NOT_IMPLEMENTED`.
 | Join, new API (`config` present) | the non-null entries of a non-empty `config.postgres_changes` list |
 | Join, old API (no `config`) | one entry from the topic: `schema[:table[:filter]]` |
 | Join reply | `{"postgres_changes": [entry + {"id": n}, …]}` |
-| After the join | insert the subscriptions with the token's claims, then `system` `{"extension":"postgres_changes","status":"ok","message":"Subscribed to PostgreSQL","channel":<t>}` |
+| After the join | insert the subscriptions with the token's claims when `role` is `anon`, `authenticated`, `service_role`, or a name in `MEGABASE_DB_EXTRA_ROLES`, then `system` `{"extension":"postgres_changes","status":"ok","message":"Subscribed to PostgreSQL","channel":<t>}`. Any other role is a final `system` error carrying PostgreSQL's `role "…" does not exist` (`22023`) or `permission denied to set role` (`42501`) message, and the rows are not inserted |
 | Subscribe error | `system` with `status` `"error"` and the message; malformed params and insert failures are final, other errors retry 5–10 s later |
 | Each change | for every channel with a matching subscription id: new API `postgres_changes` `{"data": change, "ids": [ids…]}` (ids in reverse join order), old API the change with its type (`INSERT`, `UPDATE`, `DELETE`) as the event |
 | Change JSON | `columns`, `commit_timestamp`, `errors` (null when empty), `old_record` (UPDATE, DELETE), `record` (INSERT, UPDATE), `schema`, `table`, `type`, in that order |

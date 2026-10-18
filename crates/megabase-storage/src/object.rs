@@ -30,7 +30,7 @@ use axum::{
 };
 use chrono::{DateTime, Utc};
 use md5::{Digest, Md5};
-use megabase_core::{JwtClaims, JwtError};
+use megabase_core::{db_role, JwtClaims, JwtError, RoleFailure, ROLE_EXISTS_SQL};
 use serde_json::{json, Map, Value};
 use sqlx::{Postgres, Row, Transaction};
 
@@ -147,6 +147,52 @@ struct Scope<'a> {
     uri: &'a Uri,
     headers: &'a HeaderMap,
     operation: &'static str,
+    roles: &'a megabase_core::ApiRoles,
+}
+
+/// A scope statement failed, or the JWT role is not configured.
+enum ApplyError {
+    Db(sqlx::Error),
+    Role(RoleFailure),
+}
+
+impl From<sqlx::Error> for ApplyError {
+    fn from(error: sqlx::Error) -> Self {
+        Self::Db(error)
+    }
+}
+
+/// Storage-api's response for the PostgreSQL error [`RoleFailure`] names.
+///
+/// `42501` is `AccessDenied` (HTTP 400, body status `403`). Any other
+/// SQLSTATE from this check is `DatabaseError` (`errors.ts` default).
+fn storage_role_response(failure: &RoleFailure) -> Response {
+    if failure.sqlstate == "42501" {
+        return StorageError::access_denied(Cow::Owned(failure.message.clone())).into_response();
+    }
+    fastify_json(
+        StatusCode::INTERNAL_SERVER_ERROR,
+        &json!({
+            "statusCode": "500",
+            "error": "DatabaseError",
+            "code": "DatabaseError",
+            "message": format!("database error, code: {}", failure.sqlstate),
+        }),
+    )
+}
+
+fn apply_response(error: ApplyError) -> Response {
+    match error {
+        ApplyError::Db(error) => database_error(&error),
+        ApplyError::Role(failure) => storage_role_response(&failure),
+    }
+}
+
+fn apply_pg(error: ApplyError, duplicate: fn() -> StorageError) -> Response {
+    match error {
+        ApplyError::Db(error) => pg_error(&error, duplicate),
+        ApplyError::Role(failure) => storage_role_response(&failure),
+    }
 }
 
 impl Scope<'_> {
@@ -175,14 +221,16 @@ impl Scope<'_> {
     async fn begin(
         &self,
         pool: &sqlx::PgPool,
-    ) -> Result<Transaction<'static, Postgres>, sqlx::Error> {
+    ) -> Result<Transaction<'static, Postgres>, ApplyError> {
         let mut tx = pool.begin().await?;
         self.apply(&mut tx).await?;
         Ok(tx)
     }
 
     /// Switch an open transaction to this scope.
-    async fn apply(&self, tx: &mut Transaction<'static, Postgres>) -> Result<(), sqlx::Error> {
+    ///
+    /// The JWT role is checked with [`db_role`] before `set_config('role', …)`.
+    async fn apply(&self, tx: &mut Transaction<'static, Postgres>) -> Result<(), ApplyError> {
         let (role, jwt, sub, claims) = match &self.actor {
             Actor::Request { claims, jwt } => (
                 claims.role.as_deref().unwrap_or("anon"),
@@ -197,9 +245,19 @@ impl Scope<'_> {
                 json!({ "role": "service_role" }).to_string(),
             ),
         };
+        let role = match db_role(role, self.roles) {
+            Ok(role) => role.to_string(),
+            Err(rejected) => {
+                let exists: bool = sqlx::query_scalar(ROLE_EXISTS_SQL)
+                    .bind(rejected.role())
+                    .fetch_one(&mut **tx)
+                    .await?;
+                return Err(ApplyError::Role(rejected.failure(exists)));
+            }
+        };
         sqlx::query(SCOPE_SQL)
-            .bind(role)
-            .bind(role)
+            .bind(&role)
+            .bind(&role)
             .bind(jwt)
             .bind(sub)
             .bind(claims)
@@ -219,6 +277,7 @@ impl Scope<'_> {
             uri: self.uri,
             headers: self.headers,
             operation: self.operation,
+            roles: self.roles,
         }
     }
 }
@@ -422,12 +481,13 @@ async fn upload(
         uri,
         headers,
         operation,
+        roles: &state.api_roles,
     };
 
     let bucket = match fetch_upload_bucket(pool, &scope, &bucket_id).await {
         Ok(Some(bucket)) => bucket,
         Ok(None) => return StorageError::no_such_bucket().into_response(),
-        Err(error) => return database_error(&error),
+        Err(error) => return apply_response(error),
     };
     let mime_type = file.mime_type.as_ref();
     let allowed = bucket.allowed_mime_types.unwrap_or_default();
@@ -577,7 +637,7 @@ async fn fetch_upload_bucket(
     pool: &sqlx::PgPool,
     scope: &Scope<'_>,
     bucket_id: &str,
-) -> Result<Option<UploadBucket>, sqlx::Error> {
+) -> Result<Option<UploadBucket>, ApplyError> {
     let mut tx = scope.as_super_user().begin(pool).await?;
     let bucket = sqlx::query_as::<_, UploadBucket>(UPLOAD_BUCKET_SQL)
         .bind(bucket_id)
@@ -614,11 +674,11 @@ async fn can_upload(
             .bind("1")
             .execute(&mut *tx)
             .await?;
-        tx.rollback().await
+        tx.rollback().await.map_err(ApplyError::from)
     };
     attempt
         .await
-        .map_err(|error| Box::new(pg_error(&error, StorageError::key_already_exists)))
+        .map_err(|error| Box::new(apply_pg(error, StorageError::key_already_exists)))
 }
 
 /// `completeUpload`: as the superuser, refuse to replace an existing
@@ -661,13 +721,13 @@ async fn complete_upload(
             .await?;
         let id: String = row.try_get("id")?;
         tx.commit().await?;
-        Ok::<_, sqlx::Error>(Ok((id, previous.flatten())))
+        Ok::<_, ApplyError>(Ok((id, previous.flatten())))
     };
     match attempt.await {
         Ok(Ok(done)) => Ok(done),
         Ok(Err(error)) => Err(Box::new(error.into_response())),
-        Err(error) => Err(Box::new(pg_error(
-            &error,
+        Err(error) => Err(Box::new(apply_pg(
+            error,
             StorageError::resource_already_exists,
         ))),
     }
@@ -713,7 +773,7 @@ async fn find_object(
     scope: &Scope<'_>,
     bucket_id: &str,
     object_name: &str,
-) -> Result<Option<FoundObject>, sqlx::Error> {
+) -> Result<Option<FoundObject>, ApplyError> {
     let mut tx = scope.begin(pool).await?;
     let row = sqlx::query(FIND_OBJECT_SQL)
         .bind(object_name)
@@ -722,12 +782,13 @@ async fn find_object(
         .await?;
     tx.commit().await?;
     row.map(|row| {
-        Ok(FoundObject {
+        Ok::<FoundObject, sqlx::Error>(FoundObject {
             version: row.try_get("version")?,
             metadata: row.try_get("metadata")?,
         })
     })
     .transpose()
+    .map_err(ApplyError::from)
 }
 
 /// `findBucket(id, 'id,public')` as the superuser: `None` when missing.
@@ -735,7 +796,7 @@ async fn bucket_is_public(
     pool: &sqlx::PgPool,
     scope: &Scope<'_>,
     bucket_id: &str,
-) -> Result<Option<bool>, sqlx::Error> {
+) -> Result<Option<bool>, ApplyError> {
     let mut tx = scope.as_super_user().begin(pool).await?;
     let row = sqlx::query(BUCKET_PUBLIC_SQL)
         .bind(bucket_id)
@@ -747,6 +808,7 @@ async fn bucket_is_public(
             .map(|public| public.unwrap_or(false))
     })
     .transpose()
+    .map_err(ApplyError::from)
 }
 
 /// The `download` query value, when Megabase renders its
@@ -969,10 +1031,11 @@ async fn get_object(
         uri,
         headers,
         operation: OP_GET_AUTHENTICATED,
+        roles: &state.api_roles,
     };
     let public = match bucket_is_public(pool, &scope, &bucket_id).await {
         Ok(public) => public,
-        Err(error) => return database_error(&error),
+        Err(error) => return apply_response(error),
     };
     let public = match public {
         Some(public) if public || authenticated => public,
@@ -1001,7 +1064,7 @@ async fn get_object(
             .await
         }
         Ok(None) => StorageError::no_such_key().into_response(),
-        Err(error) => database_error(&error),
+        Err(error) => apply_response(error),
     }
 }
 
@@ -1035,6 +1098,7 @@ pub(super) async fn get_public_object(
         uri: &uri,
         headers: &headers,
         operation: OP_GET_PUBLIC,
+        roles: &state.api_roles,
     };
     let bucket = bucket_is_public(pool, &scope, &bucket_id).await;
     let object = find_object(pool, &scope, &bucket_id, &object_name).await;
@@ -1055,7 +1119,7 @@ pub(super) async fn get_public_object(
         (Ok(Some(true)), Ok(None)) => StorageError::no_such_key().into_response(),
         (Ok(_), Ok(Some(_))) => StorageError::no_such_bucket().into_response(),
         (Ok(_), Ok(None)) => not_implemented(&method, &uri),
-        (Err(error), _) | (_, Err(error)) => database_error(&error),
+        (Err(error), _) | (_, Err(error)) => apply_response(error),
     }
 }
 
@@ -1120,11 +1184,12 @@ pub(super) async fn sign_object(
         uri: &uri,
         headers: &headers,
         operation: OP_SIGN,
+        roles: &state.api_roles,
     };
     match find_object(pool, &scope, &bucket_id, &object_name).await {
         Ok(Some(_)) => {}
         Ok(None) => return StorageError::no_such_key().into_response(),
-        Err(error) => return database_error(&error),
+        Err(error) => return apply_response(error),
     }
     let now = Utc::now().timestamp();
     let payload = json!({
@@ -1222,6 +1287,7 @@ pub(super) async fn get_signed_object(
         uri: &uri,
         headers: &headers,
         operation: OP_GET_SIGNED,
+        roles: &state.api_roles,
     };
     match find_object(pool, &scope, token_bucket, token_object).await {
         Ok(Some(object)) => {
@@ -1242,7 +1308,7 @@ pub(super) async fn get_signed_object(
             .await
         }
         Ok(None) => StorageError::no_such_key().into_response(),
-        Err(error) => database_error(&error),
+        Err(error) => apply_response(error),
     }
 }
 
@@ -1343,6 +1409,7 @@ pub(super) async fn delete_objects(
         uri: &uri,
         headers: &headers,
         operation: OP_DELETE_MANY,
+        roles: &state.api_roles,
     };
     let attempt = async {
         let mut tx = scope.begin(pool).await?;
@@ -1362,7 +1429,7 @@ pub(super) async fn delete_objects(
             }
         }
         tx.commit().await?;
-        Ok::<_, sqlx::Error>((deleted, files))
+        Ok::<_, ApplyError>((deleted, files))
     };
     match attempt.await {
         Ok((deleted, files)) => {
@@ -1371,7 +1438,7 @@ pub(super) async fn delete_objects(
             }
             fastify_json(StatusCode::OK, &Value::Array(deleted))
         }
-        Err(error) => pg_error(&error, StorageError::resource_already_exists),
+        Err(error) => apply_pg(error, StorageError::resource_already_exists),
     }
 }
 
@@ -1411,6 +1478,7 @@ pub(super) async fn delete_object(
         uri: &uri,
         headers: &headers,
         operation: OP_DELETE,
+        roles: &state.api_roles,
     };
     let attempt = async {
         let mut tx = scope.as_super_user().begin(pool).await?;
@@ -1452,7 +1520,7 @@ pub(super) async fn delete_object(
             }
         }
         tx.commit().await?;
-        Ok::<_, sqlx::Error>(Ok(()))
+        Ok::<_, ApplyError>(Ok(()))
     };
     match attempt.await {
         Ok(Ok(())) => fastify_json(
@@ -1460,7 +1528,7 @@ pub(super) async fn delete_object(
             &json!({ "message": "Successfully deleted" }),
         ),
         Ok(Err(response)) => response,
-        Err(error) => pg_error(&error, StorageError::resource_already_exists),
+        Err(error) => apply_pg(error, StorageError::resource_already_exists),
     }
 }
 
@@ -1687,6 +1755,7 @@ pub(super) async fn list_objects(
         uri: &uri,
         headers: &headers,
         operation: OP_LIST,
+        roles: &state.api_roles,
     };
     let attempt = async {
         let mut tx = scope.begin(pool).await?;
@@ -1706,17 +1775,44 @@ pub(super) async fn list_objects(
         tx.commit().await?;
         rows.iter()
             .map(list_entry_json)
-            .collect::<Result<Vec<_>, _>>()
+            .collect::<Result<Vec<_>, sqlx::Error>>()
+            .map_err(ApplyError::from)
     };
     match attempt.await {
         Ok(entries) => fastify_json(StatusCode::OK, &Value::Array(entries)),
-        Err(error) => pg_error(&error, StorageError::resource_already_exists),
+        Err(error) => apply_pg(error, StorageError::resource_already_exists),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn unconfigured_role_responses_match_storage_api() {
+        use axum::body::to_bytes;
+
+        let missing = storage_role_response(&RoleFailure::from_catalog("not existing", false));
+        assert_eq!(missing.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        let bytes = to_bytes(missing.into_body(), usize::MAX).await.unwrap();
+        let body: Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(body["statusCode"], "500");
+        assert_eq!(body["code"], "DatabaseError");
+        assert_eq!(body["error"], "DatabaseError");
+        assert_eq!(body["message"], "database error, code: 22023");
+
+        let denied = storage_role_response(&RoleFailure::from_catalog("postgres", true));
+        assert_eq!(denied.status(), StatusCode::BAD_REQUEST);
+        let bytes = to_bytes(denied.into_body(), usize::MAX).await.unwrap();
+        let body: Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(body["statusCode"], "403");
+        assert_eq!(body["code"], "AccessDenied");
+        assert_eq!(body["error"], "Unauthorized");
+        assert_eq!(
+            body["message"],
+            "permission denied to set role \"postgres\""
+        );
+    }
 
     #[tokio::test]
     async fn object_routes_without_a_backend_or_jwt_stay_501() {

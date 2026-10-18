@@ -15,7 +15,9 @@ use axum::extract::{OriginalUri, State};
 use axum::http::{header, HeaderMap, HeaderName, HeaderValue, Method, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::Router;
-use megabase_core::{bearer_token, JwtError, MegabaseNotImplemented};
+use megabase_core::{
+    bearer_token, db_role, JwtError, MegabaseNotImplemented, RoleFailure, ROLE_EXISTS_SQL,
+};
 use serde_json::{Map, Value};
 
 use crate::filter::{quote_ident, UnsafeType};
@@ -131,6 +133,8 @@ async fn root(
         Err(response) => return *response,
     };
     // The gateway's `rest-v1-openapi` route only admits the admin ACL group.
+    // That check stays ahead of the role allow-list so a non-admin token
+    // still receives the ACL response.
     if session.role != "service_role" {
         return megabase_core::kong::acl_forbidden();
     }
@@ -188,6 +192,9 @@ async fn relation_route(
         Ok(session) => session,
         Err(response) => return *response,
     };
+    if let Err(response) = enforce_db_role(state.pool.as_ref(), &session).await {
+        return *response;
+    }
     let prefer = Prefer::from_headers(headers);
     session.timezone = prefer.timezone.clone();
     let schema = match negotiated_schema(method, headers) {
@@ -548,6 +555,8 @@ pub(crate) struct Session {
     pub(crate) anon: bool,
     /// `Prefer: timezone=` value, applied with `set_config('timezone', …, true)`.
     pub(crate) timezone: Option<String>,
+    /// Roles this request may apply. Copied from [`RestState`].
+    api_roles: megabase_core::ApiRoles,
 }
 
 pub(crate) fn session(
@@ -573,7 +582,11 @@ pub(crate) fn session(
         )));
     };
     match jwt.verify(token) {
-        Ok(claims) => Ok(session_from_claims(claims.role, claims.raw)),
+        Ok(claims) => Ok(session_from_claims(
+            claims.role,
+            claims.raw,
+            state.api_roles.clone(),
+        )),
         Err(error) => Err(Box::new(jwt_failure(&error))),
     }
 }
@@ -584,10 +597,15 @@ fn anon_session() -> Session {
         claims: r#"{"role":"anon"}"#.to_string(),
         anon: true,
         timezone: None,
+        api_roles: megabase_core::ApiRoles::default(),
     }
 }
 
-fn session_from_claims(role: Option<String>, mut raw: Map<String, Value>) -> Session {
+fn session_from_claims(
+    role: Option<String>,
+    mut raw: Map<String, Value>,
+    api_roles: megabase_core::ApiRoles,
+) -> Session {
     let role = role
         .filter(|value| !value.is_empty())
         .unwrap_or_else(|| "anon".to_string());
@@ -598,7 +616,46 @@ fn session_from_claims(role: Option<String>, mut raw: Map<String, Value>) -> Ses
         claims: Value::Object(raw).to_string(),
         anon,
         timezone: None,
+        api_roles,
     }
+}
+
+/// Rejects a JWT `role` that [`db_role`] does not allow, before any
+/// statement runs as that role.
+///
+/// With a pool, `pg_roles` chooses the PostgreSQL error. Without one, the
+/// name is reported as missing: there is no catalog to find it in.
+pub(crate) async fn enforce_db_role(
+    pool: Option<&sqlx::PgPool>,
+    session: &Session,
+) -> Result<(), Box<Response>> {
+    let Err(rejected) = db_role(&session.role, &session.api_roles) else {
+        return Ok(());
+    };
+    let failure = match pool {
+        None => RoleFailure::from_catalog(rejected.role(), false),
+        Some(pool) => {
+            let exists: bool = sqlx::query_scalar(ROLE_EXISTS_SQL)
+                .bind(rejected.role())
+                .fetch_one(pool)
+                .await
+                .map_err(|error| Box::new(query_failure(&error, session.anon)))?;
+            rejected.failure(exists)
+        }
+    };
+    Err(Box::new(postgrest_role_response(&failure)))
+}
+
+/// PostgREST body for a [`RoleFailure`]: `code` is the SQLSTATE, `details`
+/// and `hint` are null.
+pub(crate) fn postgrest_role_response(failure: &RoleFailure) -> Response {
+    pgrst(
+        failure.postgrest_status(),
+        failure.sqlstate,
+        &failure.message,
+        None,
+        None,
+    )
 }
 
 fn jwt_failure(error: &JwtError) -> Response {
@@ -1946,6 +2003,17 @@ pub(crate) async fn set_request_context(
     request_path: &str,
     schema: &str,
 ) -> Result<(), Box<Response>> {
+    let role = match db_role(&session.role, &session.api_roles) {
+        Ok(role) => role.to_string(),
+        Err(rejected) => {
+            let exists: bool = sqlx::query_scalar(ROLE_EXISTS_SQL)
+                .bind(rejected.role())
+                .fetch_one(&mut **tx)
+                .await
+                .map_err(|error| Box::new(query_failure(&error, session.anon)))?;
+            return Err(Box::new(postgrest_role_response(&rejected.failure(exists))));
+        }
+    };
     sqlx::query(
         "SELECT set_config('role', $1, true),
                 set_config('request.jwt.claims', $2, true),
@@ -1954,7 +2022,7 @@ pub(crate) async fn set_request_context(
                 set_config('search_path', $5, true),
                 set_config('timezone', coalesce($6::text, current_setting('timezone')), true)",
     )
-    .bind(&session.role)
+    .bind(&role)
     .bind(&session.claims)
     .bind(method)
     .bind(request_path)
@@ -2517,6 +2585,70 @@ mod tests {
                 headers[header::WWW_AUTHENTICATE],
                 format!("Bearer error=\"invalid_token\", error_description=\"{message}\"")
             );
+        }
+    }
+
+    #[tokio::test]
+    async fn unconfigured_role_is_the_postgrest_missing_role_error() {
+        let app = router(state_with_secret(SECRET));
+        let token = sign(SECRET, &json!({"role": "not existing"}));
+        let request = Request::builder()
+            .uri("/rest/v1/todos")
+            .header(header::AUTHORIZATION, format!("Bearer {token}"))
+            .body(Body::empty())
+            .unwrap();
+        let (status, body, _) = send(app, request).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+        assert_eq!(
+            body,
+            json!({
+                "code": "22023",
+                "message": "role \"not existing\" does not exist",
+                "details": null,
+                "hint": null,
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn existing_unconfigured_role_is_permission_denied() {
+        let failure = RoleFailure::from_catalog("postgres", true);
+        let response = postgrest_role_response(&failure);
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let body: Value = serde_json::from_slice(&bytes).unwrap();
+        // The HTTP test above covers the missing-role path. This is the body
+        // `enforce_db_role` returns when `pg_roles` contains the name.
+        assert_eq!(
+            body,
+            json!({
+                "code": "42501",
+                "message": "permission denied to set role \"postgres\"",
+                "details": null,
+                "hint": null,
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn configured_roles_still_reach_the_database() {
+        let secret = JwtSecret::new(SECRET);
+        let state = RestState::from_config(&Config {
+            jwt_secret: Some(secret),
+            db_extra_roles: vec!["reporter".into()],
+            ..Config::default()
+        });
+        let app = router(state);
+        for role in ["anon", "authenticated", "service_role", "reporter"] {
+            let token = sign(SECRET, &json!({ "role": role }));
+            let request = Request::builder()
+                .uri("/rest/v1/todos")
+                .header(header::AUTHORIZATION, format!("Bearer {token}"))
+                .body(Body::empty())
+                .unwrap();
+            let (status, body, _) = send(app.clone(), request).await;
+            assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{role} {body}");
+            assert_eq!(body["code"], "PGRST000", "{role}");
         }
     }
 

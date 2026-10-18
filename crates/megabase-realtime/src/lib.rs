@@ -17,7 +17,7 @@ use axum::{
     routing::{get, post},
     Router,
 };
-use megabase_core::Hs256;
+use megabase_core::{ApiRoles, Hs256};
 
 mod cdc;
 mod http_api;
@@ -42,6 +42,7 @@ pub struct RealtimeState {
     hub: Arc<hub::Hub>,
     /// Postgres changes of the tenant database (`DATABASE_URL`).
     cdc: Option<Arc<cdc::Cdc>>,
+    api_roles: ApiRoles,
 }
 
 impl RealtimeState {
@@ -53,7 +54,15 @@ impl RealtimeState {
             jwt,
             hub: Arc::default(),
             cdc: None,
+            api_roles: ApiRoles::default(),
         }
+    }
+
+    /// Roles a channel token may apply when `postgres_changes` stores claims.
+    #[must_use]
+    pub fn with_api_roles(mut self, roles: ApiRoles) -> Self {
+        self.api_roles = roles;
+        self
     }
 
     /// The state with the tenant database: channels may join with
@@ -62,7 +71,11 @@ impl RealtimeState {
     /// is cluster-wide, so a second Realtime on the same cluster needs one.
     #[must_use]
     pub fn with_pool(mut self, pool: sqlx::PgPool, slot_name_suffix: Option<&str>) -> Self {
-        let cdc = Arc::new(cdc::Cdc::new(pool, slot_name_suffix));
+        let cdc = Arc::new(cdc::Cdc::new(
+            pool,
+            slot_name_suffix,
+            self.api_roles.clone(),
+        ));
         tokio::spawn(Arc::clone(&cdc).run());
         self.cdc = Some(cdc);
         self

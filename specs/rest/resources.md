@@ -60,7 +60,10 @@ stays 501, including `?select` with no `=`.
 claims `{"role":"anon"}`. A bearer token is verified with HS256. The
 statement runs after `SET LOCAL` role, `request.jwt.claims`,
 `request.method`, `request.path` (`/{relation}`, not the gateway prefix),
-and `search_path` to the negotiated schema. Reads use a read-only
+and `search_path` to the negotiated schema. The role applied is `anon`,
+`authenticated`, `service_role`, or a name in `MEGABASE_DB_EXTRA_ROLES`.
+Any other claim is rejected before `set_config('role', …)`, with the
+PostgreSQL error PostgREST returns for that name. Reads use a read-only
 transaction. Catalog lookups (existence, columns, privileges, primary key)
 run before `SET ROLE`.
 
@@ -144,6 +147,8 @@ must be exactly those columns, each a non-negated `eq`, with no logic tree.
 | No pool, or the pool cannot start a transaction | 503 | `PGRST000` Database connection error. |
 | Bearer token and no JWT secret | 500 | `PGRST300` Server lacks JWT secret |
 | Bad or expired JWT | 401 | `PGRST301` or `PGRST303`, plus `WWW-Authenticate` |
+| JWT `role` is not `anon`, `authenticated`, `service_role`, or `MEGABASE_DB_EXTRA_ROLES`, and `pg_roles` has no such role | 401 | `22023` `role "{role}" does not exist` |
+| JWT `role` is not one of those roles, and `pg_roles` has it | 403 | `42501` `permission denied to set role "{role}"` |
 | Unknown relation | 404 | `PGRST205` Could not find the table '{schema}.{relation}' in the schema cache |
 | More than one path segment, and not `rpc/{fn}` | 404 | `PGRST125` Invalid path specified in request URL |
 | Method not in the table above | 405 | `PGRST117` Unsupported HTTP method: {METHOD} |

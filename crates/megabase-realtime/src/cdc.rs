@@ -12,6 +12,7 @@ use std::collections::HashSet;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
+use megabase_core::{db_role, ApiRoles, RoleFailure, ROLE_EXISTS_SQL};
 use serde_json::Value;
 use sqlx::postgres::PgConnection;
 use sqlx::Row;
@@ -137,11 +138,12 @@ pub(crate) struct Cdc {
     /// `SLOT_NAME_SUFFIX` is set: the cluster may host another server.
     slot_suffixed: bool,
     subscribers: Mutex<Vec<Subscriber>>,
+    roles: ApiRoles,
 }
 
 impl Cdc {
     /// The extension for `pool`; `slot_name_suffix` is `SLOT_NAME_SUFFIX`.
-    pub(crate) fn new(pool: sqlx::PgPool, slot_name_suffix: Option<&str>) -> Self {
+    pub(crate) fn new(pool: sqlx::PgPool, slot_name_suffix: Option<&str>, roles: ApiRoles) -> Self {
         let slot_name = match slot_name_suffix {
             Some(suffix) => format!("{SLOT_NAME}_{suffix}"),
             None => SLOT_NAME.to_owned(),
@@ -151,6 +153,7 @@ impl Cdc {
             slot_name,
             slot_suffixed: slot_name_suffix.is_some(),
             subscribers: Mutex::new(Vec::new()),
+            roles,
         }
     }
 
@@ -326,6 +329,35 @@ impl Cdc {
             .is_some())
     }
 
+    /// Rejects a claims `role` that [`db_role`] does not allow, before the
+    /// subscription rows are inserted. `apply_rls` reads the role from those
+    /// rows, so a rejected role never reaches `set_config`.
+    async fn ensure_claims_role(
+        &self,
+        claims: &Value,
+        params: &subscriptions::SubscriptionParams,
+    ) -> Result<(), (String, bool)> {
+        let role = claims.get("role").and_then(Value::as_str).unwrap_or("");
+        if db_role(role, &self.roles).is_ok() {
+            return Ok(());
+        }
+        let exists = match sqlx::query_scalar::<_, bool>(ROLE_EXISTS_SQL)
+            .bind(role)
+            .fetch_one(&self.pool)
+            .await
+        {
+            Ok(exists) => exists,
+            Err(error) => {
+                let error = subscriptions::CreateError::Database(error);
+                let fatal = error.fatal();
+                return Err((error.to_string(), fatal));
+            }
+        };
+        let error = subscriptions::role_rejected(&RoleFailure::from_catalog(role, exists), params);
+        let fatal = error.fatal();
+        Err((error.to_string(), fatal))
+    }
+
     /// `postgres_subscribe_attempt/2`: the error message and whether it is
     /// one of `@postgres_subscribe_fatal_reasons`.
     async fn subscribe_attempt(
@@ -345,6 +377,9 @@ impl Cdc {
         }
         // `subscription_list/1` prepends, so rows go in reverse join order.
         list.reverse();
+        if let Some(params) = list.first().map(|sub| &sub.params) {
+            self.ensure_claims_role(claims, params).await?;
+        }
         subscriptions::create(&self.pool, PUBLICATION, &list)
             .await
             .map_err(|error| (error.to_string(), error.fatal()))
@@ -712,7 +747,7 @@ mod tests {
 
     #[tokio::test]
     async fn dispatch_pushes_matching_ids_per_api() {
-        let cdc = Cdc::new(lazy_pool(), None);
+        let cdc = Cdc::new(lazy_pool(), None, megabase_core::ApiRoles::default());
         let (a, b, c) = (Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4());
         let (new_box, mut new_rx) = Outbox::new(OUTBOX_CAPACITY);
         let (old_box, mut old_rx) = Outbox::new(OUTBOX_CAPACITY);
@@ -784,7 +819,7 @@ mod tests {
             .acquire_timeout(Duration::from_millis(200))
             .connect_lazy("postgres://megabase@127.0.0.1:1/megabase")
             .unwrap();
-        let cdc = Cdc::new(pool, None);
+        let cdc = Cdc::new(pool, None, megabase_core::ApiRoles::default());
         let id = Uuid::new_v4();
         let (outbox, mut rx) = Outbox::new(OUTBOX_CAPACITY);
         cdc.subscribe(Subscriber {
@@ -834,7 +869,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_stored_refresh_resumes_only_at_the_latest_generation() {
-        let cdc = Cdc::new(lazy_pool(), None);
+        let cdc = Cdc::new(lazy_pool(), None, megabase_core::ApiRoles::default());
         let id = Uuid::new_v4();
         let (outbox, mut rx) = Outbox::new(OUTBOX_CAPACITY);
         cdc.subscribe(Subscriber {
@@ -876,9 +911,12 @@ mod tests {
             .build()
             .unwrap();
         let _guard = rt.enter();
-        assert_eq!(Cdc::new(lazy_pool(), None).slot_name, SLOT_NAME);
         assert_eq!(
-            Cdc::new(lazy_pool(), Some("dev")).slot_name,
+            Cdc::new(lazy_pool(), None, megabase_core::ApiRoles::default()).slot_name,
+            SLOT_NAME
+        );
+        assert_eq!(
+            Cdc::new(lazy_pool(), Some("dev"), megabase_core::ApiRoles::default()).slot_name,
             "supabase_realtime_replication_slot_dev"
         );
         assert_eq!(backoff(1), Duration::from_millis(200));

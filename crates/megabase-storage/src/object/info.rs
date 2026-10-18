@@ -19,7 +19,7 @@ use super::{
     anon_claims, backend, bucket_is_public, fastify_json, http_date, iso, not_implemented,
     request_jwt, Actor, Scope, StorageError, StorageState,
 };
-use crate::{database_error, limits::is_valid_key};
+use crate::limits::is_valid_key;
 
 /// `ROUTE_OPERATIONS` (`src/http/routes/operations.ts`).
 const OP_INFO_PUBLIC: &str = "storage.object.info_public";
@@ -189,10 +189,11 @@ async fn object_info(
         uri,
         headers: request.headers,
         operation: request.operation,
+        roles: &state.api_roles,
     };
     let public = match bucket_is_public(pool, &scope, &bucket_id).await {
         Ok(public) => public,
-        Err(error) => return database_error(&error),
+        Err(error) => return super::apply_response(error),
     };
     let public = match public {
         Some(public) if public || authenticated => public,
@@ -211,7 +212,7 @@ async fn object_info(
             render(&row, request.render).unwrap_or_else(|| not_implemented(method, uri))
         }
         Ok(None) => StorageError::no_such_key().into_response(),
-        Err(error) => database_error(&error),
+        Err(error) => super::apply_response(error),
     }
 }
 
@@ -220,7 +221,7 @@ async fn find_info(
     scope: &Scope<'_>,
     bucket_id: &str,
     object_name: &str,
-) -> Result<Option<InfoRow>, sqlx::Error> {
+) -> Result<Option<InfoRow>, super::ApplyError> {
     let mut tx = scope.begin(pool).await?;
     let row = sqlx::query_as::<_, InfoRow>(INFO_OBJECT_SQL)
         .bind(object_name)
