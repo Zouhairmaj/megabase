@@ -1,5 +1,5 @@
 -- Ported from supabase/storage
--- migrations/tenant/0070-list-objects-with-versions.sql:1631 (Apache-2.0),
+-- migrations/tenant/0070-list-objects-with-versions.sql:1633 (Apache-2.0),
 -- pin v1.80.2. Final signature; the zero-argument function from 0005 is
 -- dropped first, as upstream does.
 -- Spec: specs/storage/database.md.

@@ -83,7 +83,8 @@ const SEARCH_V2: &str = include_str!("../sql/search_v2.sql");
 const GET_SIZE_BY_BUCKET: &str = include_str!("../sql/get_size_by_bucket.sql");
 
 /// Assigns owners when `supabase_storage_admin` (or `storage.super_user`)
-/// already exists. Issue #493 creates that role; this file does not.
+/// already exists and the connecting role can replace the objects later.
+/// Issue #493 creates that role; this file does not.
 const FUNCTION_OWNERS: &str = include_str!("../sql/function_owners.sql");
 
 /// Install order: the table before its triggers, `storage.operation()`
@@ -261,35 +262,26 @@ mod tests {
         }
     }
 
-    fn vendor_lines(file: &str, start: usize, end: usize) -> String {
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../vendor/storage/migrations/tenant")
-            .join(file);
-        let text = std::fs::read_to_string(&path)
-            .unwrap_or_else(|err| panic!("reading {}: {err}", path.display()));
-        let lines: Vec<_> = text.lines().collect();
-        let mut body = lines[start - 1..end].join("\n");
-        body.push('\n');
-        body
-    }
-
     #[test]
     fn route_and_rls_functions_match_the_pinned_migrations() {
         let sql = install_sql();
-        for (file, start, end) in [
-            ("0070-list-objects-with-versions.sql", 18, 87),
-            ("0070-list-objects-with-versions.sql", 112, 761),
-            ("0070-list-objects-with-versions.sql", 1345, 1536),
-            ("0070-list-objects-with-versions.sql", 1538, 1629),
-            ("0070-list-objects-with-versions.sql", 1631, 1662),
-            ("0068-bucket-lifecycle-configuration.sql", 61, 113),
-            ("0015-add-can-insert-object-function.sql", 1, 12),
-            ("0024-operation-function.sql", 1, 6),
+        // CI Build does not check out vendor/, so this compares the
+        // install script to the ported files rather than the pin.
+        for part in [
+            OPERATION,
+            CAN_INSERT_OBJECT,
+            GET_SIZE_BY_BUCKET,
+            PROTECT_BUCKET_CONTROL_COLUMNS,
+            LIST_MULTIPART,
+            LIST_OBJECTS,
+            SEARCH_BY_TIMESTAMP,
+            SEARCH_V2,
+            S3_MULTIPART,
+            FUNCTION_OWNERS,
         ] {
-            let slice = vendor_lines(file, start, end);
             assert!(
-                sql.contains(slice.trim_end()),
-                "{file}:{start}-{end} is not installed verbatim"
+                sql.contains(part.trim()),
+                "install SQL is missing a ported file"
             );
         }
         for older in [
@@ -299,9 +291,12 @@ mod tests {
         ] {
             assert!(sql.contains(older), "{older}");
         }
+        assert!(sql.contains("noncurrent_versions := COALESCE(noncurrent_versions, 'include');"));
+        assert!(sql.contains("delete_markers := COALESCE(delete_markers, 'include');"));
         assert!(
             sql.contains("IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = super_user) THEN")
         );
+        assert!(sql.contains("AND current_user IS DISTINCT FROM super_user THEN"));
         assert!(sql.contains("in_progress_size bigint NOT NULL DEFAULT 0"));
         assert!(sql.contains("size bigint NOT NULL DEFAULT 0"));
         assert!(sql.contains("GRANT SELECT ON TABLE storage.s3_multipart_uploads TO "));

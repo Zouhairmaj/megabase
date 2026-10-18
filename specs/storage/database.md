@@ -24,9 +24,12 @@ storage-api migrations already reached the pin on, keeps the same
 definitions. The `storage.install_roles` role setup in
 `0002-storage-schema.sql` is not ported (issue #493 creates
 `supabase_storage_admin`). `sql/function_owners.sql` runs
-`ALTER ... OWNER TO` that role only when it already exists, and otherwise
-leaves the `DATABASE_URL` role as owner. Functions keep PostgreSQL's
-default `EXECUTE` for `PUBLIC`: the tenant migrations never `GRANT` or
+`ALTER ... OWNER TO` that role only when it already exists **and** the
+connecting role is a superuser or is that owner role (so a later
+`CREATE OR REPLACE` still works). Otherwise it leaves the
+`DATABASE_URL` role as owner. A missing privilege is swallowed so the
+install does not roll back. Functions keep PostgreSQL's default
+`EXECUTE` for `PUBLIC`: the tenant migrations never `GRANT` or
 `REVOKE` `EXECUTE`.
 
 The storage service role is read as upstream does:
