@@ -37,6 +37,9 @@ mod recovery;
 pub use confirmation::{ConfirmationOutcome, ConfirmationSignup};
 pub use invite::{InviteCommand, InviteOutcome};
 pub use mfa::FactorRow;
+pub(crate) use mfa::{
+    phone_otp, EnrolledFactor, FactorVerify, MfaError, RecoveryIssue, UpgradedSession,
+};
 pub use passkey::PasskeyRow;
 pub use pkce::PkceRedemption;
 

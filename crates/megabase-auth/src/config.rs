@@ -8,6 +8,8 @@
 
 //! Auth HTTP configuration.
 
+use std::time::Duration;
+
 use crate::error::ConfigError;
 use crate::hooks::AccessTokenHook;
 
@@ -129,6 +131,31 @@ pub struct MfaConfig {
     pub webauthn_verify: bool,
     pub recovery_codes_enroll: bool,
     pub recovery_codes_verify: bool,
+    /// `GOTRUE_MFA_MAX_ENROLLED_FACTORS`. Go stores a float and truncates
+    /// toward zero when it counts factors.
+    pub max_enrolled_factors: u64,
+    /// `GOTRUE_MFA_MAX_VERIFIED_FACTORS`.
+    pub max_verified_factors: i64,
+    /// `GOTRUE_MFA_CHALLENGE_EXPIRY_DURATION`, whole seconds. Go raises
+    /// anything under 300 to 300.
+    pub challenge_expiry_seconds: u64,
+    /// `GOTRUE_MFA_FACTOR_EXPIRY_DURATION`. Go raises anything under 300s
+    /// to 300s.
+    pub factor_expiry: Duration,
+    /// `GOTRUE_MFA_PHONE_OTP_LENGTH`. Values outside 6..=10 become 6.
+    pub phone_otp_length: usize,
+    /// `GOTRUE_MFA_PHONE_MAX_FREQUENCY`. Zero becomes one minute.
+    pub phone_max_frequency: Duration,
+    /// `GOTRUE_MFA_PHONE_TEMPLATE`. Empty becomes `Your code is {{ .Code }}`.
+    pub phone_sms_template: String,
+    /// `GOTRUE_MFA_RECOVERY_CODES_COUNT`.
+    pub recovery_code_count: usize,
+    /// `GOTRUE_MFA_RECOVERY_CODES_CODE_LENGTH`.
+    pub recovery_code_length: usize,
+    /// `GOTRUE_MFA_RECOVERY_CODES_MAX_VERIFY_ATTEMPTS`.
+    pub recovery_max_attempts: i32,
+    /// `GOTRUE_MFA_RECOVERY_CODES_LOCKOUT_DURATION`.
+    pub recovery_lockout: Duration,
 }
 
 impl Default for MfaConfig {
@@ -142,6 +169,17 @@ impl Default for MfaConfig {
             webauthn_verify: false,
             recovery_codes_enroll: false,
             recovery_codes_verify: false,
+            max_enrolled_factors: 10,
+            max_verified_factors: 10,
+            challenge_expiry_seconds: 300,
+            factor_expiry: Duration::from_secs(300),
+            phone_otp_length: 6,
+            phone_max_frequency: Duration::from_secs(60),
+            phone_sms_template: "Your code is {{ .Code }}".into(),
+            recovery_code_count: 10,
+            recovery_code_length: 16,
+            recovery_max_attempts: 5,
+            recovery_lockout: Duration::from_secs(15 * 60),
         }
     }
 }
@@ -173,8 +211,159 @@ impl MfaConfig {
                 "GOTRUE_MFA_RECOVERY_CODES_VERIFY_ENABLED",
                 defaults.recovery_codes_verify,
             )?,
+            max_enrolled_factors: mfa_enrolled(lookup)?,
+            max_verified_factors: optional_i64(lookup, "GOTRUE_MFA_MAX_VERIFIED_FACTORS")?
+                .unwrap_or(defaults.max_verified_factors),
+            challenge_expiry_seconds: mfa_challenge_expiry(lookup)?,
+            factor_expiry: mfa_factor_expiry(lookup)?,
+            phone_otp_length: mfa_phone_otp_length(lookup)?,
+            phone_max_frequency: mfa_phone_frequency(lookup)?,
+            phone_sms_template: lookup("GOTRUE_MFA_PHONE_TEMPLATE")
+                .filter(|value| !value.is_empty())
+                .unwrap_or(defaults.phone_sms_template),
+            recovery_code_count: optional_u64(lookup, "GOTRUE_MFA_RECOVERY_CODES_COUNT")?
+                .unwrap_or(defaults.recovery_code_count as u64)
+                as usize,
+            recovery_code_length: optional_u64(lookup, "GOTRUE_MFA_RECOVERY_CODES_CODE_LENGTH")?
+                .unwrap_or(defaults.recovery_code_length as u64)
+                as usize,
+            recovery_max_attempts: optional_i64(
+                lookup,
+                "GOTRUE_MFA_RECOVERY_CODES_MAX_VERIFY_ATTEMPTS",
+            )?
+            .unwrap_or(i64::from(defaults.recovery_max_attempts))
+                as i32,
+            recovery_lockout: mfa_lockout(lookup)?,
         })
     }
+}
+
+fn mfa_enrolled(lookup: &impl Fn(&str) -> Option<String>) -> Result<u64, ConfigError> {
+    let Some(raw) = lookup("GOTRUE_MFA_MAX_ENROLLED_FACTORS") else {
+        return Ok(10);
+    };
+    let value: f64 = raw.trim().parse().map_err(|_| ConfigError::Invalid {
+        key: "GOTRUE_MFA_MAX_ENROLLED_FACTORS".into(),
+        value: raw.clone(),
+    })?;
+    if !value.is_finite() || value < 0.0 {
+        return Err(ConfigError::Invalid {
+            key: "GOTRUE_MFA_MAX_ENROLLED_FACTORS".into(),
+            value: raw,
+        });
+    }
+    Ok(value as u64)
+}
+
+fn mfa_challenge_expiry(lookup: &impl Fn(&str) -> Option<String>) -> Result<u64, ConfigError> {
+    let Some(raw) = lookup("GOTRUE_MFA_CHALLENGE_EXPIRY_DURATION") else {
+        return Ok(300);
+    };
+    let value: f64 = raw.trim().parse().map_err(|_| ConfigError::Invalid {
+        key: "GOTRUE_MFA_CHALLENGE_EXPIRY_DURATION".into(),
+        value: raw.clone(),
+    })?;
+    if !value.is_finite() || value < 0.0 {
+        return Err(ConfigError::Invalid {
+            key: "GOTRUE_MFA_CHALLENGE_EXPIRY_DURATION".into(),
+            value: raw,
+        });
+    }
+    Ok((value.max(300.0) as u64).max(300))
+}
+
+fn mfa_factor_expiry(lookup: &impl Fn(&str) -> Option<String>) -> Result<Duration, ConfigError> {
+    let Some(raw) = lookup("GOTRUE_MFA_FACTOR_EXPIRY_DURATION") else {
+        return Ok(Duration::from_secs(300));
+    };
+    let parsed = parse_go_duration(&raw).ok_or_else(|| ConfigError::Invalid {
+        key: "GOTRUE_MFA_FACTOR_EXPIRY_DURATION".into(),
+        value: raw,
+    })?;
+    Ok(parsed.max(Duration::from_secs(300)))
+}
+
+fn mfa_phone_otp_length(lookup: &impl Fn(&str) -> Option<String>) -> Result<usize, ConfigError> {
+    let Some(raw) = lookup("GOTRUE_MFA_PHONE_OTP_LENGTH") else {
+        return Ok(6);
+    };
+    let value: i64 = raw.trim().parse().map_err(|_| ConfigError::Invalid {
+        key: "GOTRUE_MFA_PHONE_OTP_LENGTH".into(),
+        value: raw,
+    })?;
+    if !(6..=10).contains(&value) {
+        Ok(6)
+    } else {
+        Ok(value as usize)
+    }
+}
+
+fn mfa_phone_frequency(lookup: &impl Fn(&str) -> Option<String>) -> Result<Duration, ConfigError> {
+    let Some(raw) = lookup("GOTRUE_MFA_PHONE_MAX_FREQUENCY") else {
+        return Ok(Duration::from_secs(60));
+    };
+    let parsed = parse_go_duration(&raw).ok_or_else(|| ConfigError::Invalid {
+        key: "GOTRUE_MFA_PHONE_MAX_FREQUENCY".into(),
+        value: raw,
+    })?;
+    if parsed.is_zero() {
+        Ok(Duration::from_secs(60))
+    } else {
+        Ok(parsed)
+    }
+}
+
+fn mfa_lockout(lookup: &impl Fn(&str) -> Option<String>) -> Result<Duration, ConfigError> {
+    let Some(raw) = lookup("GOTRUE_MFA_RECOVERY_CODES_LOCKOUT_DURATION") else {
+        return Ok(Duration::from_secs(15 * 60));
+    };
+    parse_go_duration(&raw).ok_or(ConfigError::Invalid {
+        key: "GOTRUE_MFA_RECOVERY_CODES_LOCKOUT_DURATION".into(),
+        value: raw,
+    })
+}
+
+/// Go `time.ParseDuration`: a sequence of number+unit (`300s`, `15m`, `1h30m`).
+fn parse_go_duration(raw: &str) -> Option<Duration> {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    let bytes = raw.as_bytes();
+    let mut index = 0;
+    let mut total = 0u128;
+    while index < bytes.len() {
+        let start = index;
+        while index < bytes.len() && (bytes[index].is_ascii_digit() || bytes[index] == b'.') {
+            index += 1;
+        }
+        if start == index {
+            return None;
+        }
+        let number: f64 = std::str::from_utf8(&bytes[start..index])
+            .ok()?
+            .parse()
+            .ok()?;
+        if !number.is_finite() || number < 0.0 {
+            return None;
+        }
+        let unit_start = index;
+        while index < bytes.len() && bytes[index].is_ascii_alphabetic() {
+            index += 1;
+        }
+        let unit = std::str::from_utf8(&bytes[unit_start..index]).ok()?;
+        let scale: f64 = match unit {
+            "ns" => 1e-9,
+            "us" | "µs" | "μs" => 1e-6,
+            "ms" => 1e-3,
+            "s" => 1.0,
+            "m" => 60.0,
+            "h" => 3600.0,
+            _ => return None,
+        };
+        total += (number * scale * 1_000_000_000.0) as u128;
+    }
+    Some(Duration::from_nanos(total.min(u64::MAX as u128) as u64))
 }
 
 /// `external` object on `GET /settings`. Email and phone are separate fields
