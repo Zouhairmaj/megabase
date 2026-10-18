@@ -746,6 +746,21 @@ mod tests {
         Arc::new(Mutex::new(megabase_core::ApiRoles::default()))
     }
 
+    #[test]
+    fn claim_role_text_follows_json_text() {
+        assert!(claim_role_text(&json!({})).is_none());
+        assert!(claim_role_text(&json!({"role": null})).is_none());
+        assert_eq!(
+            claim_role_text(&json!({"role": "authenticated"})).as_deref(),
+            Some("authenticated")
+        );
+        assert_eq!(claim_role_text(&json!({"role": 1})).as_deref(), Some("1"));
+        assert_eq!(
+            claim_role_text(&json!({"role": true})).as_deref(),
+            Some("true")
+        );
+    }
+
     #[tokio::test]
     async fn role_list_is_shared_with_the_caller() {
         let roles = shared_roles();
