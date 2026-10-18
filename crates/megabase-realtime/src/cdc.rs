@@ -12,7 +12,9 @@ use std::collections::HashSet;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
-use megabase_core::{db_role, ApiRoles, RoleFailure, ROLE_EXISTS_SQL};
+use std::borrow::Cow;
+
+use megabase_core::{db_role, ApiRoles, ROLE_EXISTS_SQL};
 use serde_json::Value;
 use sqlx::postgres::PgConnection;
 use sqlx::Row;
@@ -139,6 +141,20 @@ pub(crate) struct Cdc {
     slot_suffixed: bool,
     subscribers: Mutex<Vec<Subscriber>>,
     roles: ApiRoles,
+}
+
+/// `claims ->> 'role'`: JSON null and a missing key are SQL NULL. A string
+/// is that text. Any other JSON value is its text form, which is not NULL.
+fn claim_role_text(claims: &Value) -> Option<Cow<'_, str>> {
+    match claims.get("role") {
+        None | Some(Value::Null) => None,
+        Some(Value::String(role)) => Some(Cow::Borrowed(role.as_str())),
+        Some(other) => Some(Cow::Owned(other.to_string())),
+    }
+}
+
+fn fatal_insert(error: &subscriptions::CreateError) -> (String, bool) {
+    (error.to_string(), error.fatal())
 }
 
 impl Cdc {
@@ -330,19 +346,26 @@ impl Cdc {
     }
 
     /// Rejects a claims `role` that [`db_role`] does not allow, before the
-    /// subscription rows are inserted. `apply_rls` reads the role from those
-    /// rows, so a rejected role never reaches `set_config`.
+    /// subscription rows are inserted. `apply_rls` reads `claims_role` from
+    /// those rows, so a rejected role never reaches `set_config`.
+    ///
+    /// The reported error is the one the insert's generated column would
+    /// raise: `realtime.to_regrole((claims ->> 'role'))` (`role_name::regrole`)
+    /// is `42704` for an unknown name, and the `NOT NULL` `claims_role`
+    /// column is `23502` when `->>` yields NULL.
     async fn ensure_claims_role(
         &self,
         claims: &Value,
         params: &subscriptions::SubscriptionParams,
     ) -> Result<(), (String, bool)> {
-        let role = claims.get("role").and_then(Value::as_str).unwrap_or("");
-        if db_role(role, &self.roles).is_ok() {
+        let Some(role) = claim_role_text(claims) else {
+            return Err(fatal_insert(&subscriptions::null_claims_role(params)));
+        };
+        if db_role(role.as_ref(), &self.roles).is_ok() {
             return Ok(());
         }
         let exists = match sqlx::query_scalar::<_, bool>(ROLE_EXISTS_SQL)
-            .bind(role)
+            .bind(role.as_ref())
             .fetch_one(&self.pool)
             .await
         {
@@ -353,9 +376,12 @@ impl Cdc {
                 return Err((error.to_string(), fatal));
             }
         };
-        let error = subscriptions::role_rejected(&RoleFailure::from_catalog(role, exists), params);
-        let fatal = error.fatal();
-        Err((error.to_string(), fatal))
+        let error = if exists {
+            subscriptions::unconfigured_existing_role(role.as_ref(), params)
+        } else {
+            subscriptions::undefined_claims_role(role.as_ref(), params)
+        };
+        Err(fatal_insert(&error))
     }
 
     /// `postgres_subscribe_attempt/2`: the error message and whether it is

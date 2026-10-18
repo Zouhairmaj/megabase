@@ -189,20 +189,68 @@ impl CreateError {
     }
 }
 
-/// Final subscribe error when the claims role cannot be applied.
+/// Insert failure for `claims_role`, the `NOT NULL` generated column
+/// `realtime.to_regrole((claims ->> 'role'))` (`role_name::regrole`).
 ///
-/// The text matches an insert exception: the PostgreSQL message is the
-/// `Exception:` tail, and the error is fatal so the channel does not retry.
-pub(crate) fn role_rejected(
-    failure: &megabase_core::RoleFailure,
+/// A name that is not in `pg_roles` is the cast's `42704` (`role "…" does
+/// not exist`). A missing or JSON-null `role` makes the expression NULL,
+/// which is `23502` on `claims_role`. The text matches
+/// [`exception_message`] so the client sees the same `Exception:` tail as
+/// a rejected insert, and the error is fatal so the channel does not retry.
+pub(crate) fn undefined_claims_role(role: &str, params: &SubscriptionParams) -> CreateError {
+    insert_exception(
+        "42704",
+        &format!("role \"{role}\" does not exist"),
+        params,
+        &[],
+    )
+}
+
+/// `23502` when `claims ->> 'role'` is NULL.
+pub(crate) fn null_claims_role(params: &SubscriptionParams) -> CreateError {
+    insert_exception(
+        "23502",
+        "null value in column \"claims_role\" of relation \"subscription\" violates not-null constraint",
+        params,
+        &[("column", "claims_role"), ("table", "subscription")],
+    )
+}
+
+/// The name exists, but it is not a configured API role, so the row is not
+/// inserted. The SQLSTATE is `42501`.
+pub(crate) fn unconfigured_existing_role(role: &str, params: &SubscriptionParams) -> CreateError {
+    insert_exception(
+        "42501",
+        &format!("permission denied to set role \"{role}\""),
+        params,
+        &[],
+    )
+}
+
+fn insert_exception(
+    sqlstate: &str,
+    message: &str,
     params: &SubscriptionParams,
+    fields: &[(&str, &str)],
 ) -> CreateError {
+    let mut exception = format!(
+        "ERROR {} ({}) {}",
+        sqlstate,
+        condition_name(sqlstate),
+        message
+    );
+    if !fields.is_empty() {
+        exception.push('\n');
+        for (key, value) in fields {
+            exception.push_str("\n    ");
+            exception.push_str(key);
+            exception.push_str(": ");
+            exception.push_str(value);
+        }
+    }
     CreateError::SubscriptionInsertFailed(format!(
-        "Unable to subscribe to changes with given parameters. An exception happened so please check your connect parameters: [{}]. Exception: ERROR {} ({}) {}",
+        "Unable to subscribe to changes with given parameters. An exception happened so please check your connect parameters: [{}]. Exception: {exception}",
         params_to_log(params),
-        failure.sqlstate,
-        condition_name(failure.sqlstate),
-        failure.message,
     ))
 }
 
@@ -866,19 +914,24 @@ mod tests {
     fn rejected_role_is_a_fatal_subscribe_error() {
         let params = parse_subscription_params(&json!({"schema": "public", "table": "todos"}))
             .expect("params");
-        let missing = role_rejected(
-            &megabase_core::RoleFailure::from_catalog("not existing", false),
-            &params,
-        );
+        let missing = undefined_claims_role("not existing", &params);
         assert!(missing.fatal());
         let message = missing.to_string();
-        assert!(message.contains("ERROR 22023 (invalid_parameter_value)"));
+        assert!(message.contains("ERROR 42704 (undefined_object)"));
         assert!(message.contains("role \"not existing\" does not exist"));
+        assert!(!message.contains("22023"));
 
-        let denied = role_rejected(
-            &megabase_core::RoleFailure::from_catalog("postgres", true),
-            &params,
-        );
+        let absent = null_claims_role(&params);
+        assert!(absent.fatal());
+        let message = absent.to_string();
+        assert!(message.contains("ERROR 23502 (not_null_violation)"));
+        assert!(message.contains(
+            "null value in column \"claims_role\" of relation \"subscription\" violates not-null constraint"
+        ));
+        assert!(message.contains("column: claims_role"));
+        assert!(message.contains("table: subscription"));
+
+        let denied = unconfigured_existing_role("postgres", &params);
         assert!(denied.fatal());
         let message = denied.to_string();
         assert!(message.contains("ERROR 42501 (insufficient_privilege)"));
