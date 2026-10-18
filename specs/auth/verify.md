@@ -92,9 +92,10 @@ The site URL is `GOTRUE_SITE_URL`, or `SITE_URL` when that is unset
 the WHATWG URL parser and allowed when it matches the site (same canonical
 scheme and host; a localhost host may use another port), is a canonical
 loopback IP, or matches `GOTRUE_URI_ALLOW_LIST` (`ADDITIONAL_REDIRECT_URLS`
-when that list is unset) on its scheme, host, and path. A value with
-userinfo or a backslash is rejected, as is an IPv4 host that is not in
-dotted-decimal form. An allow-list pattern this port cannot compile
+when that list is unset) on the URL with its fragment removed and its
+query kept. Userinfo does not reject the URL; the host is the host after
+it. A backslash in the authority is rejected, as is an IPv4 host that is
+not in dotted-decimal form. An allow-list pattern this port cannot compile
 (`[`, `]`, `{`, `}`, or a dangling `\`) is HTTP 501 `GOTRUE_URI_ALLOW_LIST`
 instead of a guessed site-URL fallback.
 
