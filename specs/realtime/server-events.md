@@ -130,6 +130,14 @@ Differences from upstream:
 - The `ReplicationSlotBeingUsed` recovery (`pg_terminate_backend` on the
   slot holder) is not ported: on a cluster shared with another Realtime it
   would end that server's slot. Use `SLOT_NAME_SUFFIX` there.
+- Subscribe parsing matches pinned Realtime v2.143.3, including `like`,
+  `ilike`, `is`, `match`, `imatch`, `isdistinct`, and `not.`. A filter
+  the insert trigger rejects is still
+  `Unable to subscribe … Exception: …`. A filter evaluation error is
+  confined to that subscription: `check_equality_op` and
+  `is_visible_through_filters` return no match for it and re-raise
+  `query_canceled` (and lock or deadlock errors). `list_changes` still
+  delivers the change to the other subscribers.
 - The `db_events_per_second` and subscription-error rate counters are not
   modeled; nor is `postgres_changes_wait_timeout` (the join never waits).
 

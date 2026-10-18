@@ -122,7 +122,13 @@ impl Backend {
     ) -> Result<ConfirmationOutcome, StoreError> {
         match &self.inner {
             BackendKind::None => Err(StoreError::Unavailable),
-            BackendKind::Memory(db) => save_memory(&mut *db.lock().await, &cmd),
+            BackendKind::Memory(db) => {
+                let outcome = save_memory(&mut *db.lock().await, &cmd)?;
+                if let ConfirmationOutcome::Sent { user, .. } = &outcome {
+                    self.clear_otp_attempts(user.id);
+                }
+                Ok(outcome)
+            }
             BackendKind::Postgres(pg) => {
                 timed(async {
                     let mut tx = pg.pool.begin().await?;
@@ -166,7 +172,9 @@ impl Backend {
                     user.identities
                         .retain(|identity| identity.provider == EMAIL_PROVIDER);
                     let invited_at = load_user_tokens(&mut tx, user.id).await?.invited_at;
+                    let user_id = user.id;
                     tx.commit().await?;
+                    self.clear_otp_attempts(user_id);
                     Ok(ConfirmationOutcome::Sent {
                         user: Box::new(user),
                         invited_at,
