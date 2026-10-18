@@ -7,7 +7,7 @@
 // src/storage/database/pg.ts (`findObjects`) and src/internal/auth/jwt.ts
 // (Apache-2.0), pin v1.80.2.
 
-use std::collections::HashSet;
+use std::{borrow::Cow, collections::HashSet};
 
 use axum::{
     body::Bytes,
@@ -19,12 +19,17 @@ use chrono::Utc;
 use serde_json::{json, Value};
 
 use super::{
-    can_upload, header_str, request_jwt, Actor, Scope, MAX_SIGNED_URL_EXPIRES_IN, SCOPE_DOWNLOAD,
+    can_upload, complete_upload, etag, fetch_upload_bucket, file_upload, header_str, invalid_jwt,
+    max_file_size, object_file, remove_file, request_jwt, write_file, Actor, Scope,
+    MAX_SIGNED_URL_EXPIRES_IN, SCOPE_DOWNLOAD,
 };
 use crate::{
     database_error, fastify_json,
     limits::{is_uuid, is_valid_bucket_name, is_valid_key},
-    not_implemented, StorageError, StorageState,
+    mime::is_allowed_mime_type,
+    not_implemented,
+    render::{query_pairs, single, verified_signed_payload},
+    StorageError, StorageState,
 };
 
 /// `ROUTE_OPERATIONS.SIGN_OBJECT_URLS`.
@@ -34,6 +39,9 @@ const OP_SIGN_UPLOAD_URL: &str = "storage.object.sign_upload_url";
 
 /// `SIGNED_URL_SCOPE_UPLOAD`.
 const SCOPE_UPLOAD: &str = "upload";
+
+/// `ROUTE_OPERATIONS.UPLOAD_SIGN_OBJECT`.
+const OP_UPLOAD_SIGNED: &str = "storage.object.upload_signed";
 
 /// `MAX_OBJECTS_PER_REQUEST`, the schema's `maxItems` for `paths`.
 /// It is also `MAX_OBJECTS_PER_LOOKUP_BATCH`, so one lookup covers a body.
@@ -276,6 +284,174 @@ pub(crate) async fn sign_upload_object(
     }
 }
 
+/// `isUploadScopedToken`: `scope` is `upload`, or absent on a token that
+/// carries `upsert` (a legacy upload token).
+fn is_upload_scoped(payload: &serde_json::Map<String, Value>) -> bool {
+    match payload.get("scope") {
+        Some(Value::String(scope)) => scope == SCOPE_UPLOAD,
+        Some(_) => false,
+        None => payload.contains_key("upsert"),
+    }
+}
+
+/// `PUT /object/upload/sign/:bucketName/*?token=`: verify an upload token,
+/// then store the object as the superuser. The permission check happened
+/// when the token was signed.
+// megabase:unit storage:route:PUT /storage/v1/object/upload/sign/{bucketName}/{*}
+pub(crate) async fn put_signed_object(
+    State(state): State<StorageState>,
+    path: Result<Path<(String, String)>, PathRejection>,
+    method: Method,
+    OriginalUri(uri): OriginalUri,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    let (Ok(Path((bucket_id, object_name))), Some(pairs)) = (path, query_pairs(&uri)) else {
+        return not_implemented(&method, &uri);
+    };
+    let Some(Some(token)) = single(&pairs, "token") else {
+        return not_implemented(&method, &uri);
+    };
+    let Some(payload) = verified_signed_payload(&state, token) else {
+        return match invalid_jwt(&state, token) {
+            Some(error) => error.into_response(),
+            None => not_implemented(&method, &uri),
+        };
+    };
+    if !is_upload_scoped(&payload) {
+        return StorageError::invalid_signature(Cow::Owned(format!(
+            "Token is not scoped for {SCOPE_UPLOAD}"
+        )))
+        .into_response();
+    }
+    let expected = format!("{bucket_id}/{object_name}");
+    if payload.get("url").and_then(Value::as_str) != Some(expected.as_str()) {
+        return StorageError::invalid_signature(Cow::Borrowed("Invalid signature")).into_response();
+    }
+    let owner_id = match payload.get("owner") {
+        None => None,
+        Some(Value::String(owner)) => Some(owner.as_str()),
+        Some(_) => return not_implemented(&method, &uri),
+    };
+    let upsert = match payload.get("upsert") {
+        None => false,
+        Some(Value::Bool(upsert)) => *upsert,
+        Some(_) => return not_implemented(&method, &uri),
+    };
+    let Some((pool, root)) = super::backend(&state) else {
+        return not_implemented(&method, &uri);
+    };
+    let declared_length = header_str(&headers, header::CONTENT_LENGTH.as_str())
+        .and_then(|value| value.parse::<u64>().ok());
+    if headers.contains_key(header::CONTENT_ENCODING)
+        || headers.contains_key("x-robots-tag")
+        || headers.contains_key("x-metadata")
+        || declared_length.is_none_or(|length| length == 0)
+    {
+        return not_implemented(&method, &uri);
+    }
+    let Some(file) = file_upload(&headers, &body) else {
+        return not_implemented(&method, &uri);
+    };
+    if file.body.is_empty() {
+        return not_implemented(&method, &uri);
+    }
+    let scope = Scope {
+        actor: Actor::SuperUser,
+        method: &method,
+        uri: &uri,
+        headers: &headers,
+        operation: OP_UPLOAD_SIGNED,
+    };
+    let bucket = match fetch_upload_bucket(pool, &scope, &bucket_id).await {
+        Ok(Some(bucket)) => bucket,
+        Ok(None) => return StorageError::no_such_bucket().into_response(),
+        Err(error) => return database_error(&error),
+    };
+    let mime_type = file.mime_type.as_ref();
+    let allowed = bucket.allowed_mime_types.unwrap_or_default();
+    if !allowed.is_empty()
+        && !super::is_empty_folder(&object_name)
+        && !is_allowed_mime_type(mime_type, &allowed)
+    {
+        return StorageError::invalid_mime_type(mime_type).into_response();
+    }
+    let max = max_file_size(&object_name, bucket.file_size_limit);
+    let too_large = file.body.len() as u64 > max;
+    if !file.multipart && (declared_length.is_some_and(|length| length > max) || too_large) {
+        return StorageError::entity_too_large().into_response();
+    }
+    if !is_valid_key(&object_name) {
+        return StorageError::invalid_key(&object_name).into_response();
+    }
+    let version = uuid::Uuid::new_v4().to_string();
+    let Some(path) = object_file(root, &bucket_id, &object_name, &version) else {
+        return not_implemented(&method, &uri);
+    };
+    let owner = owner_id.filter(|owner| is_uuid(owner));
+    let probe = json!({ "mimetype": mime_type, "contentLength": declared_length });
+    if let Err(response) = can_upload(
+        pool,
+        &scope,
+        &bucket_id,
+        &object_name,
+        owner,
+        owner_id,
+        &probe,
+        upsert,
+    )
+    .await
+    {
+        return *response;
+    }
+    if too_large {
+        return StorageError::entity_too_large().into_response();
+    }
+    let bytes = &file.body;
+    let last_modified = match write_file(&path, bytes).await {
+        Ok(at) => at,
+        Err(error) => {
+            tracing::error!(%error, "storage signed upload write failed");
+            return not_implemented(&method, &uri);
+        }
+    };
+    let metadata = json!({
+        "eTag": etag(bytes),
+        "size": bytes.len(),
+        "mimetype": mime_type,
+        "cacheControl": file.cache_control,
+        "lastModified": crate::iso(Some(last_modified)),
+        "contentLength": bytes.len(),
+        "httpStatusCode": 200,
+    });
+    let completed = complete_upload(
+        pool,
+        &scope,
+        &bucket_id,
+        &object_name,
+        owner,
+        owner_id,
+        &metadata,
+        &version,
+        upsert,
+    )
+    .await;
+    match completed {
+        Ok((_id, previous)) => {
+            if let Some(previous) =
+                previous.and_then(|previous| object_file(root, &bucket_id, &object_name, &previous))
+            {
+                remove_file(&previous).await;
+            }
+            fastify_json(StatusCode::OK, &json!({ "Key": expected }))
+        }
+        Err(response) => {
+            remove_file(&path).await;
+            *response
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -332,6 +508,70 @@ mod tests {
         );
         headers.insert(header::CONTENT_LENGTH, "1e3".parse().unwrap());
         assert_eq!(upload_probe(&headers), None);
+    }
+
+    #[test]
+    fn upload_tokens_are_scoped() {
+        assert!(is_upload_scoped(
+            json!({ "scope": "upload", "upsert": false })
+                .as_object()
+                .unwrap()
+        ));
+        assert!(is_upload_scoped(
+            json!({ "upsert": true }).as_object().unwrap()
+        ));
+        assert!(!is_upload_scoped(
+            json!({ "scope": "download" }).as_object().unwrap()
+        ));
+        assert!(!is_upload_scoped(
+            json!({ "url": "a/b" }).as_object().unwrap()
+        ));
+    }
+
+    #[tokio::test]
+    async fn a_signed_upload_rejects_a_bad_token_and_stays_501_without_one() {
+        use axum::body::Body;
+        use tower::ServiceExt;
+
+        const SECRET: &str = "super-secret-jwt-token-with-at-least-32-characters-long";
+        let app = crate::router_with_state(StorageState::new(
+            None,
+            Some(megabase_core::Hs256::new(SECRET).unwrap()),
+        ));
+        let missing = app
+            .clone()
+            .oneshot(
+                axum::http::Request::builder()
+                    .method(Method::PUT)
+                    .uri("/storage/v1/object/upload/sign/avatars/a.png")
+                    .header(header::CONTENT_TYPE, "text/plain")
+                    .header(header::CONTENT_LENGTH, "4")
+                    .body(Body::from("file"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(missing.status(), StatusCode::NOT_IMPLEMENTED);
+
+        let response = app
+            .oneshot(
+                axum::http::Request::builder()
+                    .method(Method::PUT)
+                    .uri("/storage/v1/object/upload/sign/avatars/a.png?token=not-a-jwt")
+                    .header(header::CONTENT_TYPE, "text/plain")
+                    .header(header::CONTENT_LENGTH, "4")
+                    .body(Body::from("file"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let bytes = axum::body::to_bytes(response.into_body(), 1024 * 1024)
+            .await
+            .unwrap();
+        let body: Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(body["code"], "InvalidJWT");
+        assert_eq!(body["message"], "Invalid Compact JWS");
     }
 
     #[test]

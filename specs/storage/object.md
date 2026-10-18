@@ -18,6 +18,10 @@ Unit ids (`coverage/units.json`):
 - `storage:route:GET /storage/v1/object/info/authenticated/{bucketName}/{*}` (issue 61)
 - `storage:route:GET /storage/v1/object/info/{bucketName}/{*}` (issue 61)
 - `storage:route:GET /storage/v1/object/info/public/{bucketName}/{*}` (issue 61)
+- `storage:route:HEAD /storage/v1/object/public/{bucketName}/{*}` (issue 496)
+- `storage:route:HEAD /storage/v1/object/{bucketName}/{*}` (issue 496)
+- `storage:route:POST /storage/v1/object/list-v2/{bucketName}` (issue 496)
+- `storage:route:PUT /storage/v1/object/upload/sign/{bucketName}/{*}` (issue 496)
 
 supabase-js `storage.from(b).upload/update/download/remove/createSignedUrl/createSignedUrls/createSignedUploadUrl/getPublicUrl/info/exists`.
 The table these routes write is in [`database.md`](database.md).
@@ -48,7 +52,9 @@ Pins: storage `v1.80.2`, supabase `v1.26.08` (`vendor.toml`).
 | `verifyObjectSignature` | `vendor/storage/src/storage/object.ts:979` |
 | Delete: body, `deleteObjects` SQL, `objectSchema` response | `vendor/storage/src/http/routes/object/deleteObjects.ts:16`, `vendor/storage/src/storage/object.ts:193`, `vendor/storage/src/storage/database/pg.ts:1276`, `vendor/storage/src/storage/schemas/object.ts:4` |
 | Single delete: superuser `findObject ... FOR UPDATE`, `deleteObject` as the request role, `AccessDenied` when nothing was deleted, `{"message":"Successfully deleted"}` | `vendor/storage/src/http/routes/object/deleteObject.ts:42`, `vendor/storage/src/storage/object.ts:144`, `vendor/storage/src/storage/database/pg.ts:1247` |
-| Object info: bucket, auth and lookup order; operations per route | `vendor/storage/src/http/routes/object/getObjectInfo.ts:37`, `:96`, `:140` |
+| Object info: bucket, auth and lookup order; operations per route, including `HEAD /public/:bucket/*` and `HEAD /:bucket/*` | `vendor/storage/src/http/routes/object/getObjectInfo.ts:37`, `:96`, `:201` |
+| List v2: body, single-tenant (no migration gate), `listObjectsV2` | `vendor/storage/src/http/routes/object/listObjectsV2.ts:45`, `vendor/storage/src/storage/object.ts:653`, `vendor/storage/src/storage/database/pg.ts:679` |
+| Signed upload `PUT`: token scope `upload`, superuser `uploadFromRequest`, `{Key}` | `vendor/storage/src/http/routes/object/uploadSignedObject.ts:64`, `vendor/storage/src/storage/object.ts:979`, `:92` |
 | `head` and `info` renderers: metadata parsing, headers, JSON body | `vendor/storage/src/storage/renderer/head.ts:11`, `:60`, `vendor/storage/src/storage/renderer/info.ts:11`, `vendor/storage/src/storage/renderer/renderer.ts:123` |
 
 ## Configuration
@@ -63,9 +69,8 @@ download, delete) are a 501; public downloads and info, and
 `GET /object/:bucket/*` and `GET /object/info/:bucket/*` on a public bucket
 (anonymous fallback) still work.
 
-`list` is served by [`object-list.md`](object-list.md). The unported
-prefix `list-v2` is an explicit 501, so it never reaches the generic
-`:bucket/*` handlers.
+`list` is served by [`object-list.md`](object-list.md). `list-v2` is
+served below and is registered before the generic `:bucket/*` handlers.
 
 ## Request scope
 
@@ -202,6 +207,8 @@ other object routes there is no `InvalidKey` check.
 | Route | JWT | Operation | Renderer |
 |---|---|---|---|
 | `HEAD /object/authenticated/:bucket/*` | required | `object.head_authenticated_info` | `head` |
+| `HEAD /object/public/:bucket/*` | none (superuser; a bearer token is ignored) | `storage.object.info_public` | `head` |
+| `HEAD /object/:bucket/*` | `allowInvalidJwt` (`anon`) | `object.head_authenticated_info` | `head` |
 | `GET /object/info/authenticated/:bucket/*` | required | `object.get_authenticated_info` | `info` |
 | `GET /object/info/:bucket/*` | `allowInvalidJwt` (`anon`) | `object.get_authenticated_info` | `info` |
 | `GET /object/info/public/:bucket/*` | none (superuser) | `storage.object.info_public` | `info` |
@@ -223,6 +230,55 @@ stored mimetype, `text/html` becomes `text/plain`), `X-Robots-Tag: none`,
 content_encoding, etag, metadata (user_metadata), last_modified
 (updated_at), created_at, archived_at, is_delete_marker, is_versioned}`;
 missing metadata values are `null`, timestamps are ISO with milliseconds.
+`versionId`, transformation query keys and `If-None-Match` are a 501, as
+on the info routes already served.
+
+## List v2 — `POST /object/list-v2/:bucket`
+
+A verified JWT and a JSON object. Absent fields use upstream defaults:
+`prefix` `""`, `limit` 1000 (capped at 1000), `with_delimiter` false,
+`sortBy` column `name` order `asc`, `noncurrentVersions` and
+`deleteMarkers` `exclude`, `exactMatch` false. An invalid bucket name is
+`InvalidBucketName`. The bucket is not looked up; RLS on
+`storage.objects` decides the rows (`storage.operation` is
+`storage.object.list_v2`).
+
+`with_delimiter: true` and `exactMatch` not true calls
+`storage.search_v2` (delimiter `/`), then the same folder collapse as
+storage-api: one folder per common prefix, `id` null, `name` ending in
+`/`, and `bucket_id` plus the three timestamps copied from the first row.
+Otherwise the flat `SELECT` in `pg.ts` `listObjectsV2` runs (versioning
+columns on, since the installed schema is the final one). One extra row
+is fetched. `hasNext` is true when more than `limit` rows remain after
+collapse. The cursor is the base64 continuation token
+(`l` startAfter, `o` sort order, `c` sort column, `a` tie-break, `v`
+version, `r` archived_at, `n` noncurrent, `d` delete markers, `e`
+exactMatch); default values are omitted. A token locks
+`noncurrentVersions`, `deleteMarkers` and `exactMatch`, and an
+`exactMatch` token's `prefix` must equal its `startAfter`. A bad token
+is `InvalidParameter` `Invalid Parameter continuation token`.
+
+Response `200`, keys `hasNext`, `nextCursor` and `nextCursorKey` (only
+when `hasNext`), `folders`, `objects`. Object entries keep the query's
+column order (`key` only on the `search_v2` path). Timestamps are
+`toISOString()`.
+
+Self-hosted storage-api is not multitenant, so the old-migration
+`FeatureNotEnabled` body is not served.
+
+## Signed upload — `PUT /object/upload/sign/:bucket/*?token=`
+
+No bearer JWT. `token` is required. `verifyObjectSignature` with the
+upload scope: a download token is `InvalidSignature` `Token is not scoped
+for upload`; a bad compact token is `InvalidJWT` with jose's message; a
+`url` other than `<bucket>/<name>` is `InvalidSignature` `Invalid
+signature`. `owner` (a string, the `sub` from signing) and `upsert` (a
+boolean) come from the token. The upload then runs as the superuser
+(`service_role`), the same checks as `POST /object/:bucket/*` (bucket,
+MIME, size, `InvalidKey`, `canUpload`, file, row). Response `200
+{"Key":"<bucket>/<name>"}`. `Content-Encoding`, `x-robots-tag`,
+`x-metadata`, a missing or zero `Content-Length`, and an empty file are
+501, as on the other upload routes.
 
 ## Out of scope (501)
 
