@@ -40,6 +40,7 @@ as-is, anything else `Deno.inspect`, then `\n`) and passes the method's
 level. The reference stack has no event worker, so there is no sender: the
 worker writes the no-tracing fallback to its stderr, including the logger's
 extra newline. `console.log("hello")` therefore writes `[Info] hello\n\n`.
+`Deno.inspect({ n: 1 })` is `{ n: 1 }`.
 
 The channel path is the same function: a present sender queues
 `{ event: { "Log": { msg, level } }, metadata }` and writes nothing. A
@@ -56,7 +57,8 @@ Implemented and tested, not marked, not installed on a user worker.
 The reference stack never starts an event worker, and a user worker has no
 `EventManager`. Installing one would add a global the reference does not
 have. `event_accept` still follows the op: no receiver → the bail string;
-otherwise take the receiver, wait, put it back; an event is
+otherwise take the receiver, wait, put it back, including when the future
+is dropped during the wait; an event is
 `RawEvent::Event`; a closed channel is `RawEvent::Done` and reports the
 wake. The listener's `event_type` / `event` / `metadata` projection is
 tested against that JSON. `timestamp` is `new Date().toISOString()` in

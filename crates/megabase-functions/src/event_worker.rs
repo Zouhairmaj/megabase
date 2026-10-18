@@ -205,12 +205,28 @@ pub fn user_worker_log(
         .map_err(|_| UserWorkerLogError::ChannelClosed)
 }
 
+/// Puts the taken receiver back into `slot` when dropped, including when the
+/// wait is cancelled.
+struct ReceiverGuard<'a> {
+    slot: &'a mut Option<mpsc::UnboundedReceiver<WorkerEventWithMetadata>>,
+    receiver: Option<mpsc::UnboundedReceiver<WorkerEventWithMetadata>>,
+}
+
+impl Drop for ReceiverGuard<'_> {
+    fn drop(&mut self) {
+        if let Some(receiver) = self.receiver.take() {
+            *self.slot = Some(receiver);
+        }
+    }
+}
+
 /// Run `op_event_accept` against `slot`.
 ///
 /// The receiver is taken out before the wait and put back afterwards, so a
 /// second accept that observes the empty slot fails with
-/// [`EventAcceptError::ReceiverUnavailable`]. The `bool` is the wake flag:
-/// `true` only for [`RawEvent::Done`].
+/// [`EventAcceptError::ReceiverUnavailable`]. Dropping the future during the
+/// wait puts the receiver back too. The `bool` is the wake flag: `true` only
+/// for [`RawEvent::Done`].
 ///
 /// # Errors
 ///
@@ -218,10 +234,16 @@ pub fn user_worker_log(
 pub async fn event_accept(
     slot: &mut Option<mpsc::UnboundedReceiver<WorkerEventWithMetadata>>,
 ) -> Result<(RawEvent, bool), EventAcceptError> {
-    let mut receiver = slot.take().ok_or(EventAcceptError::ReceiverUnavailable)?;
-    let data = receiver.recv().await;
+    let receiver = slot.take().ok_or(EventAcceptError::ReceiverUnavailable)?;
+    let mut guard = ReceiverGuard {
+        slot,
+        receiver: Some(receiver),
+    };
+    let data = match guard.receiver.as_mut() {
+        Some(receiver) => receiver.recv().await,
+        None => return Err(EventAcceptError::ReceiverUnavailable),
+    };
     let wake = data.is_none();
-    *slot = Some(receiver);
     let event = match data {
         Some(event) => RawEvent::Event(event),
         None => RawEvent::Done,
@@ -402,6 +424,30 @@ mod tests {
         assert_eq!(raw, RawEvent::Done);
     }
 
+    #[tokio::test]
+    async fn dropping_accept_during_the_wait_puts_the_receiver_back() {
+        let (tx, rx) = mpsc::unbounded_channel();
+        let mut slot = Some(rx);
+        {
+            let pending = event_accept(&mut slot);
+            tokio::pin!(pending);
+            let early = tokio::time::timeout(Duration::from_millis(20), &mut pending).await;
+            assert!(early.is_err(), "accept finished before it was dropped");
+        }
+        assert!(
+            slot.is_some(),
+            "receiver was lost when the wait was cancelled"
+        );
+        let queued = user_worker_log(Some(&tx), &EventMetadata::default(), "later", 1).unwrap();
+        assert_eq!(queued, LogDisposition::Queued);
+        let (raw, wake) = event_accept(&mut slot).await.unwrap();
+        assert!(!wake);
+        match raw {
+            RawEvent::Event(event) => assert_eq!(event.event["Log"]["msg"], "later"),
+            RawEvent::Done => panic!("channel closed"),
+        }
+    }
+
     #[test]
     fn the_console_shim_runs_and_matches_the_fallback_line() {
         let script = format!(
@@ -410,10 +456,20 @@ mod tests {
             const decoder = new TextDecoder();
             globalThis.Deno = {{
               inspect(value) {{
-                if (typeof value === "string" || typeof value === "number" || typeof value === "boolean" || value === null || value === undefined) {{
-                  return String(value);
+                if (value === null) return "null";
+                if (value === undefined) return "undefined";
+                if (typeof value === "string") return JSON.stringify(value);
+                if (typeof value === "number" || typeof value === "boolean") return String(value);
+                if (Array.isArray(value)) {{
+                  return `[ ${{value.map((item) => Deno.inspect(item)).join(", ")}} ]`;
                 }}
-                return JSON.stringify(value);
+                if (typeof value === "object") {{
+                  const body = Object.keys(value)
+                    .map((key) => `${{key}}: ${{Deno.inspect(value[key])}}`)
+                    .join(", ");
+                  return `{{ ${{body}} }}`;
+                }}
+                return String(value);
               }},
               stderr: {{
                 writeSync(data) {{
@@ -444,7 +500,7 @@ mod tests {
         wanted.push_str(&expect(LogLevel::Error, "e\n"));
         wanted.push_str(&expect(LogLevel::Info, "a b\n"));
         wanted.push_str(&expect(LogLevel::Info, "%s z\n"));
-        wanted.push_str(&expect(LogLevel::Info, "{\"n\":1}\n"));
+        wanted.push_str(&expect(LogLevel::Info, "{ n: 1 }\n"));
         assert_eq!(stdout, wanted);
     }
 
