@@ -5,7 +5,7 @@
 //! the renderer is a 501. The checks before rendering (query validation, the
 //! signed URL token, the object key, and the bucket and object lookups)
 //! answer with Storage's error bodies. The public route reads the bucket
-//! `public` flag before the object row.
+//! first. A missing or non-public bucket is `NoSuchBucket`.
 
 // Ported from supabase/storage src/http/routes/render/index.ts,
 // src/http/routes/render/renderAuthenticatedImage.ts,
@@ -259,10 +259,13 @@ pub(super) async fn render_authenticated_image(
 }
 
 /// `GET /render/image/public/:bucketName/*`: query validation, then the
-/// bucket `public` flag, then `findObject` as the superuser. The key check
-/// runs before either query. A non-public bucket is `NoSuchKey` (`Object
-/// not found`) and the object row is not read. A missing bucket is
-/// `NoSuchBucket`.
+/// bucket, then `findObject` as the superuser. The key check runs before
+/// either query. Upstream races `findBucket(..., { isPublic: true })` with
+/// `findObject` (`Promise.all` in `renderPublicImage.ts`). A missing or
+/// non-public bucket makes that bucket lookup reject with `NoSuchBucket`.
+/// When the object row is also missing, either rejection can settle first.
+/// Megabase reads the bucket first and returns `NoSuchBucket` for both.
+/// A public bucket with no row is `NoSuchKey`.
 // megabase:unit storage:route:GET /storage/v1/render/image/public/{bucketName}/{*}
 pub(super) async fn render_public_image(
     State(state): State<StorageState>,
@@ -285,8 +288,9 @@ pub(super) async fn render_public_image(
     let version = single(&pairs, "versionId").flatten();
     match public_bucket(&state, pool, &bucket_name).await {
         Ok(Some(true)) => {}
-        Ok(Some(false)) => return StorageError::no_such_key().into_response(),
-        Ok(None) => return StorageError::no_such_bucket().into_response(),
+        // Missing and non-public are both `findBucket(..., { isPublic: true })`
+        // failures: `NoSuchBucket`, whether or not an object row exists.
+        Ok(_) => return StorageError::no_such_bucket().into_response(),
         Err(error) => return database_error(&error),
     }
     let found = public_object(&state, pool, &bucket_name, &object_name, version).await;
@@ -633,25 +637,50 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn public_image_route_returns_not_found_for_a_non_public_bucket() {
+    async fn public_image_route_returns_no_such_bucket_unless_the_bucket_is_public() {
         use std::collections::{HashMap, HashSet};
 
         let mut objects = HashMap::new();
         objects.insert("private".into(), HashSet::from(["exists.png".into()]));
+        objects.insert("absent".into(), HashSet::from(["exists.png".into()]));
         let rows = crate::RouteRows {
-            buckets: HashMap::from([("private".into(), false)]),
+            buckets: HashMap::from([("private".into(), false), ("public".into(), true)]),
             objects,
         };
         let app = router_with_state(
             StorageState::new(Some(unreachable_pool()), Some(Hs256::new(SECRET).unwrap()))
                 .with_route_rows(rows),
         );
-        let expected = br#"{"code":"NoSuchKey","error":"not_found","message":"Object not found","statusCode":"404"}"#;
-        for name in ["exists.png", "missing.png"] {
-            let path = format!("/storage/v1/render/image/public/private/{name}");
+        let no_such_bucket =
+            br#"{"code":"NoSuchBucket","error":"Bucket not found","message":"Bucket not found","statusCode":"404"}"#;
+        let no_such_key =
+            br#"{"code":"NoSuchKey","error":"not_found","message":"Object not found","statusCode":"404"}"#;
+        let cases = [
+            (
+                "/storage/v1/render/image/public/private/exists.png",
+                &no_such_bucket[..],
+            ),
+            (
+                "/storage/v1/render/image/public/private/missing.png",
+                &no_such_bucket[..],
+            ),
+            (
+                "/storage/v1/render/image/public/absent/exists.png",
+                &no_such_bucket[..],
+            ),
+            (
+                "/storage/v1/render/image/public/absent/missing.png",
+                &no_such_bucket[..],
+            ),
+            (
+                "/storage/v1/render/image/public/public/missing.png",
+                &no_such_key[..],
+            ),
+        ];
+        for (path, expected) in cases {
             let response = app
                 .clone()
-                .oneshot(axum::http::Request::get(&path).body(Body::empty()).unwrap())
+                .oneshot(axum::http::Request::get(path).body(Body::empty()).unwrap())
                 .await
                 .unwrap();
             assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{path}");

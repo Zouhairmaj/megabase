@@ -55,16 +55,24 @@ body `{"statusCode","code","error","message"}`:
 | Case | `statusCode` | `code` | `error` | `message` |
 |---|---|---|---|---|
 | Object key fails `VALID_OBJECT_KEY` | `400` | `InvalidKey` | `InvalidKey` | `Invalid key: <key>` |
-| No current object (or no row for `versionId`) | `404` | `NoSuchKey` | `not_found` | `Object not found` |
-| `public`: bucket not public | `404` | `NoSuchKey` | `not_found` | `Object not found` |
-| `public`: bucket missing | `404` | `NoSuchBucket` | `Bucket not found` | `Bucket not found` |
+| No current object after the bucket is public, or on `authenticated` / `sign` (including no row for `versionId`) | `404` | `NoSuchKey` | `not_found` | `Object not found` |
+| `public`: bucket missing or not public | `404` | `NoSuchBucket` | `Bucket not found` | `Bucket not found` |
 | `sign`: token not download-scoped | `400` | `InvalidSignature` | `InvalidSignature` | `Token is not scoped for download` |
 | `sign`: token `url` ≠ `<bucketName>/<*>` | `400` | `InvalidSignature` | `InvalidSignature` | `Invalid signature` |
 
-Order: `public` checks the key, then the bucket `public` flag, then the
-object row. A non-public bucket is `NoSuchKey` and the object row is not
-read. `sign` checks scope, then `url`, then the key of the object named by
-`url`. `authenticated` checks the key after JWT auth.
+Order: `public` checks the key, then the bucket, then the object row.
+Upstream starts `findBucket(id, 'id,public', { isPublic: true })` and
+`findObject` together with `Promise.all`
+(`vendor/storage/src/http/routes/render/renderPublicImage.ts:57`). The
+`isPublic` filter throws `NoSuchBucket` when the bucket is missing or not
+public. `findObject` throws `NoSuchKey` when the row is missing. When the
+row exists, only the bucket lookup rejects, so the response is
+`NoSuchBucket`. When both reject, storage-api reports whichever query
+settles first. Megabase reads the bucket first and answers `NoSuchBucket`
+for a missing or non-public bucket, which is one of those outcomes, and
+does not answer 501. It reads the object row only when the bucket is
+public. `sign` checks scope, then `url`, then the key of the object named
+by `url`. `authenticated` checks the key after JWT auth.
 
 `findObject` selects from `storage.objects` with `name COLLATE "C" = $1
 AND bucket_id = $2` plus `version = $3` or, after migration
