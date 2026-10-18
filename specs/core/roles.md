@@ -138,11 +138,12 @@ is a finished install: the role row is committed.
   membership grants in step 3 need `ADMIN OPTION`; without it startup fails
   with `permission denied`, naming the privilege.
 - **Concurrency.** Two Megabase processes on the same database serialise
-  on the advisory lock. Two on different databases of one cluster take the
-  same cluster-wide lock, so they also serialise. A session that does not
-  take the lock can still create the role between the `pg_roles` check and
-  the `CREATE`; the loser's `duplicate_object` or `unique_violation` is
-  ignored, and that loser does not `ALTER` the role the winner created.
+  on the advisory lock. Advisory locks are per database, so two processes
+  on different databases of one cluster do not serialise, and neither does a
+  session that does not take the lock. Either can create the role between
+  the `pg_roles` check and the `CREATE`; the loser's `duplicate_object` or
+  `unique_violation` is ignored, and that loser does not `ALTER` the role
+  the winner created.
 - **`NOLOGIN` admin roles.** The pinned image's `rolcanlogin` is true for
   `supabase_admin`, `supabase_auth_admin` and `supabase_storage_admin`,
   because those roles are connection users there and

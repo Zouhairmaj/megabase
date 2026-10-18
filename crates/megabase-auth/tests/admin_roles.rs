@@ -34,11 +34,23 @@ async fn fresh_cluster_admin_roles_and_degraded_attributes() {
     });
 
     cleanup(&admin).await;
-    admin
-        .batch_execute(
-            "CREATE ROLE mb_creator LOGIN PASSWORD 'test-password' \
-             CREATEROLE BYPASSRLS NOSUPERUSER;",
+    // Generated at runtime so the tree has no hard-coded credential.
+    // 32 hex digits: no quote or URL encoding. PostgreSQL quotes it with %L.
+    let password = uuid::Uuid::new_v4().simple().to_string();
+    let create_role: String = admin
+        .query_one(
+            "SELECT format(\
+                 'CREATE ROLE mb_creator LOGIN PASSWORD %L \
+                  CREATEROLE BYPASSRLS NOSUPERUSER', \
+                 $1::text\
+             )",
+            &[&password],
         )
+        .await
+        .expect("format create role")
+        .get(0);
+    admin
+        .batch_execute(&create_role)
         .await
         .expect("creator role");
     // CREATE DATABASE cannot run inside a multi-statement implicit transaction.
@@ -47,13 +59,12 @@ async fn fresh_cluster_admin_roles_and_degraded_attributes() {
         .await
         .expect("degraded database");
 
-    let degraded_url = url_for(&url, "mb_creator", "test-password", "mb_degraded");
+    let degraded_url = url_for(&url, "mb_creator", &password, "mb_degraded");
     megabase_auth::install_roles(&degraded_url)
         .await
         .expect("degraded install");
 
     let text = String::from_utf8(warnings.lock().expect("warnings").clone()).expect("utf8");
-    eprintln!("{text}");
     for attribute in ["SUPERUSER", "CREATEDB", "REPLICATION"] {
         assert!(
             text.contains(&format!(
