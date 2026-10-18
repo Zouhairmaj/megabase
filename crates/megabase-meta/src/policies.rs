@@ -990,6 +990,19 @@ mod tests {
     }
 
     #[test]
+    fn query_parser_does_not_panic_on_arbitrary_bytes() {
+        let mut messy = String::new();
+        for byte in 0u8..=255 {
+            messy.push(char::from(byte));
+        }
+        messy.push_str("%zz%a+&a=1&a=2&included_schemas=%ff");
+        let _ = percent_decode(&messy);
+        let _ = query_map(Some(&messy));
+        let _ = list_sql(Some(&messy));
+        let _ = list_sql(None);
+    }
+
+    #[test]
     fn javascript_id_strings_match_number_tostring() {
         assert!(matches!(classify_id("abc"), IdClass::NotFound));
         assert!(matches!(classify_id("0"), IdClass::Invalid));

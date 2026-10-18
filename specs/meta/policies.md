@@ -97,6 +97,11 @@ the policy oid, so the follow-up read uses the same id.
 `included_schemas` is not trimmed. An empty `included_schemas=` filter is
 `IN ('')`. Include wins over exclude.
 
+`action`, `command`, `definition`, and `check` are interpolated into the
+statement without parameter bindings. That is intentional: it is what
+postgres-meta does, and the route accepts only the service-role key
+(`docs/SECURE_DESIGN.md`).
+
 Megabase uses the process `DATABASE_URL`. It does not read a per-request `pg`
 header or `x-connection-encrypted`. Those headers are the same gap as
 `GET /pg/health`.
