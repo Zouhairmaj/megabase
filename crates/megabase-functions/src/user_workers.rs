@@ -12,6 +12,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
+use axum::body::Body;
 use axum::extract::Request;
 use axum::http::{header, HeaderMap, HeaderName, HeaderValue, Method};
 use axum::response::Response;
@@ -414,11 +415,12 @@ impl Pool {
                 "user worker not available".to_owned(),
             )));
         };
-        let _in_flight = begin_request(&slot)?;
+        let in_flight = begin_request(&slot)?;
         let addr = slot.addr;
-        proxy::forward(addr, request, target)
+        let response = proxy::forward(addr, request, target)
             .await
-            .map_err(|error| map_supervisor_reject(SupervisorReject::Other(error.to_string())))
+            .map_err(|error| map_supervisor_reject(SupervisorReject::Other(error.to_string())))?;
+        Ok(hold_until_body_ends(response, in_flight))
     }
 
     // megabase:unit functions:op:op_user_worker_cleanup_idle_workers
@@ -729,6 +731,48 @@ impl Drop for InFlight {
     }
 }
 
+/// Keep the in-flight count until the client finishes or drops the body.
+///
+/// `proxy::forward` returns as soon as the worker headers are in, and
+/// `Body::new` then streams the rest. Dropping the guard at that point
+/// would let idle cleanup stop the process mid-stream.
+fn hold_until_body_ends(response: Response, in_flight: InFlight) -> Response {
+    let (parts, body) = response.into_parts();
+    Response::from_parts(
+        parts,
+        Body::new(HeldBody {
+            body,
+            _in_flight: in_flight,
+        }),
+    )
+}
+
+/// Worker body that owns the in-flight guard.
+struct HeldBody {
+    body: Body,
+    _in_flight: InFlight,
+}
+
+impl http_body::Body for HeldBody {
+    type Data = bytes::Bytes;
+    type Error = axum::Error;
+
+    fn poll_frame(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Result<http_body::Frame<Self::Data>, Self::Error>>> {
+        std::pin::Pin::new(&mut self.get_mut().body).poll_frame(cx)
+    }
+
+    fn is_end_stream(&self) -> bool {
+        self.body.is_end_stream()
+    }
+
+    fn size_hint(&self) -> http_body::SizeHint {
+        self.body.size_hint()
+    }
+}
+
 /// Header pairs from a request map, in iteration order.
 ///
 /// Values stay as raw bytes. `HeaderValue::to_str` rejects obs-text
@@ -760,7 +804,6 @@ mod tests {
     use super::*;
     use std::sync::atomic::AtomicUsize as StdAtomicUsize;
 
-    use axum::body::Body;
     use axum::http::Request as HttpRequest;
 
     fn temp_dir(tag: &str) -> PathBuf {
@@ -1172,6 +1215,50 @@ mod tests {
         assert_eq!(pool.cleanup_idle_workers(5).await, 1);
         assert!(pool.mem_stats().await.is_empty());
         assert_eq!(pool.cleanup_idle_workers(5).await, 0);
+    }
+
+    #[tokio::test]
+    async fn in_flight_stays_until_the_response_body_is_dropped() {
+        let dir = temp_dir("body-hold");
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut buf = [0u8; 1024];
+            let _ = tokio::io::AsyncReadExt::read(&mut stream, &mut buf).await;
+            let _ = tokio::io::AsyncWriteExt::write_all(
+                &mut stream,
+                b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nhello",
+            )
+            .await;
+            std::future::pending::<()>().await;
+        });
+
+        let starts = Arc::new(StdAtomicUsize::new(0));
+        let runtime = FixedRuntime { addr, starts };
+        let pool = Pool::new(dir, Box::new(runtime));
+        let key = pool.create(&opts("hello")).await.unwrap().key;
+        let response = pool
+            .fetch_send(key, empty_request(), "/hello")
+            .await
+            .unwrap();
+        assert_eq!(pool.worker_info(key).await.unwrap().in_flight, 1);
+        assert_eq!(pool.cleanup_idle_workers(0).await, 0);
+        assert!(pool.worker_info(key).await.is_some());
+        drop(response);
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        loop {
+            if pool.worker_info(key).await.unwrap().in_flight == 0 {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "in_flight stayed up after the body was dropped"
+            );
+            tokio::task::yield_now().await;
+        }
+        assert_eq!(pool.cleanup_idle_workers(0).await, 1);
+        assert!(pool.worker_info(key).await.is_none());
     }
 
     #[tokio::test]

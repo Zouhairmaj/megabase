@@ -134,8 +134,10 @@ later supervisor can return the same strings. A transport error does not
 drop the worker; the next `create` reuses it while the process is running.
 A process that has exited is shut down and the next `create` starts another.
 
-`in_flight` counts requests inside `fetch_send`. It drops when the send
-finishes, including on error.
+`in_flight` counts requests inside `fetch_send`. It stays up until the
+client finishes or drops the streamed body, and it drops immediately when
+the send fails before a response is built. Idle cleanup must not stop a
+worker while a body is still being read.
 
 ## `op_user_worker_cleanup_idle_workers`
 
