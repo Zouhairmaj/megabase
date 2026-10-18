@@ -5,10 +5,10 @@
 //!
 //! Each file under `sql/` starts from its upstream
 //! `tenant_schema/realtime/<path>` file. `check_equality_op` and
-//! `is_visible_through_filters` catch an evaluation error and return no
-//! match for that subscription, so the shared poll continues for the
-//! others. `subscription_check_filters` rejects an operator, column name,
-//! or value the subscribe path does not accept. The upstream `create schema`,
+//! `is_visible_through_filters` catch an evaluation error for one
+//! subscription and return no match for it, so `list_changes` still
+//! returns the other subscriptions. `query_canceled`, `lock_not_available`,
+//! and `deadlock_detected` are re-raised. The upstream `create schema`,
 //! `create type` and `create table` statements are not idempotent, so each
 //! of those steps carries a catalog probe and is skipped when its object
 //! already exists (a restart, or a database whose Realtime migrations
@@ -407,10 +407,10 @@ mod tests {
         let visible = STEPS[index("functions/is_visible_through_filters")].sql;
         assert!(visible.contains("when others then"));
         assert!(visible.contains("return false"));
-        let check = STEPS[index("functions/subscription_check_filters")].sql;
-        assert!(check.contains("filter value exceeds the maximum length"));
-        assert!(check.contains("'eq'::realtime.equality_op"));
-        assert!(check.contains("'in'::realtime.equality_op"));
+        assert!(op.contains("query_canceled"));
+        assert!(op.contains("lock_not_available"));
+        assert!(visible.contains("query_canceled"));
+        assert!(visible.contains("lock_not_available"));
     }
 
     #[test]

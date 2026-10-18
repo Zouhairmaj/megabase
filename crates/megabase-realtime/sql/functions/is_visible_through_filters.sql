@@ -32,11 +32,11 @@ begin
                 on f.column_name = col.name
     );
 exception
-    when query_canceled then
+    when query_canceled or lock_not_available or deadlock_detected then
         raise;
     when others then
-        -- One subscription's filters failed to evaluate. Hide that
-        -- subscription from this change; the caller's poll continues.
+        -- This subscription's filters did not evaluate. Leave it out of
+        -- the change; the caller still returns the other subscriptions.
         return false;
 end;
 $function$;

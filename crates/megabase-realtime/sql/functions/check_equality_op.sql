@@ -39,7 +39,7 @@ begin
         || ')', val_1, val_2) into res;
     return res;
 exception
-    when query_canceled then
+    when query_canceled or lock_not_available or deadlock_detected then
         raise;
     when others then
         return null;
@@ -121,7 +121,7 @@ begin
 
     return case when negate then not res else res end;
 exception
-    when query_canceled then
+    when query_canceled or lock_not_available or deadlock_detected then
         raise;
     when others then
         return null;

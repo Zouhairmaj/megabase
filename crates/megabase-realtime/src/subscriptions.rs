@@ -14,21 +14,22 @@ use serde_json::Value;
 use sqlx::postgres::PgDatabaseError;
 use sqlx::PgPool;
 
-/// Filter operators accepted at subscribe time.
-///
-/// Comparison and `in` only. Other `realtime.equality_op` labels stay in the
-/// database enum so an existing installation still has the expected shape,
-/// and the insert trigger rejects them.
-const FILTER_TYPES: [&str; 7] = ["eq", "neq", "lt", "lte", "gt", "gte", "in"];
-
-/// Longest column name stored on a filter (`NAMEDATALEN - 1`).
-const MAX_COLUMN_BYTES: usize = 63;
-
-/// Longest filter value stored on a subscription, in bytes.
-const MAX_FILTER_VALUE_BYTES: usize = 4096;
-
-/// Most values in one `in` list. The insert trigger uses the same limit.
-const MAX_IN_VALUES: usize = 100;
+/// All supported filter operators (`@filter_types`).
+const FILTER_TYPES: [&str; 13] = [
+    "eq",
+    "neq",
+    "lt",
+    "lte",
+    "gt",
+    "gte",
+    "in",
+    "like",
+    "ilike",
+    "is",
+    "match",
+    "imatch",
+    "isdistinct",
+];
 
 /// The transaction deadline (`@transaction_timeout`): statement_timeout (5s) <
 /// this (10s) < RPC (15s).
@@ -349,75 +350,12 @@ fn parse_segment(segment: &str) -> Result<Filter, String> {
     if !FILTER_TYPES.contains(&filter_type) {
         return Err(inspect_str_list(&[filter_type, value]));
     }
-    if !valid_column_name(column) {
-        return Err(invalid_column_message(column));
-    }
-    let formatted = format_filter_value(filter_type, value)?;
-    if formatted.len() > MAX_FILTER_VALUE_BYTES {
-        return Err("filter value exceeds the maximum length".to_owned());
-    }
-    if filter_type == "in" {
-        let inner = formatted
-            .strip_prefix('{')
-            .and_then(|rest| rest.strip_suffix('}'))
-            .unwrap_or(&formatted);
-        if in_value_count(inner) > MAX_IN_VALUES {
-            return Err("too many values for `in` filter. Maximum 100".to_owned());
-        }
-    }
     Ok(Filter {
         column: column.to_owned(),
         op: filter_type.to_owned(),
-        value: formatted,
+        value: format_filter_value(filter_type, value)?,
         negate,
     })
-}
-
-/// An unquoted PostgreSQL identifier: a letter or `_`, then letters, digits,
-/// `_` or `$`, at most 63 bytes.
-fn valid_column_name(column: &str) -> bool {
-    let mut chars = column.chars();
-    match chars.next() {
-        Some(first) if first.is_ascii_alphabetic() || first == '_' => {
-            chars.all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '$')
-                && column.len() <= MAX_COLUMN_BYTES
-        }
-        _ => false,
-    }
-}
-
-fn invalid_column_message(column: &str) -> String {
-    if !column.is_empty() && column.len() <= MAX_COLUMN_BYTES {
-        format!("invalid column for filter {column}")
-    } else {
-        "invalid column for filter".to_owned()
-    }
-}
-
-/// Elements of an `in` list. Commas inside double quotes are part of a value.
-fn in_value_count(inner: &str) -> usize {
-    if inner.is_empty() {
-        return 0;
-    }
-    let bytes = inner.as_bytes();
-    let mut count = 1usize;
-    let mut quoted = false;
-    let mut i = 0usize;
-    while i < bytes.len() {
-        match bytes[i] {
-            b'\\' if quoted && i + 1 < bytes.len() => i += 2,
-            b'"' => {
-                quoted = !quoted;
-                i += 1;
-            }
-            b',' if !quoted => {
-                count += 1;
-                i += 1;
-            }
-            _ => i += 1,
-        }
-    }
-    count
 }
 
 fn format_filter_value(filter_type: &str, value: &str) -> Result<String, String> {
@@ -955,8 +893,8 @@ mod tests {
             vec![f("subject", "in", "{hidee,ho}", false)]
         );
         assert_eq!(
-            filter_error("subject=not.like.hey%"),
-            r#"Error parsing `filter` params: ["like", "hey%"]"#
+            filters_of("subject=not.like.hey%"),
+            vec![f("subject", "like", "hey%", true)]
         );
         assert_eq!(
             filters_of("id=gt.0,id=lt.100"),
@@ -1180,74 +1118,14 @@ mod tests {
             );
         }
         assert_eq!(
-            filter_error("details=like.hel%"),
-            r#"Error parsing `filter` params: ["like", "hel%"]"#
+            filters_of("details=like.hel%"),
+            vec![f("details", "like", "hel%", false)]
         );
         assert_eq!(
-            filter_error("flag=is.true"),
-            r#"Error parsing `filter` params: ["is", "true"]"#
+            filters_of("flag=is.true"),
+            vec![f("flag", "is", "true", false)]
         );
         assert_eq!(filters_of("id=not.eq.5"), vec![f("id", "eq", "5", true)]);
-        for op in ["like", "ilike", "is", "match", "imatch", "isdistinct"] {
-            assert_eq!(
-                filter_error(&format!("c={op}.1")),
-                format!(
-                    "Error parsing `filter` params: {}",
-                    inspect_str_list(&[op, "1"])
-                ),
-                "{op}"
-            );
-        }
-    }
-
-    #[test]
-    fn subscriptions_reject_column_names_that_are_not_identifiers() {
-        assert_eq!(
-            filter_error("bad-name=eq.1"),
-            "Error parsing `filter` params: invalid column for filter bad-name"
-        );
-        assert_eq!(
-            filter_error("1id=eq.1"),
-            "Error parsing `filter` params: invalid column for filter 1id"
-        );
-        assert_eq!(
-            filter_error("=eq.1"),
-            "Error parsing `filter` params: invalid column for filter"
-        );
-        let long = "a".repeat(MAX_COLUMN_BYTES + 1);
-        assert_eq!(
-            filter_error(&format!("{long}=eq.1")),
-            "Error parsing `filter` params: invalid column for filter"
-        );
-        let ok = "a".repeat(MAX_COLUMN_BYTES);
-        assert_eq!(
-            filters_of(&format!("{ok}=eq.1")),
-            vec![f(&ok, "eq", "1", false)]
-        );
-        assert_eq!(filters_of("_id$2=eq.1"), vec![f("_id$2", "eq", "1", false)]);
-    }
-
-    #[test]
-    fn subscriptions_reject_values_over_the_limit() {
-        let value = "a".repeat(MAX_FILTER_VALUE_BYTES + 1);
-        assert_eq!(
-            filter_error(&format!("name=eq.{value}")),
-            "Error parsing `filter` params: filter value exceeds the maximum length"
-        );
-        let fitted = "a".repeat(MAX_FILTER_VALUE_BYTES);
-        assert_eq!(
-            filters_of(&format!("name=eq.{fitted}")),
-            vec![f("name", "eq", &fitted, false)]
-        );
-        let mut items = (0..MAX_IN_VALUES)
-            .map(|n| n.to_string())
-            .collect::<Vec<_>>();
-        assert_eq!(filters_of(&format!("id=in.({})", items.join(","))).len(), 1);
-        items.push(MAX_IN_VALUES.to_string());
-        assert_eq!(
-            filter_error(&format!("id=in.({})", items.join(","))),
-            "Error parsing `filter` params: too many values for `in` filter. Maximum 100"
-        );
     }
 
     #[test]
