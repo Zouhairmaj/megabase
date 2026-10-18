@@ -53,7 +53,12 @@ pub struct MemInfo {
 /// matching the op's `Some(default)` paths. The value is never absent.
 #[must_use]
 pub fn system_memory_info() -> MemInfo {
-    system_memory_info_from(read_proc_meminfo())
+    system_memory_info_with(read_proc_meminfo)
+}
+
+/// Run the op on text from `read`. A failed read is [`MemInfo::default`].
+fn system_memory_info_with(read: impl FnOnce() -> std::io::Result<String>) -> MemInfo {
+    system_memory_info_from(read())
 }
 
 fn read_proc_meminfo() -> std::io::Result<String> {
@@ -211,18 +216,15 @@ SwapFree:       3072 kB
     }
 
     #[test]
-    fn the_live_read_follows_the_op_invariants() {
-        let info = system_memory_info();
-        assert_eq!(info.available, info.free);
-        assert_eq!(info.cached, 0);
-        #[cfg(target_os = "linux")]
-        {
-            let text = std::fs::read_to_string("/proc/meminfo").unwrap();
-            let parsed = parse_meminfo(&text);
-            assert_eq!(system_memory_info_from(Ok(text)), parsed);
-            assert!(parsed.total > 0, "MemTotal was zero");
-            assert!(info.total > 0, "live MemTotal was zero");
-        }
+    fn an_injected_reader_parses_a_snapshot_and_falls_back_to_zeros() {
+        let read = system_memory_info_with(|| Ok(SAMPLE.to_owned()));
+        assert_eq!(read, parse_meminfo(SAMPLE));
+        assert_eq!(read.available, read.free);
+        assert_eq!(read.cached, 0);
+        assert_ne!(read.available, kib(1500));
+
+        let error = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "unreadable");
+        assert_eq!(system_memory_info_with(|| Err(error)), MemInfo::default());
     }
 
     #[test]

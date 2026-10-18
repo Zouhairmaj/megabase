@@ -46,6 +46,6 @@ main worker, which Megabase does not run.
 
 None. The vendored `hello` function does not call `Deno.systemMemoryInfo`,
 and a fixture function would be TypeScript outside `vendor/`. No protected
-judge file is needed. Tests parse `/proc/meminfo`, call
-`system_memory_info`, and run the `Deno.systemMemoryInfo` shim under
-`node`.
+judge file is needed. Tests feed an in-memory reader a fixed
+`/proc/meminfo` snapshot and a failed read, and run the
+`Deno.systemMemoryInfo` shim under `node`.
