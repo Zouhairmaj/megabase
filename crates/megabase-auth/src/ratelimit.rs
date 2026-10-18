@@ -6,8 +6,10 @@
 //! GoTrue builds `tollbooth.NewLimiter(rate, ...).SetBurst(30)` with a one
 //! hour entry TTL. [`limit_by_header`] limits only when
 //! `GOTRUE_RATE_LIMIT_HEADER` names a header whose first comma-separated
-//! value is non-blank. [`limit_client`] uses a parsed `Sb-Forwarded-For`
-//! address, then `X-Forwarded-For`, then that header.
+//! value is non-blank. [`perform_rate_limiting`] uses a parsed
+//! `Sb-Forwarded-For` address only when
+//! `GOTRUE_SECURITY_SB_FORWARDED_FOR_ENABLED` is set, and otherwise the
+//! header.
 
 use std::collections::HashMap;
 use std::sync::{Mutex, PoisonError};
@@ -216,32 +218,23 @@ pub(crate) fn parse_email_rate(raw: &str) -> Result<EmailRate, String> {
     })
 }
 
-/// `performRateLimiting`: a parsed `Sb-Forwarded-For` address, otherwise
-/// the first parsed `X-Forwarded-For` address, otherwise
-/// [`limit_by_header`].
+/// `performRateLimiting`: `Sb-Forwarded-For` when that feature is on and the
+/// leftmost value is an IP, otherwise [`limit_by_header`].
 ///
 /// # Errors
 /// `over_request_rate_limit` when that key has no token left.
-pub(crate) fn limit_client(
+pub(crate) fn perform_rate_limiting(
     limiter: &KeyedLimiter,
+    sb_forwarded_for: bool,
     header: &str,
     headers: &HeaderMap,
 ) -> Result<(), GoTrueError> {
-    if let Some(ip) = client_ip(headers) {
-        return allow_key(limiter, &ip);
+    if sb_forwarded_for {
+        if let Some(ip) = sb_forwarded_ip(headers) {
+            return allow_key(limiter, &ip);
+        }
     }
     limit_by_header(limiter, header, headers)
-}
-
-/// One bucket per email or phone. An empty target is not limited.
-///
-/// # Errors
-/// `over_request_rate_limit` when that address has no token left.
-pub(crate) fn limit_target(limiter: &KeyedLimiter, target: &str) -> Result<(), GoTrueError> {
-    if target.is_empty() {
-        return Ok(());
-    }
-    allow_key(limiter, target)
 }
 
 /// `performRateLimitingWithHeader`: `Err` is GoTrue's 429.
@@ -283,14 +276,9 @@ fn over_request_rate_limit() -> GoTrueError {
     )
 }
 
-/// Leftmost address GoTrue would rate-limit by: `Sb-Forwarded-For`, then
-/// `X-Forwarded-For`. A value that is not an IP is ignored.
-fn client_ip(headers: &HeaderMap) -> Option<String> {
-    first_ip(headers, "sb-forwarded-for").or_else(|| first_ip(headers, "x-forwarded-for"))
-}
-
-fn first_ip(headers: &HeaderMap, name: &str) -> Option<String> {
-    let value = headers.get(name)?;
+/// Leftmost `Sb-Forwarded-For` value when it is an IP (`sbff.parseSBFFHeader`).
+fn sb_forwarded_ip(headers: &HeaderMap) -> Option<String> {
+    let value = headers.get("sb-forwarded-for")?;
     let raw = value.to_str().ok()?;
     let key = raw.split(',').next().unwrap_or_default().trim();
     key.parse::<std::net::IpAddr>()
@@ -422,42 +410,45 @@ mod tests {
     }
 
     #[test]
-    fn client_limit_prefers_sb_forwarded_for_then_xff() {
+    fn sb_forwarded_for_is_used_only_when_enabled() {
         let limiter = KeyedLimiter::new(0.0, 1.0);
         let mut headers = HeaderMap::new();
-        headers.insert("x-forwarded-for", HeaderValue::from_static("198.51.100.8"));
         headers.insert(
             "sb-forwarded-for",
             HeaderValue::from_static("203.0.113.5, 10.0.0.1"),
         );
+        headers.insert("x-forwarded-for", HeaderValue::from_static("198.51.100.8"));
         headers.insert("x-key", HeaderValue::from_static("hdr"));
-        assert!(limit_client(&limiter, "x-key", &headers).is_ok());
-        let Err(error) = limit_client(&limiter, "x-key", &headers) else {
-            panic!("second request from the same Sb-Forwarded-For must be limited");
+
+        assert!(perform_rate_limiting(&limiter, false, "x-key", &headers).is_ok());
+        let Err(error) = perform_rate_limiting(&limiter, false, "x-key", &headers) else {
+            panic!("the header key is used when Sb-Forwarded-For is off");
         };
-        assert_eq!(error.status, StatusCode::TOO_MANY_REQUESTS);
         assert_eq!(error.error_code, "over_request_rate_limit");
 
-        headers.remove("sb-forwarded-for");
+        let other = KeyedLimiter::new(0.0, 1.0);
+        assert!(perform_rate_limiting(&other, true, "x-key", &headers).is_ok());
+        let Err(error) = perform_rate_limiting(&other, true, "x-key", &headers) else {
+            panic!("the Sb-Forwarded-For address is the key when the flag is on");
+        };
+        assert_eq!(error.status, StatusCode::TOO_MANY_REQUESTS);
+        headers.insert("x-key", HeaderValue::from_static("other-header"));
         assert!(
-            limit_client(&limiter, "x-key", &headers).is_ok(),
-            "X-Forwarded-For is a different key"
+            perform_rate_limiting(&other, true, "x-key", &headers).is_err(),
+            "a valid Sb-Forwarded-For address does not fall through to the header"
         );
-        assert!(limit_client(&limiter, "x-key", &headers).is_err());
 
-        headers.remove("x-forwarded-for");
+        headers.insert("sb-forwarded-for", HeaderValue::from_static("not-an-ip"));
         assert!(
-            limit_client(&limiter, "x-key", &headers).is_ok(),
-            "without an IP the header key is used"
+            perform_rate_limiting(&other, true, "x-key", &headers).is_ok(),
+            "an unparsed Sb-Forwarded-For value uses the header key"
         );
-        assert!(limit_client(&limiter, "x-key", &headers).is_err());
 
-        let mut bare = HeaderMap::new();
-        bare.insert("x-forwarded-for", HeaderValue::from_static("not-an-ip"));
-        assert!(limit_client(&limiter, "x-key", &bare).is_ok());
-        assert!(limit_target(&limiter, "").is_ok());
-        assert!(limit_target(&limiter, "a@example.com").is_ok());
-        assert!(limit_target(&limiter, "a@example.com").is_err());
-        assert!(limit_target(&limiter, "b@example.com").is_ok());
+        let mut forwarded = HeaderMap::new();
+        forwarded.insert("x-forwarded-for", HeaderValue::from_static("198.51.100.8"));
+        let plain = KeyedLimiter::new(0.0, 1.0);
+        assert!(perform_rate_limiting(&plain, false, "x-key", &forwarded).is_ok());
+        assert!(perform_rate_limiting(&plain, false, "x-key", &forwarded).is_ok());
+        assert!(perform_rate_limiting(&plain, true, "x-key", &forwarded).is_ok());
     }
 }

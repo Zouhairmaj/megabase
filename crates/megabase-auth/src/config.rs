@@ -21,9 +21,6 @@ pub const MIN_PASSWORD_LENGTH: usize = 6;
 /// default is 12, so callers pass this explicitly.
 pub const BCRYPT_COST: u32 = 10;
 
-/// `MAILER_OTP_EXP` when `GOTRUE_MAILER_OTP_EXP` is unset or `0`: one hour.
-pub const MAILER_OTP_EXP_SECONDS: u64 = 3600;
-
 /// Flags and JWT claim defaults for `/auth/v1`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AuthConfig {
@@ -61,8 +58,8 @@ pub struct AuthConfig {
     pub external_redirect_url: String,
     /// `GOTRUE_EXTERNAL_EMAIL_MAGIC_LINK_ENABLED`. GoTrue default is true.
     pub magic_link_enabled: bool,
-    /// `GOTRUE_MAILER_OTP_EXP` in seconds. Unset or `0` is
-    /// [`MAILER_OTP_EXP_SECONDS`] (one hour). A positive value is kept.
+    /// `GOTRUE_MAILER_OTP_EXP` in seconds. `0` is raised to one day, matching
+    /// GoTrue's startup default.
     pub mailer_otp_exp_seconds: u64,
     /// `GOTRUE_MAILER_SECURE_EMAIL_CHANGE_ENABLED`.
     pub secure_email_change: bool,
@@ -340,7 +337,7 @@ impl AuthConfig {
             site_url: "http://localhost:3000".into(),
             external_redirect_url: String::new(),
             magic_link_enabled: true,
-            mailer_otp_exp_seconds: MAILER_OTP_EXP_SECONDS,
+            mailer_otp_exp_seconds: 86_400,
             secure_email_change: true,
             custom_access_token_hook: None,
             mfa: MfaConfig::default(),
@@ -562,7 +559,7 @@ mod tests {
         assert_eq!(config.jwt_issuer, "http://localhost:8000/auth/v1");
         assert_eq!(config.password_min_length, 6);
         assert_eq!(config.site_url, "http://localhost:3000");
-        assert_eq!(config.mailer_otp_exp_seconds, MAILER_OTP_EXP_SECONDS);
+        assert_eq!(config.mailer_otp_exp_seconds, 86_400);
         assert!(config.secure_email_change);
     }
 
@@ -596,7 +593,7 @@ mod tests {
         let zero =
             AuthConfig::from_lookup(|key| (key == "GOTRUE_MAILER_OTP_EXP").then(|| "0".into()))
                 .unwrap();
-        assert_eq!(zero.mailer_otp_exp_seconds, MAILER_OTP_EXP_SECONDS);
+        assert_eq!(zero.mailer_otp_exp_seconds, 86_400);
     }
 
     #[test]

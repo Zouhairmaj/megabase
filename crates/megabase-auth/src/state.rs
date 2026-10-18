@@ -70,16 +70,17 @@ pub struct AuthState {
     /// (default 15) per five minutes, burst 30, one bucket per header value.
     pub(crate) saml_assertion_limiter: Arc<KeyedLimiter>,
     /// `GET`/`POST /verify` limiter: `GOTRUE_RATE_LIMIT_VERIFY` (default 30)
-    /// per five minutes, burst 30. Keyed by client IP, else the rate-limit
-    /// header.
+    /// per five minutes, burst 30. Keyed like GoTrue `performRateLimiting`.
     pub(crate) verify_limiter: Arc<KeyedLimiter>,
-    /// Same budget as [`Self::verify_limiter`], one bucket per email or phone.
-    pub(crate) verify_target_limiter: Arc<KeyedLimiter>,
     /// `POST /otp` and `POST /magiclink`: `GOTRUE_RATE_LIMIT_OTP` (default 30)
     /// per five minutes, burst 30. Keyed like [`Self::verify_limiter`].
     pub(crate) otp_limiter: Arc<KeyedLimiter>,
-    /// Same budget as [`Self::otp_limiter`], one bucket per email or phone.
-    pub(crate) otp_target_limiter: Arc<KeyedLimiter>,
+    /// `GOTRUE_SECURITY_SB_FORWARDED_FOR_ENABLED`. Default false: the verify
+    /// and OTP limiters use [`Self::rate_limit_header`] only.
+    pub sb_forwarded_for_enabled: bool,
+    /// `MEGABASE_AUTH_OTP_MAX_FAILED_ATTEMPTS`. `0` leaves a bad code in
+    /// place, matching GoTrue.
+    pub otp_max_failed_attempts: u32,
     /// Shared Auth pool. `try_from_env` leaves this empty. `megabase_server::run`
     /// replaces it with `Backend::connect` before `router_with_state`, and
     /// closes it on shutdown. Signup, logout, verify, the password and
@@ -187,17 +188,14 @@ impl AuthState {
                 "GOTRUE_RATE_LIMIT_VERIFY",
                 DEFAULT_VERIFY_RATE,
             )?,
-            verify_target_limiter: per_five_minutes(
-                &lookup,
-                "GOTRUE_RATE_LIMIT_VERIFY",
-                DEFAULT_VERIFY_RATE,
-            )?,
             otp_limiter: per_five_minutes(&lookup, "GOTRUE_RATE_LIMIT_OTP", DEFAULT_OTP_RATE)?,
-            otp_target_limiter: per_five_minutes(
+            sb_forwarded_for_enabled: security_flag(
                 &lookup,
-                "GOTRUE_RATE_LIMIT_OTP",
-                DEFAULT_OTP_RATE,
+                "GOTRUE_SECURITY_SB_FORWARDED_FOR_ENABLED",
             )?,
+            otp_max_failed_attempts: otp_max_failed_attempts(lookup(
+                "MEGABASE_AUTH_OTP_MAX_FAILED_ATTEMPTS",
+            ))?,
             backend: Backend::none(),
         })
     }
@@ -241,9 +239,9 @@ impl AuthState {
             sso_limiter: defaults.sso_limiter,
             saml_assertion_limiter: defaults.saml_assertion_limiter,
             verify_limiter: defaults.verify_limiter,
-            verify_target_limiter: defaults.verify_target_limiter,
             otp_limiter: defaults.otp_limiter,
-            otp_target_limiter: defaults.otp_target_limiter,
+            sb_forwarded_for_enabled: defaults.sb_forwarded_for_enabled,
+            otp_max_failed_attempts: defaults.otp_max_failed_attempts,
             backend,
         }
     }
@@ -334,7 +332,8 @@ impl MailConfig {
 /// (`judge/compose.override.yml`). Like the other unset `GOTRUE_*` defaults
 /// in [`crate::AuthConfig`], an unset variable follows that stack rather than
 /// GoTrue's empty default. Requests without the header are not counted on
-/// that key. `Sb-Forwarded-For` or `X-Forwarded-For` is a separate key.
+/// that key unless `GOTRUE_SECURITY_SB_FORWARDED_FOR_ENABLED` selects
+/// `Sb-Forwarded-For`.
 const REFERENCE_RATE_LIMIT_HEADER: &str = "X-Megabase-Judge-Rate-Key";
 
 /// `GOTRUE_RATE_LIMIT_TOKEN_REFRESH` of the reference stack, which lowers
@@ -353,6 +352,16 @@ const DEFAULT_SAML_ASSERTION_RATE: f64 = 15.0;
 const DEFAULT_VERIFY_RATE: f64 = 30.0;
 /// `RateLimitOtp` default (`GOTRUE_RATE_LIMIT_OTP`).
 const DEFAULT_OTP_RATE: f64 = 30.0;
+
+fn otp_max_failed_attempts(raw: Option<String>) -> Result<u32, ConfigError> {
+    let Some(raw) = raw.filter(|value| !value.trim().is_empty()) else {
+        return Ok(0);
+    };
+    raw.trim().parse().map_err(|_| ConfigError::Invalid {
+        key: "MEGABASE_AUTH_OTP_MAX_FAILED_ATTEMPTS".into(),
+        value: raw,
+    })
+}
 
 fn per_five_minutes(
     lookup: &impl Fn(&str) -> Option<String>,
@@ -638,6 +647,19 @@ mod tests {
         .is_err());
         assert!(AuthState::try_from_lookup(|name| {
             (name == "GOTRUE_RATE_LIMIT_OTP").then(|| "lots".into())
+        })
+        .is_err());
+        assert!(!AuthState::reference().sb_forwarded_for_enabled);
+        assert_eq!(AuthState::reference().otp_max_failed_attempts, 0);
+        let enabled = AuthState::from_lookup(|name| match name {
+            "GOTRUE_SECURITY_SB_FORWARDED_FOR_ENABLED" => Some("true".into()),
+            "MEGABASE_AUTH_OTP_MAX_FAILED_ATTEMPTS" => Some("5".into()),
+            _ => None,
+        });
+        assert!(enabled.sb_forwarded_for_enabled);
+        assert_eq!(enabled.otp_max_failed_attempts, 5);
+        assert!(AuthState::try_from_lookup(|name| {
+            (name == "MEGABASE_AUTH_OTP_MAX_FAILED_ATTEMPTS").then(|| "nope".into())
         })
         .is_err());
         let off =

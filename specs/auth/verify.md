@@ -160,20 +160,22 @@ already confirmed user writes `login` / `account`. Email change writes
 The verify limiter runs before the body is read, as `limitHandler` on `/verify`
 ([`internal/api/api.go:270`](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/api.go#L270),
 [`internal/api/apilimiter/apilimiter.go:202`](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/apilimiter/apilimiter.go#L202)).
-The key is the leftmost `Sb-Forwarded-For` address when it parses, otherwise
-the leftmost `X-Forwarded-For` address, otherwise the
-`GOTRUE_RATE_LIMIT_HEADER` value ([`internal/api/middleware.go:123`](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/middleware.go#L123)).
-POST with an email or phone also spends a bucket on that address. A request
-with none of those keys is not counted. GET failures after this check stay
+`performRateLimiting` ([`internal/api/middleware.go:123`](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/middleware.go#L123))
+keys on the leftmost `Sb-Forwarded-For` address when
+`GOTRUE_SECURITY_SB_FORWARDED_FOR_ENABLED` is true and that value is an IP.
+Otherwise the key is `GOTRUE_RATE_LIMIT_HEADER`. The flag defaults to false.
+A request with neither key is not counted. GET failures after this check stay
 303 redirects; the 429 itself is JSON on both methods.
 
-Five failed checks of one live email or phone code clear that code
-(`confirmation`, `recovery`, email-change, and phone-change tokens, and the
-user's `auth.one_time_tokens` rows). Further checks, including the original
-code, get the same 403 `otp_expired` as a bad token. A new code starts the
-count again. A hash that matches nobody is not counted.
+`MEGABASE_AUTH_OTP_MAX_FAILED_ATTEMPTS` defaults to `0`, which leaves a bad
+code in place, as GoTrue does. A positive value clears the stored email or
+phone code after that many failed checks. Later checks, including the
+original code, get the same 403 `otp_expired` as a bad token. Each count
+lives until the code's OTP deadline, the map drops the soonest expiry past
+1024 entries, and storing a new code drops that user's counts. A hash that
+matches nobody is not counted.
 
-Expiry is strict: the token is expired only when now is after `sent_at + GOTRUE_MAILER_OTP_EXP` seconds. Unset or `0` means 3600. A positive value is kept.
+Expiry is strict: the token is expired only when now is after `sent_at + GOTRUE_MAILER_OTP_EXP` seconds. Unset or `0` means 86400. A positive value is kept.
 
 ## Edge cases
 

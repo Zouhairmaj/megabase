@@ -363,9 +363,10 @@ body and no `Content-Type`. In order:
 
 `POST /magiclink` and `POST /otp` apply `GOTRUE_RATE_LIMIT_OTP` (default 30
 per five minutes, burst 30) before the handler, keyed like `/verify`
-([`verify.md`](verify.md)): client IP, else `GOTRUE_RATE_LIMIT_HEADER`, and
-after a valid email or phone a second bucket on that address. Over the
-limit is 429 `over_request_rate_limit` / `Request rate limit reached`.
+([`verify.md`](verify.md)): `Sb-Forwarded-For` only when
+`GOTRUE_SECURITY_SB_FORWARDED_FOR_ENABLED` is true, otherwise
+`GOTRUE_RATE_LIMIT_HEADER`. Over the limit is 429
+`over_request_rate_limit` / `Request rate limit reached`.
 
 ## Out of scope
 
