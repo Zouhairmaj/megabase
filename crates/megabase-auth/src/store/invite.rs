@@ -55,7 +55,13 @@ impl Backend {
     pub async fn invite_user(&self, cmd: InviteCommand<'_>) -> Result<InviteOutcome, StoreError> {
         match &self.inner {
             BackendKind::None => Err(StoreError::Unavailable),
-            BackendKind::Memory(db) => Ok(invite_memory(&mut *db.lock().await, &cmd)),
+            BackendKind::Memory(db) => {
+                let outcome = invite_memory(&mut *db.lock().await, &cmd);
+                if let InviteOutcome::Invited(user) = &outcome {
+                    self.clear_otp_attempts(user.id);
+                }
+                Ok(outcome)
+            }
             BackendKind::Postgres(pg) => {
                 timed(async {
                     let mut tx = pg.pool.begin().await?;
@@ -78,6 +84,7 @@ impl Backend {
                         .await?
                         .ok_or(StoreError::Unavailable)?;
                     tx.commit().await?;
+                    self.clear_otp_attempts(id);
                     Ok(InviteOutcome::Invited(Box::new(user)))
                 })
                 .await
