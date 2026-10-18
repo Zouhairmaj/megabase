@@ -203,9 +203,6 @@ async fn relation_route(
         // Privileges are read as the pool user. The JWT role is not applied.
         return relation_options(state, &schema, relation, session.anon).await;
     }
-    if let Err(response) = enforce_db_role(state.pool.as_ref(), &session).await {
-        return *response;
-    }
     if !matches!(
         method,
         &Method::GET
@@ -265,6 +262,11 @@ async fn relation_route(
     };
     if method == Method::GET && headers.get(header::RANGE).is_some() {
         return not_implemented(method, path);
+    }
+    // After every request check that can answer 501, and before the
+    // statement that applies the role.
+    if let Err(response) = enforce_db_role(state.pool.as_ref(), &session).await {
+        return *response;
     }
     match *method {
         Method::GET => {
@@ -2532,6 +2534,30 @@ mod tests {
         let (status, body, _) = send(app, get("/rest/v1/todos?select")).await;
         assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
         assert_eq!(body["unit"], "GET /rest/v1/todos");
+    }
+
+    #[tokio::test]
+    async fn unhandled_query_stays_501_before_the_role_check() {
+        let app = router(state_with_secret(SECRET));
+        let token = sign(SECRET, &json!({"role": "not existing"}));
+        let request = Request::builder()
+            .uri("/rest/v1/todos?select")
+            .header(header::AUTHORIZATION, format!("Bearer {token}"))
+            .body(Body::empty())
+            .unwrap();
+        let (status, body, _) = send(app.clone(), request).await;
+        assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
+        assert_eq!(body["code"], "MEGABASE_NOT_IMPLEMENTED");
+        assert_eq!(body["unit"], "GET /rest/v1/todos");
+
+        let rpc = Request::builder()
+            .uri("/rest/v1/rpc/add_numbers?select=id")
+            .header(header::AUTHORIZATION, format!("Bearer {token}"))
+            .body(Body::empty())
+            .unwrap();
+        let (status, body, _) = send(app, rpc).await;
+        assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
+        assert_eq!(body["unit"], "GET /rest/v1/rpc/add_numbers");
     }
 
     #[tokio::test]

@@ -278,9 +278,6 @@ pub(crate) async fn call(
         // Volatility is read as the pool user. The JWT role is not applied.
         return routine_options(state, method, uri, &session, &schema, function).await;
     }
-    if let Err(response) = enforce_db_role(state.pool.as_ref(), &session).await {
-        return *response;
-    }
     if let Some(unit) = Prefer::from_headers(headers).rpc_unserved() {
         return unimplemented_unit(method, path, unit);
     }
@@ -296,6 +293,11 @@ pub(crate) async fn call(
         Ok(invocation) => invocation,
         Err(response) => return *response,
     };
+    // After every request check that can answer 501, and before the
+    // statement that applies the role.
+    if let Err(response) = enforce_db_role(state.pool.as_ref(), &session).await {
+        return *response;
+    }
     let call = Call {
         session: &session,
         schema: &schema,
