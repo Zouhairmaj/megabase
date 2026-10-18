@@ -150,7 +150,7 @@ Implemented and tested counts come from markers and `judge/cases/`. Live conform
 | Meta | roles | 4 | 5 | 0 | 0 |
 | Meta | schemas | 4 | 5 | 0 | 0 |
 | Meta | table-privileges | 4 | 3 | 0 | 0 |
-| Meta | tables | 4 | 5 | 0 | 0 |
+| Meta | tables | 4 | 5 | 5 | 0 |
 | Meta | triggers | 4 | 5 | 0 | 0 |
 | Studio | advisors | 5 | 4 | 0 | 0 |
 | Studio | api-ai | 5 | 12 | 0 | 0 |
