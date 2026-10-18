@@ -26,11 +26,12 @@ definitions. The `storage.install_roles` role setup in
 `supabase_storage_admin`). `sql/function_owners.sql` runs
 `ALTER ... OWNER TO` that role only when it already exists **and** the
 connecting role is a superuser or is that owner role (so a later
-`CREATE OR REPLACE` still works). Otherwise it leaves the
-`DATABASE_URL` role as owner. A missing privilege is swallowed so the
-install does not roll back. Functions keep PostgreSQL's default
-`EXECUTE` for `PUBLIC`: the tenant migrations never `GRANT` or
-`REVOKE` `EXECUTE`.
+`CREATE OR REPLACE` still works). Newly created functions are owned by
+the `DATABASE_URL` role. If an existing function is replaced while the
+transfer is skipped, `CREATE OR REPLACE FUNCTION` keeps that function's
+current owner. A missing privilege is swallowed so the install does not
+roll back. Functions keep PostgreSQL's default `EXECUTE` for `PUBLIC`:
+the tenant migrations never `GRANT` or `REVOKE` `EXECUTE`.
 
 The storage service role is read as upstream does:
 `COALESCE(current_setting('storage.service_role', true), 'service_role')`.
