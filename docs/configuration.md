@@ -32,6 +32,10 @@ other names. There is no `.env.example` in this tree; the judge uses
 | GOTRUE_SECURITY_UPDATE_PASSWORD_REQUIRE_REAUTHENTICATION | GoTrue flag. Default `false`. Accepted values match Go's bool parser (`1`, `t`, `T`, `true`, `0`, `f`, `F`, `false`, any case). Any other value aborts startup. When true, `PUT /auth/v1/user` with `password` returns 501. |
 | GOTRUE_SECURITY_UPDATE_PASSWORD_REQUIRE_CURRENT_PASSWORD | GoTrue flag. Default `false`. Accepted values match Go's bool parser (`1`, `t`, `T`, `true`, `0`, `f`, `F`, `false`, any case). Any other value aborts startup. When true, `PUT /auth/v1/user` with `password` returns 501. |
 | GOTRUE_URI_ALLOW_LIST | Comma-separated redirect globs for `POST /auth/v1/admin/generate_link` and `GET /auth/v1/verify`. `*` and `?` do not cross `.` or `/`; `**` does. When this is unset or blank, `ADDITIONAL_REDIRECT_URLS` is used instead. A pattern with an unescaped `[` `]` `{` or `}` is not implemented: a redirect that must be checked against it returns 501. |
+| GOTRUE_RATE_LIMIT_VERIFY | Requests per five minutes for `GET` and `POST /auth/v1/verify`. Default 30, burst 30. Over the limit is 429 `over_request_rate_limit` / `Request rate limit reached`. |
+| GOTRUE_RATE_LIMIT_OTP | Requests per five minutes for `POST /auth/v1/otp` and `POST /auth/v1/magiclink`. Default 30, burst 30. The over-limit response matches `GOTRUE_RATE_LIMIT_VERIFY`. |
+| GOTRUE_SECURITY_SB_FORWARDED_FOR_ENABLED | Default `false`. When `true` and the leftmost `Sb-Forwarded-For` value is an IP, that address is the rate-limit key. Otherwise the key is `GOTRUE_RATE_LIMIT_HEADER`. |
+| MEGABASE_AUTH_OTP_MAX_FAILED_ATTEMPTS | Default `0`, which leaves a bad code in place. A positive value clears that user's pending verification tokens and one-time-token rows after that many failed checks. Counts are process-local and last until the code's OTP deadline. |
 
 ## Running outside the Supabase stack
 
@@ -134,7 +138,7 @@ anonymous off, `disable_signup` false, mailer autoconfirm on (the judge
 overlay has no mail server), phone autoconfirm on, SMS provider empty,
 SAML and passkeys off, audience and role `authenticated`, expiry 3600
 seconds, issuer `http://localhost:8000/auth/v1`, password minimum 6,
-`GOTRUE_SITE_URL` or `SITE_URL` `http://localhost:3000`, mailer OTP expiry 86400 seconds (`GOTRUE_MAILER_OTP_EXP`; `MEGABASE_AUTH_OTP_MAX_FAILED_ATTEMPTS` defaults to 0),
+`GOTRUE_SITE_URL` or `SITE_URL` `http://localhost:3000`, mailer OTP expiry 86400 seconds (`GOTRUE_MAILER_OTP_EXP`),
 secure email change on. Bool
 overrides accept Go's `1`/`t`/`true`/`0`/`f`/`false`.
 `GOTRUE_PASSWORD_MIN_LENGTH` below 6 is raised to 6. External OAuth

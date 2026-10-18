@@ -79,7 +79,8 @@ pub struct AuthState {
     /// and OTP limiters use [`Self::rate_limit_header`] only.
     pub sb_forwarded_for_enabled: bool,
     /// `MEGABASE_AUTH_OTP_MAX_FAILED_ATTEMPTS`. `0` leaves a bad code in
-    /// place, matching GoTrue.
+    /// place, matching GoTrue. A positive value clears that user's pending
+    /// verification tokens and one-time-token rows.
     pub otp_max_failed_attempts: u32,
     /// Shared Auth pool. `try_from_env` leaves this empty. `megabase_server::run`
     /// replaces it with `Backend::connect` before `router_with_state`, and

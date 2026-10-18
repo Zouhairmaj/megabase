@@ -168,12 +168,14 @@ A request with neither key is not counted. GET failures after this check stay
 303 redirects; the 429 itself is JSON on both methods.
 
 `MEGABASE_AUTH_OTP_MAX_FAILED_ATTEMPTS` defaults to `0`, which leaves a bad
-code in place, as GoTrue does. A positive value clears the stored email or
-phone code after that many failed checks. Later checks, including the
-original code, get the same 403 `otp_expired` as a bad token. Each count
-lives until the code's OTP deadline, the map drops the soonest expiry past
-1024 entries, and storing a new code drops that user's counts. A hash that
-matches nobody is not counted.
+code in place, as GoTrue does. A positive value, after that many failed
+checks of one user, clears every pending verification token for that user
+(confirmation, recovery, both email-change tokens, and the phone-change
+token) and every `auth.one_time_tokens` row of that user. Later checks,
+including a code that was still valid, get the same 403 `otp_expired` as a
+bad token. Each count lives until that code's OTP deadline, the map drops
+the soonest expiry past 1024 entries, and storing a new code drops that
+user's counts. A hash that matches nobody is not counted.
 
 Expiry is strict: the token is expired only when now is after `sent_at + GOTRUE_MAILER_OTP_EXP` seconds. Unset or `0` means 86400. A positive value is kept.
 

@@ -17,9 +17,12 @@ matching GoTrue `ApplyDefaults` and the reference stack. A positive value
 is kept.
 
 `MEGABASE_AUTH_OTP_MAX_FAILED_ATTEMPTS` defaults to `0`. That leaves a bad
-code in place, matching GoTrue. A positive value clears the stored email or
-phone code after that many failed checks; later checks return the same 403
-`otp_expired` GoTrue returns for a bad or expired token. Each count lives
-until that code's OTP deadline. The map is capped at 1024 entries, dropping
-the soonest expiry, and storing a new code drops that user's counts. The
-count is process-local and is not a column on `auth.users`.
+code in place, matching GoTrue. A positive value, after that many failed
+checks of one user, clears every pending verification token for that user
+(confirmation, recovery, both email-change tokens, and the phone-change
+token) and every `auth.one_time_tokens` row of that user. Later checks
+return the same 403 `otp_expired` GoTrue returns for a bad or expired
+token. Each count lives until that code's OTP deadline. The map is capped
+at 1024 entries, dropping the soonest expiry, and storing a new code drops
+that user's counts. The count is process-local and is not a column on
+`auth.users`.
