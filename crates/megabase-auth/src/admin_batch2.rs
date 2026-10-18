@@ -993,7 +993,8 @@ pub(crate) fn get_referrer(
 /// `URL.Hostname`. An all-digit host is rejected. A dotted-decimal or IPv6
 /// address is allowed only when it is loopback, unless it matches the site.
 /// Any other IPv4 spelling is matched as written against the allow list.
-/// A non-HTTP(S) URL with no host is matched against the allow list too.
+/// A non-HTTP(S) URL with no host, including an empty host, is matched
+/// against the allow list too.
 /// Globs see the URL with the fragment removed and the query kept. A
 /// rejected candidate falls through to the site URL in [`get_referrer`].
 pub(crate) fn redirect_ok(
@@ -1010,7 +1011,7 @@ pub(crate) fn redirect_ok(
     let Ok(target) = Url::parse(redirect) else {
         return Ok(false);
     };
-    if target.host().is_none() {
+    if missing_or_empty_host(&target) {
         if target.scheme() == "http" || target.scheme() == "https" {
             return Ok(false);
         }
@@ -1029,7 +1030,7 @@ pub(crate) fn redirect_ok(
         Some(Host::Ipv4(ip)) => return Ok(ip.is_loopback()),
         Some(Host::Ipv6(ip)) => return Ok(ip.is_loopback()),
         Some(Host::Domain(domain)) => {
-            if domain.chars().all(|ch| ch.is_ascii_digit()) {
+            if !domain.is_empty() && domain.chars().all(|ch| ch.is_ascii_digit()) {
                 return Ok(false);
             }
             if (target.scheme() == "http" || target.scheme() == "https")
@@ -1051,6 +1052,16 @@ fn authority_has_backslash(raw: &str) -> bool {
     };
     let authority = rest.split(['/', '?', '#']).next().unwrap_or(rest);
     authority.contains('\\')
+}
+
+/// rust-url may report a missing host as `None` or as `Host::Domain("")`.
+/// Go `URL.Hostname` is empty in both cases.
+fn missing_or_empty_host(url: &Url) -> bool {
+    match url.host() {
+        None => true,
+        Some(Host::Domain(domain)) => domain.is_empty(),
+        Some(_) => false,
+    }
 }
 
 fn same_host(left: &Url, right: &Url) -> bool {
@@ -3168,7 +3179,11 @@ mod tests {
         let mobile = vec!["myapp:**".to_string()];
         assert!(redirect_ok("https://example.com", "myapp:callback", &mobile).unwrap());
         assert!(redirect_ok("https://example.com", "myapp:callback#done", &mobile).unwrap());
+        assert!(redirect_ok("https://example.com", "myapp://", &mobile).unwrap());
+        assert!(redirect_ok("https://example.com", "myapp:///callback", &mobile).unwrap());
         assert!(!redirect_ok("https://example.com", "myapp:callback", &allow).unwrap());
+        assert!(!redirect_ok("https://example.com", "myapp://", &allow).unwrap());
+        assert!(!redirect_ok("https://example.com", "myapp:///callback", &allow).unwrap());
         assert!(!redirect_ok("https://example.com", "http:relative", &allow).unwrap());
 
         let state = referrer_state(gotrue_allow_list());

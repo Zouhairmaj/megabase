@@ -434,13 +434,15 @@ is the one written in the authority, and it must match, except a
 localhost host (`localhost`, `127.0.0.1`, `::1`, `0.0.0.0`, `::`, or a
 `.localhost` suffix) may use another port. A dotted-decimal or IPv6
 loopback address is accepted. Any other address Go's `net.ParseIP`
-accepts is rejected before the allow list, as is an all-digit host.
+accepts is rejected before the allow list, as is a non-empty all-digit host.
 An IPv4 spelling Go keeps as a hostname (for example fewer than four
 decimal labels) is compared as written: the same written host matches
 the site, and otherwise it must match the allow list. An `http` or
 `https` domain must match GoTrue's regular hostname pattern. A
-non-HTTP(S) URL with no host is not rejected for that; it is matched
-against the allow list. Otherwise the URL, with its fragment removed
+non-HTTP(S) URL with no host, including an empty host (`myapp://`,
+`myapp:///callback`), is not rejected for that; it is matched against
+the allow list. An all-digit host is a non-empty host of only digits.
+Otherwise the URL, with its fragment removed
 and its query kept, must match
 `GOTRUE_URI_ALLOW_LIST` (comma-separated globs; `ADDITIONAL_REDIRECT_URLS`
 when that variable is unset or blank). `*` and `?` do not cross `.` or `/`;

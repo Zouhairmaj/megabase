@@ -95,9 +95,10 @@ dotted-decimal or IPv6 loopback address, or matches `GOTRUE_URI_ALLOW_LIST`
 (`ADDITIONAL_REDIRECT_URLS` when that list is unset) on the URL with its
 fragment removed and its query kept. Userinfo does not reject the URL; the
 host is the host after it. A backslash in the authority is rejected. An
-all-digit host is rejected. An IPv4 spelling that Go keeps as a hostname
-is matched as written, including against the allow list. A non-HTTP(S)
-URL with no host is matched against the allow list. An allow-list pattern
+all-digit host is rejected (a non-empty host of only digits). An IPv4
+spelling that Go keeps as a hostname is matched as written, including
+against the allow list. A non-HTTP(S) URL with no host, including an
+empty host, is matched against the allow list. An allow-list pattern
 this port cannot compile
 (`[`, `]`, `{`, `}`, or a dangling `\`) is HTTP 501 `GOTRUE_URI_ALLOW_LIST`
 instead of a guessed site-URL fallback.
