@@ -56,13 +56,15 @@ body `{"statusCode","code","error","message"}`:
 |---|---|---|---|---|
 | Object key fails `VALID_OBJECT_KEY` | `400` | `InvalidKey` | `InvalidKey` | `Invalid key: <key>` |
 | No current object (or no row for `versionId`) | `404` | `NoSuchKey` | `not_found` | `Object not found` |
-| `public`: bucket missing or not public, object found | `404` | `NoSuchBucket` | `Bucket not found` | `Bucket not found` |
+| `public`: bucket not public | `404` | `NoSuchKey` | `not_found` | `Object not found` |
+| `public`: bucket missing | `404` | `NoSuchBucket` | `Bucket not found` | `Bucket not found` |
 | `sign`: token not download-scoped | `400` | `InvalidSignature` | `InvalidSignature` | `Token is not scoped for download` |
 | `sign`: token `url` ≠ `<bucketName>/<*>` | `400` | `InvalidSignature` | `InvalidSignature` | `Invalid signature` |
 
-Order: `public` checks the key before any query (the `findObject` promise
-rejects synchronously). `sign` checks scope, then `url`, then the key of
-the object named by `url`. `authenticated` checks the key after JWT auth.
+Order: `public` checks the key, then the bucket `public` flag, then the
+object row. A non-public bucket is `NoSuchKey` and the object row is not
+read. `sign` checks scope, then `url`, then the key of the object named by
+`url`. `authenticated` checks the key after JWT auth.
 
 `findObject` selects from `storage.objects` with `name COLLATE "C" = $1
 AND bucket_id = $2` plus `version = $3` or, after migration
@@ -79,8 +81,6 @@ AND bucket_id = $2` plus `version = $3` or, after migration
 - `sign` tokens jose rejects (`InvalidJWT` with jose's message): bad
   signature, `exp <= now`, any `nbf`, a non-numeric `iat`. A `versionId`
   claim that is not a string.
-- `public` when both the bucket and the object lookups fail: storage-api
-  reports whichever query returns first.
 - Any database error, including a database without `storage.objects`
   (Megabase installs only `storage.buckets`).
 - Multi-tenant `FeatureNotEnabled` and rate limiting (`SlowDown`).

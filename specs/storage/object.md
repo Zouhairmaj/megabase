@@ -115,10 +115,10 @@ for a binary body.
 - Both: bucket missing (or private when unauthenticated) is `NoSuchBucket`;
   then `InvalidKey`; a public bucket reads the row as superuser, a private
   one under RLS; no row is `NoSuchKey`.
-- `GET /object/public/:bucket/*`: `InvalidKey` first, then bucket (public
-  only) and row as superuser. Row found but bucket missing or private is
-  `NoSuchBucket`; bucket public and no row is `NoSuchKey`; both missing is a
-  501 (storage-api races the two lookups).
+- `GET /object/public/:bucket/*`: `InvalidKey` first, then the bucket
+  `public` flag as superuser. A non-public bucket is `NoSuchKey` and the
+  object row is not read. A missing bucket is `NoSuchBucket`. A public
+  bucket reads the row as superuser; no row is `NoSuchKey`.
 - `GET /object/sign/:bucket/*?token=&download=`: jose 6.2.3 verification
   (`InvalidJWT`: `Invalid Compact JWS` for a token that is not three
   `.`-separated segments, empty included; `signature verification failed`;

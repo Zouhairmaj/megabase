@@ -2,9 +2,10 @@
 //! transformation (`specs/storage/render.md`).
 //!
 //! Megabase has no object backend and no imgproxy, so a request that reaches
-//! the renderer is a 501. The checks storage-api runs before it (query
-//! validation, the signed URL token, the object key, the bucket and object
-//! lookups) answer as upstream does.
+//! the renderer is a 501. The checks before rendering (query validation, the
+//! signed URL token, the object key, and the bucket and object lookups)
+//! answer with Storage's error bodies. The public route reads the bucket
+//! `public` flag before the object row.
 
 // Ported from supabase/storage src/http/routes/render/index.ts,
 // src/http/routes/render/renderAuthenticatedImage.ts,
@@ -22,6 +23,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use serde_json::Value;
+use sqlx::Row;
 
 use super::{
     database_error, limits::is_valid_key, not_implemented, service_role, StorageError, StorageState,
@@ -35,9 +37,9 @@ const FIND_OBJECT_SQL: &str = "SELECT id FROM storage.objects \
 const FIND_OBJECT_VERSION_SQL: &str = "SELECT id FROM storage.objects \
      WHERE name COLLATE \"C\" = $1 AND bucket_id = $2 AND version = $3 LIMIT 1";
 
-/// `findBucketById(bucketName, 'id,public', { isPublic: true })`.
-const FIND_PUBLIC_BUCKET_SQL: &str =
-    "SELECT id FROM storage.buckets WHERE id = $1 AND public = $2 LIMIT 1";
+/// `findBucket(bucketName, 'id,public')` without the `isPublic` filter, so a
+/// private bucket is distinct from a missing bucket.
+const BUCKET_PUBLIC_SQL: &str = "SELECT public FROM storage.buckets WHERE id = $1 LIMIT 1";
 
 /// `SIGNED_URL_SCOPE_DOWNLOAD`.
 pub(super) const SCOPE_DOWNLOAD: &str = "download";
@@ -174,14 +176,47 @@ async fn find_object(
     Ok(row.is_some())
 }
 
-/// Whether `bucket_id` exists and is public, as the superuser.
-async fn find_public_bucket(pool: &sqlx::PgPool, bucket_id: &str) -> Result<bool, sqlx::Error> {
-    let row = sqlx::query(FIND_PUBLIC_BUCKET_SQL)
+/// `findBucket(id, 'id,public')` on the pool (the superuser connection).
+/// `None` when the bucket row is missing. A null `public` column is false.
+async fn bucket_public_flag(
+    pool: &sqlx::PgPool,
+    bucket_id: &str,
+) -> Result<Option<bool>, sqlx::Error> {
+    let row = sqlx::query(BUCKET_PUBLIC_SQL)
         .bind(bucket_id)
-        .bind(true)
         .fetch_optional(pool)
         .await?;
-    Ok(row.is_some())
+    row.map(|row| {
+        row.try_get::<Option<bool>, _>("public")
+            .map(|public| public.unwrap_or(false))
+    })
+    .transpose()
+}
+
+/// The bucket `public` flag, from test rows when installed.
+async fn public_bucket(
+    state: &StorageState,
+    pool: &sqlx::PgPool,
+    bucket_id: &str,
+) -> Result<Option<bool>, sqlx::Error> {
+    if let Some(flag) = state.scripted_bucket(bucket_id) {
+        return Ok(flag);
+    }
+    bucket_public_flag(pool, bucket_id).await
+}
+
+/// Whether `findObject` finds a row, from test rows when installed.
+async fn public_object(
+    state: &StorageState,
+    pool: &sqlx::PgPool,
+    bucket_id: &str,
+    object_name: &str,
+    version: Option<&str>,
+) -> Result<bool, sqlx::Error> {
+    if let Some(exists) = state.scripted_object(bucket_id, object_name) {
+        return Ok(exists);
+    }
+    find_object(pool, bucket_id, object_name, version, true).await
 }
 
 /// The outcome of a `findObject` that found nothing or something: a found
@@ -223,11 +258,11 @@ pub(super) async fn render_authenticated_image(
     object_outcome(found, &method, &uri)
 }
 
-/// `GET /render/image/public/:bucketName/*`: query validation, then
-/// `findBucket` (public only) and `findObject` as the superuser, raced with
-/// `Promise.all`. The key check throws before either query. When both
-/// lookups fail, which error storage-api reports depends on which query
-/// returns first, so that case is a 501.
+/// `GET /render/image/public/:bucketName/*`: query validation, then the
+/// bucket `public` flag, then `findObject` as the superuser. The key check
+/// runs before either query. A non-public bucket is `NoSuchKey` (`Object
+/// not found`) and the object row is not read. A missing bucket is
+/// `NoSuchBucket`.
 // megabase:unit storage:route:GET /storage/v1/render/image/public/{bucketName}/{*}
 pub(super) async fn render_public_image(
     State(state): State<StorageState>,
@@ -248,14 +283,14 @@ pub(super) async fn render_public_image(
         return not_implemented(&method, &uri);
     };
     let version = single(&pairs, "versionId").flatten();
-    let bucket = find_public_bucket(pool, &bucket_name).await;
-    let object = find_object(pool, &bucket_name, &object_name, version, true).await;
-    match (bucket, object) {
-        (Ok(true), object) => object_outcome(object, &method, &uri),
-        (Ok(false), Ok(true)) => StorageError::no_such_bucket().into_response(),
-        (Ok(false), Ok(false)) => not_implemented(&method, &uri),
-        (Err(error), _) | (_, Err(error)) => database_error(&error),
+    match public_bucket(&state, pool, &bucket_name).await {
+        Ok(Some(true)) => {}
+        Ok(Some(false)) => return StorageError::no_such_key().into_response(),
+        Ok(None) => return StorageError::no_such_bucket().into_response(),
+        Err(error) => return database_error(&error),
     }
+    let found = public_object(&state, pool, &bucket_name, &object_name, version).await;
+    object_outcome(found, &method, &uri)
 }
 
 /// `GET /render/image/sign/:bucketName/*?token=`: `verifyObjectSignature`
@@ -595,5 +630,38 @@ mod tests {
         .await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
         assert_eq!(body["code"], "InvalidSignature");
+    }
+
+    #[tokio::test]
+    async fn public_image_route_returns_not_found_for_a_non_public_bucket() {
+        use std::collections::{HashMap, HashSet};
+
+        let mut objects = HashMap::new();
+        objects.insert("private".into(), HashSet::from(["exists.png".into()]));
+        let rows = crate::RouteRows {
+            buckets: HashMap::from([("private".into(), false)]),
+            objects,
+        };
+        let app = router_with_state(
+            StorageState::new(Some(unreachable_pool()), Some(Hs256::new(SECRET).unwrap()))
+                .with_route_rows(rows),
+        );
+        let expected = br#"{"code":"NoSuchKey","error":"not_found","message":"Object not found","statusCode":"404"}"#;
+        for name in ["exists.png", "missing.png"] {
+            let path = format!("/storage/v1/render/image/public/private/{name}");
+            let response = app
+                .clone()
+                .oneshot(axum::http::Request::get(&path).body(Body::empty()).unwrap())
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{path}");
+            assert_eq!(
+                response.headers()[header::CONTENT_TYPE],
+                "application/json; charset=utf-8",
+                "{path}"
+            );
+            let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+            assert_eq!(body.as_ref(), expected, "{path}");
+        }
     }
 }
