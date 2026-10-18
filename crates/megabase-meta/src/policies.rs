@@ -243,7 +243,12 @@ fn parse_json_body(headers: &HeaderMap, body: &[u8]) -> Result<Value, String> {
         return Err("Unsupported Media Type: undefined".to_string());
     };
     let essence = raw.split(';').next().unwrap_or("").trim();
-    if essence != "application/json" {
+    // Fastify 4 matches parser names case-insensitively and treats
+    // `text/plain` as a string. `create` then reads no `name` property.
+    if essence.eq_ignore_ascii_case("text/plain") {
+        return Ok(Value::String(String::from_utf8_lossy(body).into_owned()));
+    }
+    if !essence.eq_ignore_ascii_case("application/json") {
         return Err(format!("Unsupported Media Type: {raw}"));
     }
     if body.is_empty() {
@@ -923,6 +928,9 @@ mod tests {
         assert!(!system.contains("pg_catalog"));
         let empty = list_sql(Some("included_schemas="));
         assert!(empty.contains("n.nspname IN ('')"));
+        let last_duplicate = list_sql(Some("included_schemas=secret&included_schemas=public"));
+        assert!(last_duplicate.contains("n.nspname IN ('public')"));
+        assert!(!last_duplicate.contains("secret"));
         let zero = list_sql(Some("limit=0"));
         assert!(zero.contains("limit '0'\n"), "{zero}");
     }
@@ -1123,6 +1131,39 @@ mod tests {
         .await;
         assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
         assert_eq!(body["error"], "Unsupported Media Type: undefined");
+        let (status, body) = call(
+            pool.clone(),
+            Method::POST,
+            "/pg/policies",
+            Some(&admin),
+            Some("Application/JSON"),
+            "{}",
+        )
+        .await;
+        assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(body["error"], IDENT_NULL);
+        let (status, body) = call(
+            pool.clone(),
+            Method::POST,
+            "/pg/policies",
+            Some(&admin),
+            Some("Application/JSON; charset=utf-8"),
+            "",
+        )
+        .await;
+        assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(body["error"], EMPTY_JSON);
+        let (status, body) = call(
+            pool.clone(),
+            Method::POST,
+            "/pg/policies",
+            Some(&admin),
+            Some("text/plain"),
+            "{\"name\":\"p\",\"table\":\"t\"}",
+        )
+        .await;
+        assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(body["error"], IDENT_NULL);
         let (status, body) = call(
             pool.clone(),
             Method::PATCH,

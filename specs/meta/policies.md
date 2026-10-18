@@ -32,7 +32,10 @@ Pin: postgres-meta `v0.100.0` (`vendor.toml`).
 
 `apikey` must be the service-role key.
 
-`GET /pg/policies` query string (Node `querystring`, last duplicate wins):
+`GET /pg/policies` query string (Megabase parser, last duplicate wins):
+
+Megabase keeps the last value for duplicate keys. Node `querystring` and
+Fastify's default `fast-querystring` parser represent duplicate keys as arrays.
 
 - `include_system_schemas` — only the exact string `true` includes system schemas.
 - `included_schemas` — comma-separated list. When non-empty it wins over excludes.
@@ -44,12 +47,15 @@ passes it through JavaScript `Number`, so `01` is `1`, `0` is falsy, and a
 value past `Number.MAX_SAFE_INTEGER` is the same rounded decimal `String(Number(id))`
 produces (`1e+21`, `Infinity`).
 
-`POST` and `PATCH` bodies are JSON. `name` and `table` are required on create.
-`schema` defaults to `public`, `action` to `PERMISSIVE`, `command` to `ALL`,
-`roles` to `["public"]`. `definition` and `check` are optional SQL expressions
-placed in `USING (...)` and `WITH CHECK (...)`. `action` and `command` are
-interpolated as SQL keywords, the same way postgres-meta does. Identifiers go
-through pg-format `ident`.
+`POST` and `PATCH` bodies follow Fastify 4's default parsers:
+`application/json` (case-insensitive, plus a `charset` parameter) is JSON;
+`text/plain` is the raw body as a string, so create then fails with
+`SQL identifier cannot be null or undefined`. `name` and `table` are required
+on create. `schema` defaults to `public`, `action` to `PERMISSIVE`, `command`
+to `ALL`, `roles` to `["public"]`. `definition` and `check` are optional SQL
+expressions placed in `USING (...)` and `WITH CHECK (...)`. `action` and
+`command` are interpolated as SQL keywords, the same way postgres-meta does.
+Identifiers go through pg-format `ident`.
 
 ## Outputs
 
