@@ -3,8 +3,12 @@
 //! Installs the `realtime` tenant schema subset that Postgres CDC
 //! (`postgres_changes`) needs, plus the `supabase_realtime` publication.
 //!
-//! Each file under `sql/` is a verbatim copy of its upstream
-//! `tenant_schema/realtime/<path>` file. The upstream `create schema`,
+//! Each file under `sql/` starts from its upstream
+//! `tenant_schema/realtime/<path>` file. `check_equality_op` and
+//! `is_visible_through_filters` catch an evaluation error for one
+//! subscription and return no match for it, so `list_changes` still
+//! returns the other subscriptions. `query_canceled`, `lock_not_available`,
+//! and `deadlock_detected` are re-raised. The upstream `create schema`,
 //! `create type` and `create table` statements are not idempotent, so each
 //! of those steps carries a catalog probe and is skipped when its object
 //! already exists (a restart, or a database whose Realtime migrations
@@ -393,6 +397,20 @@ mod tests {
         assert!(probe.contains("count(*) = 9 FROM pg_attribute"));
         assert!(probe.contains("a.atttypid = e.typ::regtype"));
         assert!(probe.contains(SUBSCRIPTION_UNIQUE_INDEX));
+    }
+
+    #[test]
+    fn filter_evaluation_errors_stay_on_one_subscription() {
+        let op = STEPS[index("functions/check_equality_op")].sql;
+        assert!(op.contains("when others then"));
+        assert!(op.contains("return null"));
+        let visible = STEPS[index("functions/is_visible_through_filters")].sql;
+        assert!(visible.contains("when others then"));
+        assert!(visible.contains("return false"));
+        assert!(op.contains("query_canceled"));
+        assert!(op.contains("lock_not_available"));
+        assert!(visible.contains("query_canceled"));
+        assert!(visible.contains("lock_not_available"));
     }
 
     #[test]

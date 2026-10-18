@@ -357,6 +357,7 @@ pub(crate) async fn generate_link(
     tx.commit()
         .await
         .map_err(|_| AuthError::internal("Database error finding user"))?;
+    state.backend.clear_otp_attempts(verification.user_id);
     let mut conn = db
         .acquire()
         .await
