@@ -6,13 +6,11 @@
 //! [`Runtime`] (normally [`DenoRuntime`]) and forwards requests to the
 //! address it listens on.
 
-use std::collections::HashMap;
 use std::future::Future;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::process::{ExitStatus, Stdio};
-use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 use tokio::io::{AsyncBufReadExt as _, BufReader};
@@ -34,7 +32,8 @@ pub const ENTRYPOINTS: &[&str] = &[
 ];
 
 /// How long a worker may take to accept connections after it starts.
-/// Upstream `main` gives a worker `workerTimeoutMs = 60 * 1000`.
+/// This is the boot wait, separate from the wall-clock `workerTimeoutMs`
+/// the pool applies after the process is listening (`specs/functions/workers.md`).
 pub const DEFAULT_BOOT_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// Why a worker could not be started. `Display` follows edge-runtime's
@@ -109,7 +108,7 @@ impl WorkerHandle {
         }
     }
 
-    fn is_running(&mut self) -> bool {
+    pub(crate) fn is_running(&mut self) -> bool {
         self.child
             .as_mut()
             .is_none_or(|child| matches!(child.try_wait(), Ok(None)))
@@ -264,70 +263,49 @@ pub fn entrypoint(dir: &Path, name: &str) -> Result<PathBuf, BootError> {
         .ok_or(BootError::NoEntrypoint)
 }
 
-type Slot = Arc<tokio::sync::Mutex<Option<WorkerHandle>>>;
-
-/// Running workers by function name.
+/// Running workers, one pool for the five `op_user_worker_*` ops.
 pub(crate) struct Workers {
-    dir: PathBuf,
-    runtime: Box<dyn Runtime>,
-    slots: Mutex<HashMap<String, Slot>>,
+    pool: crate::user_workers::Pool,
 }
 
 impl Workers {
     pub(crate) fn new(dir: PathBuf, runtime: Box<dyn Runtime>) -> Self {
         Self {
-            dir,
-            runtime,
-            slots: Mutex::default(),
+            pool: crate::user_workers::Pool::new(dir, runtime),
         }
     }
 
-    /// Address of a running worker for `name`, starting one if needed.
-    /// Boots of the same function are serialized; other functions proceed.
-    pub(crate) async fn address(&self, name: &str) -> Result<SocketAddr, BootError> {
-        let entry = entrypoint(&self.dir, name)?;
-        let slot = Arc::clone(
-            self.slots
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .entry(name.to_owned())
-                .or_default(),
-        );
-        let mut current = slot.lock().await;
-        if let Some(handle) = current.as_mut() {
-            if handle.is_running() {
-                return Ok(handle.addr());
-            }
-        }
-        if let Some(old) = current.take() {
-            old.stop().await;
-        }
-        let handle = self
-            .runtime
-            .start(WorkerSpec {
-                name,
-                entrypoint: &entry,
-            })
-            .await?;
-        let addr = handle.addr();
-        *current = Some(handle);
-        Ok(addr)
+    /// `EdgeRuntime.userWorkers.create` as the pinned `main` service calls it.
+    ///
+    /// # Errors
+    ///
+    /// [`BootError`] when the worker cannot be started.
+    pub(crate) async fn create_main(&self, name: &str) -> Result<uuid::Uuid, BootError> {
+        self.pool.create_main(name).await
     }
 
-    /// Drop the worker for `name` so the next request starts a new one.
-    pub(crate) async fn forget(&self, name: &str) {
-        let slot = self
-            .slots
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .get(name)
-            .map(Arc::clone);
-        if let Some(slot) = slot {
-            let old = slot.lock().await.take();
-            if let Some(old) = old {
-                old.stop().await;
-            }
-        }
+    /// `worker.fetch` for `key`.
+    ///
+    /// # Errors
+    ///
+    /// [`crate::user_workers::SendError`] when the worker cannot answer.
+    pub(crate) async fn fetch(
+        &self,
+        key: uuid::Uuid,
+        request: axum::extract::Request,
+        target: &str,
+    ) -> Result<axum::response::Response, crate::user_workers::SendError> {
+        self.pool.fetch_send(key, request, target).await
+    }
+
+    pub(crate) async fn cleanup_idle_workers(&self, timeout_ms: u64) -> usize {
+        self.pool.cleanup_idle_workers(timeout_ms).await
+    }
+
+    pub(crate) async fn mem_stats(
+        &self,
+    ) -> std::collections::BTreeMap<String, crate::user_workers::MemStat> {
+        self.pool.mem_stats().await
     }
 }
 
