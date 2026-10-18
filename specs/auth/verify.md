@@ -90,12 +90,15 @@ first allowed URL among `redirect_to`, the `Referer` header, and the site URL.
 The site URL is `GOTRUE_SITE_URL`, or `SITE_URL` when that is unset
 (`http://localhost:3000` when both are unset). A candidate is parsed with
 the WHATWG URL parser and allowed when it matches the site (same canonical
-scheme and host; a localhost host may use another port), is a canonical
-loopback IP, or matches `GOTRUE_URI_ALLOW_LIST` (`ADDITIONAL_REDIRECT_URLS`
-when that list is unset) on the URL with its fragment removed and its
-query kept. Userinfo does not reject the URL; the host is the host after
-it. A backslash in the authority is rejected, as is an IPv4 host that is
-not in dotted-decimal form. An allow-list pattern this port cannot compile
+scheme and host; a localhost host may use another port), is a
+dotted-decimal or IPv6 loopback address, or matches `GOTRUE_URI_ALLOW_LIST`
+(`ADDITIONAL_REDIRECT_URLS` when that list is unset) on the URL with its
+fragment removed and its query kept. Userinfo does not reject the URL; the
+host is the host after it. A backslash in the authority is rejected. An
+all-digit host is rejected. An IPv4 spelling that Go keeps as a hostname
+is matched as written, including against the allow list. A non-HTTP(S)
+URL with no host is matched against the allow list. An allow-list pattern
+this port cannot compile
 (`[`, `]`, `{`, `}`, or a dangling `\`) is HTTP 501 `GOTRUE_URI_ALLOW_LIST`
 instead of a guessed site-URL fallback.
 

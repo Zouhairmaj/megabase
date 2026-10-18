@@ -988,11 +988,14 @@ pub(crate) fn get_referrer(
 /// GoTrue `IsRedirectURLValid` (`internal/utilities/request.go`), with the
 /// candidate parsed by the WHATWG URL standard.
 ///
-/// A value that does not parse, has a backslash in its authority, or spells
-/// an IPv4 address in anything other than dotted decimal is rejected.
-/// Userinfo is ignored when comparing hosts, as in Go `URL.Hostname`.
-/// Allow-list globs see the URL with the fragment removed and the query
-/// kept. A rejected candidate falls through to the site URL in [`get_referrer`].
+/// A value that does not parse or has a backslash in its authority is
+/// rejected. Userinfo is ignored when comparing hosts, as in Go
+/// `URL.Hostname`. An all-digit host is rejected. A dotted-decimal or IPv6
+/// address is allowed only when it is loopback, unless it matches the site.
+/// Any other IPv4 spelling is matched as written against the allow list.
+/// A non-HTTP(S) URL with no host is matched against the allow list too.
+/// Globs see the URL with the fragment removed and the query kept. A
+/// rejected candidate falls through to the site URL in [`get_referrer`].
 pub(crate) fn redirect_ok(
     site_url: &str,
     redirect: &str,
@@ -1007,8 +1010,14 @@ pub(crate) fn redirect_ok(
     let Ok(target) = Url::parse(redirect) else {
         return Ok(false);
     };
-    if target.host().is_none() || noncanonical_ipv4(redirect, &target) {
-        return Ok(false);
+    if target.host().is_none() {
+        if target.scheme() == "http" || target.scheme() == "https" {
+            return Ok(false);
+        }
+        return allow_list_matches(allow, redirect);
+    }
+    if noncanonical_ipv4(redirect, &target) {
+        return written_ipv4_host(site_url, redirect, &base, &target, allow);
     }
     if base.scheme() == target.scheme()
         && same_host(&base, &target)
@@ -1053,8 +1062,38 @@ fn same_host(left: &Url, right: &Url) -> bool {
     }
 }
 
-/// The WHATWG parser rewrites hex, octal, and integer IPv4 spellings to
-/// dotted decimal. Only the dotted form is accepted.
+/// Go `URL.Hostname` for an IPv4 spelling the WHATWG parser rewrites.
+///
+/// The written host is compared with the site and with the allow list.
+/// It is not treated as the rewritten address.
+fn written_ipv4_host(
+    site_url: &str,
+    redirect: &str,
+    base: &Url,
+    target: &Url,
+    allow: &[String],
+) -> Result<bool, RedirectAllowListUnsupported> {
+    let raw_host = raw_authority(redirect).map(|part| part.host).unwrap_or("");
+    let site_host = raw_authority(site_url).map(|part| part.host).unwrap_or("");
+    if base.scheme() == target.scheme()
+        && site_host == raw_host
+        && (raw_port(site_url) == raw_port(redirect) || go_is_localhost(raw_host))
+    {
+        return Ok(true);
+    }
+    if !raw_host.is_empty() && raw_host.chars().all(|ch| ch.is_ascii_digit()) {
+        return Ok(false);
+    }
+    if let Ok(ip) = raw_host.parse::<std::net::IpAddr>() {
+        return Ok(ip.is_loopback());
+    }
+    if (target.scheme() == "http" || target.scheme() == "https") && !regular_hostname(raw_host) {
+        return Ok(false);
+    }
+    allow_list_matches(allow, redirect)
+}
+
+/// True when the WHATWG parser rewrote an IPv4 host to dotted decimal.
 fn noncanonical_ipv4(raw: &str, url: &Url) -> bool {
     let Some(Host::Ipv4(ip)) = url.host() else {
         return false;
@@ -3117,12 +3156,20 @@ mod tests {
         .unwrap());
 
         let hex = vec!["http://0x08080808/*".to_string()];
-        assert!(!redirect_ok("https://example.com", "http://0x08080808/path", &hex).unwrap());
+        assert!(redirect_ok("https://example.com", "http://0x08080808/path", &hex).unwrap());
+        assert!(!redirect_ok("https://example.com", "http://0x08080808/path", &allow).unwrap());
         let octal = vec!["http://010.010.010.010/*".to_string()];
-        assert!(
-            !redirect_ok("https://example.com", "http://010.010.010.010/path", &octal).unwrap()
-        );
+        assert!(redirect_ok("https://example.com", "http://010.010.010.010/path", &octal).unwrap());
         assert!(!redirect_ok("https://example.com", "http://8.8.8.8/path", &hex).unwrap());
+        let shorthand = vec!["http://127.1/*".to_string()];
+        assert!(redirect_ok("https://example.com", "http://127.1/cb", &shorthand).unwrap());
+        assert!(!redirect_ok("https://example.com", "http://127.1/cb", &allow).unwrap());
+        assert!(redirect_ok("http://127.1", "http://127.1/cb", &allow).unwrap());
+        let mobile = vec!["myapp:**".to_string()];
+        assert!(redirect_ok("https://example.com", "myapp:callback", &mobile).unwrap());
+        assert!(redirect_ok("https://example.com", "myapp:callback#done", &mobile).unwrap());
+        assert!(!redirect_ok("https://example.com", "myapp:callback", &allow).unwrap());
+        assert!(!redirect_ok("https://example.com", "http:relative", &allow).unwrap());
 
         let state = referrer_state(gotrue_allow_list());
         let rejected = [

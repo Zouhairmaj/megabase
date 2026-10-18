@@ -426,17 +426,22 @@ query `redirect_to` (percent-decoded, `+` as space) even when the header is
 invalid; otherwise the query value is used. An invalid candidate falls
 through to `Referer`, then `GOTRUE_SITE_URL` (default `http://localhost:3000`).
 A candidate is parsed with the WHATWG URL parser. It is rejected when
-parsing fails, when a backslash appears in the authority, or when an
-IPv4 host is not already in dotted-decimal form. Userinfo does not
-reject the URL; the host compared is the host after it, as in Go
-`URL.Hostname`. Scheme and host are compared in canonical form
+parsing fails or when a backslash appears in the authority. Userinfo
+does not reject the URL; the host compared is the host after it, as in
+Go `URL.Hostname`. Scheme and host are compared in canonical form
 (lowercase scheme and domain, dotted IPv4, compressed IPv6). The port
 is the one written in the authority, and it must match, except a
 localhost host (`localhost`, `127.0.0.1`, `::1`, `0.0.0.0`, `::`, or a
-`.localhost` suffix) may use another port. A canonical loopback address
-is accepted. Any other IP is rejected before the allow list. An `http`
-or `https` domain must match GoTrue's regular hostname pattern.
-Otherwise the URL, with its fragment removed and its query kept, must match
+`.localhost` suffix) may use another port. A dotted-decimal or IPv6
+loopback address is accepted. Any other address Go's `net.ParseIP`
+accepts is rejected before the allow list, as is an all-digit host.
+An IPv4 spelling Go keeps as a hostname (for example fewer than four
+decimal labels) is compared as written: the same written host matches
+the site, and otherwise it must match the allow list. An `http` or
+`https` domain must match GoTrue's regular hostname pattern. A
+non-HTTP(S) URL with no host is not rejected for that; it is matched
+against the allow list. Otherwise the URL, with its fragment removed
+and its query kept, must match
 `GOTRUE_URI_ALLOW_LIST` (comma-separated globs; `ADDITIONAL_REDIRECT_URLS`
 when that variable is unset or blank). `*` and `?` do not cross `.` or `/`;
 `**` does. A pattern with an unescaped character class or `{` alternative is
