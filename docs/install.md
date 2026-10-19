@@ -114,11 +114,14 @@ Environment variables are in [Configuration](configuration.md). `just` lists
 every recipe that works today.
 
 When `DATABASE_URL` is set, startup creates the standard API roles
-(`anon`, `authenticated`, `service_role`, `authenticator`) when the cluster
-lacks them, then the Auth schema objects Megabase currently implements. Both
+(`anon`, `authenticated`, `service_role`, `authenticator`) and the Supabase
+admin roles (`supabase_admin`, `supabase_auth_admin`,
+`supabase_storage_admin`, `supabase_realtime_admin`) when the cluster lacks
+them, then the Auth schema objects Megabase currently implements. Both
 installs are idempotent, so an existing Supabase migration runs unchanged on
 an empty database. The connecting role needs `CREATEROLE` (or superuser) on
-a stock cluster; see [Configuration](configuration.md). Without
+a stock cluster. An attribute it cannot grant is skipped and logged, and
+startup continues. See [Configuration](configuration.md). Without
 `DATABASE_URL` the process still serves HTTP.
 
 The public site generator is separate:

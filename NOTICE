@@ -70,7 +70,7 @@ pg-format (identifier and literal quoting for Postgres Meta SQL)
   https://github.com/datalanche/node-pg-format  1.0.4, as required by
   vendor/postgres-meta/package.json
   crates/megabase-meta/src/pg_format.rs
-  LICENSES/MIT.txt
+  LICENSES/pg-format.txt
 
 golang-jwt (Auth JWT parse and validation errors)
   SPDX-License-Identifier: MIT
