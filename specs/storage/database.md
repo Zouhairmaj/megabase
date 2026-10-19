@@ -30,8 +30,9 @@ connecting role is a superuser or is that owner role (so a later
 the `DATABASE_URL` role. If an existing function is replaced while the
 transfer is skipped, `CREATE OR REPLACE FUNCTION` keeps that function's
 current owner. A missing privilege is swallowed so the install does not
-roll back. Functions keep PostgreSQL's default `EXECUTE` for `PUBLIC`:
-the tenant migrations never `GRANT` or `REVOKE` `EXECUTE`.
+roll back. Newly created functions keep PostgreSQL's default `EXECUTE`
+for `PUBLIC`: the tenant migrations never `GRANT` or `REVOKE` `EXECUTE`.
+`CREATE OR REPLACE FUNCTION` keeps the ACL of an existing function.
 
 The storage service role is read as upstream does:
 `COALESCE(current_setting('storage.service_role', true), 'service_role')`.
