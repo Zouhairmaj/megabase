@@ -14,8 +14,8 @@
 
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
-use std::sync::Arc;
-use std::time::{Duration, SystemTime};
+use std::sync::{Arc, Mutex as SyncMutex, PoisonError};
+use std::time::{Duration, Instant, SystemTime};
 
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha224};
@@ -388,7 +388,21 @@ pub enum RevokeGrant {
 #[derive(Clone)]
 pub struct Backend {
     inner: BackendKind,
+    /// Failed checks of one stored code, used only when
+    /// `MEGABASE_AUTH_OTP_MAX_FAILED_ATTEMPTS` is non-zero. Not a database
+    /// column: the Auth schema stays the pinned GoTrue schema.
+    attempts: Arc<SyncMutex<HashMap<String, OtpAttempt>>>,
 }
+
+/// One failed-check count. `expires` is the token's OTP deadline.
+struct OtpAttempt {
+    count: u32,
+    expires: Instant,
+}
+
+/// Cap on the in-process failed-check map. Past this, the soonest expiry
+/// is dropped.
+const OTP_ATTEMPT_CAP: usize = 1024;
 
 #[derive(Clone)]
 enum BackendKind {
@@ -448,10 +462,15 @@ struct MemoryConsent {
     revoked: bool,
 }
 
+fn fresh_attempts() -> Arc<SyncMutex<HashMap<String, OtpAttempt>>> {
+    Arc::new(SyncMutex::new(HashMap::new()))
+}
+
 impl Backend {
     pub fn none() -> Self {
         Self {
             inner: BackendKind::None,
+            attempts: fresh_attempts(),
         }
     }
 
@@ -471,12 +490,14 @@ impl Backend {
                 mfa: mfa::MemoryMfa::default(),
                 passkeys: Vec::new(),
             }))),
+            attempts: fresh_attempts(),
         }
     }
 
     pub async fn connect(database_url: &str) -> Result<Self, SchemaError> {
         Ok(Self {
             inner: BackendKind::Postgres(Pg::connect(database_url).await?),
+            attempts: fresh_attempts(),
         })
     }
 
@@ -759,25 +780,42 @@ impl Backend {
         }
     }
 
+    /// Drop failed-check counts for `user_id`. Called when a new code is stored.
+    pub(crate) fn clear_otp_attempts(&self, user_id: Uuid) {
+        forget_user_attempts(&self.attempts, user_id);
+    }
+
     /// Confirm a signup, invite, recovery, or email-change one-time token.
     ///
     /// `Err` is a database failure. A bad or expired token is
     /// [`VerifyOutcome::Rejected`] so the HTTP layer can keep GoTrue's status.
+    /// `max_failed_attempts` of `0` leaves a bad code in place.
     pub async fn verify(
         &self,
         request: &VerifyRequest,
         hook: Option<&TokenHookCall<'_>>,
+        max_failed_attempts: u32,
     ) -> Result<VerifyOutcome, StoreError> {
         match &self.inner {
             BackendKind::None => Err(StoreError::Unavailable),
             BackendKind::Memory(db) => {
-                let mut outcome = memory_verify(db, request).await?;
+                let mut outcome =
+                    memory_verify(db, &self.attempts, request, max_failed_attempts).await?;
                 if let VerifyOutcome::Session(issued, _) = &mut outcome {
                     customize_memory(db, hook, issued).await?;
                 }
                 Ok(outcome)
             }
-            BackendKind::Postgres(pg) => timed(postgres_verify(pg, request, hook)).await,
+            BackendKind::Postgres(pg) => {
+                timed(postgres_verify(
+                    pg,
+                    &self.attempts,
+                    request,
+                    hook,
+                    max_failed_attempts,
+                ))
+                .await
+            }
         }
     }
 
@@ -3349,6 +3387,14 @@ struct Found {
 enum Located {
     Found(Found),
     Reject(VerifyOutcome),
+    /// The user exists and the presented code does not match a live token.
+    Mismatch {
+        user_id: Uuid,
+        key: String,
+        /// Remaining life of the stored code. The failed-check entry uses it.
+        ttl: Duration,
+        outcome: VerifyOutcome,
+    },
 }
 
 struct AuditNote {
@@ -3636,7 +3682,7 @@ fn locate_email_memory(db: &MemoryDb, request: &VerifyRequest) -> Located {
     }
     let tokens = db.tokens.get(&user.id).cloned().unwrap_or_default();
     let Some(side) = email_otp_side(request, &tokens) else {
-        return Located::Reject(token_invalid());
+        return mismatch(user.id, &tokens, request, token_invalid());
     };
     Located::Found(Found {
         user_id: user.id,
@@ -3686,7 +3732,7 @@ fn locate_email_change_memory(db: &MemoryDb, request: &VerifyRequest) -> Located
     } else if new_ok {
         MatchedSide::EmailNew
     } else {
-        return Located::Reject(token_invalid());
+        return mismatch(user_id, &tokens, request, token_invalid());
     };
     Located::Found(Found { user_id, side })
 }
@@ -3716,7 +3762,7 @@ fn locate_phone_memory(db: &MemoryDb, request: &VerifyRequest) -> Located {
     }
     let tokens = db.tokens.get(&user.id).cloned().unwrap_or_default();
     if !phone_otp_valid(request, &tokens) {
-        return Located::Reject(token_invalid());
+        return mismatch(user.id, &tokens, request, token_invalid());
     }
     Located::Found(Found {
         user_id: user.id,
@@ -3772,14 +3818,177 @@ fn user_tokens_email_change(db: &MemoryDb, user_id: Uuid) -> String {
         .unwrap_or_default()
 }
 
+fn mismatch(
+    user_id: Uuid,
+    tokens: &UserTokens,
+    request: &VerifyRequest,
+    outcome: VerifyOutcome,
+) -> Located {
+    Located::Mismatch {
+        user_id,
+        key: attempt_key(user_id, tokens),
+        ttl: attempt_ttl(request, tokens),
+        outcome,
+    }
+}
+
+fn attempt_ttl(request: &VerifyRequest, tokens: &UserTokens) -> Duration {
+    let now = SystemTime::now();
+    if request.kind.is_phone() {
+        let sent = if request.kind == VerifyKind::PhoneChange {
+            tokens.phone_change_sent_at
+        } else {
+            tokens.confirmation_sent_at
+        };
+        return remaining(sent, request.sms_otp_exp_seconds, now);
+    }
+    let sent = match request.kind {
+        VerifyKind::Recovery => tokens.recovery_sent_at,
+        VerifyKind::EmailChange => tokens.email_change_sent_at,
+        VerifyKind::Email => tokens.confirmation_sent_at.or(tokens.recovery_sent_at),
+        _ => tokens.confirmation_sent_at,
+    };
+    remaining(sent, request.otp_exp_seconds, now)
+}
+
+fn remaining(sent: Option<SystemTime>, exp_seconds: u64, now: SystemTime) -> Duration {
+    let window = Duration::from_secs(exp_seconds);
+    let Some(sent) = sent else {
+        return window;
+    };
+    sent.checked_add(window)
+        .map(|deadline| deadline.duration_since(now).unwrap_or(Duration::ZERO))
+        .unwrap_or(window)
+}
+
+fn attempt_key(user_id: Uuid, tokens: &UserTokens) -> String {
+    format!(
+        "{user_id}|{}|{}|{}|{}|{}",
+        tokens.confirmation_token,
+        tokens.recovery_token,
+        tokens.email_change_token_current,
+        tokens.email_change_token_new,
+        tokens.phone_change_token,
+    )
+}
+
+/// `true` when this check reaches `max_failed_attempts` and the code should
+/// be cleared. `max_failed_attempts` of `0` records nothing.
+fn record_failed_attempt(
+    attempts: &SyncMutex<HashMap<String, OtpAttempt>>,
+    max_failed_attempts: u32,
+    key: &str,
+    ttl: Duration,
+) -> bool {
+    max_failed_attempts > 0 && note_failure(attempts, key, ttl) >= max_failed_attempts
+}
+
+fn note_failure(
+    attempts: &SyncMutex<HashMap<String, OtpAttempt>>,
+    key: &str,
+    ttl: Duration,
+) -> u32 {
+    note_failure_at(attempts, key, ttl, Instant::now())
+}
+
+fn note_failure_at(
+    attempts: &SyncMutex<HashMap<String, OtpAttempt>>,
+    key: &str,
+    ttl: Duration,
+    now: Instant,
+) -> u32 {
+    let mut guard = attempts.lock().unwrap_or_else(PoisonError::into_inner);
+    guard.retain(|_, entry| entry.expires > now);
+    if !guard.contains_key(key) {
+        while guard.len() >= OTP_ATTEMPT_CAP {
+            let Some(oldest) = guard
+                .iter()
+                .min_by_key(|(_, entry)| entry.expires)
+                .map(|(key, _)| key.clone())
+            else {
+                break;
+            };
+            guard.remove(&oldest);
+        }
+    }
+    let entry = guard.entry(key.to_string()).or_insert(OtpAttempt {
+        count: 0,
+        expires: now + ttl,
+    });
+    entry.count = entry.count.saturating_add(1);
+    entry.count
+}
+
+fn forget_user_attempts(attempts: &SyncMutex<HashMap<String, OtpAttempt>>, user_id: Uuid) {
+    let prefix = format!("{user_id}|");
+    let mut guard = attempts.lock().unwrap_or_else(PoisonError::into_inner);
+    guard.retain(|key, _| !key.starts_with(&prefix));
+}
+
+fn clear_verification_tokens_memory(db: &mut MemoryDb, user_id: Uuid) {
+    if let Some(tokens) = db.tokens.get_mut(&user_id) {
+        tokens.confirmation_token.clear();
+        tokens.confirmation_sent_at = None;
+        tokens.recovery_token.clear();
+        tokens.recovery_sent_at = None;
+        tokens.email_change_token_current.clear();
+        tokens.email_change_token_new.clear();
+        tokens.email_change_sent_at = None;
+        tokens.phone_change_token.clear();
+        tokens.phone_change_sent_at = None;
+    }
+    db.one_time.retain(|row| row.user_id != user_id);
+}
+
+async fn burn_verification_tokens(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    user_id: Uuid,
+) -> Result<(), StoreError> {
+    sqlx::query(
+        "UPDATE auth.users SET
+            confirmation_token = '',
+            confirmation_sent_at = NULL,
+            recovery_token = '',
+            recovery_sent_at = NULL,
+            email_change_token_current = '',
+            email_change_token_new = '',
+            email_change_sent_at = NULL,
+            phone_change_token = '',
+            phone_change_sent_at = NULL
+         WHERE instance_id = $1::uuid AND id = $2::uuid",
+    )
+    .bind(Uuid::nil())
+    .bind(user_id)
+    .execute(&mut **tx)
+    .await?;
+    sqlx::query("DELETE FROM auth.one_time_tokens WHERE user_id = $1")
+        .bind(user_id)
+        .execute(&mut **tx)
+        .await?;
+    Ok(())
+}
+
 async fn memory_verify(
     db: &Mutex<MemoryDb>,
+    attempts: &SyncMutex<HashMap<String, OtpAttempt>>,
     request: &VerifyRequest,
+    max_failed_attempts: u32,
 ) -> Result<VerifyOutcome, StoreError> {
     let needs_password = {
-        let guard = db.lock().await;
+        let mut guard = db.lock().await;
         match locate_memory(&guard, request) {
             Located::Reject(rejected) => return Ok(rejected),
+            Located::Mismatch {
+                user_id,
+                key,
+                ttl,
+                outcome,
+            } => {
+                if record_failed_attempt(attempts, max_failed_attempts, &key, ttl) {
+                    clear_verification_tokens_memory(&mut guard, user_id);
+                }
+                return Ok(outcome);
+            }
             Located::Found(found) => {
                 let user = guard.users.get(&found.user_id);
                 let tokens = guard.tokens.get(&found.user_id);
@@ -3799,8 +4008,20 @@ async fn memory_verify(
         None
     };
     let mut guard = db.lock().await;
-    let Located::Found(found) = locate_memory(&guard, request) else {
-        return Ok(token_invalid());
+    let found = match locate_memory(&guard, request) {
+        Located::Found(found) => found,
+        Located::Reject(_) => return Ok(token_invalid()),
+        Located::Mismatch {
+            user_id,
+            key,
+            ttl,
+            outcome,
+        } => {
+            if record_failed_attempt(attempts, max_failed_attempts, &key, ttl) {
+                clear_verification_tokens_memory(&mut guard, user_id);
+            }
+            return Ok(outcome);
+        }
     };
     let user_id = found.user_id;
     // Work on copies so a rejected PKCE auth code leaves the user untouched,
@@ -3865,6 +4086,7 @@ async fn memory_verify(
     };
     guard.tokens.insert(user_id, tokens);
     guard.users.insert(user_id, user);
+    forget_user_attempts(attempts, user_id);
     Ok(outcome)
 }
 
@@ -4015,14 +4237,33 @@ fn apply_email_change(user: &mut UserRecord, tokens: &mut UserTokens, now: Syste
 
 async fn postgres_verify(
     pg: &Pg,
+    attempts: &SyncMutex<HashMap<String, OtpAttempt>>,
     request: &VerifyRequest,
     hook: Option<&TokenHookCall<'_>>,
+    max_failed_attempts: u32,
 ) -> Result<VerifyOutcome, StoreError> {
     let mut tx = pg.pool.begin().await?;
     let found = match locate_postgres(&mut tx, request).await? {
         Located::Reject(rejected) => {
             tx.commit().await?;
             return Ok(rejected);
+        }
+        Located::Mismatch {
+            user_id,
+            key,
+            ttl,
+            outcome,
+        } => {
+            return finish_mismatch(
+                tx,
+                attempts,
+                max_failed_attempts,
+                user_id,
+                &key,
+                ttl,
+                outcome,
+            )
+            .await;
         }
         Located::Found(found) => found,
     };
@@ -4048,6 +4289,23 @@ async fn postgres_verify(
         Located::Reject(rejected) => {
             tx.commit().await?;
             return Ok(rejected);
+        }
+        Located::Mismatch {
+            user_id,
+            key,
+            ttl,
+            outcome,
+        } => {
+            return finish_mismatch(
+                tx,
+                attempts,
+                max_failed_attempts,
+                user_id,
+                &key,
+                ttl,
+                outcome,
+            )
+            .await;
         }
         Located::Found(_) => {
             tx.commit().await?;
@@ -4135,6 +4393,23 @@ async fn postgres_verify(
             )
         }
     };
+    tx.commit().await?;
+    forget_user_attempts(attempts, user.id);
+    Ok(outcome)
+}
+
+async fn finish_mismatch(
+    mut tx: sqlx::Transaction<'_, sqlx::Postgres>,
+    attempts: &SyncMutex<HashMap<String, OtpAttempt>>,
+    max_failed_attempts: u32,
+    user_id: Uuid,
+    key: &str,
+    ttl: Duration,
+    outcome: VerifyOutcome,
+) -> Result<VerifyOutcome, StoreError> {
+    if record_failed_attempt(attempts, max_failed_attempts, key, ttl) {
+        burn_verification_tokens(&mut tx, user_id).await?;
+    }
     tx.commit().await?;
     Ok(outcome)
 }
@@ -4252,7 +4527,7 @@ async fn locate_email_postgres(
     }
     let tokens = load_user_tokens(&mut *tx, user.id).await?;
     let Some(side) = email_otp_side(request, &tokens) else {
-        return Ok(Located::Reject(token_invalid()));
+        return Ok(mismatch(user.id, &tokens, request, token_invalid()));
     };
     Ok(Located::Found(Found {
         user_id: user.id,
@@ -4320,7 +4595,7 @@ async fn locate_email_change_postgres(
     ) {
         MatchedSide::EmailNew
     } else {
-        return Ok(Located::Reject(token_invalid()));
+        return Ok(mismatch(user_id, &tokens, request, token_invalid()));
     };
     Ok(Located::Found(Found { user_id, side }))
 }
@@ -4365,7 +4640,7 @@ async fn locate_phone_postgres(
     let mut tokens = load_user_tokens(&mut *tx, user_id).await?;
     load_phone_tokens(&mut *tx, user_id, &mut tokens).await?;
     if !phone_otp_valid(request, &tokens) {
-        return Ok(Located::Reject(token_invalid()));
+        return Ok(mismatch(user_id, &tokens, request, token_invalid()));
     }
     Ok(Located::Found(Found {
         user_id,
@@ -4599,5 +4874,45 @@ mod tests {
         assert!(<SystemTime as ToSql>::accepts(&Type::TIMESTAMPTZ));
         assert!(<Value as ToSql>::accepts(&Type::JSONB));
         assert!(<Value as ToSql>::accepts(&Type::JSON));
+    }
+
+    #[test]
+    fn otp_attempts_expire_with_the_window_and_stay_bounded() {
+        let attempts = SyncMutex::new(HashMap::new());
+        let start = Instant::now();
+        let ttl = Duration::from_secs(10);
+        assert_eq!(note_failure_at(&attempts, "user|code", ttl, start), 1);
+        assert_eq!(note_failure_at(&attempts, "user|code", ttl, start), 2);
+        assert_eq!(
+            note_failure_at(&attempts, "user|code", ttl, start + Duration::from_secs(10)),
+            1,
+            "an entry past the OTP window starts again"
+        );
+
+        let fresh = SyncMutex::new(HashMap::new());
+        for n in 0..OTP_ATTEMPT_CAP {
+            note_failure_at(&fresh, &format!("k{n}"), Duration::from_secs(60), start);
+        }
+        note_failure_at(&fresh, "overflow", Duration::from_secs(60), start);
+        let len = fresh.lock().unwrap_or_else(PoisonError::into_inner).len();
+        assert_eq!(len, OTP_ATTEMPT_CAP);
+    }
+
+    #[test]
+    fn clear_otp_attempts_drops_that_user() {
+        let backend = Backend::memory();
+        let user_id = Uuid::new_v4();
+        let key = format!("{user_id}|code");
+        note_failure(&backend.attempts, &key, Duration::from_secs(60));
+        note_failure(&backend.attempts, "other|code", Duration::from_secs(60));
+        backend.clear_otp_attempts(user_id);
+        let guard = backend
+            .attempts
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        assert!(guard
+            .keys()
+            .all(|key| !key.starts_with(&format!("{user_id}|"))));
+        assert!(guard.contains_key("other|code"));
     }
 }

@@ -764,6 +764,7 @@ mod tests {
             "GOTRUE_SMS_PROVIDER" => Some("twilio".into()),
             "GOTRUE_SMS_OTP_EXP" => Some("300".into()),
             "GOTRUE_SMS_TEST_OTP" => Some("15550001111:123456".into()),
+            "GOTRUE_MAILER_OTP_EXP" => Some("7200".into()),
             _ => None,
         })
         .unwrap();
@@ -777,6 +778,11 @@ mod tests {
         assert_eq!(config.sms_otp_exp_seconds, 300);
         assert!(config.sms_test_otp_configured);
         assert!(config.saml_private_key_next_configured);
+        assert_eq!(config.mailer_otp_exp_seconds, 7200);
+        let zero =
+            AuthConfig::from_lookup(|key| (key == "GOTRUE_MAILER_OTP_EXP").then(|| "0".into()))
+                .unwrap();
+        assert_eq!(zero.mailer_otp_exp_seconds, 86_400);
     }
 
     #[test]

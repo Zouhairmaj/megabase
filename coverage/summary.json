@@ -2,12 +2,12 @@
   "schema": 1,
   "totals": {
     "units": 1036,
-    "implemented": 348,
+    "implemented": 353,
     "tested": 218,
     "conformant": 0
   },
   "percent": {
-    "coverage": 33.6,
+    "coverage": 34.1,
     "conformance": 0.0,
     "done": 0.0
   },
@@ -166,7 +166,7 @@
     },
     "meta": {
       "units": 69,
-      "implemented": 2,
+      "implemented": 7,
       "tested": 2,
       "conformant": 0,
       "groups": {
@@ -238,7 +238,7 @@
         },
         "tables": {
           "units": 5,
-          "implemented": 0,
+          "implemented": 5,
           "tested": 0,
           "conformant": 0
         },
@@ -696,8 +696,13 @@
     "functions:op:op_runtime_memory_usage": "implemented",
     "functions:op:op_set_env": "implemented",
     "functions:route:* /functions/v1/{function_name}": "tested",
+    "meta:route:DELETE /pg/tables/{id}": "implemented",
     "meta:route:GET /pg/config/version": "tested",
     "meta:route:GET /pg/health": "tested",
+    "meta:route:GET /pg/tables": "implemented",
+    "meta:route:GET /pg/tables/{id}": "implemented",
+    "meta:route:PATCH /pg/tables/{id}": "implemented",
+    "meta:route:POST /pg/tables": "implemented",
     "realtime:client-event:access_token": "implemented",
     "realtime:client-event:broadcast": "implemented",
     "realtime:client-event:presence": "implemented",
