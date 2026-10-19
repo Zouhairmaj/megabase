@@ -14,8 +14,8 @@ are public. Signup is public and, with the judge's autoconfirm overlay,
 creates an `auth.users` row and a session. Logout revokes sessions for a
 verified user access token. Recover is specified in
 [`recover.md`](recover.md) and invite in [`invite.md`](invite.md). Resend
-and reauthenticate answer HTTP 501 with their unit id after any implemented
-validation. Resend is public; reauthenticate needs a user session in GoTrue.
+and reauthenticate are served below. Resend is public; reauthenticate needs
+a user session.
 
 ## Upstream
 
@@ -37,10 +37,11 @@ Reference-stack flags come from `vendor/supabase/docker/.env.example` and
 
 ## Inputs
 
-Health and settings take no body. They are registered with chi's `r.Get`
-only (`vendor/auth/internal/api/api.go:202`, `:222`), so `HEAD` and every
-other method get chi's `methodNotAllowedHandler`: 405, `Allow: GET`, empty
-body. chi does not answer `HEAD` from a `GET` route. Without an `apikey`
+Health, settings, and reauthenticate take no body. They are registered with
+chi's `r.Get` only (`vendor/auth/internal/api/api.go:202`, `:222`, `:278`),
+so `HEAD` and every other method get chi's `methodNotAllowedHandler`: 405,
+`Allow: GET`, empty body. chi does not answer `HEAD` from a `GET` route.
+Without an `apikey`
 the gateway answers first (`specs/server/key-auth.md`). Signup, invite,
 recover, and resend read a JSON body of at most `1 << 20` bytes.
 
@@ -62,7 +63,8 @@ Logout reads `Authorization: Bearer <access token>` and optional query
 | `POST /auth/v1/logout` | yes | 204 empty body |
 | `POST /auth/v1/recover` | see [`recover.md`](recover.md) | 200 `{}` |
 | `POST /auth/v1/invite` | see [`invite.md`](invite.md) | 200 user object |
-| `GET /auth/v1/reauthenticate`, `POST /auth/v1/resend` | no | 501 `MEGABASE_NOT_IMPLEMENTED` with that unit id |
+| `GET /auth/v1/reauthenticate` | email | 200 `{}` after the reauthentication email. See [GET /reauthenticate](#get-reauthenticate) |
+| `POST /auth/v1/resend` | email | 200 `{}`. See [POST /resend](#post-resend) |
 
 Signup user JSON matches GoTrue's user object for an autoconfirmed email
 user: `phone` is `""`, and `confirmed_at` is omitted. Signup reloads the
@@ -184,43 +186,84 @@ v2.197.0. With `GOTRUE_MAILER_AUTOCONFIRM=false`, after the checks in
 that `grant_type=pkce` exchanges ([`token.md`](token.md)). The judge stack
 sets autoconfirm on, so it never takes this path.
 
-## Partial: POST /resend
+## GET /reauthenticate
 
-Ported validation source: `internal/api/resend.go:15-77` in Supabase Auth
-`v2.197.0` (MIT). The public endpoint reads JSON fields `type`, `email`,
-`phone`, `code_challenge`, and `code_challenge_method` with the existing
-1 MiB body limit and `bad_json` errors. Missing or null strings are empty.
-Keys match case-insensitively and the last duplicate wins, like Go
-`encoding/json`.
+`requireAuthentication` (`internal/api/auth.go:20`), then
+`internal/api/reauthenticate.go:17` and `sendReauthenticationOtp`
+(`internal/api/mail.go:439`). No body. The bearer checks are the same as
+`GET /user`.
 
-Validation follows upstream order. All errors below are HTTP 400:
+| When | Status | `error_code` / `msg` |
+|---|---|---|
+| No bearer | 401 | `no_authorization` / `This endpoint requires a valid Bearer token` |
+| Bad JWT, missing user, missing session, banned user | same as `GET /user` | |
+| Email and phone both empty | 400 | `validation_failed` / `Reauthentication requires the user to have an email or a phone number` |
+| Email set and not confirmed | 422 | `email_not_confirmed` / `Please verify your email first.` |
+| No email, phone not confirmed | 422 | `phone_not_confirmed` / `Please verify your phone first.` |
+| Confirmed phone only | 501 | `MEGABASE_NOT_IMPLEMENTED`, unit `auth:route:GET /auth/v1/reauthenticate` (SMS is not ported) |
+| Confirmed email | 200 | `{}` |
+
+The email path is `sendReauthenticationOtp`: the `reauthentication_sent_at`
+frequency limit (`GOTRUE_SMTP_MAX_FREQUENCY`), one OTP (no `pkce_` prefix),
+the authorized-address check and the email-send limiter, then the same mail
+client as `POST /recover`. A randomness failure is 500
+`Error sending reauthentication email` and stores nothing. Success writes
+`user_reauthenticate_requested`, `reauthentication_token`,
+`reauthentication_sent_at`, and a `reauthentication_token` one-time token.
+An unreachable SMTP host is 500 with that message and stores nothing. A
+reachable host is 501.
+
+## POST /resend
+
+`internal/api/resend.go` and `internal/api/api.go:258`. The
+`GOTRUE_RATE_LIMIT_OTP` limiter (its own bucket, not the `/otp` bucket)
+runs before the body, the same way as `POST /otp`. Over the limit is 429
+`over_request_rate_limit` / `Request rate limit reached`.
+
+The body fields are `type`, `email`, `phone`, `code_challenge`, and
+`code_challenge_method`. Missing or null strings are empty. Keys match
+case-insensitively and the last duplicate wins. A top-level `null` is the
+zero value. Validation order, all HTTP 400:
 
 1. `type` must be `signup`, `email_change`, `sms`, or `phone_change`;
    otherwise `validation_failed` / `Missing one of these types: signup, email_change, sms, phone_change`.
-   Signup and email change then use the existing PKCE validation, including
-   `PKCE flow requires code_challenge_method and code_challenge` for an
-   incomplete pair. SMS and phone change do not validate PKCE.
-2. Signup with empty email returns `validation_failed` /
-   `Type provided requires an email address`. SMS with empty phone returns
-   `validation_failed` / `Type provided requires a phone number`.
-3. Both addresses present returns `validation_failed` /
-   `Only an email address or phone number should be provided.`
-4. A nonempty email requires the email provider; otherwise
-   `email_provider_disabled` / `Email logins are disabled`. It then uses
-   the existing email validator (format and length only; the normalized
-   value is discarded because the route stops at 501 before any lookup).
-   A nonempty phone requires the phone provider; otherwise
-   `phone_provider_disabled` / `Phone logins are disabled`. It then uses
-   the existing E.164 validator (format only; the normalized value is
-   discarded); invalid format returns `validation_failed` /
-   `Invalid phone number format (E.164 required)`.
-5. Both addresses empty returns `validation_failed` /
-   `Missing email address or phone number`.
+   Signup and email change then use the existing PKCE validation. SMS and
+   phone change do not.
+2. Signup with empty email: `Type provided requires an email address`. SMS
+   with empty phone: `Type provided requires a phone number`.
+3. Both addresses: `Only an email address or phone number should be provided.`
+4. A nonempty email requires the email provider
+   (`email_provider_disabled` / `Email logins are disabled`), then the
+   existing email validator. The stored address is the lowercased value.
+   A nonempty phone requires the phone provider
+   (`phone_provider_disabled` / `Phone logins are disabled`), then E.164.
+   The stored phone drops one leading `+` and spaces.
+5. Both empty: `Missing email address or phone number`.
 
-After validation, the endpoint returns HTTP 501 `MEGABASE_NOT_IMPLEMENTED`
-with unit `auth:route:POST /auth/v1/resend`. It performs no user lookup,
-enumeration, writes, or mail/SMS delivery. No coverage marker is added
-until delivery is ported.
+Lookup is by the normalized address and audience. No row is 200 `{}`.
+A database error is 500 `unexpected_failure` / `Unable to process request`,
+not that empty object. Then, still with no mail:
+
+- `signup` and the email is already confirmed: 200 `{}`
+- `sms` and the phone is already confirmed: 200 `{}`
+- `email_change` and `email_change` is empty: 200 `{}`
+- `phone_change` and `phone_change` is empty: 200 `{}`
+- `sms` or `phone_change` that would send: 501 (SMS is not ported)
+
+`signup` for an unconfirmed user is `sendConfirmation`: frequency limit on
+`confirmation_sent_at`, a new OTP (`pkce_` prefix when `code_challenge` is
+set), one email-send slot, then the mail client. Success writes
+`user_confirmation_requested`, the confirmation token and one-time token,
+and, for PKCE, an `email/signup` flow state in the same transaction.
+`email_change` with a pending address is `sendEmailChange`: frequency limit
+on `email_change_sent_at`, a new-address OTP, and a current-address OTP when
+secure email change is on and the user has an email. Both hashes take the
+`pkce_` prefix together. One mail hand-off covers both. Success resets
+`email_change_confirm_status` to 0, stores the hashes and one-time tokens,
+and, for PKCE, an `email_change` flow state. Resend writes no audit row for
+an email change. An unknown challenge method is GoTrue's default 500 before
+any mail. Failure messages are `Error sending confirmation email` and
+`Error sending email change email`. The mail client matches `POST /recover`.
 
 ## Level 2 (issue 46): authorize, callback, magiclink, otp
 
@@ -378,6 +421,10 @@ are ported.
 
 ## Judge cases
 
-Already in `judge/cases/auth.toml` (not edited here): `auth.health`,
-`auth.settings`, `auth.signup.password`, `auth.signup.weak-password`,
-`auth.logout`. Conformance was not measured in this change (no Docker).
+`auth.reauthenticate.no-bearer`, `auth.reauthenticate.invalid-bearer`,
+`auth.reauthenticate.post`, `auth.reauthenticate.smtp-down`,
+`auth.resend.missing-type`, `auth.resend.unknown-signup`,
+`auth.resend.confirmed-signup`, and `auth.resend.email-change-none`
+are in `judge/cases/auth.toml`. The mail-down reauthenticate case expects
+the shared 500 from an unreachable `GOTRUE_SMTP_HOST`. The resend cases
+are the paths that send nothing.

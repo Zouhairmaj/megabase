@@ -1918,3 +1918,92 @@ units = ["auth:route:GET /auth/v1/scim/v2/Schemas"]
 [[case.step]]
 method = "GET"
 path = "/auth/v1/scim/v2/Schemas"
+
+# GET /reauthenticate and POST /resend. The reference stack has no mail
+# server, so a send that must leave the process is a 500 on both sides.
+# Paths that send nothing (unknown address, already confirmed, no pending
+# email change) answer 200 {}.
+
+[[case]]
+id = "auth.reauthenticate.no-bearer"
+description = "Reauthenticate with only the anon key is rejected"
+units = ["auth:route:GET /auth/v1/reauthenticate"]
+[[case.step]]
+method = "GET"
+path = "/auth/v1/reauthenticate"
+
+[[case]]
+id = "auth.reauthenticate.invalid-bearer"
+description = "Reauthenticate with a malformed bearer token is rejected"
+units = ["auth:route:GET /auth/v1/reauthenticate"]
+[[case.step]]
+method = "GET"
+path = "/auth/v1/reauthenticate"
+headers = { Authorization = "Bearer not-a-jwt" }
+
+[[case]]
+id = "auth.reauthenticate.post"
+description = "POST on reauthenticate is not allowed"
+units = ["auth:route:GET /auth/v1/reauthenticate"]
+[[case.step]]
+method = "POST"
+path = "/auth/v1/reauthenticate"
+json = {}
+
+[[case]]
+id = "auth.reauthenticate.smtp-down"
+description = "A confirmed user gets the reauthentication mail error when SMTP is down"
+units = ["auth:route:GET /auth/v1/reauthenticate"]
+[[case.step]]
+method = "POST"
+path = "/auth/v1/signup"
+json = { email = "judge-reauth-{{run}}@example.com", password = "judge-password-1" }
+capture = { token = "/access_token" }
+[[case.step]]
+method = "GET"
+path = "/auth/v1/reauthenticate"
+headers = { Authorization = "Bearer {{token}}" }
+
+[[case]]
+id = "auth.resend.missing-type"
+description = "Resend without a type fails validation"
+units = ["auth:route:POST /auth/v1/resend"]
+[[case.step]]
+method = "POST"
+path = "/auth/v1/resend"
+json = { email = "judge-resend-type-{{run}}@example.com" }
+
+[[case]]
+id = "auth.resend.unknown-signup"
+description = "Resend signup for an unknown address is an empty 200"
+units = ["auth:route:POST /auth/v1/resend"]
+[[case.step]]
+method = "POST"
+path = "/auth/v1/resend"
+json = { type = "signup", email = "judge-resend-ghost-{{run}}@example.com" }
+
+[[case]]
+id = "auth.resend.confirmed-signup"
+description = "Resend signup for an already confirmed user sends nothing"
+units = ["auth:route:POST /auth/v1/resend"]
+[[case.step]]
+method = "POST"
+path = "/auth/v1/signup"
+json = { email = "judge-resend-confirmed-{{run}}@example.com", password = "judge-password-1" }
+[[case.step]]
+method = "POST"
+path = "/auth/v1/resend"
+json = { type = "signup", email = "judge-resend-confirmed-{{run}}@example.com" }
+
+[[case]]
+id = "auth.resend.email-change-none"
+description = "Resend email change with nothing pending is an empty 200"
+units = ["auth:route:POST /auth/v1/resend"]
+[[case.step]]
+method = "POST"
+path = "/auth/v1/signup"
+json = { email = "judge-resend-change-{{run}}@example.com", password = "judge-password-1" }
+[[case.step]]
+method = "POST"
+path = "/auth/v1/resend"
+json = { type = "email_change", email = "judge-resend-change-{{run}}@example.com" }

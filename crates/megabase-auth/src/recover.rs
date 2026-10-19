@@ -171,7 +171,7 @@ pub(crate) async fn recover(
     }
 }
 
-fn empty_ok() -> Response {
+pub(crate) fn empty_ok() -> Response {
     (StatusCode::OK, Json(json!({}))).into_response()
 }
 
@@ -284,9 +284,8 @@ pub(crate) fn over_email_limit(message: impl Into<String>) -> GoTrueError {
     )
 }
 
-/// The checks `sendEmail` runs before it hands the message to the client:
-/// the authorized-address list and the email-send limiter.
-pub(crate) fn check_send_allowed(state: &AuthState, recipient: &str) -> Result<(), GoTrueError> {
+/// `checkEmailAddressAuthorization` for one recipient.
+pub(crate) fn authorize_recipient(state: &AuthState, recipient: &str) -> Result<(), GoTrueError> {
     let mail = &state.mail;
     if !recipient.is_empty() && !address_authorized(&mail.authorized_addresses, recipient) {
         return Err(GoTrueError::new(
@@ -298,6 +297,12 @@ pub(crate) fn check_send_allowed(state: &AuthState, recipient: &str) -> Result<(
             ),
         ));
     }
+    Ok(())
+}
+
+/// The email-send limiter `sendEmail` applies once per message.
+pub(crate) fn take_email_slot(state: &AuthState) -> Result<(), GoTrueError> {
+    let mail = &state.mail;
     if mail.email_limiter.rate().events() == 0.0 {
         return Err(over_email_limit("email rate limit exceeded"));
     }
@@ -305,6 +310,13 @@ pub(crate) fn check_send_allowed(state: &AuthState, recipient: &str) -> Result<(
         return Err(over_email_limit("email rate limit exceeded"));
     }
     Ok(())
+}
+
+/// The checks `sendEmail` runs before it hands the message to the client:
+/// the authorized-address list and the email-send limiter.
+pub(crate) fn check_send_allowed(state: &AuthState, recipient: &str) -> Result<(), GoTrueError> {
+    authorize_recipient(state, recipient)?;
+    take_email_slot(state)
 }
 
 /// `checkEmailAddressAuthorization`. A `+label` before the `@` is ignored.
