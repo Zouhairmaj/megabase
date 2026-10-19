@@ -1,10 +1,12 @@
 // Ported from supabase/auth internal/api/middleware.go and
 // internal/api/apilimiter/apilimiter.go (MIT), pin v2.197.0.
 
-//! Header-keyed token-bucket rate limiting, as GoTrue's `Token` limiter.
+//! Header-keyed token-bucket rate limiting, as GoTrue's tollbooth limiters.
 //!
-//! GoTrue builds `tollbooth.NewLimiter(rate, ...).SetBurst(30)` with a one
-//! hour entry TTL. [`limit_by_header`] limits only when
+//! GoTrue builds `tollbooth.NewLimiter(rate, ...).SetBurst(30)`. Most
+//! limiters keep an entry for one hour. `FactorVerify` keeps one for one
+//! minute. An idle entry is dropped, and the next request starts from a
+//! full burst. [`limit_by_header`] limits only when
 //! `GOTRUE_RATE_LIMIT_HEADER` names a header whose first comma-separated
 //! value is non-blank. [`perform_rate_limiting`] uses a parsed
 //! `Sb-Forwarded-For` address only when
@@ -37,6 +39,8 @@ struct Bucket {
 pub(crate) struct KeyedLimiter {
     rate: f64,
     burst: f64,
+    /// How long an idle key keeps its bucket (`DefaultExpirationTTL`).
+    entry_ttl: Duration,
     table: Mutex<Table>,
 }
 
@@ -47,11 +51,17 @@ struct Table {
 }
 
 impl KeyedLimiter {
-    /// `rate` is tokens per second.
+    /// `rate` is tokens per second. Entries live for one hour.
     pub(crate) fn new(rate: f64, burst: f64) -> Self {
+        Self::with_entry_ttl(rate, burst, ENTRY_TTL)
+    }
+
+    /// `new`, with GoTrue's `DefaultExpirationTTL` for this limiter.
+    pub(crate) fn with_entry_ttl(rate: f64, burst: f64, entry_ttl: Duration) -> Self {
         Self {
             rate: rate.max(0.0),
             burst,
+            entry_ttl,
             table: Mutex::new(Table::default()),
         }
     }
@@ -62,6 +72,7 @@ impl KeyedLimiter {
     }
 
     fn allow_at(&self, key: &str, now: Instant) -> bool {
+        let entry_ttl = self.entry_ttl;
         let mut guard = self.table.lock().unwrap_or_else(PoisonError::into_inner);
         let table = &mut *guard;
         let sweep_due = table
@@ -70,13 +81,19 @@ impl KeyedLimiter {
         if table.buckets.len() >= SWEEP_AT && sweep_due {
             table
                 .buckets
-                .retain(|_, bucket| now.saturating_duration_since(bucket.last) < ENTRY_TTL);
+                .retain(|_, bucket| now.saturating_duration_since(bucket.last) < entry_ttl);
             table.last_sweep = Some(now);
         }
         let bucket = table.buckets.entry(key.to_string()).or_insert(Bucket {
             tokens: self.burst,
             last: now,
         });
+        // Tollbooth drops an entry that has not been touched within the TTL.
+        // The next request starts from a full burst.
+        if now.saturating_duration_since(bucket.last) >= entry_ttl {
+            bucket.tokens = self.burst;
+            bucket.last = now;
+        }
         let elapsed = now.saturating_duration_since(bucket.last).as_secs_f64();
         bucket.tokens = (bucket.tokens + elapsed * self.rate).min(self.burst);
         bucket.last = now;
@@ -330,6 +347,19 @@ mod tests {
         assert!(parse_email_rate("x/1s").is_err());
         assert!(parse_email_rate("1/2/3").is_err());
         assert!(parse_email_rate("1/x").is_err());
+    }
+
+    #[test]
+    fn idle_entry_resets_after_its_ttl() {
+        let limiter = KeyedLimiter::with_entry_ttl(0.0, 1.0, Duration::from_secs(60));
+        let start = Instant::now();
+        assert!(limiter.allow_at("a", start));
+        assert!(!limiter.allow_at("a", start + Duration::from_secs(59)));
+        // That denial touched the entry. A quiet minute after it starts full.
+        assert!(
+            limiter.allow_at("a", start + Duration::from_secs(119)),
+            "an entry idle for the TTL starts full again"
+        );
     }
 
     #[test]

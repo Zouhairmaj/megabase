@@ -28,6 +28,7 @@ use crate::error::{unexpected, validation, GoTrueError};
 use crate::gojson::{self, GoStruct, Kind};
 use crate::hooks::TokenHookCall;
 use crate::jsonutil::{mfa_access_claims, session_json};
+use crate::ratelimit::perform_rate_limiting;
 use crate::routes::{read_body, JsonOk, INVALID_CHANNEL};
 use crate::state::AuthState;
 use crate::store::{
@@ -319,6 +320,16 @@ async fn verify_factor(
         Ok(loaded) => loaded,
         Err(response) => return *response,
     };
+    // `limitHandler(FactorVerify)` runs after `loadFactor` and before the
+    // handler. Challenge uses a separate limiter with the same setting.
+    if let Err(error) = perform_rate_limiting(
+        &state.factor_verify_limiter,
+        state.sb_forwarded_for_enabled,
+        &state.rate_limit_header,
+        &headers,
+    ) {
+        return error.into_response();
+    }
     let bytes = match read_body(body).await {
         Ok(bytes) => bytes,
         Err(error) => return error.into_response(),
@@ -561,6 +572,15 @@ async fn recovery_codes_verify(
         Ok(authed) => authed,
         Err(response) => return *response,
     };
+    // The same `FactorVerify` limiter as `POST /factors/{id}/verify`.
+    if let Err(error) = perform_rate_limiting(
+        &state.factor_verify_limiter,
+        state.sb_forwarded_for_enabled,
+        &state.rate_limit_header,
+        &headers,
+    ) {
+        return error.into_response();
+    }
     let Some(session_id) = authed.session_id else {
         return unexpected(
             "A valid session and a registered user are required to verify recovery codes",
@@ -1053,6 +1073,56 @@ mod tests {
         (status, json)
     }
 
+    async fn call_keyed(
+        app: &Router,
+        path: &str,
+        body: &str,
+        token: Option<&str>,
+        headers: &[(&str, &str)],
+    ) -> (StatusCode, Value) {
+        let mut builder = Request::builder().method("POST").uri(path);
+        if let Some(token) = token {
+            builder = builder.header("authorization", format!("Bearer {token}"));
+        }
+        for (name, value) in headers {
+            builder = builder.header(*name, *value);
+        }
+        let request = builder.body(Body::from(body.to_string())).unwrap();
+        let response = app.clone().oneshot(request).await.unwrap();
+        let status = response.status();
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let json = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
+        (status, json)
+    }
+
+    /// Burst of one on `FactorVerify`, keyed by `x-rate-key`.
+    async fn limited_fixture(sb_forwarded_for: bool) -> Fixture {
+        let backend = Backend::memory();
+        let config = AuthConfig::reference_defaults();
+        let jwt = Hs256::new(SECRET.as_bytes()).unwrap();
+        let mut state = AuthState::new(config, Some(jwt), backend.clone());
+        state.rate_limit_header = "x-rate-key".into();
+        state.sb_forwarded_for_enabled = sb_forwarded_for;
+        state.factor_verify_limiter =
+            std::sync::Arc::new(crate::ratelimit::KeyedLimiter::new(0.0, 1.0));
+        let app = crate::router_with_state(state);
+        let body = json!({ "email": EMAIL, "password": "secret-pass" }).to_string();
+        let (status, body) = call(&app, "POST", "/auth/v1/signup", Some(&body), None).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        let token = body["access_token"].as_str().unwrap().to_string();
+        let claims = Hs256::new(SECRET.as_bytes())
+            .unwrap()
+            .verify(&token)
+            .unwrap();
+        let session_id = Uuid::parse_str(claims.raw["session_id"].as_str().unwrap()).unwrap();
+        Fixture {
+            app,
+            backend,
+            token,
+            session_id,
+        }
+    }
+
     fn assert_error(result: &(StatusCode, Value), status: StatusCode, code: &str, msg: &str) {
         assert_eq!(result.0, status, "{}", result.1);
         assert_eq!(result.1["code"], status.as_u16(), "{}", result.1);
@@ -1310,6 +1380,147 @@ mod tests {
             "validation_failed",
             BAD_FACTOR_TYPE,
         );
+    }
+
+    #[tokio::test]
+    async fn totp_verify_is_rate_limited_like_gotrue() {
+        let fx = limited_fixture(false).await;
+        let factor = fx
+            .backend
+            .add_factor_for_test(EMAIL, "totp", "unverified")
+            .await;
+        let path = format!("/auth/v1/factors/{factor}/verify");
+        let missing = format!("/auth/v1/factors/{}/verify", Uuid::new_v4());
+        let recovery = "/auth/v1/factors/recovery-codes/verify";
+        let empty = r#"{"code":""}"#;
+
+        // `loadFactor` runs before the limiter, so a missing factor is not counted.
+        let missed = call_keyed(
+            &fx.app,
+            &missing,
+            empty,
+            Some(&fx.token),
+            &[("x-rate-key", "miss")],
+        )
+        .await;
+        assert_error(
+            &missed,
+            StatusCode::NOT_FOUND,
+            "mfa_factor_not_found",
+            "Factor not found",
+        );
+        let missed = call_keyed(
+            &fx.app,
+            &missing,
+            empty,
+            Some(&fx.token),
+            &[("x-rate-key", "miss")],
+        )
+        .await;
+        assert_eq!(missed.0, StatusCode::NOT_FOUND, "{}", missed.1);
+
+        // An authenticated verify consumes one token, then the next is 429.
+        let first = call_keyed(
+            &fx.app,
+            &path,
+            empty,
+            Some(&fx.token),
+            &[("x-rate-key", "k1")],
+        )
+        .await;
+        assert_error(
+            &first,
+            StatusCode::BAD_REQUEST,
+            "validation_failed",
+            "Code needs to be non-empty",
+        );
+        let limited = call_keyed(
+            &fx.app,
+            &path,
+            empty,
+            Some(&fx.token),
+            &[("x-rate-key", "k1")],
+        )
+        .await;
+        assert_error(
+            &limited,
+            StatusCode::TOO_MANY_REQUESTS,
+            "over_request_rate_limit",
+            "Request rate limit reached",
+        );
+        // Recovery-code verify shares this bucket.
+        let shared = call_keyed(
+            &fx.app,
+            recovery,
+            r#"{"code":"abcd"}"#,
+            Some(&fx.token),
+            &[("x-rate-key", "k1")],
+        )
+        .await;
+        assert_error(
+            &shared,
+            StatusCode::TOO_MANY_REQUESTS,
+            "over_request_rate_limit",
+            "Request rate limit reached",
+        );
+
+        let other = call_keyed(
+            &fx.app,
+            &path,
+            empty,
+            Some(&fx.token),
+            &[("x-rate-key", "k2")],
+        )
+        .await;
+        assert_eq!(other.0, StatusCode::BAD_REQUEST, "{}", other.1);
+
+        // No rate-limit header: the request is not counted.
+        let open = call_keyed(&fx.app, &path, empty, Some(&fx.token), &[]).await;
+        assert_eq!(open.0, StatusCode::BAD_REQUEST, "{}", open.1);
+        let open = call_keyed(&fx.app, &path, empty, Some(&fx.token), &[]).await;
+        assert_eq!(open.0, StatusCode::BAD_REQUEST, "{}", open.1);
+
+        let forwarded = limited_fixture(true).await;
+        let factor = forwarded
+            .backend
+            .add_factor_for_test(EMAIL, "totp", "unverified")
+            .await;
+        let path = format!("/auth/v1/factors/{factor}/verify");
+        let first = call_keyed(
+            &forwarded.app,
+            &path,
+            empty,
+            Some(&forwarded.token),
+            &[
+                ("sb-forwarded-for", "203.0.113.5"),
+                ("x-rate-key", "unused"),
+            ],
+        )
+        .await;
+        assert_eq!(first.0, StatusCode::BAD_REQUEST, "{}", first.1);
+        let limited = call_keyed(
+            &forwarded.app,
+            &path,
+            empty,
+            Some(&forwarded.token),
+            &[("sb-forwarded-for", "203.0.113.5"), ("x-rate-key", "other")],
+        )
+        .await;
+        assert_error(
+            &limited,
+            StatusCode::TOO_MANY_REQUESTS,
+            "over_request_rate_limit",
+            "Request rate limit reached",
+        );
+        let fresh = call_keyed(
+            &forwarded.app,
+            &path,
+            empty,
+            Some(&forwarded.token),
+            &[("sb-forwarded-for", "203.0.113.9"), ("x-rate-key", "fresh")],
+        )
+        .await;
+        assert_eq!(fresh.0, StatusCode::BAD_REQUEST, "{}", fresh.1);
     }
 
     #[tokio::test]
