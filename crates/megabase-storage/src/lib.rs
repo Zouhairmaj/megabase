@@ -39,7 +39,7 @@ use axum::{
     Router,
 };
 use chrono::{DateTime, Utc};
-use megabase_core::{bearer_token, Hs256, JwtClaims, MegabaseNotImplemented};
+use megabase_core::{bearer_token, ApiRoles, Hs256, JwtClaims, MegabaseNotImplemented};
 use serde_json::{json, Map, Value};
 
 mod bucket;
@@ -82,6 +82,9 @@ pub struct StorageState {
     pool: Option<sqlx::PgPool>,
     jwt: Option<Arc<Hs256>>,
     files: Option<Arc<std::path::Path>>,
+    /// JWT roles object scope may apply. The three API roles, plus any
+    /// extras from configuration.
+    api_roles: ApiRoles,
     #[cfg(test)]
     rows: Option<Arc<RouteRows>>,
 }
@@ -94,9 +97,17 @@ impl StorageState {
             pool,
             jwt: jwt.map(Arc::new),
             files: None,
+            api_roles: ApiRoles::default(),
             #[cfg(test)]
             rows: None,
         }
+    }
+
+    /// Roles a request JWT may apply, from [`megabase_core::Config::api_roles`].
+    #[must_use]
+    pub fn with_api_roles(mut self, roles: ApiRoles) -> Self {
+        self.api_roles = roles;
+        self
     }
 
     /// Keep object bytes under `root` (`FILE_STORAGE_BACKEND_PATH`). Without
