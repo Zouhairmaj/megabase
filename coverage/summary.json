@@ -2,12 +2,12 @@
   "schema": 1,
   "totals": {
     "units": 1036,
-    "implemented": 351,
+    "implemented": 356,
     "tested": 218,
     "conformant": 0
   },
   "percent": {
-    "coverage": 33.9,
+    "coverage": 34.4,
     "conformance": 0.0,
     "done": 0.0
   },
@@ -166,7 +166,7 @@
     },
     "meta": {
       "units": 69,
-      "implemented": 7,
+      "implemented": 12,
       "tested": 2,
       "conformant": 0,
       "groups": {
@@ -202,7 +202,7 @@
         },
         "policies": {
           "units": 5,
-          "implemented": 0,
+          "implemented": 5,
           "tested": 0,
           "conformant": 0
         },
@@ -690,12 +690,17 @@
     "functions:op:op_runtime_memory_usage": "implemented",
     "functions:op:op_set_env": "implemented",
     "functions:route:* /functions/v1/{function_name}": "tested",
+    "meta:route:DELETE /pg/policies/{id}": "implemented",
     "meta:route:DELETE /pg/tables/{id}": "implemented",
     "meta:route:GET /pg/config/version": "tested",
     "meta:route:GET /pg/health": "tested",
+    "meta:route:GET /pg/policies": "implemented",
+    "meta:route:GET /pg/policies/{id}": "implemented",
     "meta:route:GET /pg/tables": "implemented",
     "meta:route:GET /pg/tables/{id}": "implemented",
+    "meta:route:PATCH /pg/policies/{id}": "implemented",
     "meta:route:PATCH /pg/tables/{id}": "implemented",
+    "meta:route:POST /pg/policies": "implemented",
     "meta:route:POST /pg/tables": "implemented",
     "realtime:client-event:access_token": "implemented",
     "realtime:client-event:broadcast": "implemented",
