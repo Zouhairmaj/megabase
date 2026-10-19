@@ -32,6 +32,9 @@ pub enum ProxyError {
     /// The upstream path is not a valid request-target.
     #[error("{0}")]
     Target(#[from] axum::http::uri::InvalidUri),
+    /// `op_user_worker_fetch_build` rejected the request.
+    #[error("{0}")]
+    Build(String),
 }
 
 /// Hop-by-hop headers (RFC 9110 section 7.6.1) a proxy does not forward.
@@ -62,11 +65,13 @@ fn strip_hop_by_hop(headers: &mut HeaderMap) {
 
 /// Send `request` to the worker at `addr` with request-target `target`
 /// (the path after `/functions/v1`, with the query). Method, headers
-/// (including `Authorization`) and body pass through unchanged.
+/// (including `Authorization`) and body pass through. `content-length` on
+/// a `POST` or `PUT` with no body is forced to `0` (`op_user_worker_fetch_build`).
 ///
 /// # Errors
 ///
-/// [`ProxyError`] when the worker cannot be reached or the exchange fails.
+/// [`ProxyError`] when the request cannot be built, the worker cannot be
+/// reached, or the exchange fails.
 pub async fn forward(
     addr: SocketAddr,
     request: Request,
@@ -82,10 +87,20 @@ pub async fn forward(
     });
 
     let (mut parts, body) = request.into_parts();
+    let has_body = crate::user_workers::request_has_body(&parts.headers);
     let method = parts.method.clone();
-    parts.uri = target.parse::<Uri>()?;
-    parts.version = axum::http::Version::HTTP_11;
     strip_hop_by_hop(&mut parts.headers);
+    let pairs = crate::user_workers::header_pairs(&parts.headers);
+    let built = crate::user_workers::fetch_build(&crate::user_workers::FetchBuildInput {
+        method: method.as_str().as_bytes(),
+        url: target,
+        headers: &pairs,
+        has_body,
+    })?;
+    parts.method = built.method;
+    parts.uri = built.url.parse::<Uri>()?;
+    parts.version = axum::http::Version::HTTP_11;
+    parts.headers = built.headers;
     parts
         .headers
         .insert(header::HOST, HeaderValue::from_static(UPSTREAM_HOST));

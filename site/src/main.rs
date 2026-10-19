@@ -1195,7 +1195,9 @@ mod tests {
             status.contains(&shown),
             "status must show summary.totals.units ({shown})"
         );
-        assert!(!home.contains(">334<") && !status.contains(">334<"));
+        // 334 was the Kite placeholder unit total. Live pages must not use it
+        // as `totals.units`; a commit or PR count may still be 334.
+        assert_ne!(total, 334, "live coverage must not use the Kite mock total");
         assert_treemap_svgs_are_fluid(&home);
         assert_treemap_svgs_are_fluid(&status);
         assert!(!home.contains("coverage/treemap.svg"));

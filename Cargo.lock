@@ -1294,6 +1294,8 @@ version = "0.1.48"
 dependencies = [
  "axum",
  "base64 0.22.1",
+ "bytes",
+ "http-body",
  "hyper",
  "hyper-util",
  "megabase-core",
@@ -1302,6 +1304,7 @@ dependencies = [
  "tokio",
  "tower",
  "tracing",
+ "uuid",
 ]
 
 [[package]]
