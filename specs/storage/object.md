@@ -281,8 +281,10 @@ No bearer JWT. `token` is required. `verifyObjectSignature` with the
 upload scope: a download token is `InvalidSignature` `Token is not scoped
 for upload`; a bad compact token is `InvalidJWT` with jose's message; a
 `url` other than `<bucket>/<name>` is `InvalidSignature` `Invalid
-signature`. `owner` (a string, the `sub` from signing) and `upsert` (a
-boolean) come from the token. The upload then runs as the superuser
+signature`. `owner` (a string, the `sub` from signing) comes from the
+token; a non-string `owner` is 501. `upsert` is JavaScript `Boolean`
+(`object.ts` `uploadFromRequest`): `false`, `0`, `""`, and `null` are not
+an upsert, and every other JSON value is. The upload then runs as the superuser
 (`service_role`), the same checks as `POST /object/:bucket/*` (bucket,
 MIME, size, `InvalidKey`, `canUpload`, file, row). Response `200
 {"Key":"<bucket>/<name>"}`. `Content-Encoding`, `x-robots-tag`,

@@ -284,6 +284,17 @@ pub(crate) async fn sign_upload_object(
     }
 }
 
+/// JavaScript `Boolean(value)` for a JSON claim.
+fn js_boolean(value: &Value) -> bool {
+    match value {
+        Value::Null => false,
+        Value::Bool(flag) => *flag,
+        Value::Number(number) => number.as_f64().is_some_and(|number| number != 0.0),
+        Value::String(text) => !text.is_empty(),
+        Value::Array(_) | Value::Object(_) => true,
+    }
+}
+
 /// `isUploadScopedToken`: `scope` is `upload`, or absent on a token that
 /// carries `upsert` (a legacy upload token).
 fn is_upload_scoped(payload: &serde_json::Map<String, Value>) -> bool {
@@ -333,11 +344,10 @@ pub(crate) async fn put_signed_object(
         Some(Value::String(owner)) => Some(owner.as_str()),
         Some(_) => return not_implemented(&method, &uri),
     };
-    let upsert = match payload.get("upsert") {
-        None => false,
-        Some(Value::Bool(upsert)) => *upsert,
-        Some(_) => return not_implemented(&method, &uri),
-    };
+    // `uploadFromRequest` passes the claim through `Boolean(file.isUpsert)`.
+    // A missing claim is `undefined`, which is false. A non-boolean claim is
+    // not rejected: only the JavaScript falsy JSON values stay false.
+    let upsert = payload.get("upsert").is_some_and(js_boolean);
     let Some((pool, root)) = super::backend(&state) else {
         return not_implemented(&method, &uri);
     };
@@ -508,6 +518,23 @@ mod tests {
         );
         headers.insert(header::CONTENT_LENGTH, "1e3".parse().unwrap());
         assert_eq!(upload_probe(&headers), None);
+    }
+
+    #[test]
+    fn upsert_claims_follow_javascript_boolean() {
+        for value in [json!(false), json!(0), json!(0.0), json!(""), Value::Null] {
+            assert!(!js_boolean(&value), "{value}");
+        }
+        for value in [
+            json!(true),
+            json!("false"),
+            json!(1),
+            json!(-1),
+            json!([]),
+            json!({}),
+        ] {
+            assert!(js_boolean(&value), "{value}");
+        }
     }
 
     #[test]
