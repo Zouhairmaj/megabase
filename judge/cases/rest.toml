@@ -2252,11 +2252,11 @@ path = "/rest/v1/todos?title=gte.run&select=id&order=id"
 
 [[case]]
 id = "rest.filter.gte.and-lte"
-description = "and combines gte and lte into a closed range"
+description = "and keeps only the overlap of gte and lte, not either side alone"
 units = ["rest:filter-operator:gte", "rest:filter-operator:lte", "rest:query-param:and"]
 [[case.step]]
 method = "GET"
-path = "/rest/v1/todos?and=(priority.gte.2,id.lte.2)&select=id&order=id"
+path = "/rest/v1/todos?and=(priority.gte.2,priority.lte.2)&select=id&order=id"
 
 [[case]]
 id = "rest.filter.lt.excludes-equal"
@@ -2380,8 +2380,8 @@ path = "/rest/v1/todos?or=(priority.gt.2,priority.lt.2)&select=id&order=id"
 
 [[case]]
 id = "rest.query.and.neq"
-description = "and combines neq with a second filter"
-units = ["rest:query-param:and", "rest:filter-operator:neq"]
+description = "and keeps the overlap of neq and eq, which is neither side alone"
+units = ["rest:query-param:and", "rest:filter-operator:neq", "rest:filter-operator:eq"]
 [[case.step]]
 method = "GET"
-path = "/rest/v1/todos?and=(id.neq.1,done.eq.false)&select=id&order=id"
+path = "/rest/v1/todos?and=(id.neq.2,done.eq.false)&select=id&order=id"
