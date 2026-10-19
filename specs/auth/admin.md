@@ -428,11 +428,12 @@ through to `Referer`, then `GOTRUE_SITE_URL` (default `http://localhost:3000`).
 A candidate is parsed with the WHATWG URL parser. It is rejected when
 parsing fails or when a backslash appears in the authority. Userinfo
 does not reject the URL; the host compared is the host after it, as in
-Go `URL.Hostname`. Scheme and host are compared in canonical form
-(lowercase scheme and domain, dotted IPv4, compressed IPv6). The port
+Go `URL.Hostname`. Scheme is compared as parsed; the host is the
+written hostname, case-sensitive, as in Go `URL.Hostname`. The port
 is the one written in the authority, and it must match, except a
 localhost host (`localhost`, `127.0.0.1`, `::1`, `0.0.0.0`, `::`, or a
-`.localhost` suffix) may use another port. A dotted-decimal or IPv6
+`.localhost` suffix) may use another port. Two empty hosts with the
+same non-HTTP(S) scheme are same-site. A dotted-decimal or IPv6
 loopback address is accepted. Any other address Go's `net.ParseIP`
 accepts is rejected before the allow list, as is a non-empty all-digit host.
 An IPv4 spelling Go keeps as a hostname (for example fewer than four

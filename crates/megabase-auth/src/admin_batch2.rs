@@ -994,8 +994,9 @@ pub(crate) fn get_referrer(
 /// `URL.Hostname`. An all-digit host is rejected. A dotted-decimal or IPv6
 /// address is allowed only when it is loopback, unless it matches the site.
 /// Any other IPv4 spelling is matched as written against the allow list.
-/// A non-HTTP(S) URL with no host, including an empty host, is matched
-/// against the allow list too.
+/// A non-HTTP(S) URL with no host, including an empty host, is same-site
+/// when the site host is also empty, otherwise it is matched against the
+/// allow list.
 /// Globs see the URL with the fragment removed and the query kept. A
 /// rejected candidate falls through to the site URL in [`get_referrer`].
 pub(crate) fn redirect_ok(
@@ -1016,14 +1017,22 @@ pub(crate) fn redirect_ok(
         if target.scheme() == "http" || target.scheme() == "https" {
             return Ok(false);
         }
+        if missing_or_empty_host(&base)
+            && base.scheme() == target.scheme()
+            && raw_port(site_url) == raw_port(redirect)
+        {
+            return Ok(true);
+        }
         return allow_list_matches(allow, redirect);
     }
     if noncanonical_ipv4(redirect, &target) {
         return written_ipv4_host(site_url, redirect, &base, &target, allow);
     }
+    let redirect_host = go_hostname(redirect);
     if base.scheme() == target.scheme()
-        && same_host(&base, &target)
-        && (raw_port(site_url) == raw_port(redirect) || host_is_localhost(&target))
+        && !redirect_host.is_empty()
+        && go_hostname(site_url) == redirect_host
+        && (raw_port(site_url) == raw_port(redirect) || go_is_localhost(redirect_host))
     {
         return Ok(true);
     }
@@ -1065,13 +1074,9 @@ fn missing_or_empty_host(url: &Url) -> bool {
     }
 }
 
-fn same_host(left: &Url, right: &Url) -> bool {
-    match (left.host(), right.host()) {
-        (Some(Host::Domain(left)), Some(Host::Domain(right))) => left == right,
-        (Some(Host::Ipv4(left)), Some(Host::Ipv4(right))) => left == right,
-        (Some(Host::Ipv6(left)), Some(Host::Ipv6(right))) => left == right,
-        _ => false,
-    }
+/// Go `URL.Hostname`: the host as written, without brackets or a port.
+fn go_hostname(raw: &str) -> &str {
+    raw_authority(raw).map(|part| part.host).unwrap_or("")
 }
 
 /// Go `URL.Hostname` for an IPv4 spelling the WHATWG parser rewrites.
@@ -1114,21 +1119,6 @@ fn noncanonical_ipv4(raw: &str, url: &Url) -> bool {
         return true;
     };
     authority.host != ip.to_string()
-}
-
-fn host_is_localhost(url: &Url) -> bool {
-    match url.host() {
-        Some(Host::Domain(name)) => go_is_localhost(name),
-        Some(Host::Ipv4(ip)) => {
-            let text = ip.to_string();
-            go_is_localhost(&text)
-        }
-        Some(Host::Ipv6(ip)) => {
-            let text = ip.to_string();
-            go_is_localhost(&text)
-        }
-        None => false,
-    }
 }
 
 struct RawAuthority<'a> {
@@ -3122,8 +3112,9 @@ mod tests {
         assert!(redirect_ok("https://example.com", "http://127.0.0.2:9/cb", &allow).unwrap());
         assert!(redirect_ok("http://0.0.0.0:3000", "http://0.0.0.0:9/cb", &allow).unwrap());
         assert!(!redirect_ok("https://example.com", "http://0.0.0.0/cb", &allow).unwrap());
-        assert!(redirect_ok("http://localhost:3000", "http://LocalHost:9/cb", &allow).unwrap());
-        assert!(redirect_ok("https://example.com", "https://Example.COM/dash", &allow).unwrap());
+        assert!(!redirect_ok("http://localhost:3000", "http://LocalHost:9/cb", &allow).unwrap());
+        assert!(!redirect_ok("https://example.com", "https://Example.COM/dash", &allow).unwrap());
+        assert!(redirect_ok("https://example.com", "https://example.com/dash", &allow).unwrap());
         assert!(!redirect_ok(
             "https://example.com",
             "https://example.com:443/dash",
@@ -3182,6 +3173,10 @@ mod tests {
         assert!(redirect_ok("https://example.com", "myapp:callback#done", &mobile).unwrap());
         assert!(redirect_ok("https://example.com", "myapp://", &mobile).unwrap());
         assert!(redirect_ok("https://example.com", "myapp:///callback", &mobile).unwrap());
+        assert!(redirect_ok("myapp://", "myapp://", &allow).unwrap());
+        assert!(redirect_ok("myapp://", "myapp:///callback", &allow).unwrap());
+        assert!(redirect_ok("myapp:callback", "myapp:other", &allow).unwrap());
+        assert!(!redirect_ok("https://example.com", "myapp:///callback", &allow).unwrap());
         assert!(!redirect_ok("https://example.com", "myapp:callback", &allow).unwrap());
         assert!(!redirect_ok("https://example.com", "myapp://", &allow).unwrap());
         assert!(!redirect_ok("https://example.com", "myapp:///callback", &allow).unwrap());
