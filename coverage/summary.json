@@ -2,12 +2,12 @@
   "schema": 1,
   "totals": {
     "units": 1036,
-    "implemented": 352,
+    "implemented": 356,
     "tested": 218,
     "conformant": 0
   },
   "percent": {
-    "coverage": 34.0,
+    "coverage": 34.4,
     "conformance": 0.0,
     "done": 0.0
   },
@@ -390,7 +390,7 @@
     },
     "storage": {
       "units": 154,
-      "implemented": 100,
+      "implemented": 104,
       "tested": 35,
       "conformant": 0,
       "groups": {
@@ -426,7 +426,7 @@
         },
         "object": {
           "units": 22,
-          "implemented": 18,
+          "implemented": 22,
           "tested": 0,
           "conformant": 0
         },
@@ -861,6 +861,8 @@
     "storage:route:HEAD /storage/v1/iceberg/v1/{prefix}/namespaces/{namespace}": "implemented",
     "storage:route:HEAD /storage/v1/iceberg/v1/{prefix}/namespaces/{namespace}/tables/{table}": "implemented",
     "storage:route:HEAD /storage/v1/object/authenticated/{bucketName}/{*}": "implemented",
+    "storage:route:HEAD /storage/v1/object/public/{bucketName}/{*}": "implemented",
+    "storage:route:HEAD /storage/v1/object/{bucketName}/{*}": "implemented",
     "storage:route:HEAD /storage/v1/s3/{Bucket}": "tested",
     "storage:route:HEAD /storage/v1/s3/{Bucket}/{*}": "tested",
     "storage:route:POST /storage/v1/bucket": "tested",
@@ -870,6 +872,7 @@
     "storage:route:POST /storage/v1/iceberg/v1/{prefix}/namespaces/{namespace}/tables": "implemented",
     "storage:route:POST /storage/v1/iceberg/v1/{prefix}/namespaces/{namespace}/tables/{table}": "implemented",
     "storage:route:POST /storage/v1/object/copy": "implemented",
+    "storage:route:POST /storage/v1/object/list-v2/{bucketName}": "implemented",
     "storage:route:POST /storage/v1/object/list/{bucketName}": "implemented",
     "storage:route:POST /storage/v1/object/move": "implemented",
     "storage:route:POST /storage/v1/object/sign/{bucketName}": "implemented",
@@ -892,6 +895,7 @@
     "storage:route:POST /storage/v1/vector/ListVectorBuckets": "implemented",
     "storage:route:PUT /storage/v1/bucket/{bucketId}": "tested",
     "storage:route:PUT /storage/v1/bucket/{bucketId}/lifecycle": "tested",
+    "storage:route:PUT /storage/v1/object/upload/sign/{bucketName}/{*}": "implemented",
     "storage:route:PUT /storage/v1/object/{bucketName}/{*}": "implemented",
     "storage:route:PUT /storage/v1/s3/{Bucket}": "tested",
     "storage:route:PUT /storage/v1/s3/{Bucket}/{*}": "tested",

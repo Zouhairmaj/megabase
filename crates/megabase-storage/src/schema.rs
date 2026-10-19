@@ -55,6 +55,9 @@ const DROPPED_PREFIX_FUNCTIONS: &str = include_str!("../sql/dropped_prefix_funct
 // megabase:unit storage:sql-function:storage.search()
 const SEARCH: &str = include_str!("../sql/search.sql");
 
+/// `list-v2` calls these. The sql-function units are not claimed.
+const LIST_V2: &str = include_str!("../sql/list_v2.sql");
+
 /// Install order: the table before its triggers, `storage.operation()`
 /// before the `LANGUAGE sql` helpers that call it.
 const OBJECTS: &[&str] = &[
@@ -69,6 +72,7 @@ const OBJECTS: &[&str] = &[
     EXTENSION,
     DROPPED_PREFIX_FUNCTIONS,
     SEARCH,
+    LIST_V2,
 ];
 
 /// Failure installing the storage schema. Display text does not include the URL.
@@ -139,6 +143,15 @@ mod tests {
         assert!(buckets < objects, "objects references buckets");
         assert!(objects < position(&sql, "TRIGGER protect_objects_delete"));
         assert!(buckets < operation);
+        assert!(
+            position(
+                &sql,
+                "CREATE OR REPLACE FUNCTION storage.get_common_prefix("
+            ) < position(
+                &sql,
+                "CREATE OR REPLACE FUNCTION storage.list_objects_with_delimiter("
+            )
+        );
         for helper in [
             "storage.allow_only_operation(",
             "storage.allow_any_operation(",

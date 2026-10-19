@@ -140,6 +140,47 @@ pub(crate) async fn get_public_object_info(
     object_info(&state, path, &request, None, true).await
 }
 
+/// `HEAD /object/public/:bucketName/*`: no JWT plugin, so a bearer token
+/// is ignored. The bucket must be public; the row is read as the superuser.
+// megabase:unit storage:route:HEAD /storage/v1/object/public/{bucketName}/{*}
+pub(crate) async fn head_public_object(
+    State(state): State<StorageState>,
+    path: Result<Path<(String, String)>, PathRejection>,
+    method: Method,
+    OriginalUri(uri): OriginalUri,
+    headers: HeaderMap,
+) -> Response {
+    let request = InfoRequest {
+        method: &method,
+        uri: &uri,
+        headers: &headers,
+        render: Render::Head,
+        operation: OP_INFO_PUBLIC,
+    };
+    object_info(&state, path, &request, None, true).await
+}
+
+/// `HEAD /object/:bucketName/*`: `allowInvalidJwt`, so a missing or invalid
+/// JWT reads public buckets only.
+// megabase:unit storage:route:HEAD /storage/v1/object/{bucketName}/{*}
+pub(crate) async fn head_object(
+    State(state): State<StorageState>,
+    path: Result<Path<(String, String)>, PathRejection>,
+    method: Method,
+    OriginalUri(uri): OriginalUri,
+    headers: HeaderMap,
+) -> Response {
+    let jwt = request_jwt(&state, &headers);
+    let request = InfoRequest {
+        method: &method,
+        uri: &uri,
+        headers: &headers,
+        render: Render::Head,
+        operation: OP_HEAD_AUTH_INFO,
+    };
+    object_info(&state, path, &request, jwt, false).await
+}
+
 struct InfoRequest<'a> {
     method: &'a Method,
     uri: &'a Uri,

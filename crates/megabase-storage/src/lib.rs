@@ -217,15 +217,13 @@ pub fn router_with_state(state: StorageState) -> Router {
             "/storage/v1/render/image/sign/:bucket_name/*object_name",
             get(render::render_signed_image),
         )
-        // `HEAD` is `getObjectInfo`; where it is not ported, axum would
-        // answer it with the `GET` handler otherwise.
         .route(
             "/storage/v1/object/authenticated/:bucket_name/*object_name",
             get(object::get_authenticated_object).head(object::head_authenticated_object),
         )
         .route(
             "/storage/v1/object/public/:bucket_name/*object_name",
-            get(object::get_public_object).head(not_implemented_head),
+            get(object::get_public_object).head(object::head_public_object),
         )
         .route(
             "/storage/v1/object/sign/:bucket_name/*object_name",
@@ -243,13 +241,11 @@ pub fn router_with_state(state: StorageState) -> Router {
         )
         .route(
             "/storage/v1/object/upload/sign/:bucket_name/*object_name",
-            post(object::sign_upload_object),
+            post(object::sign_upload_object).put(object::put_signed_object),
         )
-        // Unported upstream routes whose first segment the generic
-        // `:bucket_name/*object_name` route would take for a bucket name.
         .route(
             "/storage/v1/object/list-v2/:bucket_name",
-            post(not_implemented_any),
+            post(object::list_objects_v2),
         )
         // Fastify's automatic `HEAD` for the info routes is not ported.
         .route(
@@ -271,7 +267,7 @@ pub fn router_with_state(state: StorageState) -> Router {
         .route(
             "/storage/v1/object/:bucket_name/*object_name",
             get(object::get_object_any)
-                .head(not_implemented_head)
+                .head(object::head_object)
                 .post(object::create_object)
                 .put(object::update_object)
                 .delete(object::delete_object),
@@ -370,10 +366,6 @@ async fn healthcheck(
         }
     };
     fastify_json(StatusCode::OK, &json!({ "healthy": healthy }))
-}
-
-async fn not_implemented_any(method: Method, OriginalUri(uri): OriginalUri) -> Response {
-    not_implemented(&method, &uri)
 }
 
 async fn not_implemented_head(method: Method, OriginalUri(uri): OriginalUri) -> Response {
@@ -542,6 +534,18 @@ impl StorageError {
             code: "InvalidJWT",
             error: "InvalidJWT",
             message: Cow::Borrowed(message),
+        }
+    }
+
+    /// `ERRORS.InvalidParameter`. It sets no `error`, so the handler
+    /// repeats the code there. `message` is the upstream text, default or
+    /// the continuation-token mismatch.
+    pub(crate) fn invalid_parameter(message: Cow<'static, str>) -> Self {
+        Self {
+            status_code: "400",
+            code: "InvalidParameter",
+            error: "InvalidParameter",
+            message,
         }
     }
 

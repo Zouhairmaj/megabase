@@ -38,11 +38,14 @@ mod info;
 mod sign;
 mod transfer;
 
+mod list_v2;
+
 pub(super) use info::{
     get_object_info_any, get_object_info_authenticated, get_public_object_info,
-    head_authenticated_object,
+    head_authenticated_object, head_object, head_public_object,
 };
-pub(super) use sign::{sign_objects, sign_upload_object};
+pub(super) use list_v2::list_objects_v2;
+pub(super) use sign::{put_signed_object, sign_objects, sign_upload_object};
 pub(super) use transfer::{copy_object, move_object};
 
 use super::{
