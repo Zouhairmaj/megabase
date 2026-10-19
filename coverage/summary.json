@@ -3,7 +3,7 @@
   "totals": {
     "units": 1036,
     "implemented": 347,
-    "tested": 218,
+    "tested": 219,
     "conformant": 0
   },
   "percent": {
@@ -12,14 +12,14 @@
     "done": 0.0
   },
   "judge": {
-    "cases": 447,
+    "cases": 458,
     "passing": 0
   },
   "components": {
     "auth": {
       "units": 159,
       "implemented": 122,
-      "tested": 86,
+      "tested": 87,
       "conformant": 0,
       "groups": {
         "admin": {
@@ -37,7 +37,7 @@
         "endpoints": {
           "units": 13,
           "implemented": 7,
-          "tested": 5,
+          "tested": 6,
           "conformant": 0
         },
         "factors": {
@@ -634,7 +634,7 @@
     "auth:route:POST /auth/v1/logout": "tested",
     "auth:route:POST /auth/v1/magiclink": "implemented",
     "auth:route:POST /auth/v1/oauth/clients/register": "implemented",
-    "auth:route:POST /auth/v1/recover": "implemented",
+    "auth:route:POST /auth/v1/recover": "tested",
     "auth:route:POST /auth/v1/signup": "tested",
     "auth:route:POST /auth/v1/token": "tested",
     "auth:route:POST /auth/v1/verify": "tested",
