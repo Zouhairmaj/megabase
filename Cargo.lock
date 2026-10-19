@@ -1281,6 +1281,7 @@ dependencies = [
  "tokio-postgres",
  "tower",
  "tracing",
+ "tracing-subscriber",
  "uuid",
 ]
 
@@ -1370,6 +1371,7 @@ dependencies = [
  "axum",
  "chrono",
  "megabase-core",
+ "serde",
  "serde_json",
  "sqlx",
  "tokio",
