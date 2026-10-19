@@ -63,10 +63,13 @@ statement runs after `SET LOCAL` role, `request.jwt.claims`,
 and `search_path` to the negotiated schema. The role applied is `anon`,
 `authenticated`, `service_role`, or a name in `MEGABASE_DB_EXTRA_ROLES`.
 Any other claim is rejected before `set_config('role', …)`, with the
-PostgreSQL error PostgREST returns for that name. `OPTIONS` still reads
-privileges as the pool user and does not apply that rejection. Reads use a read-only
-transaction. Catalog lookups (existence, columns, privileges, primary key)
-run before `SET ROLE`.
+PostgreSQL error PostgREST returns for that name. A request this route does
+not serve answers 501 before that rejection, including an unhandled query, a
+`Range` header on `GET`, a counted write, an embed or aggregate in a write
+`select`, and `limit` or `offset` on `PATCH` or `DELETE`. `OPTIONS` still
+reads privileges as the pool user and does not apply that rejection. Reads
+use a read-only transaction. Catalog lookups (existence, columns,
+privileges, primary key) run before `SET ROLE`.
 
 JSON is the default body media type when `Content-Type` is missing.
 `application/json` and `application/*` are accepted. Other known media
@@ -159,7 +162,7 @@ must be exactly those columns, each a non-negated `eq`, with no logic tree.
 | Unknown `Content-Type` | 400 | `PGRST102` Content-Type not acceptable: {type} |
 | Column not in the cache | 400 | `PGRST204` Could not find the '{column}' column of '{relation}' in the schema cache |
 | `PUT` with `limit` or `offset` | 400 | `PGRST114` limit/offset querystring parameters are not allowed for PUT |
-| `PATCH` or `DELETE` with `limit` or `offset` | 501 | `MEGABASE_NOT_IMPLEMENTED` for that route. Checked before the body is parsed |
+| `PATCH` or `DELETE` with `limit` or `offset` | 501 | `MEGABASE_NOT_IMPLEMENTED` for that route. Checked before the body is parsed and before the role rejection |
 | `PUT` filters are not exactly the primary key `eq`s | 405 | `PGRST105` Filters must include all and only primary key columns with 'eq' operators |
 | `PUT` body primary key does not match the URL, or the statement did not change one row | 400 | `PGRST115` Payload values do not match URL in primary key column(s). The transaction is rolled back |
 | `42501` as `anon` | 401 | PostgreSQL message, code `42501` |
@@ -171,10 +174,10 @@ must be exactly those columns, each a non-negated `eq`, with no logic tree.
 PostgREST's fuzzy table hint is not served; `hint` stays null on `PGRST205`.
 
 `PUT` checks order is: query parse (`PGRST100`), then `Prefer` (501), then
-`PGRST114`, then the body (`PGRST102`), then the database, then `PGRST105`
+`PGRST114`, then the body (`PGRST102`), then filters with no `eq`
+(`PGRST105`), then the role rejection, then the database, then `PGRST105`
 against the catalog primary key, then `PGRST115`. An empty `PUT` body is
-`PGRST102` even when the filters are missing. Filters with no `eq` are
-`PGRST105` before the pool is required, once the body is valid JSON.
+`PGRST102` even when the filters are missing.
 
 ## Edge cases
 

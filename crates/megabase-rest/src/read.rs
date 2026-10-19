@@ -263,10 +263,12 @@ async fn relation_route(
     if method == Method::GET && headers.get(header::RANGE).is_some() {
         return not_implemented(method, path);
     }
-    // After every request check that can answer 501, and before the
-    // statement that applies the role.
-    if let Err(response) = enforce_db_role(state.pool.as_ref(), &session).await {
-        return *response;
+    // A read has finished every check that can answer 501. A write answers
+    // those inside `mutate`, before the role is applied.
+    if is_read {
+        if let Err(response) = enforce_db_role(state.pool.as_ref(), &session).await {
+            return *response;
+        }
     }
     match *method {
         Method::GET => {
@@ -2558,6 +2560,121 @@ mod tests {
         let (status, body, _) = send(app, rpc).await;
         assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
         assert_eq!(body["unit"], "GET /rest/v1/rpc/add_numbers");
+    }
+
+    #[tokio::test]
+    async fn unserved_write_stays_501_before_the_role_check() {
+        let token = sign(SECRET, &json!({"role": "not existing"}));
+        let cases = [
+            (
+                "POST",
+                "/rest/v1/todos",
+                Some("count=exact"),
+                r#"{"id":1}"#,
+                "rest:prefer:count=exact",
+            ),
+            (
+                "PATCH",
+                "/rest/v1/todos?id=eq.1&select=notes(body)",
+                None,
+                "{}",
+                "PATCH /rest/v1/todos",
+            ),
+            (
+                "POST",
+                "/rest/v1/todos?select=id.sum()",
+                None,
+                r#"{"id":1}"#,
+                "POST /rest/v1/todos",
+            ),
+            (
+                "PATCH",
+                "/rest/v1/todos?limit=1",
+                None,
+                "{}",
+                "PATCH /rest/v1/todos",
+            ),
+            (
+                "DELETE",
+                "/rest/v1/todos?id=eq.1&offset=2",
+                None,
+                "",
+                "DELETE /rest/v1/todos",
+            ),
+        ];
+        for (method, uri, prefer, payload, unit) in cases {
+            let app = router(state_with_secret(SECRET));
+            let mut builder = Request::builder()
+                .method(method)
+                .uri(uri)
+                .header(header::AUTHORIZATION, format!("Bearer {token}"))
+                .header(header::CONTENT_TYPE, "application/json");
+            if let Some(prefer) = prefer {
+                builder = builder.header("prefer", prefer);
+            }
+            let request = builder.body(Body::from(payload)).unwrap();
+            let (status, body, _) = send(app, request).await;
+            assert_eq!(status, StatusCode::NOT_IMPLEMENTED, "{method} {uri} {body}");
+            assert_eq!(body["code"], "MEGABASE_NOT_IMPLEMENTED", "{method} {uri}");
+            assert_eq!(body["unit"], unit, "{method} {uri}");
+        }
+    }
+
+    #[tokio::test]
+    async fn write_request_errors_stay_ahead_of_the_role_check() {
+        let token = sign(SECRET, &json!({"role": "not existing"}));
+        let cases = [
+            (
+                "PUT",
+                "/rest/v1/todos?id=eq.1&limit=1",
+                r#"{"id":1}"#,
+                StatusCode::BAD_REQUEST,
+                "PGRST114",
+            ),
+            (
+                "POST",
+                "/rest/v1/todos",
+                "",
+                StatusCode::BAD_REQUEST,
+                "PGRST102",
+            ),
+            (
+                "PUT",
+                "/rest/v1/todos",
+                r#"{"id":1}"#,
+                StatusCode::METHOD_NOT_ALLOWED,
+                "PGRST105",
+            ),
+        ];
+        for (method, uri, payload, expected, code) in cases {
+            let app = router(state_with_secret(SECRET));
+            let request = Request::builder()
+                .method(method)
+                .uri(uri)
+                .header(header::AUTHORIZATION, format!("Bearer {token}"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(payload))
+                .unwrap();
+            let (status, body, _) = send(app, request).await;
+            assert_eq!(status, expected, "{method} {uri} {body}");
+            assert_eq!(body["code"], code, "{method} {uri}");
+        }
+    }
+
+    #[tokio::test]
+    async fn served_write_still_rejects_an_unconfigured_role() {
+        let app = router(state_with_secret(SECRET));
+        let token = sign(SECRET, &json!({"role": "not existing"}));
+        let request = Request::builder()
+            .method("POST")
+            .uri("/rest/v1/todos")
+            .header(header::AUTHORIZATION, format!("Bearer {token}"))
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(r#"{"id":1}"#))
+            .unwrap();
+        let (status, body, _) = send(app, request).await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(body["code"], "PGRST000");
     }
 
     #[tokio::test]
