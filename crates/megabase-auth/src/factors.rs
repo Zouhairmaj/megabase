@@ -241,6 +241,16 @@ async fn challenge_factor(
         Ok(loaded) => loaded,
         Err(response) => return *response,
     };
+    // `limitHandler(FactorChallenge)` runs after `loadFactor`. Its bucket
+    // is separate from `FactorVerify` and uses the same setting.
+    if let Err(error) = perform_rate_limiting(
+        &state.factor_challenge_limiter,
+        state.sb_forwarded_for_enabled,
+        &state.rate_limit_header,
+        &headers,
+    ) {
+        return error.into_response();
+    }
     if let Err(response) = verify_gate(&state, &factor, "mfa_webauthn_verify_not_enabled") {
         return *response;
     }
@@ -1105,6 +1115,8 @@ mod tests {
         state.sb_forwarded_for_enabled = sb_forwarded_for;
         state.factor_verify_limiter =
             std::sync::Arc::new(crate::ratelimit::KeyedLimiter::new(0.0, 1.0));
+        state.factor_challenge_limiter =
+            std::sync::Arc::new(crate::ratelimit::KeyedLimiter::new(0.0, 1.0));
         let app = crate::router_with_state(state);
         let body = json!({ "email": EMAIL, "password": "secret-pass" }).to_string();
         let (status, body) = call(&app, "POST", "/auth/v1/signup", Some(&body), None).await;
@@ -1521,6 +1533,56 @@ mod tests {
         )
         .await;
         assert_eq!(fresh.0, StatusCode::BAD_REQUEST, "{}", fresh.1);
+    }
+
+    #[tokio::test]
+    async fn totp_challenge_has_its_own_rate_limit_bucket() {
+        let fx = limited_fixture(false).await;
+        let factor = fx
+            .backend
+            .add_factor_for_test(EMAIL, "totp", "unverified")
+            .await;
+        let path = format!("/auth/v1/factors/{factor}/challenge");
+        let missing = format!("/auth/v1/factors/{}/challenge", Uuid::new_v4());
+        let missed = call_keyed(
+            &fx.app,
+            &missing,
+            "",
+            Some(&fx.token),
+            &[("x-rate-key", "miss")],
+        )
+        .await;
+        assert_error(
+            &missed,
+            StatusCode::NOT_FOUND,
+            "mfa_factor_not_found",
+            "Factor not found",
+        );
+        let first = call_keyed(&fx.app, &path, "", Some(&fx.token), &[("x-rate-key", "k1")]).await;
+        assert_eq!(first.0, StatusCode::OK, "{}", first.1);
+        let limited =
+            call_keyed(&fx.app, &path, "", Some(&fx.token), &[("x-rate-key", "k1")]).await;
+        assert_error(
+            &limited,
+            StatusCode::TOO_MANY_REQUESTS,
+            "over_request_rate_limit",
+            "Request rate limit reached",
+        );
+        let verify = format!("/auth/v1/factors/{factor}/verify");
+        let separate = call_keyed(
+            &fx.app,
+            &verify,
+            r#"{"code":""}"#,
+            Some(&fx.token),
+            &[("x-rate-key", "k1")],
+        )
+        .await;
+        assert_error(
+            &separate,
+            StatusCode::BAD_REQUEST,
+            "validation_failed",
+            "Code needs to be non-empty",
+        );
     }
 
     #[tokio::test]

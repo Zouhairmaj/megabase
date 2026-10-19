@@ -77,9 +77,11 @@ pub struct AuthState {
     pub(crate) otp_limiter: Arc<KeyedLimiter>,
     /// `POST /factors/{id}/verify` and `POST /factors/recovery-codes/verify`:
     /// GoTrue `FactorVerify`, `GOTRUE_MFA_RATE_LIMIT_CHALLENGE_AND_VERIFY`
-    /// (default 15) per minute, burst 30, one-minute entry TTL. Challenge
-    /// uses a separate limiter with the same setting.
+    /// (default 15) per minute, burst 30, one-minute entry TTL.
     pub(crate) factor_verify_limiter: Arc<KeyedLimiter>,
+    /// `POST /factors/{id}/challenge`: GoTrue `FactorChallenge`. Same
+    /// setting and entry TTL as [`Self::factor_verify_limiter`], own bucket.
+    pub(crate) factor_challenge_limiter: Arc<KeyedLimiter>,
     /// `GOTRUE_SECURITY_SB_FORWARDED_FOR_ENABLED`. Default false: the verify
     /// and OTP limiters use [`Self::rate_limit_header`] only.
     pub sb_forwarded_for_enabled: bool,
@@ -200,6 +202,11 @@ impl AuthState {
                 "GOTRUE_MFA_RATE_LIMIT_CHALLENGE_AND_VERIFY",
                 DEFAULT_MFA_CHALLENGE_AND_VERIFY_RATE,
             )?,
+            factor_challenge_limiter: per_minute(
+                &lookup,
+                "GOTRUE_MFA_RATE_LIMIT_CHALLENGE_AND_VERIFY",
+                DEFAULT_MFA_CHALLENGE_AND_VERIFY_RATE,
+            )?,
             sb_forwarded_for_enabled: security_flag(
                 &lookup,
                 "GOTRUE_SECURITY_SB_FORWARDED_FOR_ENABLED",
@@ -252,6 +259,7 @@ impl AuthState {
             verify_limiter: defaults.verify_limiter,
             otp_limiter: defaults.otp_limiter,
             factor_verify_limiter: defaults.factor_verify_limiter,
+            factor_challenge_limiter: defaults.factor_challenge_limiter,
             sb_forwarded_for_enabled: defaults.sb_forwarded_for_enabled,
             otp_max_failed_attempts: defaults.otp_max_failed_attempts,
             backend,

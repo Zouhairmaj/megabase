@@ -4,9 +4,11 @@
 //! Header-keyed token-bucket rate limiting, as GoTrue's tollbooth limiters.
 //!
 //! GoTrue builds `tollbooth.NewLimiter(rate, ...).SetBurst(30)`. Most
-//! limiters keep an entry for one hour. `FactorVerify` keeps one for one
-//! minute. An idle entry is dropped, and the next request starts from a
-//! full burst. [`limit_by_header`] limits only when
+//! limiters keep an entry for one hour. `FactorVerify` and
+//! `FactorChallenge` keep one for one minute. The entry expires a fixed
+//! interval after it is created; a later request does not extend that
+//! deadline. The next request starts from a full burst. [`limit_by_header`]
+//! limits only when
 //! `GOTRUE_RATE_LIMIT_HEADER` names a header whose first comma-separated
 //! value is non-blank. [`perform_rate_limiting`] uses a parsed
 //! `Sb-Forwarded-For` address only when
@@ -32,6 +34,8 @@ const SWEEP_INTERVAL: Duration = Duration::from_secs(60);
 
 struct Bucket {
     tokens: f64,
+    /// When this cache entry was stored. Tollbooth does not extend it on read.
+    created: Instant,
     last: Instant,
 }
 
@@ -39,7 +43,7 @@ struct Bucket {
 pub(crate) struct KeyedLimiter {
     rate: f64,
     burst: f64,
-    /// How long an idle key keeps its bucket (`DefaultExpirationTTL`).
+    /// How long a key keeps its bucket after creation (`DefaultExpirationTTL`).
     entry_ttl: Duration,
     table: Mutex<Table>,
 }
@@ -81,17 +85,19 @@ impl KeyedLimiter {
         if table.buckets.len() >= SWEEP_AT && sweep_due {
             table
                 .buckets
-                .retain(|_, bucket| now.saturating_duration_since(bucket.last) < entry_ttl);
+                .retain(|_, bucket| now.saturating_duration_since(bucket.created) < entry_ttl);
             table.last_sweep = Some(now);
         }
         let bucket = table.buckets.entry(key.to_string()).or_insert(Bucket {
             tokens: self.burst,
+            created: now,
             last: now,
         });
-        // Tollbooth drops an entry that has not been touched within the TTL.
-        // The next request starts from a full burst.
-        if now.saturating_duration_since(bucket.last) >= entry_ttl {
+        // Tollbooth stores the limiter with a fixed cache TTL. The next
+        // request after that deadline starts from a full burst.
+        if now.saturating_duration_since(bucket.created) >= entry_ttl {
             bucket.tokens = self.burst;
+            bucket.created = now;
             bucket.last = now;
         }
         let elapsed = now.saturating_duration_since(bucket.last).as_secs_f64();
@@ -186,6 +192,7 @@ impl EmailLimiter {
                 let burst = events.trunc().max(0.0);
                 let bucket = state.bucket.get_or_insert(Bucket {
                     tokens: burst,
+                    created: now,
                     last: now,
                 });
                 let per_second = if every.is_zero() {
@@ -350,15 +357,14 @@ mod tests {
     }
 
     #[test]
-    fn idle_entry_resets_after_its_ttl() {
+    fn entry_expires_from_creation_not_last_use() {
         let limiter = KeyedLimiter::with_entry_ttl(0.0, 1.0, Duration::from_secs(60));
         let start = Instant::now();
         assert!(limiter.allow_at("a", start));
         assert!(!limiter.allow_at("a", start + Duration::from_secs(59)));
-        // That denial touched the entry. A quiet minute after it starts full.
         assert!(
-            limiter.allow_at("a", start + Duration::from_secs(119)),
-            "an entry idle for the TTL starts full again"
+            limiter.allow_at("a", start + Duration::from_secs(60)),
+            "the bucket resets one TTL after it was created"
         );
     }
 
