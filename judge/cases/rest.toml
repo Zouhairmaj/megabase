@@ -2424,7 +2424,7 @@ path = "/rest/v1/spans?during=not.adj.%5B0,1)&select=id,body&order=id"
 
 [[case]]
 id = "rest.filter.adj.touch"
-description = "Adjacent on the left, at a shared bound, across a gap, and to two spans at once."
+description = "Adjacent on the left, at a shared bound, not adjacent to a range it overlaps, and adjacent to two spans across a gap."
 units = ["rest:filter-operator:adj"]
 [[case.step]]
 method = "GET"
