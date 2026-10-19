@@ -1262,6 +1262,41 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn in_flight_clears_after_the_response_body_is_read() {
+        let dir = temp_dir("body-read");
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut buf = [0u8; 1024];
+            let _ = tokio::io::AsyncReadExt::read(&mut stream, &mut buf).await;
+            let _ = tokio::io::AsyncWriteExt::write_all(
+                &mut stream,
+                b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nhello",
+            )
+            .await;
+            std::future::pending::<()>().await;
+        });
+
+        let starts = Arc::new(StdAtomicUsize::new(0));
+        let runtime = FixedRuntime { addr, starts };
+        let pool = Pool::new(dir, Box::new(runtime));
+        let key = pool.create(&opts("hello")).await.unwrap().key;
+        let response = pool
+            .fetch_send(key, empty_request(), "/hello")
+            .await
+            .unwrap();
+        assert_eq!(pool.worker_info(key).await.unwrap().in_flight, 1);
+        let body = axum::body::to_bytes(response.into_body(), 64)
+            .await
+            .unwrap();
+        assert_eq!(&body[..], b"hello");
+        assert_eq!(pool.worker_info(key).await.unwrap().in_flight, 0);
+        assert_eq!(pool.cleanup_idle_workers(0).await, 1);
+        assert!(pool.worker_info(key).await.is_none());
+    }
+
+    #[tokio::test]
     async fn wall_clock_retires_at_half_and_stops_at_the_limit() {
         let dir = temp_dir("wall");
         let (runtime, _) = runtime();
