@@ -1010,7 +1010,7 @@ units = ["auth:route:GET /auth/v1/admin/users"]
 [[case.step]]
 method = "GET"
 path = "/auth/v1/admin/users"
-headers = { Authorization = "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzk5NTM1NjAwLCJpYXQiOjE2NDE3NjkyMDAsImlzcyI6InN1cGFiYXNlLWRlbW8iLCJyb2xlIjoiYXV0aGVudGljYXRlZCIsInN1YiI6IjAwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDBhMSJ9.SwFOh8kdys6i2Xwu-c81KSa_6dDP6bKk0ifFP1rJTWI" }
+headers = { Authorization = "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjo0MTAyNDQ0ODAwLCJpYXQiOjE3MDAwMDAwMDAsImlzcyI6InN1cGFiYXNlLWRlbW8iLCJyb2xlIjoiYXV0aGVudGljYXRlZCIsInN1YiI6IjAwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDBhMSJ9.VVBtMNvo9e-SviQPmPZXoEomw70h0W3lIecbLCdJccc" }
 
 [[case]]
 id = "auth.adversarial.body.signup-not-json"
@@ -1921,9 +1921,11 @@ path = "/auth/v1/scim/v2/Schemas"
 
 # auth.uid(), auth.jwt(), auth.role(), auth.email() through REST.
 # Fixtures: public.judge_auth_*, public.judge_subjects (RLS on auth.uid()),
-# public.judge_caller. owner-a and owner-b bearers are the same HS256 tokens
-# as the REST RLS cases. The email bearer adds an email claim for owner-a,
-# signed with the public demo JWT_SECRET.
+# public.judge_caller. owner-a and owner-b bearers are HS256 tokens for those
+# subjects, signed with the public demo JWT_SECRET. exp is 2100-01-01, the
+# same horizon as the storage render fixture, so PostgREST still accepts
+# them after the pinned anon key expires. The email bearer adds an email
+# claim for owner-a.
 
 [[case]]
 id = "auth.helper.uid.anon"
@@ -1940,19 +1942,19 @@ units = ["auth:sql-function:auth.uid()"]
 [[case.step]]
 method = "GET"
 path = "/rest/v1/rpc/judge_auth_uid"
-headers = { Authorization = "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzk5NTM1NjAwLCJpYXQiOjE2NDE3NjkyMDAsImlzcyI6InN1cGFiYXNlLWRlbW8iLCJyb2xlIjoiYXV0aGVudGljYXRlZCIsInN1YiI6IjAwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDBhMSJ9.SwFOh8kdys6i2Xwu-c81KSa_6dDP6bKk0ifFP1rJTWI" }
+headers = { Authorization = "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjo0MTAyNDQ0ODAwLCJpYXQiOjE3MDAwMDAwMDAsImlzcyI6InN1cGFiYXNlLWRlbW8iLCJyb2xlIjoiYXV0aGVudGljYXRlZCIsInN1YiI6IjAwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDBhMSJ9.VVBtMNvo9e-SviQPmPZXoEomw70h0W3lIecbLCdJccc" }
 [[case.step]]
 method = "GET"
 path = "/rest/v1/judge_subjects?select=label"
-headers = { Authorization = "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzk5NTM1NjAwLCJpYXQiOjE2NDE3NjkyMDAsImlzcyI6InN1cGFiYXNlLWRlbW8iLCJyb2xlIjoiYXV0aGVudGljYXRlZCIsInN1YiI6IjAwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDBhMSJ9.SwFOh8kdys6i2Xwu-c81KSa_6dDP6bKk0ifFP1rJTWI" }
+headers = { Authorization = "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjo0MTAyNDQ0ODAwLCJpYXQiOjE3MDAwMDAwMDAsImlzcyI6InN1cGFiYXNlLWRlbW8iLCJyb2xlIjoiYXV0aGVudGljYXRlZCIsInN1YiI6IjAwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDBhMSJ9.VVBtMNvo9e-SviQPmPZXoEomw70h0W3lIecbLCdJccc" }
 [[case.step]]
 method = "GET"
 path = "/rest/v1/rpc/judge_auth_uid"
-headers = { Authorization = "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzk5NTM1NjAwLCJpYXQiOjE2NDE3NjkyMDAsImlzcyI6InN1cGFiYXNlLWRlbW8iLCJyb2xlIjoiYXV0aGVudGljYXRlZCIsInN1YiI6IjAwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDBiMiJ9.FOGAcMSnz_IW5eXgNu_2n6tEaj1K8nD0yh5YbJaOmgk" }
+headers = { Authorization = "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjo0MTAyNDQ0ODAwLCJpYXQiOjE3MDAwMDAwMDAsImlzcyI6InN1cGFiYXNlLWRlbW8iLCJyb2xlIjoiYXV0aGVudGljYXRlZCIsInN1YiI6IjAwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDBiMiJ9.DTLjj2PffCKMW4Mca6L9Rza5ucYZ5IoKPH_WIVwL3QU" }
 [[case.step]]
 method = "GET"
 path = "/rest/v1/judge_subjects?select=label"
-headers = { Authorization = "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzk5NTM1NjAwLCJpYXQiOjE2NDE3NjkyMDAsImlzcyI6InN1cGFiYXNlLWRlbW8iLCJyb2xlIjoiYXV0aGVudGljYXRlZCIsInN1YiI6IjAwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDBiMiJ9.FOGAcMSnz_IW5eXgNu_2n6tEaj1K8nD0yh5YbJaOmgk" }
+headers = { Authorization = "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjo0MTAyNDQ0ODAwLCJpYXQiOjE3MDAwMDAwMDAsImlzcyI6InN1cGFiYXNlLWRlbW8iLCJyb2xlIjoiYXV0aGVudGljYXRlZCIsInN1YiI6IjAwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDBiMiJ9.DTLjj2PffCKMW4Mca6L9Rza5ucYZ5IoKPH_WIVwL3QU" }
 
 [[case]]
 id = "auth.helper.uid.service"
@@ -1978,7 +1980,7 @@ units = ["auth:sql-function:auth.role()"]
 [[case.step]]
 method = "GET"
 path = "/rest/v1/rpc/judge_auth_role"
-headers = { Authorization = "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzk5NTM1NjAwLCJpYXQiOjE2NDE3NjkyMDAsImlzcyI6InN1cGFiYXNlLWRlbW8iLCJyb2xlIjoiYXV0aGVudGljYXRlZCIsInN1YiI6IjAwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDBhMSJ9.SwFOh8kdys6i2Xwu-c81KSa_6dDP6bKk0ifFP1rJTWI" }
+headers = { Authorization = "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjo0MTAyNDQ0ODAwLCJpYXQiOjE3MDAwMDAwMDAsImlzcyI6InN1cGFiYXNlLWRlbW8iLCJyb2xlIjoiYXV0aGVudGljYXRlZCIsInN1YiI6IjAwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDBhMSJ9.VVBtMNvo9e-SviQPmPZXoEomw70h0W3lIecbLCdJccc" }
 
 [[case]]
 id = "auth.helper.role.service"
@@ -2004,7 +2006,7 @@ units = ["auth:sql-function:auth.email()"]
 [[case.step]]
 method = "GET"
 path = "/rest/v1/rpc/judge_auth_email"
-headers = { Authorization = "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzk5NTM1NjAwLCJpYXQiOjE2NDE3NjkyMDAsImlzcyI6InN1cGFiYXNlLWRlbW8iLCJyb2xlIjoiYXV0aGVudGljYXRlZCIsInN1YiI6IjAwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDBhMSIsImVtYWlsIjoib3duZXItYUBleGFtcGxlLmNvbSJ9.JyCMaG8O-EITLh-uuPBvaMnp2oKumCm5BRJLKva67kQ" }
+headers = { Authorization = "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjo0MTAyNDQ0ODAwLCJpYXQiOjE3MDAwMDAwMDAsImlzcyI6InN1cGFiYXNlLWRlbW8iLCJyb2xlIjoiYXV0aGVudGljYXRlZCIsInN1YiI6IjAwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDBhMSIsImVtYWlsIjoib3duZXItYUBleGFtcGxlLmNvbSJ9.qIb1YjEAxQb2hAgDDg5-_OQSUttL-44-5UHcAhLsHbg" }
 
 [[case]]
 id = "auth.helper.email.service"
@@ -2030,7 +2032,7 @@ units = ["auth:sql-function:auth.jwt()"]
 [[case.step]]
 method = "GET"
 path = "/rest/v1/rpc/judge_auth_jwt"
-headers = { Authorization = "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzk5NTM1NjAwLCJpYXQiOjE2NDE3NjkyMDAsImlzcyI6InN1cGFiYXNlLWRlbW8iLCJyb2xlIjoiYXV0aGVudGljYXRlZCIsInN1YiI6IjAwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDBhMSIsImVtYWlsIjoib3duZXItYUBleGFtcGxlLmNvbSJ9.JyCMaG8O-EITLh-uuPBvaMnp2oKumCm5BRJLKva67kQ" }
+headers = { Authorization = "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjo0MTAyNDQ0ODAwLCJpYXQiOjE3MDAwMDAwMDAsImlzcyI6InN1cGFiYXNlLWRlbW8iLCJyb2xlIjoiYXV0aGVudGljYXRlZCIsInN1YiI6IjAwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDBhMSIsImVtYWlsIjoib3duZXItYUBleGFtcGxlLmNvbSJ9.qIb1YjEAxQb2hAgDDg5-_OQSUttL-44-5UHcAhLsHbg" }
 
 [[case]]
 id = "auth.helper.jwt.service"
@@ -2048,11 +2050,11 @@ units = ["auth:sql-function:auth.uid()", "auth:sql-function:auth.role()", "auth:
 [[case.step]]
 method = "GET"
 path = "/rest/v1/judge_caller?select=uid,caller_role,email,jwt_iss,jwt_role,jwt_email"
-headers = { Authorization = "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzk5NTM1NjAwLCJpYXQiOjE2NDE3NjkyMDAsImlzcyI6InN1cGFiYXNlLWRlbW8iLCJyb2xlIjoiYXV0aGVudGljYXRlZCIsInN1YiI6IjAwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDBhMSIsImVtYWlsIjoib3duZXItYUBleGFtcGxlLmNvbSJ9.JyCMaG8O-EITLh-uuPBvaMnp2oKumCm5BRJLKva67kQ" }
+headers = { Authorization = "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjo0MTAyNDQ0ODAwLCJpYXQiOjE3MDAwMDAwMDAsImlzcyI6InN1cGFiYXNlLWRlbW8iLCJyb2xlIjoiYXV0aGVudGljYXRlZCIsInN1YiI6IjAwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDBhMSIsImVtYWlsIjoib3duZXItYUBleGFtcGxlLmNvbSJ9.qIb1YjEAxQb2hAgDDg5-_OQSUttL-44-5UHcAhLsHbg" }
 
 # custom_access_token. The hook is enabled on both stacks and adds judge_hook
 # to every issued access token. A member-prefixed mailbox also gets
-# user_role = member. A reject-prefixed mailbox fails the grant.
+# user_role = member.
 
 [[case]]
 id = "auth.hook.access-token.password"
