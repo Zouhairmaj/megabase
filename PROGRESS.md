@@ -94,6 +94,7 @@ None.
 ### Follow-ups
 
 - [ ] When release-please opens the v0.1.0 PR: delete `"release-as": "0.1.0"` from `release-please-config.json` **in that PR before it merges**. The merge retriggers Release on `main`; leaving the key would propose another `0.1.0`. Tracked from PR #132.
+- [ ] Meta tables (#90): the five `/pg/tables` routes are served. Judge cases belong in `judge/cases/meta.toml`, which is a protected path, so they are a `review/issue-90-cases` follow-up. Spec: `specs/meta/tables.md`.
 - [ ] Realtime WebSocket (#70): `GET /realtime/v1/websocket` serves connect, heartbeat, public join and leave, public broadcast (`self`, `ack`) and presence (track, untrack, `presence_state`, `presence_diff`), but the judge harness cannot open a WebSocket yet, so these units have no conformance case. Private channels, Postgres changes, replay and `access_token` refresh remain. Its plain-HTTP handshake errors can be judged now; a `review/issue-70-cases` PR should add them, and frame-level cases once the harness speaks WebSocket. Spec: `specs/realtime/websocket.md`.
 
 ### Blocked items
