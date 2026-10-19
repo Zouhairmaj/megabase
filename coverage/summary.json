@@ -3,7 +3,7 @@
   "totals": {
     "units": 1036,
     "implemented": 347,
-    "tested": 218,
+    "tested": 219,
     "conformant": 0
   },
   "percent": {
@@ -12,14 +12,14 @@
     "done": 0.0
   },
   "judge": {
-    "cases": 447,
+    "cases": 463,
     "passing": 0
   },
   "components": {
     "auth": {
       "units": 159,
       "implemented": 122,
-      "tested": 86,
+      "tested": 87,
       "conformant": 0,
       "groups": {
         "admin": {
@@ -49,7 +49,7 @@
         "hooks": {
           "units": 7,
           "implemented": 1,
-          "tested": 0,
+          "tested": 1,
           "conformant": 0
         },
         "oauth": {
@@ -565,7 +565,7 @@
     "auth:grant-type:password": "tested",
     "auth:grant-type:pkce": "implemented",
     "auth:grant-type:refresh_token": "tested",
-    "auth:hook:custom_access_token": "implemented",
+    "auth:hook:custom_access_token": "tested",
     "auth:provider:azure": "implemented",
     "auth:provider:bitbucket": "implemented",
     "auth:provider:discord": "implemented",

@@ -68,6 +68,12 @@ services:
       # 2s) with a hardcoded burst of 30. A slow run can refill before the
       # 31st grant. 1 refills about once every 5 minutes.
       GOTRUE_RATE_LIMIT_TOKEN_REFRESH: "1"
+      # pg-functions custom access token hook. The fixture function is
+      # public.custom_access_token_hook. No webhook secret: that variable
+      # is only read for HTTP hooks. Megabase gets the same two variables
+      # below and in the judge workflows.
+      GOTRUE_HOOK_CUSTOM_ACCESS_TOKEN_ENABLED: "true"
+      GOTRUE_HOOK_CUSTOM_ACCESS_TOKEN_URI: "pg-functions://postgres/public/custom_access_token_hook"
   rest:
     image: ghcr.io/postgrest/postgrest:v16.4@sha256:d155c6718ed9a9f990d159a2ab7c0a3f16944dbb6d0a0344557421042acfe0df
     environment:
@@ -132,6 +138,8 @@ services:
       PGRST_DB_AGGREGATES_ENABLED: "true"
       JWT_SECRET: ${JWT_SECRET}
       DATABASE_URL: postgres://supabase_admin:${POSTGRES_PASSWORD}@db:${POSTGRES_PORT}/megabase
+      GOTRUE_HOOK_CUSTOM_ACCESS_TOKEN_ENABLED: "true"
+      GOTRUE_HOOK_CUSTOM_ACCESS_TOKEN_URI: "pg-functions://postgres/public/custom_access_token_hook"
     ports:
       - "8100:8000"
     healthcheck:

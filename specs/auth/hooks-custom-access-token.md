@@ -170,5 +170,6 @@ wrapping `Error running hook URI` failure.
 parsing, every error shape, schema messages, IP and time formatting, and
 HTTP tests on the memory backend for signup, password, refresh, verify, a
 hook error, a schema failure, a missing function, and an HTTPS hook (501).
-Judge cases need the hook enabled on the reference stack, which the pinned
-compose file does not do.
+The judge overlay enables this hook
+(`pg-functions://postgres/public/custom_access_token_hook`) on Auth and
+on Megabase. Cases live in `judge/cases/auth.toml`.
