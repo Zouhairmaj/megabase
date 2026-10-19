@@ -30,6 +30,7 @@ use crate::error::{unexpected, GoTrueError};
 use crate::gojson;
 use crate::hooks::TokenHookCall;
 use crate::jsonutil::unix_secs;
+use crate::ratelimit::perform_rate_limiting;
 use crate::recover::{create_email_flow, send_recovery, RecoveryMail, Stop};
 use crate::routes::{
     read_body, request_aud, signup_outcome, valid_channel, validate_email, validate_pkce,
@@ -99,6 +100,14 @@ pub(crate) async fn magiclink(
     headers: HeaderMap,
     body: Body,
 ) -> Response {
+    if let Err(error) = perform_rate_limiting(
+        &state.otp_limiter,
+        state.sb_forwarded_for_enabled,
+        &state.rate_limit_header,
+        &headers,
+    ) {
+        return error.into_response();
+    }
     if let Some(error) = magic_link_gate(&state) {
         return error.into_response();
     }
@@ -327,6 +336,14 @@ pub(crate) async fn otp(
     headers: HeaderMap,
     body: Body,
 ) -> Response {
+    if let Err(error) = perform_rate_limiting(
+        &state.otp_limiter,
+        state.sb_forwarded_for_enabled,
+        &state.rate_limit_header,
+        &headers,
+    ) {
+        return error.into_response();
+    }
     let bytes = match read_body(body).await {
         Ok(bytes) => bytes,
         Err(error) => return error.into_response(),
@@ -573,6 +590,71 @@ mod tests {
     fn assert_501(result: &(StatusCode, Value), unit: &str) {
         assert_eq!(result.0, StatusCode::NOT_IMPLEMENTED, "{}", result.1);
         assert_eq!(result.1["unit"], unit, "{}", result.1);
+    }
+
+    #[tokio::test]
+    async fn otp_and_magiclink_are_rate_limited() {
+        let mut state = AuthState::new(
+            AuthConfig::reference_defaults(),
+            Some(megabase_core::Hs256::new(SECRET.as_bytes()).unwrap()),
+            Backend::memory(),
+        );
+        state.mail.smtp_host = String::new();
+        state.rate_limit_header = "x-rate-key".into();
+        state.otp_limiter = std::sync::Arc::new(crate::ratelimit::KeyedLimiter::new(0.0, 1.0));
+        let app = crate::router_with_state(state);
+        let once = |app: &Router, key: &str, email: &str| {
+            let app = app.clone();
+            let key = key.to_string();
+            let body = format!(r#"{{"email":"{email}"}}"#);
+            async move {
+                let request = Request::builder()
+                    .method("POST")
+                    .uri("/auth/v1/otp")
+                    .header("content-type", "application/json")
+                    .header("x-rate-key", key)
+                    .body(Body::from(body))
+                    .unwrap();
+                let response = app.oneshot(request).await.unwrap();
+                let status = response.status();
+                let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+                (
+                    status,
+                    serde_json::from_slice::<Value>(&bytes).unwrap_or(Value::Null),
+                )
+            }
+        };
+        assert_eq!(once(&app, "k1", "a@example.com").await.0, StatusCode::OK);
+        let limited = once(&app, "k1", "a@example.com").await;
+        assert_eq!(limited.0, StatusCode::TOO_MANY_REQUESTS);
+        assert_eq!(limited.1["error_code"], "over_request_rate_limit");
+        assert_eq!(limited.1["msg"], "Request rate limit reached");
+        assert_eq!(once(&app, "k2", "b@example.com").await.0, StatusCode::OK);
+
+        let mut state = AuthState::new(
+            AuthConfig::reference_defaults(),
+            Some(megabase_core::Hs256::new(SECRET.as_bytes()).unwrap()),
+            Backend::memory(),
+        );
+        state.mail.smtp_host = String::new();
+        state.otp_limiter = std::sync::Arc::new(crate::ratelimit::KeyedLimiter::new(0.0, 1.0));
+        let app = crate::router_with_state(state);
+        let forwarded = |app: &Router, email: &str| {
+            let app = app.clone();
+            let body = format!(r#"{{"email":"{email}"}}"#);
+            async move {
+                let request = Request::builder()
+                    .method("POST")
+                    .uri("/auth/v1/magiclink")
+                    .header("content-type", "application/json")
+                    .header("x-forwarded-for", "203.0.113.5")
+                    .body(Body::from(body))
+                    .unwrap();
+                app.oneshot(request).await.unwrap().status()
+            }
+        };
+        assert_eq!(forwarded(&app, "c@example.com").await, StatusCode::OK);
+        assert_eq!(forwarded(&app, "d@example.com").await, StatusCode::OK);
     }
 
     #[tokio::test]

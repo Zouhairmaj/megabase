@@ -155,8 +155,29 @@ already confirmed user writes `login` / `account`. Email change writes
 | Banned (`banned_until` in the future), checked before expiry | 403 | `user_banned` / `User is banned` |
 | No database | 500 | `unexpected_failure` / `Database error finding user from email link` on the hash path, `Database error finding user` on the email path (GET redirects this) |
 | `JWT_SECRET` missing | 500 | `unexpected_failure` / `Server lacks JWT secret`, before the one-time token is read (GET redirects this) |
+| `GOTRUE_RATE_LIMIT_VERIFY` (default 30 per five minutes, burst 30) | 429 | `over_request_rate_limit` / `Request rate limit reached` |
 
-Expiry is strict: the token is expired only when now is after `sent_at + GOTRUE_MAILER_OTP_EXP` seconds. `0` means 86400.
+The verify limiter runs before the body is read, as `limitHandler` on `/verify`
+([`internal/api/api.go:270`](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/api.go#L270),
+[`internal/api/apilimiter/apilimiter.go:202`](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/apilimiter/apilimiter.go#L202)).
+`performRateLimiting` ([`internal/api/middleware.go:123`](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/api/middleware.go#L123))
+keys on the leftmost `Sb-Forwarded-For` address when
+`GOTRUE_SECURITY_SB_FORWARDED_FOR_ENABLED` is true and that value is an IP.
+Otherwise the key is `GOTRUE_RATE_LIMIT_HEADER`. The flag defaults to false.
+A request with neither key is not counted. GET failures after this check stay
+303 redirects; the 429 itself is JSON on both methods.
+
+`MEGABASE_AUTH_OTP_MAX_FAILED_ATTEMPTS` defaults to `0`, which leaves a bad
+code in place, as GoTrue does. A positive value, after that many failed
+checks of one user, clears every pending verification token for that user
+(confirmation, recovery, both email-change tokens, and the phone-change
+token) and every `auth.one_time_tokens` row of that user. Later checks,
+including a code that was still valid, get the same 403 `otp_expired` as a
+bad token. Each count lives until that code's OTP deadline, the map drops
+the soonest expiry past 1024 entries, and storing a new code drops that
+user's counts. A hash that matches nobody is not counted.
+
+Expiry is strict: the token is expired only when now is after `sent_at + GOTRUE_MAILER_OTP_EXP` seconds. Unset or `0` means 86400. A positive value is kept.
 
 ## Edge cases
 
