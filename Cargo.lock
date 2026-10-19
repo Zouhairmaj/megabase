@@ -1266,6 +1266,7 @@ dependencies = [
  "bcrypt",
  "chrono",
  "data-encoding",
+ "getrandom 0.2.17",
  "hmac 0.12.1",
  "megabase-core",
  "qrcode",

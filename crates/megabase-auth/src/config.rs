@@ -323,47 +323,15 @@ fn mfa_lockout(lookup: &impl Fn(&str) -> Option<String>) -> Result<Duration, Con
     })
 }
 
-/// Go `time.ParseDuration`: a sequence of number+unit (`300s`, `15m`, `1h30m`).
+/// Go `time.ParseDuration`, including a bare `0` and the `µs` / `μs` units.
+///
+/// A negative duration cannot be stored in [`Duration`], so it is rejected.
 fn parse_go_duration(raw: &str) -> Option<Duration> {
-    let raw = raw.trim();
-    if raw.is_empty() {
+    let nanos = crate::admin_batch2::batch3::parse_go_duration(raw.trim()).ok()?;
+    if nanos < 0 {
         return None;
     }
-    let bytes = raw.as_bytes();
-    let mut index = 0;
-    let mut total = 0u128;
-    while index < bytes.len() {
-        let start = index;
-        while index < bytes.len() && (bytes[index].is_ascii_digit() || bytes[index] == b'.') {
-            index += 1;
-        }
-        if start == index {
-            return None;
-        }
-        let number: f64 = std::str::from_utf8(&bytes[start..index])
-            .ok()?
-            .parse()
-            .ok()?;
-        if !number.is_finite() || number < 0.0 {
-            return None;
-        }
-        let unit_start = index;
-        while index < bytes.len() && bytes[index].is_ascii_alphabetic() {
-            index += 1;
-        }
-        let unit = std::str::from_utf8(&bytes[unit_start..index]).ok()?;
-        let scale: f64 = match unit {
-            "ns" => 1e-9,
-            "us" | "µs" | "μs" => 1e-6,
-            "ms" => 1e-3,
-            "s" => 1.0,
-            "m" => 60.0,
-            "h" => 3600.0,
-            _ => return None,
-        };
-        total += (number * scale * 1_000_000_000.0) as u128;
-    }
-    Some(Duration::from_nanos(total.min(u64::MAX as u128) as u64))
+    u64::try_from(nanos).ok().map(Duration::from_nanos)
 }
 
 /// `external` object on `GET /settings`. Email and phone are separate fields
@@ -725,6 +693,39 @@ fn optional_u64(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn go_duration_accepts_zero_and_microseconds() {
+        let zero = AuthConfig::from_lookup(|key| {
+            (key == "GOTRUE_MFA_PHONE_MAX_FREQUENCY").then(|| "0".into())
+        })
+        .unwrap();
+        assert_eq!(zero.mfa.phone_max_frequency, Duration::from_secs(60));
+        let plus = AuthConfig::from_lookup(|key| {
+            (key == "GOTRUE_MFA_PHONE_MAX_FREQUENCY").then(|| "+0".into())
+        })
+        .unwrap();
+        assert_eq!(plus.mfa.phone_max_frequency, Duration::from_secs(60));
+        let micros = AuthConfig::from_lookup(|key| {
+            (key == "GOTRUE_MFA_RECOVERY_CODES_LOCKOUT_DURATION").then(|| "5µs".into())
+        })
+        .unwrap();
+        assert_eq!(micros.mfa.recovery_lockout, Duration::from_micros(5));
+        let greek = AuthConfig::from_lookup(|key| {
+            (key == "GOTRUE_MFA_RECOVERY_CODES_LOCKOUT_DURATION").then(|| "5μs".into())
+        })
+        .unwrap();
+        assert_eq!(greek.mfa.recovery_lockout, Duration::from_micros(5));
+        let compound = AuthConfig::from_lookup(|key| {
+            (key == "GOTRUE_MFA_RECOVERY_CODES_LOCKOUT_DURATION").then(|| "1h30m".into())
+        })
+        .unwrap();
+        assert_eq!(compound.mfa.recovery_lockout, Duration::from_secs(5400));
+        assert!(AuthConfig::from_lookup(|key| {
+            (key == "GOTRUE_MFA_PHONE_MAX_FREQUENCY").then(|| "5x".into())
+        })
+        .is_err());
+    }
 
     #[test]
     fn reference_defaults_match_the_judge_stack() {

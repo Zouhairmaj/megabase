@@ -20,10 +20,10 @@ const KEY_LEN: usize = 32;
 /// `GenerateRecoveryCode`: `length` characters from the lowercase base32 alphabet.
 ///
 /// # Errors
-/// Returns [`HashError::Random`] when `/dev/urandom` cannot be read.
+/// Returns [`HashError::Random`] when the system RNG cannot be read.
 pub(crate) fn generate_code(length: usize) -> Result<String, HashError> {
     let mut raw = vec![0u8; length];
-    fill_random(&mut raw)?;
+    getrandom::getrandom(&mut raw).map_err(|_| HashError::Random)?;
     Ok(raw
         .into_iter()
         .map(|byte| char::from(ALPHABET[(byte as usize) % ALPHABET.len()]))
@@ -42,11 +42,11 @@ pub(crate) fn normalize(input: &str) -> String {
 /// `GenerateRecoveryCodeHash`.
 ///
 /// # Errors
-/// Returns [`HashError`] when the salt cannot be read or argon2id rejects
-/// the parameters.
+/// Returns [`HashError`] when the RNG cannot fill the salt or argon2id
+/// rejects the parameters.
 pub(crate) fn hash_code(code: &str) -> Result<String, HashError> {
     let mut salt = [0u8; SALT_LEN];
-    fill_random(&mut salt)?;
+    getrandom::getrandom(&mut salt).map_err(|_| HashError::Random)?;
     let digest = argon2id(
         code.as_bytes(),
         &salt,
@@ -163,15 +163,10 @@ fn ct_eq(left: &[u8], right: &[u8]) -> bool {
     diff == 0
 }
 
-fn fill_random(buf: &mut [u8]) -> Result<(), HashError> {
-    let mut file = std::fs::File::open("/dev/urandom").map_err(|_| HashError::Random)?;
-    std::io::Read::read_exact(&mut file, buf).map_err(|_| HashError::Random)
-}
-
 /// A recovery-code hash could not be built or read.
 #[derive(Debug)]
 pub(crate) enum HashError {
-    /// `/dev/urandom` could not fill the salt.
+    /// The system RNG could not fill the buffer.
     Random,
     /// The stored string is not the PHC subset GoTrue accepts.
     Format,
@@ -186,10 +181,12 @@ mod tests {
     #[test]
     fn hash_round_trip_and_normalization() {
         let code = generate_code(16).expect("code");
+        let other = generate_code(16).expect("other");
+        assert_ne!(code, other);
         let hash = hash_code(&code).expect("hash");
         assert!(hash.starts_with("$argon2id$v=19$m=19456,t=2,p=1$"));
         assert_eq!(matches(&hash, &code).ok(), Some(true));
-        assert_eq!(matches(&hash, "nope-nope-nope-no").ok(), Some(false));
+        assert_eq!(matches(&hash, &other).ok(), Some(false));
         assert!(matches("not-a-hash", &code).is_err());
         assert_eq!(normalize(" AbCd-EF\tgh\u{a0}"), "abcdefgh");
     }

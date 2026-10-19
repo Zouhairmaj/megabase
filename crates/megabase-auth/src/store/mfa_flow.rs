@@ -5,10 +5,12 @@
 
 //! Enrollment, challenge, verification, and recovery-code writes.
 
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::{json, Value};
 use sqlx::Row;
+use tokio::sync::Mutex;
 use uuid::Uuid;
 
 use super::super::{
@@ -16,6 +18,8 @@ use super::super::{
 };
 use super::{FactorRow, MemoryChallenge, MemoryCode, MemoryMfa, MemoryRecovery};
 use crate::config::MfaConfig;
+use crate::hooks::{self, TokenHookCall};
+use crate::jsonutil::mfa_access_claims;
 use crate::recovery_code::{self, HashError};
 use crate::store::{Backend, BackendKind, StoreError, UserRecord};
 use crate::totp::{self, TotpError};
@@ -82,6 +86,8 @@ pub(crate) struct UpgradedSession {
     pub refresh_token: String,
     /// AMR entries, most recent first.
     pub amr: Vec<(String, SystemTime)>,
+    /// Claims from the custom access token hook. `None` when the hook is off.
+    pub hook_claims: Option<Value>,
 }
 
 /// Recovery codes returned once, on generate or regenerate.
@@ -312,6 +318,7 @@ impl Backend {
         factor: &FactorRow,
         attempt: FactorVerify<'_>,
         config: &MfaConfig,
+        hook: Option<&TokenHookCall<'_>>,
     ) -> Result<UpgradedSession, MfaError> {
         let _otp = self
             .consume_challenge(factor, attempt.challenge_id, attempt.ip, config)
@@ -330,6 +337,7 @@ impl Backend {
             factor,
             attempt.challenge_id,
             "totp",
+            hook,
         )
         .await
     }
@@ -344,6 +352,7 @@ impl Backend {
         factor: &FactorRow,
         attempt: FactorVerify<'_>,
         config: &MfaConfig,
+        hook: Option<&TokenHookCall<'_>>,
     ) -> Result<UpgradedSession, MfaError> {
         let otp = self
             .consume_challenge(factor, attempt.challenge_id, attempt.ip, config)
@@ -361,6 +370,7 @@ impl Backend {
             factor,
             attempt.challenge_id,
             "mfa/phone",
+            hook,
         )
         .await
     }
@@ -428,28 +438,28 @@ impl Backend {
         session_id: Uuid,
         code: &str,
         config: &MfaConfig,
+        hook: Option<&TokenHookCall<'_>>,
     ) -> Result<UpgradedSession, MfaError> {
         let normalized = recovery_code::normalize(code);
-        self.redeem_recovery_code(user, session_id, &normalized, config)
+        self.redeem_recovery_code(user, session_id, &normalized, config, hook)
             .await
     }
 }
 
 /// `crypto.GenerateOtp` for a phone challenge. Digits are already clamped.
-pub(crate) fn phone_otp(digits: usize) -> String {
+///
+/// # Errors
+/// Returns a 500 when the system RNG cannot fill the buffer.
+pub(crate) fn phone_otp(digits: usize) -> Result<String, MfaError> {
     let mut buf = [0u8; 8];
-    if std::fs::File::open("/dev/urandom")
-        .and_then(|mut file| std::io::Read::read_exact(&mut file, &mut buf))
-        .is_err()
-    {
-        buf.fill(0);
-    }
+    getrandom::getrandom(&mut buf)
+        .map_err(|_| http(500, "unexpected_failure", "Error generating OTP"))?;
     let mut value = 0u64;
     for byte in buf {
         value = value.wrapping_mul(256).wrapping_add(u64::from(byte));
     }
     let upper = 10u64.pow(digits as u32);
-    format!("{:0width$}", value % upper, width = digits)
+    Ok(format!("{:0width$}", value % upper, width = digits))
 }
 
 fn ct_eq(left: &[u8], right: &[u8]) -> bool {
@@ -924,6 +934,7 @@ impl Backend {
         factor: &FactorRow,
         challenge_id: Uuid,
         method: &str,
+        hook: Option<&TokenHookCall<'_>>,
     ) -> Result<UpgradedSession, MfaError> {
         let traits = json!({
             "factor_id": factor.id.to_string(),
@@ -933,27 +944,31 @@ impl Backend {
         match &self.inner {
             BackendKind::None => Err(StoreError::Unavailable.into()),
             BackendKind::Memory(db) => {
-                let mut db = db.lock().await;
-                if let Some(challenge) = db
-                    .mfa
-                    .challenges
-                    .iter_mut()
-                    .find(|row| row.id == challenge_id)
-                {
-                    challenge.verified_at = Some(SystemTime::now());
-                }
-                if let Some(row) = db.mfa.factors.iter_mut().find(|row| row.id == factor.id) {
-                    row.status = "verified".into();
-                }
-                let factor_type = factor.factor_type.clone();
-                let factor_id = factor.id;
-                db.mfa.factors.retain(|row| {
-                    !(row.user_id == user.id
-                        && row.factor_type == factor_type
-                        && row.status != "verified")
-                });
-                let upgraded = upgrade_memory(&mut db, user, session_id, factor_id, method)?;
-                remember_audit(user, "verification_attempted", "factor", Some(traits));
+                let mut upgraded = {
+                    let mut db = db.lock().await;
+                    if let Some(challenge) = db
+                        .mfa
+                        .challenges
+                        .iter_mut()
+                        .find(|row| row.id == challenge_id)
+                    {
+                        challenge.verified_at = Some(SystemTime::now());
+                    }
+                    if let Some(row) = db.mfa.factors.iter_mut().find(|row| row.id == factor.id) {
+                        row.status = "verified".into();
+                    }
+                    let factor_type = factor.factor_type.clone();
+                    let factor_id = factor.id;
+                    db.mfa.factors.retain(|row| {
+                        !(row.user_id == user.id
+                            && row.factor_type == factor_type
+                            && row.status != "verified")
+                    });
+                    let upgraded = upgrade_memory(&mut db, user, session_id, factor_id, method)?;
+                    remember_audit(user, "verification_attempted", "factor", Some(traits));
+                    upgraded
+                };
+                apply_memory_hook(db, hook, session_id, &mut upgraded).await?;
                 Ok(upgraded)
             }
             BackendKind::Postgres(pg) => {
@@ -984,7 +999,7 @@ impl Backend {
                         Some(traits),
                     )
                     .await?;
-                    let upgraded =
+                    let mut upgraded =
                         upgrade_postgres(&mut tx, &user, session_id, factor_id, &method).await?;
                     sqlx::query(
                         "DELETE FROM auth.sessions
@@ -1001,6 +1016,7 @@ impl Backend {
                     .bind(&factor_type)
                     .execute(&mut *tx)
                     .await?;
+                    apply_pg_hook(&mut tx, hook, session_id, &mut upgraded).await?;
                     tx.commit().await?;
                     Ok(upgraded)
                 })
@@ -1120,31 +1136,58 @@ impl Backend {
         session_id: Uuid,
         code: &str,
         config: &MfaConfig,
+        hook: Option<&TokenHookCall<'_>>,
     ) -> Result<UpgradedSession, MfaError> {
         match &self.inner {
             BackendKind::None => Err(StoreError::Unavailable.into()),
             BackendKind::Memory(db) => {
-                let mut db = db.lock().await;
-                let Some(factor) = db
-                    .mfa
-                    .factors
-                    .iter()
-                    .find(|row| row.user_id == user.id && row.factor_type == "recovery_code")
-                    .cloned()
-                else {
-                    return Err(invalid_recovery());
+                let (factor, pending) = {
+                    let db = db.lock().await;
+                    let Some(factor) = db
+                        .mfa
+                        .factors
+                        .iter()
+                        .find(|row| row.user_id == user.id && row.factor_type == "recovery_code")
+                        .cloned()
+                    else {
+                        return Err(invalid_recovery());
+                    };
+                    let Some(set) = db.mfa.recovery_codes.get(&user.id) else {
+                        return Err(invalid_recovery());
+                    };
+                    if set
+                        .locked_until
+                        .is_some_and(|until| SystemTime::now() < until)
+                    {
+                        return Err(locked_recovery());
+                    }
+                    let pending = set
+                        .codes
+                        .iter()
+                        .filter(|entry| entry.consumed_at.is_none())
+                        .map(|entry| (entry.id, entry.hash.clone()))
+                        .collect::<Vec<_>>();
+                    (factor, pending)
                 };
-                let Some(set) = db.mfa.recovery_codes.get(&user.id) else {
-                    return Err(invalid_recovery());
+                let probe = code.to_string();
+                let matched = tokio::task::spawn_blocking(move || match_hashes(&pending, &probe))
+                    .await
+                    .map_err(|_| StoreError::Hash)?;
+                let mut upgraded = {
+                    let mut db = db.lock().await;
+                    if db
+                        .mfa
+                        .recovery_codes
+                        .get(&user.id)
+                        .and_then(|set| set.locked_until)
+                        .is_some_and(|until| SystemTime::now() < until)
+                    {
+                        return Err(locked_recovery());
+                    }
+                    apply_recovery_result(&mut db, user, session_id, &factor, matched, config)?
                 };
-                if set
-                    .locked_until
-                    .is_some_and(|until| SystemTime::now() < until)
-                {
-                    return Err(locked_recovery());
-                }
-                let matched = match_codes(&set.codes, code);
-                apply_recovery_result(&mut db, user, session_id, &factor, matched, config)
+                apply_memory_hook(db, hook, session_id, &mut upgraded).await?;
+                Ok(upgraded)
             }
             BackendKind::Postgres(pg) => {
                 let user = user.clone();
@@ -1190,15 +1233,19 @@ impl Backend {
                     .bind(set_id)
                     .fetch_all(&mut *tx)
                     .await?;
-                    let mut matched: Option<Uuid> = None;
-                    for row in &rows {
-                        let hash: String = row.try_get("code_hash")?;
-                        match recovery_code::matches(&hash, &code) {
-                            Ok(true) if matched.is_none() => matched = Some(row.try_get("id")?),
-                            Ok(_) => {}
-                            Err(_) => {}
-                        }
-                    }
+                    let pending = rows
+                        .iter()
+                        .map(|row| {
+                            Ok((
+                                row.try_get::<Uuid, _>("id")?,
+                                row.try_get::<String, _>("code_hash")?,
+                            ))
+                        })
+                        .collect::<Result<Vec<_>, sqlx::Error>>()?;
+                    let probe = code;
+                    let matched = tokio::task::spawn_blocking(move || match_hashes(&pending, &probe))
+                        .await
+                        .map_err(|_| StoreError::Hash)?;
                     let Some(code_id) = matched else {
                         let next = failed.saturating_add(1);
                         let lock_until = (next >= max_attempts).then(|| {
@@ -1258,7 +1305,7 @@ impl Backend {
                         })),
                     )
                     .await?;
-                    let upgraded =
+                    let mut upgraded =
                         upgrade_postgres(&mut tx, &user, session_id, factor_id, "mfa/recovery_code")
                             .await?;
                     sqlx::query(
@@ -1267,6 +1314,7 @@ impl Backend {
                     .bind(user.id)
                     .execute(&mut *tx)
                     .await?;
+                    apply_pg_hook(&mut tx, hook, session_id, &mut upgraded).await?;
                     tx.commit().await?;
                     Ok(upgraded)
                 })
@@ -1292,14 +1340,11 @@ fn locked_recovery() -> MfaError {
     )
 }
 
-fn match_codes(codes: &[MemoryCode], code: &str) -> Option<Uuid> {
+fn match_hashes(codes: &[(Uuid, String)], code: &str) -> Option<Uuid> {
     let mut matched = None;
-    for entry in codes {
-        if entry.consumed_at.is_some() {
-            continue;
-        }
-        match recovery_code::matches(&entry.hash, code) {
-            Ok(true) if matched.is_none() => matched = Some(entry.id),
+    for (id, hash) in codes {
+        match recovery_code::matches(hash, code) {
+            Ok(true) if matched.is_none() => matched = Some(*id),
             Ok(_) => {}
             Err(_) => {}
         }
@@ -1536,6 +1581,7 @@ fn upgrade_memory(
         user: user.clone(),
         refresh_token,
         amr,
+        hook_claims: None,
     })
 }
 
@@ -1621,7 +1667,58 @@ async fn upgrade_postgres(
         user: reloaded,
         refresh_token,
         amr,
+        hook_claims: None,
     })
+}
+
+async fn apply_memory_hook(
+    db: &Arc<Mutex<MemoryDb>>,
+    hook: Option<&TokenHookCall<'_>>,
+    session_id: Uuid,
+    upgraded: &mut UpgradedSession,
+) -> Result<(), MfaError> {
+    let Some(call) = hook else {
+        return Ok(());
+    };
+    let claims = proposed_claims(call, session_id, upgraded);
+    let function = db.lock().await.access_token_hook.as_ref().map(Arc::clone);
+    let signed = hooks::run_memory_claims(call, upgraded.user.id, &claims, function.as_deref())
+        .map_err(|error| StoreError::Hook(Box::new(error)))?;
+    upgraded.hook_claims = Some(signed);
+    Ok(())
+}
+
+async fn apply_pg_hook(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    hook: Option<&TokenHookCall<'_>>,
+    session_id: Uuid,
+    upgraded: &mut UpgradedSession,
+) -> Result<(), MfaError> {
+    let Some(call) = hook else {
+        return Ok(());
+    };
+    let claims = proposed_claims(call, session_id, upgraded);
+    let signed = hooks::run_pg_claims(tx, call, upgraded.user.id, &claims)
+        .await
+        .map_err(|error| StoreError::Hook(Box::new(error)))?;
+    upgraded.hook_claims = Some(signed);
+    Ok(())
+}
+
+fn proposed_claims(
+    call: &TokenHookCall<'_>,
+    session_id: Uuid,
+    upgraded: &UpgradedSession,
+) -> Value {
+    let (issuer, now, expires_in) = call.claim_timing();
+    mfa_access_claims(
+        &upgraded.user,
+        session_id,
+        &upgraded.amr,
+        issuer,
+        now,
+        expires_in,
+    )
 }
 
 async fn insert_factor_sql(

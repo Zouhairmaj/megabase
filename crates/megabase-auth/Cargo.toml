@@ -27,6 +27,7 @@ tracing = { workspace = true }
 uuid = { workspace = true, features = ["serde"] }
 argon2 = { version = "0.5", default-features = false, features = ["alloc"] }
 data-encoding = "2.11"
+getrandom = "0.2"
 qrcode = { version = "0.14", default-features = false }
 
 [dev-dependencies]

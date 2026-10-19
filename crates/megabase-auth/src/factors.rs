@@ -26,6 +26,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::error::{unexpected, validation, GoTrueError};
 use crate::gojson::{self, GoStruct, Kind};
+use crate::hooks::TokenHookCall;
 use crate::jsonutil::{mfa_access_claims, session_json};
 use crate::routes::{read_body, JsonOk, INVALID_CHANNEL};
 use crate::state::AuthState;
@@ -274,7 +275,10 @@ async fn challenge_factor(
             {
                 return mfa_error(error);
             }
-            let otp = crate::store::phone_otp(state.config.mfa.phone_otp_length);
+            let otp = match crate::store::phone_otp(state.config.mfa.phone_otp_length) {
+                Ok(otp) => otp,
+                Err(error) => return mfa_error(error),
+            };
             if let Err(response) = send_mfa_sms(&state, &otp) {
                 return *response;
             }
@@ -343,6 +347,7 @@ async fn verify_factor(
     let ip = client_ip(&headers);
     let verified = match factor.factor_type.as_str() {
         "totp" => {
+            let hook = mfa_hook(&state, &headers, "totp");
             state
                 .backend
                 .verify_totp(
@@ -355,10 +360,12 @@ async fn verify_factor(
                         ip: &ip,
                     },
                     &state.config.mfa,
+                    hook.as_ref(),
                 )
                 .await
         }
         "phone" => {
+            let hook = mfa_hook(&state, &headers, "mfa/phone");
             state
                 .backend
                 .verify_phone(
@@ -371,6 +378,7 @@ async fn verify_factor(
                         ip: &ip,
                     },
                     &state.config.mfa,
+                    hook.as_ref(),
                 )
                 .await
         }
@@ -574,9 +582,16 @@ async fn recovery_codes_verify(
     if normalize_recovery_code(&params.code).is_empty() {
         return validation("Code needs to be non-empty").into_response();
     }
+    let hook = mfa_hook(&state, &headers, "mfa/recovery_code");
     match state
         .backend
-        .verify_recovery_code(&authed.user, session_id, &params.code, &state.config.mfa)
+        .verify_recovery_code(
+            &authed.user,
+            session_id,
+            &params.code,
+            &state.config.mfa,
+            hook.as_ref(),
+        )
         .await
     {
         Ok(upgraded) => session_response(&state, session_id, upgraded),
@@ -804,6 +819,7 @@ fn internal(error: &crate::store::StoreError) -> Response {
 
 fn mfa_error(error: MfaError) -> Response {
     match error {
+        MfaError::Store(crate::store::StoreError::Hook(error)) => (*error).into_response(),
         MfaError::Store(error) => internal(&error),
         MfaError::Status {
             status,
@@ -854,14 +870,17 @@ fn session_response(state: &AuthState, session_id: Uuid, upgraded: UpgradedSessi
         .map(|duration| duration.as_secs() as i64)
         .unwrap_or(0);
     let expires_in = state.config.jwt_exp_seconds;
-    let claims = mfa_access_claims(
-        &upgraded.user,
-        session_id,
-        &upgraded.amr,
-        &state.config.jwt_issuer,
-        now,
-        expires_in,
-    );
+    let claims = match &upgraded.hook_claims {
+        Some(claims) => claims.clone(),
+        None => mfa_access_claims(
+            &upgraded.user,
+            session_id,
+            &upgraded.amr,
+            &state.config.jwt_issuer,
+            now,
+            expires_in,
+        ),
+    };
     let access_token = match jwt.sign(&claims) {
         Ok(token) => token,
         Err(error) => {
@@ -906,8 +925,10 @@ fn challenge_id_from(bytes: &[u8]) -> Uuid {
         .unwrap_or(Uuid::nil())
 }
 
-/// `generateSMSFromTemplate`, then `GetSmsProvider`. No SMS client is ported,
-/// so a configured name still fails the way a missing provider does.
+/// `generateSMSFromTemplate`, then `GetSmsProvider`.
+///
+/// No SMS client is ported. A missing provider is GoTrue's 500. A configured
+/// provider would send the message, so that step is 501.
 fn send_mfa_sms(state: &AuthState, otp: &str) -> Result<(), Box<Response>> {
     let template = &state.config.mfa.phone_sms_template;
     let message = template
@@ -921,9 +942,33 @@ fn send_mfa_sms(state: &AuthState, otp: &str) -> Result<(), Box<Response>> {
         ));
     }
     let _ = message;
+    if state.config.sms_provider.is_empty() {
+        return Err(Box::new(
+            unexpected("Failed to get SMS provider").into_response(),
+        ));
+    }
     Err(Box::new(
-        unexpected("Failed to get SMS provider").into_response(),
+        MegabaseNotImplemented::new(COMPONENT, UNIT_CHALLENGE).into_response(),
     ))
+}
+
+fn mfa_hook<'a>(
+    state: &'a AuthState,
+    headers: &HeaderMap,
+    method: &'static str,
+) -> Option<TokenHookCall<'a>> {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs() as i64)
+        .unwrap_or(0);
+    TokenHookCall::new(
+        state.config.custom_access_token_hook.as_ref(),
+        headers,
+        method,
+        &state.config.jwt_issuer,
+        now,
+        state.config.jwt_exp_seconds,
+    )
 }
 
 #[cfg(test)]
@@ -947,7 +992,17 @@ mod tests {
     }
 
     async fn fixture(configure: impl FnOnce(&mut AuthConfig)) -> Fixture {
+        fixture_hook(configure, None).await
+    }
+
+    async fn fixture_hook(
+        configure: impl FnOnce(&mut AuthConfig),
+        hook: Option<std::sync::Arc<crate::hooks::MemoryHook>>,
+    ) -> Fixture {
         let backend = Backend::memory();
+        if let Some(function) = hook {
+            backend.set_access_token_hook_for_test(function).await;
+        }
         let mut config = AuthConfig::reference_defaults();
         configure(&mut config);
         let jwt = Hs256::new(SECRET.as_bytes()).unwrap();
@@ -1331,6 +1386,139 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn totp_verify_signs_custom_access_token_hook_claims() {
+        let events = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let seen = std::sync::Arc::clone(&events);
+        let function: std::sync::Arc<crate::hooks::MemoryHook> =
+            std::sync::Arc::new(move |event: &Value| {
+                seen.lock().expect("hook events").push(event.clone());
+                let mut claims = event["claims"].clone();
+                claims["user_role"] = json!("moderator");
+                Some(json!({ "claims": claims }).to_string())
+            });
+        let fx = fixture_hook(
+            |config| {
+                config.custom_access_token_hook =
+                    Some(crate::hooks::AccessTokenHook::pg_function_for_test(
+                        "public",
+                        "custom_access_token_hook",
+                    ));
+            },
+            Some(function),
+        )
+        .await;
+        events.lock().expect("hook events").clear();
+        let enrolled = call(
+            &fx.app,
+            "POST",
+            "/auth/v1/factors",
+            Some(r#"{"factor_type":"totp","friendly_name":"hook","issuer":"megabase"}"#),
+            Some(&fx.token),
+        )
+        .await;
+        assert_eq!(enrolled.0, StatusCode::OK, "{}", enrolled.1);
+        let factor_id = enrolled.1["id"].as_str().unwrap();
+        let secret = enrolled.1["totp"]["secret"].as_str().unwrap();
+        let challenged = call(
+            &fx.app,
+            "POST",
+            &format!("/auth/v1/factors/{factor_id}/challenge"),
+            Some(""),
+            Some(&fx.token),
+        )
+        .await;
+        assert_eq!(challenged.0, StatusCode::OK, "{}", challenged.1);
+        let challenge_id = challenged.1["id"].as_str().unwrap();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let code = crate::totp::current_code(secret, now);
+        let verified = call(
+            &fx.app,
+            "POST",
+            &format!("/auth/v1/factors/{factor_id}/verify"),
+            Some(&format!(
+                r#"{{"challenge_id":"{challenge_id}","code":"{code}"}}"#
+            )),
+            Some(&fx.token),
+        )
+        .await;
+        assert_eq!(verified.0, StatusCode::OK, "{}", verified.1);
+        let claims = megabase_core::Hs256::new(SECRET.as_bytes())
+            .unwrap()
+            .verify(verified.1["access_token"].as_str().unwrap())
+            .unwrap();
+        assert_eq!(claims.raw["aal"], "aal2");
+        assert_eq!(claims.raw["user_role"], "moderator");
+        let events = events.lock().expect("hook events");
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0]["authentication_method"], "totp");
+        assert_eq!(events[0]["claims"]["aal"], "aal2");
+        assert_eq!(events[0]["claims"]["amr"][0]["method"], "totp");
+    }
+
+    #[tokio::test]
+    async fn phone_challenge_reports_missing_provider_and_unported_send() {
+        let body = r#"{"factor_type":"phone","phone":"+15555550100"}"#;
+        let missing = fixture(|config| {
+            config.mfa.phone_enroll = true;
+            config.mfa.phone_verify = true;
+        })
+        .await;
+        let enrolled = call(
+            &missing.app,
+            "POST",
+            "/auth/v1/factors",
+            Some(body),
+            Some(&missing.token),
+        )
+        .await;
+        assert_eq!(enrolled.0, StatusCode::OK, "{}", enrolled.1);
+        let factor_id = enrolled.1["id"].as_str().unwrap();
+        let challenged = call(
+            &missing.app,
+            "POST",
+            &format!("/auth/v1/factors/{factor_id}/challenge"),
+            Some("{}"),
+            Some(&missing.token),
+        )
+        .await;
+        assert_error(
+            &challenged,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "unexpected_failure",
+            "Failed to get SMS provider",
+        );
+
+        let configured = fixture(|config| {
+            config.mfa.phone_enroll = true;
+            config.mfa.phone_verify = true;
+            config.sms_provider = "twilio".into();
+        })
+        .await;
+        let enrolled = call(
+            &configured.app,
+            "POST",
+            "/auth/v1/factors",
+            Some(body),
+            Some(&configured.token),
+        )
+        .await;
+        assert_eq!(enrolled.0, StatusCode::OK, "{}", enrolled.1);
+        let factor_id = enrolled.1["id"].as_str().unwrap();
+        let challenged = call(
+            &configured.app,
+            "POST",
+            &format!("/auth/v1/factors/{factor_id}/challenge"),
+            Some("{}"),
+            Some(&configured.token),
+        )
+        .await;
+        assert_501(&challenged, UNIT_CHALLENGE);
+    }
+
+    #[tokio::test]
     async fn unenroll_requires_aal2_for_verified_factors() {
         let fx = fixture(|_| {}).await;
         let unverified = fx
@@ -1518,6 +1706,35 @@ mod tests {
         assert_eq!(rotated.0, StatusCode::OK, "{}", rotated.1);
         assert_eq!(rotated.1["total"], 10);
         assert_eq!(rotated.1["id"], recovery);
+        let code = rotated.1["codes"][0].as_str().unwrap();
+        // A second AAL1 session redeems the code. The original session stays
+        // bound to the TOTP factor, so deleting the recovery factor later
+        // does not drop it from AAL2.
+        let login = call(
+            &fx.app,
+            "POST",
+            "/auth/v1/token?grant_type=password",
+            Some(&json!({ "email": EMAIL, "password": "secret-pass" }).to_string()),
+            None,
+        )
+        .await;
+        assert_eq!(login.0, StatusCode::OK, "{}", login.1);
+        let aal1 = login.1["access_token"].as_str().unwrap();
+        let verified = call(
+            &fx.app,
+            "POST",
+            verify,
+            Some(&format!(r#"{{"code":"{code}"}}"#)),
+            Some(aal1),
+        )
+        .await;
+        assert_eq!(verified.0, StatusCode::OK, "{}", verified.1);
+        let claims = megabase_core::Hs256::new(SECRET.as_bytes())
+            .unwrap()
+            .verify(verified.1["access_token"].as_str().unwrap())
+            .unwrap();
+        assert_eq!(claims.raw["aal"], "aal2");
+        assert_eq!(claims.raw["amr"][0]["method"], "mfa/recovery_code");
         let (status, body) = call(&fx.app, "DELETE", generate, None, token).await;
         assert_eq!(status, StatusCode::OK, "{body}");
         assert_eq!(body["id"], recovery);
