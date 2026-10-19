@@ -12,8 +12,8 @@
     "done": 21.0
   },
   "judge": {
-    "cases": 447,
-    "passing": 447
+    "cases": 468,
+    "passing": 468
   },
   "components": {
     "auth": {

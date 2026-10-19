@@ -78,8 +78,10 @@ level 1.
 
 The regression baseline `coverage/judge-results.json` records the live
 Judge publication on `gh-pages` for commit
-`7d8923bf535016d8bc8fcda8c8fa8ef532ad9ae0` (447 passing cases). That
-recording is the deliberate baseline update in
+`7d8923bf535016d8bc8fcda8c8fa8ef532ad9ae0` (447 passing cases) and the
+21 `rest.prefer.*` cases that passed on the Judge run for
+[#505](https://github.com/Zouhairmaj/megabase/pull/505) (468 passing
+cases). That recording is the deliberate baseline update in
 [decision 0030](docs/decisions/0030-conformance-is-the-live-judge-score.md).
 The live score remains the publication.
 

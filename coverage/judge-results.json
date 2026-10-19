@@ -1402,7 +1402,31 @@
       "pass": true
     },
     {
+      "id": "rest.prefer.count.estimated.head",
+      "pass": true
+    },
+    {
+      "id": "rest.prefer.count.estimated.partial",
+      "pass": true
+    },
+    {
+      "id": "rest.prefer.count.exact.empty",
+      "pass": true
+    },
+    {
+      "id": "rest.prefer.count.exact.partial",
+      "pass": true
+    },
+    {
       "id": "rest.prefer.count.planned",
+      "pass": true
+    },
+    {
+      "id": "rest.prefer.count.planned.head",
+      "pass": true
+    },
+    {
+      "id": "rest.prefer.count.planned.offset",
       "pass": true
     },
     {
@@ -1410,7 +1434,23 @@
       "pass": true
     },
     {
+      "id": "rest.prefer.handling.lenient.insert",
+      "pass": true
+    },
+    {
+      "id": "rest.prefer.handling.lenient.update",
+      "pass": true
+    },
+    {
       "id": "rest.prefer.handling.strict",
+      "pass": true
+    },
+    {
+      "id": "rest.prefer.handling.strict.many",
+      "pass": true
+    },
+    {
+      "id": "rest.prefer.handling.strict.post",
       "pass": true
     },
     {
@@ -1418,7 +1458,23 @@
       "pass": true
     },
     {
+      "id": "rest.prefer.max-affected.delete",
+      "pass": true
+    },
+    {
+      "id": "rest.prefer.max-affected.equal",
+      "pass": true
+    },
+    {
       "id": "rest.prefer.missing.default",
+      "pass": true
+    },
+    {
+      "id": "rest.prefer.missing.default.columns",
+      "pass": true
+    },
+    {
+      "id": "rest.prefer.missing.default.single",
       "pass": true
     },
     {
@@ -1426,11 +1482,35 @@
       "pass": true
     },
     {
+      "id": "rest.prefer.missing.null.columns",
+      "pass": true
+    },
+    {
+      "id": "rest.prefer.missing.null.nullable",
+      "pass": true
+    },
+    {
       "id": "rest.prefer.resolution.ignore-duplicates",
       "pass": true
     },
     {
+      "id": "rest.prefer.resolution.ignore-duplicates.bulk",
+      "pass": true
+    },
+    {
+      "id": "rest.prefer.resolution.ignore-duplicates.insert",
+      "pass": true
+    },
+    {
       "id": "rest.prefer.resolution.merge-duplicates",
+      "pass": true
+    },
+    {
+      "id": "rest.prefer.resolution.merge-duplicates.bulk",
+      "pass": true
+    },
+    {
+      "id": "rest.prefer.resolution.merge-duplicates.on-conflict",
       "pass": true
     },
     {
@@ -1491,6 +1571,10 @@
     },
     {
       "id": "rest.prefer.tx.commit",
+      "pass": true
+    },
+    {
+      "id": "rest.prefer.tx.commit.delete",
       "pass": true
     },
     {
