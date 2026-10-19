@@ -13,6 +13,7 @@
 
 pub mod bootstrap;
 pub mod env;
+pub mod event_worker;
 pub mod gate;
 pub mod os;
 pub mod proxy;
