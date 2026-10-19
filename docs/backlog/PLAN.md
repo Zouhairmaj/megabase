@@ -1615,7 +1615,7 @@ Read the files linked below in `vendor/`. Write `specs/auth/database.md` if it d
 
 ## Dependencies
 
-Blocked by **Core: JWT and config**. Blocks Auth endpoints, token and user.
+Blocked by **Core: JWT and config**.
 
 **Effort:** L. **Milestone:** Level 2. **Labels:** `component:auth`, `level:2`, `type:feature`.
 
