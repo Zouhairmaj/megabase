@@ -10,7 +10,7 @@ card: Start the binary, call /_megabase/health, then hit a 501 on an unimplement
 
 > [!NOTE]
 > Unimplemented HTTP endpoints answer 501 `MEGABASE_NOT_IMPLEMENTED`.
-> `GET /auth/v1/health` is live. The standard API roles and the Auth SQL
+> `GET /auth/v1/health` is live. The standard roles and the Auth SQL
 > objects listed in [Configuration](configuration.md) are installed when
 > `DATABASE_URL` is set. This is not production software.
 
