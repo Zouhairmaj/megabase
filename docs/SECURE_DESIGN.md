@@ -20,10 +20,13 @@ below: a route that does not exist yet does not accept the request.
 `POST /auth/v1/recover`, `GET /auth/v1/reauthenticate`, and `POST /auth/v1/resend`
 send mail through the same client. An unknown resend address, an
 already-confirmed signup resend, and an email-change resend with nothing
-pending answer 200 `{}` and send nothing, so that answer does not reveal
-whether the address is registered. A lookup failure is 500, not that empty
-200. OTP generation fails the request when the system random source cannot
-be read, and nothing is stored. Phone and SMS delivery stays 501.
+pending answer the same 200 `{}` and send nothing. A registered address that
+still needs mail takes the send path, as in GoTrue, and can answer 429
+(frequency limit), 400 (address not authorized), or 500 (mail failure).
+Those answers can show that an unconfirmed address is registered. A lookup
+failure is 500 `Unable to process request`. OTP generation fails the request
+when the system random source cannot be read, and nothing is stored. Phone
+and SMS delivery stays 501.
 
 ## Saltzer and Schroeder
 
