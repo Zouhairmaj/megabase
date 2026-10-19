@@ -144,7 +144,7 @@ Implemented and tested counts come from markers and `judge/cases/`. Live conform
 | Meta | endpoints | 4 | 14 | 2 | 2 |
 | Meta | extensions | 4 | 5 | 0 | 0 |
 | Meta | functions | 4 | 5 | 0 | 0 |
-| Meta | policies | 4 | 5 | 0 | 0 |
+| Meta | policies | 4 | 5 | 5 | 0 |
 | Meta | publications | 4 | 5 | 0 | 0 |
 | Meta | query | 4 | 4 | 0 | 0 |
 | Meta | roles | 4 | 5 | 0 | 0 |
