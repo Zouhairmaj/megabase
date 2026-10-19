@@ -217,9 +217,6 @@ pub fn router_with_state(state: StorageState) -> Router {
             "/storage/v1/render/image/sign/:bucket_name/*object_name",
             get(render::render_signed_image),
         )
-        // `HEAD` on the info routes is Fastify's automatic head route,
-        // which is not a coverage unit. Axum would answer it with the
-        // `GET` handler otherwise.
         .route(
             "/storage/v1/object/authenticated/:bucket_name/*object_name",
             get(object::get_authenticated_object).head(object::head_authenticated_object),

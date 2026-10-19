@@ -65,9 +65,11 @@ route is a 501, and without the file root so is every route that reads or
 writes object bytes. `POST /object/sign/:bucket` reads no bytes, so it needs
 only `DATABASE_URL` and `JWT_SECRET`. Without `JWT_SECRET`, the routes that need a
 verified JWT (upload, authenticated download and info, sign, signed
-download, delete) are a 501; public downloads and info, and
-`GET /object/:bucket/*` and `GET /object/info/:bucket/*` on a public bucket
-(anonymous fallback) still work.
+download, delete, list-v2) and the signed upload itself
+(`PUT /object/upload/sign/:bucket/*`) are a 501; public downloads and info,
+`HEAD /object/public/:bucket/*`, and `GET`/`HEAD /object/:bucket/*` and
+`GET /object/info/:bucket/*` on a public bucket (anonymous fallback) still
+work.
 
 `list` is served by [`object-list.md`](object-list.md). `list-v2` is
 served below and is registered before the generic `:bucket/*` handlers.
@@ -324,10 +326,7 @@ MIME, size, `InvalidKey`, `canUpload`, file, row). Response `200
   not RFC 3339 or epoch milliseconds; `HEAD` also needs a stored
   `mimetype` and `contentLength`. Fastify's automatic `HEAD` on the
   `/object/info` routes.
-- `HEAD /object/public/:bucket/*` and `HEAD /object/:bucket/*` (the same
-  handler; issue 61 PR 2), `/object/list-v2`, and the signed upload itself
-  (`PUT /object/upload/sign/:bucket/*`). Copy and move are in
-  [`object-transfer.md`](object-transfer.md).
+- Copy and move are in [`object-transfer.md`](object-transfer.md).
 
 ## Judge cases
 
