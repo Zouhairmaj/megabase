@@ -32,6 +32,7 @@ mod invite;
 mod mfa;
 mod passkey;
 mod pkce;
+mod reauth;
 mod recovery;
 
 pub use confirmation::{ConfirmationOutcome, ConfirmationSignup};
@@ -39,6 +40,7 @@ pub use invite::{InviteCommand, InviteOutcome};
 pub use mfa::FactorRow;
 pub use passkey::PasskeyRow;
 pub use pkce::PkceRedemption;
+pub use reauth::{EmailChangeResend, SignupResend};
 
 const EMAIL_PROVIDER: &str = "email";
 
@@ -3358,6 +3360,8 @@ struct UserTokens {
     phone_change: String,
     phone_change_token: String,
     phone_change_sent_at: Option<SystemTime>,
+    reauthentication_token: String,
+    reauthentication_sent_at: Option<SystemTime>,
 }
 
 struct OneTimeToken {

@@ -178,11 +178,7 @@ async fn every_non_preflight_response_carries_allow_origin_star() {
     for (method, path, expected) in [
         ("GET", "/auth/v1/health", StatusCode::OK),
         ("GET", "/auth/v1/settings", StatusCode::OK),
-        (
-            "GET",
-            "/auth/v1/reauthenticate",
-            StatusCode::NOT_IMPLEMENTED,
-        ),
+        ("GET", "/auth/v1/reauthenticate", StatusCode::UNAUTHORIZED),
         // An empty JSON body is GoTrue's 400 bad request.
         ("POST", "/auth/v1/signup", StatusCode::BAD_REQUEST),
         ("GET", "/storage/v1/object/b/k", StatusCode::NOT_IMPLEMENTED),

@@ -2,24 +2,24 @@
   "schema": 1,
   "totals": {
     "units": 1036,
-    "implemented": 352,
-    "tested": 218,
+    "implemented": 354,
+    "tested": 220,
     "conformant": 0
   },
   "percent": {
-    "coverage": 34.0,
+    "coverage": 34.2,
     "conformance": 0.0,
     "done": 0.0
   },
   "judge": {
-    "cases": 468,
+    "cases": 476,
     "passing": 0
   },
   "components": {
     "auth": {
       "units": 159,
-      "implemented": 122,
-      "tested": 86,
+      "implemented": 124,
+      "tested": 88,
       "conformant": 0,
       "groups": {
         "admin": {
@@ -36,8 +36,8 @@
         },
         "endpoints": {
           "units": 13,
-          "implemented": 7,
-          "tested": 5,
+          "implemented": 9,
+          "tested": 7,
           "conformant": 0
         },
         "factors": {
@@ -615,6 +615,7 @@
     "auth:route:GET /auth/v1/health": "tested",
     "auth:route:GET /auth/v1/oauth/userinfo": "implemented",
     "auth:route:GET /auth/v1/passkeys": "tested",
+    "auth:route:GET /auth/v1/reauthenticate": "tested",
     "auth:route:GET /auth/v1/scim/v2/ResourceTypes": "tested",
     "auth:route:GET /auth/v1/scim/v2/Schemas": "tested",
     "auth:route:GET /auth/v1/scim/v2/ServiceProviderConfig": "tested",
@@ -635,6 +636,7 @@
     "auth:route:POST /auth/v1/magiclink": "implemented",
     "auth:route:POST /auth/v1/oauth/clients/register": "implemented",
     "auth:route:POST /auth/v1/recover": "implemented",
+    "auth:route:POST /auth/v1/resend": "tested",
     "auth:route:POST /auth/v1/signup": "tested",
     "auth:route:POST /auth/v1/token": "tested",
     "auth:route:POST /auth/v1/verify": "tested",

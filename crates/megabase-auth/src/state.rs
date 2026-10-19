@@ -75,6 +75,9 @@ pub struct AuthState {
     /// `POST /otp` and `POST /magiclink`: `GOTRUE_RATE_LIMIT_OTP` (default 30)
     /// per five minutes, burst 30. Keyed like [`Self::verify_limiter`].
     pub(crate) otp_limiter: Arc<KeyedLimiter>,
+    /// `POST /resend`: its own `GOTRUE_RATE_LIMIT_OTP` bucket (GoTrue does not
+    /// share the OTP limiter's tokens with resend).
+    pub(crate) resend_limiter: Arc<KeyedLimiter>,
     /// `GOTRUE_SECURITY_SB_FORWARDED_FOR_ENABLED`. Default false: the verify
     /// and OTP limiters use [`Self::rate_limit_header`] only.
     pub sb_forwarded_for_enabled: bool,
@@ -190,6 +193,7 @@ impl AuthState {
                 DEFAULT_VERIFY_RATE,
             )?,
             otp_limiter: per_five_minutes(&lookup, "GOTRUE_RATE_LIMIT_OTP", DEFAULT_OTP_RATE)?,
+            resend_limiter: per_five_minutes(&lookup, "GOTRUE_RATE_LIMIT_OTP", DEFAULT_OTP_RATE)?,
             sb_forwarded_for_enabled: security_flag(
                 &lookup,
                 "GOTRUE_SECURITY_SB_FORWARDED_FOR_ENABLED",
@@ -241,6 +245,7 @@ impl AuthState {
             saml_assertion_limiter: defaults.saml_assertion_limiter,
             verify_limiter: defaults.verify_limiter,
             otp_limiter: defaults.otp_limiter,
+            resend_limiter: defaults.resend_limiter,
             sb_forwarded_for_enabled: defaults.sb_forwarded_for_enabled,
             otp_max_failed_attempts: defaults.otp_max_failed_attempts,
             backend,
