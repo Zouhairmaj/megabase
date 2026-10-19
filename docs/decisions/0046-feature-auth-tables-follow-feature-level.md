@@ -3,12 +3,12 @@
 - Status: Accepted (Zouhair, 2026-10-19)
 - Date: 2026-10-19
 
-This file is 0046. On `main`, 0045 is
+This file is 0046. On `main`, 0045 is both
 [0045-verify-otp-limits.md](0045-verify-otp-limits.md) from
-[#483](https://github.com/Zouhairmaj/megabase/pull/483). Open pull request
-[#498](https://github.com/Zouhairmaj/megabase/pull/498) also adds a file
-numbered 0045, so the next free number after `main` and that pull request
-is 0046.
+[#483](https://github.com/Zouhairmaj/megabase/pull/483) and
+[0045-bootstrap-supabase-admin-roles.md](0045-bootstrap-supabase-admin-roles.md)
+from [#498](https://github.com/Zouhairmaj/megabase/pull/498). The next free
+number is 0046.
 
 ## Context
 
