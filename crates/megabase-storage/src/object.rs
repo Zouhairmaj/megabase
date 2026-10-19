@@ -1006,8 +1006,12 @@ async fn get_object(
 }
 
 /// `GET /object/public/:bucketName/*`: the bucket must be public; no JWT.
-/// storage-api runs the bucket and object lookups with `Promise.all`, so
-/// when both fail the reported error is a race and Megabase answers 501.
+/// Upstream races `findBucket(..., { isPublic: true })` with `findObject`
+/// (`Promise.all` in `getPublicObject.ts`). That bucket lookup rejects with
+/// `NoSuchBucket` when the bucket is missing or not public. When the object
+/// row is also missing, either rejection can settle first. Megabase reads
+/// the bucket first and returns `NoSuchBucket` for both, one of those
+/// outcomes. A public bucket with no row is `NoSuchKey`.
 // megabase:unit storage:route:GET /storage/v1/object/public/{bucketName}/{*}
 pub(super) async fn get_public_object(
     State(state): State<StorageState>,
@@ -1036,10 +1040,15 @@ pub(super) async fn get_public_object(
         headers: &headers,
         operation: OP_GET_PUBLIC,
     };
-    let bucket = bucket_is_public(pool, &scope, &bucket_id).await;
-    let object = find_object(pool, &scope, &bucket_id, &object_name).await;
-    match (bucket, object) {
-        (Ok(Some(true)), Ok(Some(object))) => {
+    match public_bucket(&state, pool, &scope, &bucket_id).await {
+        Ok(Some(true)) => {}
+        // Missing and non-public are both `findBucket(..., { isPublic: true })`
+        // failures: `NoSuchBucket`, whether or not an object row exists.
+        Ok(_) => return StorageError::no_such_bucket().into_response(),
+        Err(error) => return database_error(&error),
+    }
+    match public_object_row(&state, pool, &scope, &bucket_id, &object_name).await {
+        Ok(Some(object)) => {
             render_asset(
                 root,
                 &bucket_id,
@@ -1052,11 +1061,40 @@ pub(super) async fn get_public_object(
             )
             .await
         }
-        (Ok(Some(true)), Ok(None)) => StorageError::no_such_key().into_response(),
-        (Ok(_), Ok(Some(_))) => StorageError::no_such_bucket().into_response(),
-        (Ok(_), Ok(None)) => not_implemented(&method, &uri),
-        (Err(error), _) | (_, Err(error)) => database_error(&error),
+        Ok(None) => StorageError::no_such_key().into_response(),
+        Err(error) => database_error(&error),
     }
+}
+
+/// The bucket `public` flag, from test rows when installed, otherwise
+/// `findBucket(id, 'id,public')`.
+async fn public_bucket<'a>(
+    state: &StorageState,
+    pool: &sqlx::PgPool,
+    scope: &Scope<'a>,
+    bucket_id: &str,
+) -> Result<Option<bool>, sqlx::Error> {
+    if let Some(flag) = state.scripted_bucket(bucket_id) {
+        return Ok(flag);
+    }
+    bucket_is_public(pool, scope, bucket_id).await
+}
+
+/// The current object row, from test rows when installed.
+async fn public_object_row(
+    state: &StorageState,
+    pool: &sqlx::PgPool,
+    scope: &Scope<'_>,
+    bucket_id: &str,
+    object_name: &str,
+) -> Result<Option<FoundObject>, sqlx::Error> {
+    if let Some(exists) = state.scripted_object(bucket_id, object_name) {
+        return Ok(exists.then_some(FoundObject {
+            version: None,
+            metadata: None,
+        }));
+    }
+    find_object(pool, scope, bucket_id, object_name).await
 }
 
 // ---------------------------------------------------------------------------
@@ -2100,5 +2138,72 @@ mod tests {
             );
         }
         tokio::fs::remove_dir_all(&root).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn public_object_route_returns_no_such_bucket_unless_the_bucket_is_public() {
+        use std::collections::{HashMap, HashSet};
+        use tower::ServiceExt;
+
+        let mut objects = HashMap::new();
+        objects.insert("private".into(), HashSet::from(["exists.png".into()]));
+        objects.insert("absent".into(), HashSet::from(["exists.png".into()]));
+        let rows = crate::RouteRows {
+            buckets: HashMap::from([("private".into(), false), ("public".into(), true)]),
+            objects,
+        };
+        let pool = sqlx::postgres::PgPoolOptions::new()
+            .acquire_timeout(std::time::Duration::from_millis(200))
+            .connect_lazy("postgres://postgres@127.0.0.1:1/postgres")
+            .unwrap();
+        let root = std::env::temp_dir();
+        let app = crate::router_with_state(
+            StorageState::new(Some(pool), None)
+                .with_file_root(Some(&root))
+                .with_route_rows(rows),
+        );
+        let no_such_bucket =
+            br#"{"code":"NoSuchBucket","error":"Bucket not found","message":"Bucket not found","statusCode":"404"}"#;
+        let no_such_key =
+            br#"{"code":"NoSuchKey","error":"not_found","message":"Object not found","statusCode":"404"}"#;
+        let cases = [
+            (
+                "/storage/v1/object/public/private/exists.png",
+                &no_such_bucket[..],
+            ),
+            (
+                "/storage/v1/object/public/private/missing.png",
+                &no_such_bucket[..],
+            ),
+            (
+                "/storage/v1/object/public/absent/exists.png",
+                &no_such_bucket[..],
+            ),
+            (
+                "/storage/v1/object/public/absent/missing.png",
+                &no_such_bucket[..],
+            ),
+            (
+                "/storage/v1/object/public/public/missing.png",
+                &no_such_key[..],
+            ),
+        ];
+        for (path, expected) in cases {
+            let response = app
+                .clone()
+                .oneshot(axum::http::Request::get(path).body(Body::empty()).unwrap())
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{path}");
+            assert_eq!(
+                response.headers()[header::CONTENT_TYPE],
+                "application/json; charset=utf-8",
+                "{path}"
+            );
+            let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+                .await
+                .unwrap();
+            assert_eq!(body.as_ref(), expected, "{path}");
+        }
     }
 }

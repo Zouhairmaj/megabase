@@ -83,6 +83,8 @@ impl Backend {
                     stored.updated_at = sent_at;
                 }
                 remember_audit(user, RECOVERY_REQUESTED, "user", None);
+                drop(db);
+                self.clear_otp_attempts(user.id);
                 Ok(())
             }
             BackendKind::Postgres(pg) => {
@@ -121,6 +123,7 @@ impl Backend {
                     .execute(&mut *tx)
                     .await?;
                     tx.commit().await?;
+                    self.clear_otp_attempts(user.id);
                     Ok(())
                 })
                 .await
