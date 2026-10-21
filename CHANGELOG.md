@@ -4,6 +4,29 @@ All notable changes to Megabase are documented in this file.
 The format is produced by [release-please](https://github.com/googleapis/release-please).
 Sections: Features, Bug Fixes, Performance, Conformance/judge, Documentation.
 
+## [0.1.49](https://github.com/Zouhairmaj/megabase/compare/v0.1.48...v0.1.49) (2026-10-21)
+
+
+### Features
+
+* **auth:** verify rate limits and otp expiry parity ([#483](https://github.com/Zouhairmaj/megabase/issues/483)) ([d0dde22](https://github.com/Zouhairmaj/megabase/commit/d0dde22f4551c423defe7216a9e7886a7be776e9))
+* **functions:** serve os memory info ([#489](https://github.com/Zouhairmaj/megabase/issues/489)) ([2e7976a](https://github.com/Zouhairmaj/megabase/commit/2e7976a6266d91513e9a659f3064f97e8a27cd6a))
+* **meta:** serve /pg/policies routes (policies PR 1) ([#491](https://github.com/Zouhairmaj/megabase/issues/491)) ([64e921f](https://github.com/Zouhairmaj/megabase/commit/64e921f7f1ff353fa208699ed4526847a8f9c241))
+* **meta:** serve /pg/tables routes (tables PR 1) ([#492](https://github.com/Zouhairmaj/megabase/issues/492)) ([c82e73e](https://github.com/Zouhairmaj/megabase/commit/c82e73e073016705f3d2b3634e13ba1f3b281d6b))
+
+
+### Bug Fixes
+
+* bootstrap supabase admin roles on a fresh cluster ([#498](https://github.com/Zouhairmaj/megabase/issues/498)) ([210310e](https://github.com/Zouhairmaj/megabase/commit/210310ee076f61ad9f8625708f2d4d49aa0951d6))
+* **realtime:** validate postgres_changes filters and isolate per-subscription errors ([#484](https://github.com/Zouhairmaj/megabase/issues/484)) ([686e814](https://github.com/Zouhairmaj/megabase/commit/686e814c8f7aa1455266d1323709510b1c3e939d))
+* **storage:** public routes parity for non-public buckets ([#482](https://github.com/Zouhairmaj/megabase/issues/482)) ([8318b13](https://github.com/Zouhairmaj/megabase/commit/8318b13f55b8242952e70eecd71051fcf8d90b33))
+
+
+### Documentation
+
+* devlog 2026-10-16 ([#481](https://github.com/Zouhairmaj/megabase/issues/481)) ([7d8923b](https://github.com/Zouhairmaj/megabase/commit/7d8923bf535016d8bc8fcda8c8fa8ef532ad9ae0))
+* **devlog:** 2026-10-18 ([#494](https://github.com/Zouhairmaj/megabase/issues/494)) ([f63efe5](https://github.com/Zouhairmaj/megabase/commit/f63efe536497532470d3290f9856e3fbafa7fdbb))
+
 ## [0.1.48](https://github.com/Zouhairmaj/megabase/compare/v0.1.47...v0.1.48) (2026-10-16)
 
 
