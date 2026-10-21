@@ -283,10 +283,17 @@ pub fn build(file: &UnitsFile) -> Vec<Item> {
                 );
             }
             ("auth", "database") => {
-                let _ = writeln!(
-                    body,
-                    "Blocked by **Core: JWT and config**. Blocks Auth endpoints, token and user."
-                );
+                // Endpoints, token, and user depend on the Level 1 database
+                // epic (`auth.users`, `auth.uid()`, `auth.jwt()`). The Level 2
+                // feature tables do not block that work.
+                if *level == 1 {
+                    let _ = writeln!(
+                        body,
+                        "Blocked by **Core: JWT and config**. Blocks Auth endpoints, token and user."
+                    );
+                } else {
+                    let _ = writeln!(body, "Blocked by **Core: JWT and config**.");
+                }
             }
             ("rest", "resources") => {
                 let _ = writeln!(body, "Blocked by **Core: JWT and config** (RLS uses the JWT). Blocks the rest of REST.");
@@ -633,6 +640,48 @@ mod tests {
         assert!(website
             .body
             .contains("Status embeds `coverage/treemap.svg`"));
+    }
+
+    #[test]
+    fn level_two_auth_database_does_not_block_level_one_auth() {
+        let mk = |id: &str, level: u8| Unit {
+            id: id.into(),
+            component: "auth".into(),
+            group: "database".into(),
+            name: id.into(),
+            level,
+            source: Source {
+                repo: "auth".into(),
+                file: "migrations/a.sql".into(),
+                line: 1,
+            },
+        };
+        let items = build(&UnitsFile {
+            units: vec![
+                mk("auth:sql-table:auth.users", 1),
+                mk("auth:sql-table:auth.mfa_factors", 2),
+            ],
+            vendor: vec![],
+        });
+        let level_one = items
+            .iter()
+            .find(|i| i.key == "epic:auth:database:1")
+            .expect("level 1 database epic");
+        let level_two = items
+            .iter()
+            .find(|i| i.key == "epic:auth:database:2")
+            .expect("level 2 database epic");
+        assert!(level_one
+            .body
+            .contains("Blocks Auth endpoints, token and user."));
+        assert!(!level_two
+            .body
+            .contains("Blocks Auth endpoints, token and user."));
+        assert!(level_two
+            .body
+            .contains("Blocked by **Core: JWT and config**."));
+        assert_eq!(level_one.blocked_by, ["epic:core:jwt:1"]);
+        assert_eq!(level_two.blocked_by, ["epic:core:jwt:1"]);
     }
 
     #[test]

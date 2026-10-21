@@ -99,7 +99,7 @@ Implemented and tested counts come from markers and `judge/cases/`. Live conform
 | REST | resources | 1 | 10 | 10 | 10 |
 | REST | rpc | 1 | 4 | 4 | 4 |
 | Auth | admin | 1–2 | 28 | 28 | 28 |
-| Auth | database | 1 | 32 | 32 | 32 |
+| Auth | database | 1–2 | 32 | 32 | 32 |
 | Auth | endpoints | 1–2 | 13 | 7 | 5 |
 | Auth | factors | 2 | 9 | 3 | 0 |
 | Auth | hooks | 1–2 | 7 | 1 | 0 |
@@ -144,7 +144,7 @@ Implemented and tested counts come from markers and `judge/cases/`. Live conform
 | Meta | endpoints | 4 | 14 | 2 | 2 |
 | Meta | extensions | 4 | 5 | 0 | 0 |
 | Meta | functions | 4 | 5 | 0 | 0 |
-| Meta | policies | 4 | 5 | 0 | 0 |
+| Meta | policies | 4 | 5 | 5 | 0 |
 | Meta | publications | 4 | 5 | 0 | 0 |
 | Meta | query | 4 | 4 | 0 | 0 |
 | Meta | roles | 4 | 5 | 0 | 0 |
