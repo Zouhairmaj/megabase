@@ -30,6 +30,7 @@ use megabase_core::MegabaseNotImplemented;
 use serde::Deserialize;
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha224, Sha256};
+use url::{Host, Url};
 use uuid::Uuid;
 
 use crate::admin::{
@@ -985,38 +986,196 @@ pub(crate) fn get_referrer(
     })
 }
 
-/// GoTrue `IsRedirectURLValid` (`internal/utilities/request.go`).
+/// GoTrue `IsRedirectURLValid` (`internal/utilities/request.go`), with the
+/// candidate parsed by the WHATWG URL standard.
+///
+/// A value that does not parse or has a backslash in its authority is
+/// rejected. Userinfo is ignored when comparing hosts, as in Go
+/// `URL.Hostname`. An all-digit host is rejected. A dotted-decimal or IPv6
+/// address is allowed only when it is loopback, unless it matches the site.
+/// Any other IPv4 spelling is matched as written against the allow list.
+/// A non-HTTP(S) URL with no host, including an empty host, is same-site
+/// when the site host is also empty, otherwise it is matched against the
+/// allow list.
+/// Globs see the URL with the fragment removed and the query kept. A
+/// rejected candidate falls through to the site URL in [`get_referrer`].
 pub(crate) fn redirect_ok(
     site_url: &str,
     redirect: &str,
     allow: &[String],
 ) -> Result<bool, RedirectAllowListUnsupported> {
-    if redirect.is_empty() {
+    if redirect.is_empty() || authority_has_backslash(redirect) {
         return Ok(false);
     }
-    let Ok(base) = url_parts(site_url) else {
+    let Ok(base) = Url::parse(site_url) else {
         return Ok(false);
     };
-    let Ok(target) = url_parts(redirect) else {
+    let Ok(target) = Url::parse(redirect) else {
         return Ok(false);
     };
-    if base.host == target.host
-        && base.scheme == target.scheme
-        && (base.port == target.port || go_is_localhost(&target.host))
+    if missing_or_empty_host(&target) {
+        if target.scheme() == "http" || target.scheme() == "https" {
+            return Ok(false);
+        }
+        if missing_or_empty_host(&base)
+            && base.scheme() == target.scheme()
+            && raw_port(site_url) == raw_port(redirect)
+        {
+            return Ok(true);
+        }
+        return allow_list_matches(allow, redirect);
+    }
+    if noncanonical_ipv4(redirect, &target) {
+        return written_ipv4_host(site_url, redirect, &base, &target, allow);
+    }
+    let redirect_host = go_hostname(redirect);
+    if base.scheme() == target.scheme()
+        && !redirect_host.is_empty()
+        && go_hostname(site_url) == redirect_host
+        && (raw_port(site_url) == raw_port(redirect) || go_is_localhost(redirect_host))
     {
         return Ok(true);
     }
-    let host = target.host.as_str();
-    if host.chars().all(|ch| ch.is_ascii_digit()) {
+    match target.host() {
+        Some(Host::Ipv4(ip)) => return Ok(ip.is_loopback()),
+        Some(Host::Ipv6(ip)) => return Ok(ip.is_loopback()),
+        Some(Host::Domain(domain)) => {
+            if !domain.is_empty() && domain.chars().all(|ch| ch.is_ascii_digit()) {
+                return Ok(false);
+            }
+            if (target.scheme() == "http" || target.scheme() == "https")
+                && !regular_hostname(domain)
+            {
+                return Ok(false);
+            }
+        }
+        None => return Ok(false),
+    }
+    allow_list_matches(allow, redirect)
+}
+
+/// A backslash in the authority is rejected. A backslash later in the path
+/// or query is left for the parser, matching GoTrue on those URLs.
+fn authority_has_backslash(raw: &str) -> bool {
+    let Some((_, rest)) = raw.split_once("://") else {
+        return false;
+    };
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or(rest);
+    authority.contains('\\')
+}
+
+/// rust-url may report a missing host as `None` or as `Host::Domain("")`.
+/// Go `URL.Hostname` is empty in both cases.
+fn missing_or_empty_host(url: &Url) -> bool {
+    match url.host() {
+        None => true,
+        Some(Host::Domain(domain)) => domain.is_empty(),
+        Some(_) => false,
+    }
+}
+
+/// Go `URL.Hostname`: the host as written, without brackets or a port.
+fn go_hostname(raw: &str) -> &str {
+    raw_authority(raw).map(|part| part.host).unwrap_or("")
+}
+
+/// Go `URL.Hostname` for an IPv4 spelling the WHATWG parser rewrites.
+///
+/// The written host is compared with the site and with the allow list.
+/// It is not treated as the rewritten address.
+fn written_ipv4_host(
+    site_url: &str,
+    redirect: &str,
+    base: &Url,
+    target: &Url,
+    allow: &[String],
+) -> Result<bool, RedirectAllowListUnsupported> {
+    let raw_host = raw_authority(redirect).map(|part| part.host).unwrap_or("");
+    let site_host = raw_authority(site_url).map(|part| part.host).unwrap_or("");
+    if base.scheme() == target.scheme()
+        && site_host == raw_host
+        && (raw_port(site_url) == raw_port(redirect) || go_is_localhost(raw_host))
+    {
+        return Ok(true);
+    }
+    if !raw_host.is_empty() && raw_host.chars().all(|ch| ch.is_ascii_digit()) {
         return Ok(false);
     }
-    if let Ok(ip) = host.parse::<std::net::IpAddr>() {
+    if let Ok(ip) = raw_host.parse::<std::net::IpAddr>() {
         return Ok(ip.is_loopback());
     }
-    if (target.scheme == "http" || target.scheme == "https") && !regular_hostname(host) {
+    if (target.scheme() == "http" || target.scheme() == "https") && !regular_hostname(raw_host) {
         return Ok(false);
     }
     allow_list_matches(allow, redirect)
+}
+
+/// True when the WHATWG parser rewrote an IPv4 host to dotted decimal.
+fn noncanonical_ipv4(raw: &str, url: &Url) -> bool {
+    let Some(Host::Ipv4(ip)) = url.host() else {
+        return false;
+    };
+    let Some(authority) = raw_authority(raw) else {
+        return true;
+    };
+    authority.host != ip.to_string()
+}
+
+struct RawAuthority<'a> {
+    host: &'a str,
+    port: &'a str,
+}
+
+fn raw_port(raw: &str) -> &str {
+    raw_authority(raw)
+        .map(|authority| authority.port)
+        .unwrap_or("")
+}
+
+/// Host and port as written, before WHATWG canonicalization. The port is
+/// empty when the authority omits it, matching Go `URL.Port`.
+fn raw_authority(raw: &str) -> Option<RawAuthority<'_>> {
+    let (_, rest) = raw.split_once("://")?;
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or(rest);
+    if authority.is_empty() {
+        return None;
+    }
+    let hostport = authority
+        .rsplit_once('@')
+        .map_or(authority, |(_, host)| host);
+    if hostport.is_empty() {
+        return None;
+    }
+    if let Some(rest) = hostport.strip_prefix('[') {
+        let (host, after) = rest.split_once(']')?;
+        if host.is_empty() {
+            return None;
+        }
+        let port = if let Some(port) = after.strip_prefix(':') {
+            if port.is_empty() || !port.bytes().all(|byte| byte.is_ascii_digit()) {
+                return None;
+            }
+            port
+        } else if after.is_empty() {
+            ""
+        } else {
+            return None;
+        };
+        return Some(RawAuthority { host, port });
+    }
+    if let Some((host, port)) = hostport.rsplit_once(':') {
+        if !host.is_empty()
+            && !host.contains(':')
+            && !port.is_empty()
+            && port.bytes().all(|byte| byte.is_ascii_digit())
+        {
+            return Some(RawAuthority { host, port });
+        }
+    }
+    Some(RawAuthority {
+        host: hostport,
+        port: "",
+    })
 }
 
 /// `url_validator.go` `isLocalhost`. Used only to skip the port check.
@@ -1046,6 +1205,8 @@ fn regular_hostname(host: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || *byte == b'.' || *byte == b'-')
 }
 
+/// Glob the URL with its fragment removed. The query stays in the match
+/// text, as in GoTrue `IsRedirectURLValid`. Separators stay `.` and `/`.
 fn allow_list_matches(
     allow: &[String],
     redirect: &str,
@@ -1170,6 +1331,9 @@ fn is_glob_sep(byte: u8) -> bool {
 struct UrlParts {
     scheme: String,
     host: String,
+    // Redirect checks read the port from the raw authority. This field stays
+    // so the OAuth parser tests can see which port `url_parts` kept.
+    #[allow(dead_code)]
     port: String,
 }
 
@@ -2764,7 +2928,7 @@ mod tests {
     }
 
     #[test]
-    fn redirect_checks_ignore_userinfo() {
+    fn redirect_uses_the_host_after_userinfo() {
         let allow = Vec::<String>::new();
         assert!(!redirect_ok(
             "http://localhost:3000",
@@ -2779,12 +2943,47 @@ mod tests {
         )
         .unwrap());
         assert!(redirect_ok("https://127.0.0.1", "https://a.com:443@127.0.0.1/", &allow).unwrap());
+        assert!(redirect_ok(
+            "https://example.com",
+            "https://user@example.com/path",
+            &allow
+        )
+        .unwrap());
+        assert!(redirect_ok("https://example.com", "https://@example.com/path", &allow).unwrap());
         assert!(!redirect_ok(
             "http://localhost:3000",
             r"http://localhost\evil.com/cb",
             &allow
         )
         .unwrap());
+        assert!(
+            !redirect_ok("https://127.0.0.1", r"https://evil.com\@127.0.0.1/", &allow).unwrap()
+        );
+        assert!(!redirect_ok(
+            "https://example.com",
+            r"https://example.com\@welcome",
+            &allow
+        )
+        .unwrap());
+        assert!(redirect_ok(
+            "https://example.com",
+            r"https://example.com/callback\state",
+            &allow
+        )
+        .unwrap());
+        assert!(redirect_ok(
+            "https://example.com",
+            r"https://example.com/callback?state=a\b",
+            &allow
+        )
+        .unwrap());
+        assert!(redirect_ok(
+            "https://example.com",
+            "https://example.com/callback?email=a@b.com",
+            &allow
+        )
+        .unwrap());
+        assert!(redirect_ok("https://example.com", "https://example.com/@user", &allow).unwrap());
     }
 
     fn gotrue_allow_list() -> Vec<String> {
@@ -2914,6 +3113,14 @@ mod tests {
         assert!(redirect_ok("http://0.0.0.0:3000", "http://0.0.0.0:9/cb", &allow).unwrap());
         assert!(!redirect_ok("https://example.com", "http://0.0.0.0/cb", &allow).unwrap());
         assert!(!redirect_ok("http://localhost:3000", "http://LocalHost:9/cb", &allow).unwrap());
+        assert!(!redirect_ok("https://example.com", "https://Example.COM/dash", &allow).unwrap());
+        assert!(redirect_ok("https://example.com", "https://example.com/dash", &allow).unwrap());
+        assert!(!redirect_ok(
+            "https://example.com",
+            "https://example.com:443/dash",
+            &allow
+        )
+        .unwrap());
         assert!(redirect_ok(
             "http://app.localhost:3000",
             "http://app.localhost:9/cb",
@@ -2925,6 +3132,129 @@ mod tests {
         assert!(!redirect_ok("https://example.com", "http://8.8.8.8/path", &ip_glob).unwrap());
         let digit = vec!["http://2130706433/*".to_string()];
         assert!(!redirect_ok("https://example.com", "http://2130706433/path", &digit).unwrap());
+    }
+
+    #[test]
+    fn redirect_canonical_ipv4_and_glob_path() {
+        let allow = Vec::<String>::new();
+        for raw in [
+            "http://0x7f.0.0.1/path",
+            "http://0X7F000001/path",
+            "http://0177.0.0.1/cb",
+            "http://127.1/cb",
+            "http://127.0.0.1./cb",
+            "http://2130706433/path",
+        ] {
+            assert!(
+                !redirect_ok("http://127.0.0.1:3000", raw, &allow).unwrap(),
+                "{raw}"
+            );
+        }
+        assert!(redirect_ok("https://example.com", "http://127.0.0.1/cb", &allow).unwrap());
+        assert!(redirect_ok(
+            "https://example.com",
+            "http://[0:0:0:0:0:0:0:1]:12345/path",
+            &allow
+        )
+        .unwrap());
+
+        let hex = vec!["http://0x08080808/*".to_string()];
+        assert!(redirect_ok("https://example.com", "http://0x08080808/path", &hex).unwrap());
+        assert!(!redirect_ok("https://example.com", "http://0x08080808/path", &allow).unwrap());
+        let octal = vec!["http://010.010.010.010/*".to_string()];
+        assert!(redirect_ok("https://example.com", "http://010.010.010.010/path", &octal).unwrap());
+        assert!(!redirect_ok("https://example.com", "http://8.8.8.8/path", &hex).unwrap());
+        let shorthand = vec!["http://127.1/*".to_string()];
+        assert!(redirect_ok("https://example.com", "http://127.1/cb", &shorthand).unwrap());
+        assert!(!redirect_ok("https://example.com", "http://127.1/cb", &allow).unwrap());
+        assert!(redirect_ok("http://127.1", "http://127.1/cb", &allow).unwrap());
+        let mobile = vec!["myapp:**".to_string()];
+        assert!(redirect_ok("https://example.com", "myapp:callback", &mobile).unwrap());
+        assert!(redirect_ok("https://example.com", "myapp:callback#done", &mobile).unwrap());
+        assert!(redirect_ok("https://example.com", "myapp://", &mobile).unwrap());
+        assert!(redirect_ok("https://example.com", "myapp:///callback", &mobile).unwrap());
+        assert!(redirect_ok("myapp://", "myapp://", &allow).unwrap());
+        assert!(redirect_ok("myapp://", "myapp:///callback", &allow).unwrap());
+        assert!(redirect_ok("myapp:callback", "myapp:other", &allow).unwrap());
+        assert!(!redirect_ok("https://example.com", "myapp:///callback", &allow).unwrap());
+        assert!(!redirect_ok("https://example.com", "myapp:callback", &allow).unwrap());
+        assert!(!redirect_ok("https://example.com", "myapp://", &allow).unwrap());
+        assert!(!redirect_ok("https://example.com", "myapp:///callback", &allow).unwrap());
+        assert!(!redirect_ok("https://example.com", "http:relative", &allow).unwrap());
+
+        let state = referrer_state(gotrue_allow_list());
+        let rejected = [
+            r"https://evil.com\@127.0.0.1/",
+            "http://0x7f.0.0.1/path",
+            "http://0177.0.0.1/cb",
+            "http://2130706433/phish",
+        ];
+        for raw in rejected {
+            let got = link_referrer(&state, &HeaderMap::new(), raw, "").unwrap();
+            assert_eq!(got, "https://example.com", "{raw}");
+        }
+        let kept = link_referrer(
+            &state,
+            &HeaderMap::new(),
+            "https://a.com:443@127.0.0.1/",
+            "",
+        )
+        .unwrap();
+        assert_eq!(kept, "https://a.com:443@127.0.0.1/");
+
+        let wide = vec!["http://**:12345/*".to_string()];
+        assert!(redirect_ok("https://example.com", "http://a.b:12345/path", &wide).unwrap());
+        assert!(redirect_ok(
+            "https://example.com",
+            "http://evil.example/steal?next=:12345/path",
+            &wide
+        )
+        .unwrap());
+        let star = vec!["http://*.localhost:8000/*".to_string()];
+        assert!(redirect_ok(
+            "https://example.com",
+            "http://foo.localhost:8000/path?param=1",
+            &star
+        )
+        .unwrap());
+        assert!(redirect_ok(
+            "https://example.com",
+            "http://evil?.localhost:8000/path",
+            &star
+        )
+        .unwrap());
+        let literal = vec!["http://example.com/*".to_string()];
+        assert!(redirect_ok(
+            "https://app.test",
+            "http://example.com/a?b=1#section",
+            &literal
+        )
+        .unwrap());
+        assert!(!redirect_ok(
+            "https://app.test",
+            "http://evil.com/?http://example.com/a",
+            &literal
+        )
+        .unwrap());
+        let exact = vec!["https://app.example/callback".to_string()];
+        assert!(redirect_ok(
+            "https://example.com",
+            "https://app.example/callback",
+            &exact
+        )
+        .unwrap());
+        assert!(redirect_ok(
+            "https://example.com",
+            "https://app.example/callback#section",
+            &exact
+        )
+        .unwrap());
+        assert!(!redirect_ok(
+            "https://example.com",
+            "https://app.example/callback?next=1",
+            &exact
+        )
+        .unwrap());
     }
 
     #[test]
