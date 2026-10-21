@@ -4,15 +4,15 @@
     "units": 1036,
     "implemented": 352,
     "tested": 218,
-    "conformant": 218
+    "conformant": 211
   },
   "percent": {
     "coverage": 34.0,
-    "conformance": 100.0,
-    "done": 21.0
+    "conformance": 97.1,
+    "done": 20.4
   },
   "judge": {
-    "cases": 468,
+    "cases": 482,
     "passing": 468
   },
   "components": {
@@ -324,7 +324,7 @@
       "units": 93,
       "implemented": 93,
       "tested": 93,
-      "conformant": 93,
+      "conformant": 86,
       "groups": {
         "aggregates": {
           "units": 5,
@@ -342,7 +342,7 @@
           "units": 28,
           "implemented": 28,
           "tested": 28,
-          "conformant": 28
+          "conformant": 21
         },
         "logic": {
           "units": 3,
@@ -734,28 +734,28 @@
     "rest:filter-operator:cd": "conformant",
     "rest:filter-operator:cs": "conformant",
     "rest:filter-operator:eq": "conformant",
-    "rest:filter-operator:fts": "conformant",
+    "rest:filter-operator:fts": "tested",
     "rest:filter-operator:gt": "conformant",
     "rest:filter-operator:gte": "conformant",
-    "rest:filter-operator:ilike": "conformant",
-    "rest:filter-operator:imatch": "conformant",
+    "rest:filter-operator:ilike": "tested",
+    "rest:filter-operator:imatch": "tested",
     "rest:filter-operator:in": "conformant",
     "rest:filter-operator:is": "conformant",
     "rest:filter-operator:isdistinct": "conformant",
     "rest:filter-operator:like": "conformant",
     "rest:filter-operator:lt": "conformant",
     "rest:filter-operator:lte": "conformant",
-    "rest:filter-operator:match": "conformant",
+    "rest:filter-operator:match": "tested",
     "rest:filter-operator:neq": "conformant",
     "rest:filter-operator:not": "conformant",
     "rest:filter-operator:nxl": "conformant",
     "rest:filter-operator:nxr": "conformant",
     "rest:filter-operator:ov": "conformant",
-    "rest:filter-operator:phfts": "conformant",
-    "rest:filter-operator:plfts": "conformant",
+    "rest:filter-operator:phfts": "tested",
+    "rest:filter-operator:plfts": "tested",
     "rest:filter-operator:sl": "conformant",
     "rest:filter-operator:sr": "conformant",
-    "rest:filter-operator:wfts": "conformant",
+    "rest:filter-operator:wfts": "tested",
     "rest:logic-operator:and": "conformant",
     "rest:logic-operator:not": "conformant",
     "rest:logic-operator:or": "conformant",
