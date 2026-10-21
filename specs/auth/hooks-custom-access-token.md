@@ -163,6 +163,12 @@ wrapping `Error running hook URI` failure.
   Auth error does yet.
 - **In-memory backend.** Tests use a Rust closure as the hook function.
   Memory writes are not transactional, so a failure keeps the session.
+- **`aud` shape.** golang-jwt `MarshalSingleStringAsArray` defaults to
+  true, so the first hook input in a GoTrue process has `aud` as a
+  one-element array. `SignJWT` then sets that global false, and later
+  tokens use a string. Megabase always sends a string. The judge fixture
+  collapses a one-element `aud` array to a string so the hook cases do
+  not depend on request order.
 
 ## Tests
 
