@@ -227,6 +227,10 @@ jobs:
           # `functions` service (judge/compose.override.yml VERIFY_JWT).
           MEGABASE_FUNCTIONS_DIR: vendor/supabase/docker/volumes/functions
           FUNCTIONS_VERIFY_JWT: "true"
+          # Same pg-functions hook as the reference auth service
+          # (judge/compose.override.yml). No webhook secret.
+          GOTRUE_HOOK_CUSTOM_ACCESS_TOKEN_ENABLED: "true"
+          GOTRUE_HOOK_CUSTOM_ACCESS_TOKEN_URI: "pg-functions://postgres/public/custom_access_token_hook"
         run: |
           set -euo pipefail
           JWT_SECRET=$(grep '^JWT_SECRET=' vendor/supabase/docker/.env.example | cut -d= -f2-)

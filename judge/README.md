@@ -28,7 +28,9 @@ Images published on `public.ecr.aws` come from `ghcr.io/zouhairmaj`
 mirrors at the same tag and digest, with ECR as the CI fallback
 ([decision 0041](../docs/decisions/0041-ghcr-supabase-image-mirrors.md)). It uses named volumes
 so nothing is written into `vendor/`, turns on Auth autoconfirm (the
-stack has no mail server), and can start Megabase on host port 8100
+stack has no mail server), enables the pg-functions custom access token
+hook (`public.custom_access_token_hook`) on Auth and on the Megabase
+service, and can start Megabase on host port 8100
 against a dedicated `megabase` database. Kong's entrypoint is
 `!override`, which needs Docker Compose 2.24.4 or newer. The ECR
 library image has `/docker-entrypoint.sh`, and an appended vendor
@@ -80,7 +82,11 @@ A final job named `Judge` merges the JSON results and is the required
 status check. Each service job reads `JWT_SECRET` and `POSTGRES_PASSWORD`
 from `vendor/supabase/docker/.env.example` and sets
 `DATABASE_URL=postgres://supabase_admin:<password>@127.0.0.1:54322/megabase`
-after `prepare` creates that database. Host `:5432` is Supavisor; the
+after `prepare` creates that database. The runner sets
+`GOTRUE_HOOK_CUSTOM_ACCESS_TOKEN_ENABLED` and
+`GOTRUE_HOOK_CUSTOM_ACCESS_TOKEN_URI` to the same pg-functions hook as
+the reference Auth service. The hidden-suite and lockfile judge jobs
+set those same two variables. Host `:5432` is Supavisor; the
 `postgres` role cannot `CREATE` in schema `auth`, so CI uses
 `supabase_admin`. Sharing the official `postgres` database would make
 catalog and row comparisons vacuous. Local `just judge-up` builds the

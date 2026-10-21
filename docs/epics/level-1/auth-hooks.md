@@ -10,4 +10,4 @@ Specs go in `specs/auth/<unit>.md` (GOAL.md section 5). Mark served code with `/
 
 | State | Unit id | Upstream source |
 |---|---|---|
-| 🟨 | `auth:hook:custom_access_token` | [internal/conf/configuration.go:937](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/conf/configuration.go#L937) |
+| 🟩 | `auth:hook:custom_access_token` | [internal/conf/configuration.go:937](https://github.com/supabase/auth/blob/4eee58f296d9698a1c2c0ae14d7a0b379c7622d3/internal/conf/configuration.go#L937) |
