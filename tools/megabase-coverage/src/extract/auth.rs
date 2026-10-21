@@ -271,6 +271,25 @@ fn verify_types(ctx: &mut Ctx, repo: &Repo) -> Result<()> {
     Ok(())
 }
 
+/// Level of an `auth` SQL table.
+///
+/// A table takes the level of the feature that owns it
+/// (`docs/decisions/0046-feature-auth-tables-follow-feature-level.md`).
+/// MFA, OAuth, SAML, SSO, SCIM, passkeys, and custom OAuth providers are
+/// Level 2. Email/password and JWT tables stay Level 1.
+fn sql_table_level(table: &str) -> u8 {
+    const LEVEL_2_PREFIXES: &[&str] = &["mfa_", "oauth_", "saml_", "sso_", "scim_", "webauthn_"];
+    if table == "custom_oauth_providers"
+        || LEVEL_2_PREFIXES
+            .iter()
+            .any(|prefix| table.starts_with(prefix))
+    {
+        2
+    } else {
+        1
+    }
+}
+
 fn sql_objects(ctx: &mut Ctx, repo: &Repo) -> Result<()> {
     let function_re = Regex::new(
         r"(?i)create\s+(?:or\s+replace\s+)?function\s+\{\{[^}]*\}\}\.([a-z_][a-z0-9_]*)",
@@ -289,12 +308,18 @@ fn sql_objects(ctx: &mut Ctx, repo: &Repo) -> Result<()> {
         ] {
             for c in re.captures_iter(&text) {
                 count += 1;
+                let object = c[1].to_lowercase();
+                let level = if kind == "sql-table" {
+                    sql_table_level(&object)
+                } else {
+                    1
+                };
                 ctx.out.item(UnitSpec {
                     component: C,
                     group: "database",
                     kind,
-                    name: format!("auth.{}{fmt}", c[1].to_lowercase()),
-                    level: 1,
+                    name: format!("auth.{object}{fmt}"),
+                    level,
                     source: repo.source(&file, &text, c.get(0).unwrap().start()),
                 });
             }
@@ -328,5 +353,45 @@ mod tests {
         assert_eq!(route_level("/user/oauth/grants"), 2);
         assert_eq!(route_level("/authorize"), 2);
         assert_eq!(route_level("/.well-known/jwks.json"), 2);
+    }
+
+    #[test]
+    fn feature_auth_tables_follow_the_feature_level() {
+        for table in [
+            "mfa_amr_claims",
+            "mfa_challenges",
+            "mfa_factors",
+            "mfa_recovery_code_sets",
+            "mfa_recovery_codes",
+            "oauth_authorizations",
+            "oauth_client_states",
+            "oauth_clients",
+            "oauth_consents",
+            "saml_providers",
+            "saml_relay_states",
+            "scim_tokens",
+            "scim_users",
+            "sso_domains",
+            "sso_providers",
+            "sso_sessions",
+            "webauthn_challenges",
+            "webauthn_credentials",
+            "custom_oauth_providers",
+        ] {
+            assert_eq!(sql_table_level(table), 2, "{table}");
+        }
+        for table in [
+            "users",
+            "identities",
+            "sessions",
+            "refresh_tokens",
+            "audit_log_entries",
+            "one_time_tokens",
+            "flow_state",
+            "instances",
+            "schema_migrations",
+        ] {
+            assert_eq!(sql_table_level(table), 1, "{table}");
+        }
     }
 }
