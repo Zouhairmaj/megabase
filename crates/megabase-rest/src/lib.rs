@@ -29,7 +29,7 @@ mod rpc;
 use std::sync::Arc;
 
 use axum::Router;
-use megabase_core::{Config, Hs256};
+use megabase_core::{ApiRoles, Config, Hs256};
 
 pub use db::connect;
 pub use query::interpret_query;
@@ -42,6 +42,7 @@ pub struct RestState {
     pool: Option<sqlx::PgPool>,
     jwt: Option<Arc<Hs256>>,
     aggregates: bool,
+    api_roles: ApiRoles,
 }
 
 impl RestState {
@@ -56,6 +57,7 @@ impl RestState {
             pool: None,
             jwt,
             aggregates: config.db_aggregates_enabled,
+            api_roles: config.api_roles(),
         }
     }
 
