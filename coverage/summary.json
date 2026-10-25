@@ -2,12 +2,12 @@
   "schema": 1,
   "totals": {
     "units": 1036,
-    "implemented": 358,
+    "implemented": 362,
     "tested": 219,
     "conformant": 209
   },
   "percent": {
-    "coverage": 34.6,
+    "coverage": 34.9,
     "conformance": 97.7,
     "done": 20.2
   },
@@ -390,7 +390,7 @@
     },
     "storage": {
       "units": 154,
-      "implemented": 100,
+      "implemented": 104,
       "tested": 35,
       "conformant": 35,
       "groups": {
@@ -426,7 +426,7 @@
         },
         "object": {
           "units": 22,
-          "implemented": 18,
+          "implemented": 22,
           "tested": 0,
           "conformant": 0
         },
@@ -867,6 +867,8 @@
     "storage:route:HEAD /storage/v1/iceberg/v1/{prefix}/namespaces/{namespace}": "implemented",
     "storage:route:HEAD /storage/v1/iceberg/v1/{prefix}/namespaces/{namespace}/tables/{table}": "implemented",
     "storage:route:HEAD /storage/v1/object/authenticated/{bucketName}/{*}": "implemented",
+    "storage:route:HEAD /storage/v1/object/public/{bucketName}/{*}": "implemented",
+    "storage:route:HEAD /storage/v1/object/{bucketName}/{*}": "implemented",
     "storage:route:HEAD /storage/v1/s3/{Bucket}": "conformant",
     "storage:route:HEAD /storage/v1/s3/{Bucket}/{*}": "conformant",
     "storage:route:POST /storage/v1/bucket": "conformant",
@@ -876,6 +878,7 @@
     "storage:route:POST /storage/v1/iceberg/v1/{prefix}/namespaces/{namespace}/tables": "implemented",
     "storage:route:POST /storage/v1/iceberg/v1/{prefix}/namespaces/{namespace}/tables/{table}": "implemented",
     "storage:route:POST /storage/v1/object/copy": "implemented",
+    "storage:route:POST /storage/v1/object/list-v2/{bucketName}": "implemented",
     "storage:route:POST /storage/v1/object/list/{bucketName}": "implemented",
     "storage:route:POST /storage/v1/object/move": "implemented",
     "storage:route:POST /storage/v1/object/sign/{bucketName}": "implemented",
@@ -898,6 +901,7 @@
     "storage:route:POST /storage/v1/vector/ListVectorBuckets": "implemented",
     "storage:route:PUT /storage/v1/bucket/{bucketId}": "conformant",
     "storage:route:PUT /storage/v1/bucket/{bucketId}/lifecycle": "conformant",
+    "storage:route:PUT /storage/v1/object/upload/sign/{bucketName}/{*}": "implemented",
     "storage:route:PUT /storage/v1/object/{bucketName}/{*}": "implemented",
     "storage:route:PUT /storage/v1/s3/{Bucket}": "conformant",
     "storage:route:PUT /storage/v1/s3/{Bucket}/{*}": "conformant",

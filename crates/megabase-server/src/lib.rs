@@ -132,7 +132,8 @@ pub fn create_router_with(auth: &megabase_auth::AuthState) -> Router {
 pub fn create_router_from(auth: &megabase_auth::AuthState, config: &Config) -> Router {
     let rest = megabase_rest::RestState::from_config(config);
     let meta = megabase_meta::MetaState::new(None, config.jwt_hs256().ok());
-    let storage = megabase_storage::StorageState::new(None, config.jwt_hs256().ok());
+    let storage = megabase_storage::StorageState::new(None, config.jwt_hs256().ok())
+        .with_api_roles(config.api_roles());
     apply_http_layers(
         assemble(&Services {
             auth,
@@ -140,7 +141,8 @@ pub fn create_router_from(auth: &megabase_auth::AuthState, config: &Config) -> R
             meta: &meta,
             storage: &storage,
             functions: &megabase_functions::FunctionsState::disabled(),
-            realtime: &megabase_realtime::RealtimeState::new(config.jwt_hs256().ok()),
+            realtime: &megabase_realtime::RealtimeState::new(config.jwt_hs256().ok())
+                .with_api_roles(config.api_roles()),
         }),
         config,
     )
@@ -226,7 +228,8 @@ pub async fn run(config: Config) -> std::io::Result<()> {
     // REST, Postgres Meta and Storage share one pool; each request that
     // changes session state does so with `SET LOCAL` inside a transaction.
     let mut pool = None;
-    let mut realtime = megabase_realtime::RealtimeState::new(config.jwt_hs256().ok());
+    let mut realtime = megabase_realtime::RealtimeState::new(config.jwt_hs256().ok())
+        .with_api_roles(config.api_roles());
     if let Some(url) = config.database_url.as_deref() {
         info!("connecting rest pool");
         let shared = megabase_rest::connect(url)
@@ -252,7 +255,8 @@ pub async fn run(config: Config) -> std::io::Result<()> {
     }
     let meta = megabase_meta::MetaState::new(pool.clone(), config.jwt_hs256().ok());
     let storage = megabase_storage::StorageState::new(pool, config.jwt_hs256().ok())
-        .with_file_root(config.storage_file_path.as_deref());
+        .with_file_root(config.storage_file_path.as_deref())
+        .with_api_roles(config.api_roles());
     if config.storage_file_path.is_none() {
         info!("FILE_STORAGE_BACKEND_PATH unset or empty;/storage/v1/object routes answer 501");
     }

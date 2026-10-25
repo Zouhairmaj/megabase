@@ -122,7 +122,7 @@ Implemented and tested counts come from markers and `judge/cases/`. Live conform
 | Storage | database | 2 | 46 | 15 | 0 |
 | Storage | health | 2 | 1 | 1 | 0 |
 | Storage | iceberg | 2 | 15 | 15 | 0 |
-| Storage | object | 2 | 22 | 18 | 0 |
+| Storage | object | 2 | 22 | 22 | 0 |
 | Storage | render | 2 | 3 | 3 | 3 |
 | Storage | resumable | 2 | 16 | 0 | 0 |
 | Storage | s3 | 2 | 26 | 26 | 26 |

@@ -23,10 +23,10 @@ use crate::params::parse_get_query;
 use crate::prefer::Prefer;
 use crate::query::{percent_decode, query_parts};
 use crate::read::{
-    begin, content_range, database_unavailable, negotiate_write, negotiated_schema,
-    not_implemented, options_response, pgrst, profile_header, query_fail, query_failure,
-    reject_accept, session, set_request_context, singular_check, unimplemented_unit, unsafe_type,
-    ReadShape, Session, JSON_UTF8,
+    begin, content_range, database_unavailable, enforce_db_role, negotiate_write,
+    negotiated_schema, not_implemented, options_response, pgrst, profile_header, query_fail,
+    query_failure, reject_accept, session, set_request_context, singular_check, unimplemented_unit,
+    unsafe_type, ReadShape, Session, JSON_UTF8,
 };
 use crate::RestState;
 
@@ -275,6 +275,7 @@ pub(crate) async fn call(
     }
     if method == Method::OPTIONS {
         // megabase:unit rest:route:OPTIONS /rest/v1/rpc/{function}
+        // Volatility is read as the pool user. The JWT role is not applied.
         return routine_options(state, method, uri, &session, &schema, function).await;
     }
     if let Some(unit) = Prefer::from_headers(headers).rpc_unserved() {
@@ -292,6 +293,11 @@ pub(crate) async fn call(
         Ok(invocation) => invocation,
         Err(response) => return *response,
     };
+    // After every request check that can answer 501, and before the
+    // statement that applies the role.
+    if let Err(response) = enforce_db_role(state.pool.as_ref(), &session).await {
+        return *response;
+    }
     let call = Call {
         session: &session,
         schema: &schema,
