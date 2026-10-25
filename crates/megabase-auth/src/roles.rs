@@ -1,16 +1,18 @@
-//! Creates the standard API roles the Supabase Postgres image ships.
+//! Creates the standard API roles and Supabase admin roles a stock
+//! PostgreSQL lacks.
 //!
 //! `anon`, `authenticated`, `service_role` and `authenticator` are cluster
 //! objects applications depend on: migrations say `to authenticated` and
-//! `grant ... to anon`, and REST `SET`s the JWT role for every statement. The
-//! official image creates them at `initdb`; a stock PostgreSQL has none. The
-//! SQL is `sql/roles.sql`, ported from the vendored copies of that setup
-//! (Storage tenant migration, Supavisor dev setup). Spec:
+//! `grant ... to anon`, and REST `SET`s the JWT role for every statement.
+//! `supabase_admin`, `supabase_auth_admin`, `supabase_storage_admin` and
+//! `supabase_realtime_admin` are what dumps, policies and the realtime
+//! schema name. The official image creates them at `initdb`; a stock
+//! PostgreSQL has none. The SQL is `sql/roles.sql`. Spec:
 //! `specs/core/roles.md`.
 
 use std::time::Duration;
 
-use crate::schema::{connect, reject_tls, SchemaError};
+use crate::schema::{reject_tls, SchemaError};
 
 /// Whole-install bound (connect + SQL). Startup fails instead of hanging.
 const INSTALL_DEADLINE: Duration = Duration::from_secs(30);
@@ -23,7 +25,8 @@ pub enum RolesError {
     #[error("installing standard roles timed out after {timeout:?}")]
     TimedOut { timeout: Duration },
     #[error(
-        "installing standard roles (anon, authenticated, service_role, authenticator): {0}; \
+        "installing standard roles (anon, authenticated, service_role, authenticator, \
+         supabase_admin, supabase_auth_admin, supabase_storage_admin, supabase_realtime_admin): {0}; \
          DATABASE_URL must connect as a superuser, or as a role with CREATEROLE that owns the public schema"
     )]
     Postgres(#[from] tokio_postgres::Error),
@@ -40,13 +43,18 @@ impl From<SchemaError> for RolesError {
     }
 }
 
-/// Create the standard roles, memberships, `public` usage and default
-/// privileges when they are missing.
+/// Create the standard roles, admin roles, memberships, `public` usage and
+/// default privileges when they are missing.
 ///
 /// Idempotent. A role that already exists keeps its attributes: a cluster the
 /// official stack initialised is not altered. Memberships and grants are
 /// added only when absent. Runs in one transaction under
 /// `pg_advisory_xact_lock(hashtext('megabase.core.install_roles'))`.
+///
+/// An attribute the connecting role is not allowed to grant (for example
+/// `SUPERUSER` when it is not a superuser) is skipped. PostgreSQL reports
+/// that as a `WARNING`, and this function logs it at `warn`. The role is
+/// still created, and startup continues.
 ///
 /// # Errors
 ///
@@ -68,11 +76,42 @@ async fn install_roles_within(database_url: &str, deadline: Duration) -> Result<
 }
 
 async fn install_roles_inner(database_url: &str) -> Result<(), RolesError> {
-    let client = connect(database_url).await?;
+    let (client, connection) = tokio_postgres::connect(database_url, tokio_postgres::NoTls).await?;
+    // Notices (the attribute WARNINGs) are only visible while this task
+    // polls the connection. `schema::connect` awaits the connection future,
+    // which drops them.
+    let logged = tokio::spawn(log_role_notices(connection));
     // A failed batch leaves the session in an aborted transaction; the client
     // is dropped on return, which rolls back. Do not reuse it after an error.
-    client.batch_execute(ROLES).await?;
+    let executed = client.batch_execute(ROLES).await;
+    drop(client);
+    let _ = logged.await;
+    executed?;
     Ok(())
+}
+
+/// Forward PostgreSQL notices from the role install to `tracing`.
+///
+/// `RAISE WARNING` in `roles.sql` is how a missing privilege degrades
+/// without aborting the transaction. The message is the warning text.
+async fn log_role_notices<S, T>(mut connection: tokio_postgres::Connection<S, T>)
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
+    T: tokio_postgres::tls::TlsStream + Unpin + Send + 'static,
+{
+    loop {
+        match std::future::poll_fn(|cx| connection.poll_message(cx)).await {
+            Some(Ok(tokio_postgres::AsyncMessage::Notice(notice))) => {
+                tracing::warn!(severity = notice.severity(), "{}", notice.message());
+            }
+            Some(Ok(_)) => {}
+            Some(Err(error)) => {
+                tracing::error!(%error, "roles postgres connection closed");
+                break;
+            }
+            None => break,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -101,18 +140,25 @@ mod tests {
         assert!(ROLES.contains("CREATE ROLE authenticator LOGIN NOINHERIT;"));
         assert_eq!(
             ROLES.matches("BYPASSRLS").count(),
-            1,
-            "only service_role bypasses RLS"
+            3,
+            "service_role, the supabase_admin CREATE, and its attribute fallback"
         );
-        assert_eq!(ROLES.matches("CREATE ROLE").count(), 4);
+        // Four literal API-role statements, plus five admin-role format
+        // strings (base and full for supabase_admin, base and full for the
+        // auth/storage pair, and the realtime base).
+        assert_eq!(ROLES.matches("CREATE ROLE").count(), 9);
         let lower = ROLES.to_ascii_lowercase();
         assert!(
             !lower.contains("password '"),
             "no password is set or embedded"
         );
         assert!(
+            ROLES.contains("NOLOGIN SUPERUSER CREATEDB CREATEROLE INHERIT REPLICATION BYPASSRLS"),
+            "supabase_admin is superuser-like"
+        );
+        assert!(
             !lower.contains("superuser;"),
-            "no role is created superuser"
+            "no role statement ends by making an API role a superuser"
         );
         assert!(
             !lower.contains("grant postgres to authenticator"),
@@ -134,14 +180,61 @@ mod tests {
         }
         assert_eq!(
             ROLES
-                .matches("EXCEPTION WHEN duplicate_object THEN NULL;")
+                .matches("EXCEPTION WHEN duplicate_object OR unique_violation THEN NULL;")
                 .count(),
             4,
             "a concurrent CREATE ROLE on another database is tolerated"
         );
         assert!(
-            !ROLES.contains("ALTER ROLE"),
-            "an existing role keeps its attributes"
+            !ROLES[..ROLES.find("admin_role").expect("admin block")].contains("ALTER ROLE"),
+            "an existing API role keeps its attributes"
+        );
+    }
+
+    #[test]
+    fn admin_roles_are_nologin_and_created_only_when_missing() {
+        for role in [
+            "supabase_admin",
+            "supabase_auth_admin",
+            "supabase_storage_admin",
+            "supabase_realtime_admin",
+        ] {
+            assert!(
+                ROLES.contains(&format!("'{role}'")),
+                "{role} is in the admin-role list"
+            );
+        }
+        let guard = ROLES
+            .find("IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = admin_role) THEN")
+            .expect("skip when the role exists");
+        let create = ROLES
+            .find("CREATE ROLE %I NOLOGIN SUPERUSER")
+            .expect("supabase_admin attributes");
+        assert!(guard < create, "a role that already exists is not altered");
+        assert!(ROLES.contains("NOLOGIN NOINHERIT CREATEROLE NOREPLICATION"));
+        assert!(ROLES.contains("NOLOGIN NOINHERIT NOREPLICATION"));
+        assert_eq!(
+            ROLES
+                .matches("WHEN duplicate_object OR unique_violation THEN")
+                .count(),
+            6,
+            "admin creates tolerate duplicate_object and unique_violation too"
+        );
+        let degraded = ROLES
+            .find("WHEN insufficient_privilege THEN")
+            .expect("degrade");
+        let alter = ROLES.find("ALTER ROLE").expect("attribute grant");
+        assert!(
+            degraded < alter,
+            "ALTER ROLE runs only after the full CREATE was denied"
+        );
+        assert_eq!(ROLES.matches("ALTER ROLE").count(), 1);
+        assert!(ROLES.contains(
+            "RAISE WARNING 'megabase: connecting role cannot grant % to %; role created without it'"
+        ));
+        assert!(
+            !ROLES.to_ascii_lowercase().contains("password '"),
+            "admin roles get no password"
         );
     }
 

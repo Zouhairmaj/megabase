@@ -69,6 +69,26 @@ pub struct AuthState {
     /// `POST /sso/saml/acs` limiter: `GOTRUE_SAML_RATE_LIMIT_ASSERTION`
     /// (default 15) per five minutes, burst 30, one bucket per header value.
     pub(crate) saml_assertion_limiter: Arc<KeyedLimiter>,
+    /// `GET`/`POST /verify` limiter: `GOTRUE_RATE_LIMIT_VERIFY` (default 30)
+    /// per five minutes, burst 30. Keyed like GoTrue `performRateLimiting`.
+    pub(crate) verify_limiter: Arc<KeyedLimiter>,
+    /// `POST /otp` and `POST /magiclink`: `GOTRUE_RATE_LIMIT_OTP` (default 30)
+    /// per five minutes, burst 30. Keyed like [`Self::verify_limiter`].
+    pub(crate) otp_limiter: Arc<KeyedLimiter>,
+    /// `POST /factors/{id}/verify` and `POST /factors/recovery-codes/verify`:
+    /// GoTrue `FactorVerify`, `GOTRUE_MFA_RATE_LIMIT_CHALLENGE_AND_VERIFY`
+    /// (default 15) per minute, burst 30, one-minute entry TTL.
+    pub(crate) factor_verify_limiter: Arc<KeyedLimiter>,
+    /// `POST /factors/{id}/challenge`: GoTrue `FactorChallenge`. Same
+    /// setting and entry TTL as [`Self::factor_verify_limiter`], own bucket.
+    pub(crate) factor_challenge_limiter: Arc<KeyedLimiter>,
+    /// `GOTRUE_SECURITY_SB_FORWARDED_FOR_ENABLED`. Default false: the verify
+    /// and OTP limiters use [`Self::rate_limit_header`] only.
+    pub sb_forwarded_for_enabled: bool,
+    /// `MEGABASE_AUTH_OTP_MAX_FAILED_ATTEMPTS`. `0` leaves a bad code in
+    /// place, matching GoTrue. A positive value clears that user's pending
+    /// verification tokens and one-time-token rows.
+    pub otp_max_failed_attempts: u32,
     /// Shared Auth pool. `try_from_env` leaves this empty. `megabase_server::run`
     /// replaces it with `Backend::connect` before `router_with_state`, and
     /// closes it on shutdown. Signup, logout, verify, the password and
@@ -171,6 +191,29 @@ impl AuthState {
                 )? / (60.0 * 5.0),
                 TOKEN_BURST,
             )),
+            verify_limiter: per_five_minutes(
+                &lookup,
+                "GOTRUE_RATE_LIMIT_VERIFY",
+                DEFAULT_VERIFY_RATE,
+            )?,
+            otp_limiter: per_five_minutes(&lookup, "GOTRUE_RATE_LIMIT_OTP", DEFAULT_OTP_RATE)?,
+            factor_verify_limiter: per_minute(
+                &lookup,
+                "GOTRUE_MFA_RATE_LIMIT_CHALLENGE_AND_VERIFY",
+                DEFAULT_MFA_CHALLENGE_AND_VERIFY_RATE,
+            )?,
+            factor_challenge_limiter: per_minute(
+                &lookup,
+                "GOTRUE_MFA_RATE_LIMIT_CHALLENGE_AND_VERIFY",
+                DEFAULT_MFA_CHALLENGE_AND_VERIFY_RATE,
+            )?,
+            sb_forwarded_for_enabled: security_flag(
+                &lookup,
+                "GOTRUE_SECURITY_SB_FORWARDED_FOR_ENABLED",
+            )?,
+            otp_max_failed_attempts: otp_max_failed_attempts(lookup(
+                "MEGABASE_AUTH_OTP_MAX_FAILED_ATTEMPTS",
+            ))?,
             backend: Backend::none(),
         })
     }
@@ -213,6 +256,12 @@ impl AuthState {
             oauth_register_limiter: defaults.oauth_register_limiter,
             sso_limiter: defaults.sso_limiter,
             saml_assertion_limiter: defaults.saml_assertion_limiter,
+            verify_limiter: defaults.verify_limiter,
+            otp_limiter: defaults.otp_limiter,
+            factor_verify_limiter: defaults.factor_verify_limiter,
+            factor_challenge_limiter: defaults.factor_challenge_limiter,
+            sb_forwarded_for_enabled: defaults.sb_forwarded_for_enabled,
+            otp_max_failed_attempts: defaults.otp_max_failed_attempts,
             backend,
         }
     }
@@ -302,7 +351,9 @@ impl MailConfig {
 /// `GOTRUE_RATE_LIMIT_HEADER` of the reference stack
 /// (`judge/compose.override.yml`). Like the other unset `GOTRUE_*` defaults
 /// in [`crate::AuthConfig`], an unset variable follows that stack rather than
-/// GoTrue's empty default. Requests without the header are never limited.
+/// GoTrue's empty default. Requests without the header are not counted on
+/// that key unless `GOTRUE_SECURITY_SB_FORWARDED_FOR_ENABLED` selects
+/// `Sb-Forwarded-For`.
 const REFERENCE_RATE_LIMIT_HEADER: &str = "X-Megabase-Judge-Rate-Key";
 
 /// `GOTRUE_RATE_LIMIT_TOKEN_REFRESH` of the reference stack, which lowers
@@ -317,6 +368,48 @@ const DEFAULT_OAUTH_REGISTER_RATE: f64 = 10.0;
 const DEFAULT_SSO_RATE: f64 = 30.0;
 /// `SAMLConfiguration.RateLimitAssertion` default.
 const DEFAULT_SAML_ASSERTION_RATE: f64 = 15.0;
+/// `RateLimitVerify` default (`GOTRUE_RATE_LIMIT_VERIFY`).
+const DEFAULT_VERIFY_RATE: f64 = 30.0;
+/// `RateLimitOtp` default (`GOTRUE_RATE_LIMIT_OTP`).
+const DEFAULT_OTP_RATE: f64 = 30.0;
+/// `MFA.RateLimitChallengeAndVerify` default. The reference stack does not set it.
+const DEFAULT_MFA_CHALLENGE_AND_VERIFY_RATE: f64 = 15.0;
+/// `FactorVerify` entry TTL (`DefaultExpirationTTL: time.Minute`).
+const MFA_VERIFY_ENTRY_TTL: Duration = Duration::from_secs(60);
+
+fn otp_max_failed_attempts(raw: Option<String>) -> Result<u32, ConfigError> {
+    let Some(raw) = raw.filter(|value| !value.trim().is_empty()) else {
+        return Ok(0);
+    };
+    raw.trim().parse().map_err(|_| ConfigError::Invalid {
+        key: "MEGABASE_AUTH_OTP_MAX_FAILED_ATTEMPTS".into(),
+        value: raw,
+    })
+}
+
+/// Events per minute, burst [`TOKEN_BURST`], entries kept for one minute.
+fn per_minute(
+    lookup: &impl Fn(&str) -> Option<String>,
+    key: &str,
+    default: f64,
+) -> Result<Arc<KeyedLimiter>, ConfigError> {
+    Ok(Arc::new(KeyedLimiter::with_entry_ttl(
+        rate_setting(lookup, key, default)? / 60.0,
+        TOKEN_BURST,
+        MFA_VERIFY_ENTRY_TTL,
+    )))
+}
+
+fn per_five_minutes(
+    lookup: &impl Fn(&str) -> Option<String>,
+    key: &str,
+    default: f64,
+) -> Result<Arc<KeyedLimiter>, ConfigError> {
+    Ok(Arc::new(KeyedLimiter::new(
+        rate_setting(lookup, key, default)? / (60.0 * 5.0),
+        TOKEN_BURST,
+    )))
+}
 
 /// A `GOTRUE_RATE_LIMIT_*` float (events per five minutes); unset or empty
 /// is `default`.
@@ -585,6 +678,35 @@ mod tests {
         assert_eq!(rate_setting(&set, key, 1.0).unwrap(), 150.0);
         let bad = |name: &str| (name == key).then(|| "lots".to_string());
         assert!(rate_setting(&bad, key, 1.0).is_err());
+        assert!(AuthState::try_from_lookup(|name| {
+            (name == "GOTRUE_RATE_LIMIT_VERIFY").then(|| "lots".into())
+        })
+        .is_err());
+        assert!(AuthState::try_from_lookup(|name| {
+            (name == "GOTRUE_RATE_LIMIT_OTP").then(|| "lots".into())
+        })
+        .is_err());
+        assert!(AuthState::try_from_lookup(|name| {
+            (name == "GOTRUE_MFA_RATE_LIMIT_CHALLENGE_AND_VERIFY").then(|| "lots".into())
+        })
+        .is_err());
+        assert!(AuthState::try_from_lookup(|name| {
+            (name == "GOTRUE_MFA_RATE_LIMIT_CHALLENGE_AND_VERIFY").then(|| "15".into())
+        })
+        .is_ok());
+        assert!(!AuthState::reference().sb_forwarded_for_enabled);
+        assert_eq!(AuthState::reference().otp_max_failed_attempts, 0);
+        let enabled = AuthState::from_lookup(|name| match name {
+            "GOTRUE_SECURITY_SB_FORWARDED_FOR_ENABLED" => Some("true".into()),
+            "MEGABASE_AUTH_OTP_MAX_FAILED_ATTEMPTS" => Some("5".into()),
+            _ => None,
+        });
+        assert!(enabled.sb_forwarded_for_enabled);
+        assert_eq!(enabled.otp_max_failed_attempts, 5);
+        assert!(AuthState::try_from_lookup(|name| {
+            (name == "MEGABASE_AUTH_OTP_MAX_FAILED_ATTEMPTS").then(|| "nope".into())
+        })
+        .is_err());
         let off =
             AuthState::from_lookup(|key| (key == "GOTRUE_RATE_LIMIT_HEADER").then(String::new));
         assert_eq!(off.rate_limit_header, "");

@@ -16,7 +16,7 @@ other names. There is no `.env.example` in this tree; the judge uses
 | --- | --- |
 | MEGABASE_HOST | Bind address. Default `0.0.0.0`. |
 | MEGABASE_PORT | HTTP port. Default `8000`. |
-| DATABASE_URL | PostgreSQL connection string. PostgreSQL stays external; Megabase does not bundle it. When set, startup first creates the standard API roles `anon`, `authenticated`, `service_role`, and `authenticator` when they are missing, with the memberships, `public` usage, and default privileges of the Supabase Postgres image ([`specs/core/roles.md`](../specs/core/roles.md)), then installs the Auth SQL objects listed in [`specs/auth/database.md`](../specs/auth/database.md) (each an idempotent transaction with a 30-second deadline), and opens two sqlx pools (10 connections each, 30-second acquire): one for Auth and one for REST. Signup, logout, verify, the password and refresh-token grants on `POST /auth/v1/token`, the user routes, and served admin routes share the Auth pool. REST resource routes in [`specs/rest/resources.md`](../specs/rest/resources.md), the horizontal filters in [`specs/rest/filtering.md`](../specs/rest/filtering.md), and RPC in [`specs/rest/rpc.md`](../specs/rest/rpc.md) use the REST pool. SIGINT and SIGTERM close both pools after the drain described under HTTP limits. Omit it to skip the role and schema install (the HTTP server still starts; admin, signup, logout, verify, token, and user calls that need the database then return 500, and a served REST route that needs the database returns 503). On a stock cluster the connecting role must be a superuser, or have `CREATEROLE` and own the `public` schema; on a cluster the official stack initialised the roles already exist and no role DDL runs. Existing roles are never altered and nothing is revoked. A non-superuser connecting role is granted `anon`, `authenticated`, and `service_role` so REST can `SET` the JWT role, the way `authenticator` does for PostgREST. The judge sets this to the dedicated `megabase` database (`just judge-up` / CI), never to the official stack's `postgres` database. |
+| DATABASE_URL | PostgreSQL connection string. PostgreSQL stays external; Megabase does not bundle it. When set, startup first creates the standard API roles `anon`, `authenticated`, `service_role`, and `authenticator`, and the Supabase admin roles `supabase_admin`, `supabase_auth_admin`, `supabase_storage_admin`, and `supabase_realtime_admin`, when they are missing. The API roles get the memberships, `public` usage, and default privileges of the Supabase Postgres image. The admin roles are `NOLOGIN`. `supabase_admin` is superuser-like when the connecting role can grant that; the auth and storage admin roles are `CREATEROLE NOINHERIT`. An attribute the connecting role cannot grant is skipped and logged, and startup continues ([`specs/core/roles.md`](../specs/core/roles.md)). Startup then installs the Auth SQL objects listed in [`specs/auth/database.md`](../specs/auth/database.md) (each an idempotent transaction with a 30-second deadline), and opens two sqlx pools (10 connections each, 30-second acquire): one for Auth and one for REST. Signup, logout, verify, the password and refresh-token grants on `POST /auth/v1/token`, the user routes, the factor routes, and served admin routes share the Auth pool. REST resource routes in [`specs/rest/resources.md`](../specs/rest/resources.md), the horizontal filters in [`specs/rest/filtering.md`](../specs/rest/filtering.md), and RPC in [`specs/rest/rpc.md`](../specs/rest/rpc.md) use the REST pool. SIGINT and SIGTERM close both pools after the drain described under HTTP limits. Omit it to skip the role and schema install (the HTTP server still starts; admin, signup, logout, verify, token, user, and factor calls that need the database then return 500, and a served REST route that needs the database returns 503). On a stock cluster the connecting role must be a superuser, or have `CREATEROLE` and own the `public` schema; on a cluster the official stack initialised the roles already exist and no role DDL runs. Existing roles are never altered and nothing is revoked. A non-superuser connecting role is granted `anon`, `authenticated`, and `service_role` so REST can `SET` the JWT role, the way `authenticator` does for PostgREST. The judge sets this to the dedicated `megabase` database (`just judge-up` / CI), never to the official stack's `postgres` database. |
 | MEGABASE_HTTP_TIMEOUT_MS | Whole-request deadline in milliseconds. Default `150000`, the functions `read_timeout` in `vendor/supabase/docker/volumes/api/kong.yml`. `0` and non-integers abort startup. A request that exceeds it returns 504. |
 | MEGABASE_REQUEST_BODY_LIMIT_BYTES | Maximum request body in bytes. Default `52428800`, `FILE_SIZE_LIMIT` in `vendor/supabase/docker/docker-compose.yml`. A non-integer aborts startup. A larger body returns 413. |
 | JWT_SECRET | HS256 secret for verifying and signing JWTs (same name as the self-hosted demo stack). Raw UTF-8 bytes, not base64, and not a default. Omit it and the process still starts so `/_megabase/health` and `GET /auth/v1/health` work; verification and signing then fail with `Server lacks JWT secret`. Email signup then returns 500 `Server lacks JWT secret` and does not insert a user. A present value shorter than 32 bytes, including empty, aborts startup before listen: `JWT_SECRET is N bytes; HMAC-SHA-256 keys shorter than 32 bytes are disabled`. Length is bytes, not an entropy check. Required for `/auth/v1/admin` (a missing Bearer token is still 401). |
@@ -33,6 +33,20 @@ other names. There is no `.env.example` in this tree; the judge uses
 | GOTRUE_SECURITY_UPDATE_PASSWORD_REQUIRE_REAUTHENTICATION | GoTrue flag. Default `false`. Accepted values match Go's bool parser (`1`, `t`, `T`, `true`, `0`, `f`, `F`, `false`, any case). Any other value aborts startup. When true, `PUT /auth/v1/user` with `password` returns 501. |
 | GOTRUE_SECURITY_UPDATE_PASSWORD_REQUIRE_CURRENT_PASSWORD | GoTrue flag. Default `false`. Accepted values match Go's bool parser (`1`, `t`, `T`, `true`, `0`, `f`, `F`, `false`, any case). Any other value aborts startup. When true, `PUT /auth/v1/user` with `password` returns 501. |
 | GOTRUE_URI_ALLOW_LIST | Comma-separated redirect globs for `POST /auth/v1/admin/generate_link` and `GET /auth/v1/verify`. `*` and `?` do not cross `.` or `/`; `**` does. When this is unset or blank, `ADDITIONAL_REDIRECT_URLS` is used instead. A pattern with an unescaped `[` `]` `{` or `}` is not implemented: a redirect that must be checked against it returns 501. |
+| GOTRUE_RATE_LIMIT_VERIFY | Requests per five minutes for `GET` and `POST /auth/v1/verify`. Default 30, burst 30. Over the limit is 429 `over_request_rate_limit` / `Request rate limit reached`. |
+| GOTRUE_RATE_LIMIT_OTP | Requests per five minutes for `POST /auth/v1/otp` and `POST /auth/v1/magiclink`. Default 30, burst 30. The over-limit response matches `GOTRUE_RATE_LIMIT_VERIFY`. |
+| GOTRUE_MFA_RATE_LIMIT_CHALLENGE_AND_VERIFY | Requests per minute for `POST /auth/v1/factors/{factor_id}/verify` and `POST /auth/v1/factors/recovery-codes/verify` (`FactorVerify`), and for `POST /auth/v1/factors/{factor_id}/challenge` (`FactorChallenge`). The two limiters share this setting and use separate buckets. Default 15, burst 30, one-minute entry TTL. The over-limit response matches `GOTRUE_RATE_LIMIT_VERIFY`. |
+| GOTRUE_MFA_TOTP_ENROLL_ENABLED, GOTRUE_MFA_TOTP_VERIFY_ENABLED, GOTRUE_MFA_PHONE_ENROLL_ENABLED, GOTRUE_MFA_PHONE_VERIFY_ENABLED, GOTRUE_MFA_WEB_AUTHN_ENROLL_ENABLED, GOTRUE_MFA_WEB_AUTHN_VERIFY_ENABLED, GOTRUE_MFA_RECOVERY_CODES_ENROLL_ENABLED, GOTRUE_MFA_RECOVERY_CODES_VERIFY_ENABLED | Go bool (`1`, `t`, `true`, `0`, `f`, `false`, any case). Any other value aborts startup. Empty is the default. TOTP enroll and verify default on. Phone, WebAuthn, and recovery codes default off. |
+| GOTRUE_MFA_MAX_ENROLLED_FACTORS, GOTRUE_MFA_MAX_VERIFIED_FACTORS | Defaults 10 and 10. Enrolled is a finite number truncated toward zero; a negative or non-numeric value aborts startup. Verified is an integer; a non-integer aborts startup. |
+| GOTRUE_MFA_CHALLENGE_EXPIRY_DURATION | Whole seconds, parsed as a number. Default 300. A value under 300 is raised to 300. A negative or non-numeric value aborts startup. |
+| GOTRUE_MFA_FACTOR_EXPIRY_DURATION | Go duration (`time.ParseDuration`, including a bare `0` and `µs` / `μs`). Default 300s. Anything shorter is raised to 300s. A negative or unparsable value aborts startup. |
+| GOTRUE_MFA_PHONE_OTP_LENGTH | Default 6. An integer outside 6–10 becomes 6. A non-integer aborts startup. |
+| GOTRUE_MFA_PHONE_MAX_FREQUENCY | Go duration. Default one minute. `0` becomes one minute. A negative or unparsable value aborts startup. |
+| GOTRUE_MFA_PHONE_TEMPLATE | SMS body. Empty becomes `Your code is {{ .Code }}`. |
+| GOTRUE_MFA_RECOVERY_CODES_COUNT, GOTRUE_MFA_RECOVERY_CODES_CODE_LENGTH, GOTRUE_MFA_RECOVERY_CODES_MAX_VERIFY_ATTEMPTS | Defaults 10, 16, and 5. A non-integer aborts startup. |
+| GOTRUE_MFA_RECOVERY_CODES_LOCKOUT_DURATION | Go duration. Default 15 minutes. A negative or unparsable value aborts startup. |
+| GOTRUE_SECURITY_SB_FORWARDED_FOR_ENABLED | Default `false`. When `true` and the leftmost `Sb-Forwarded-For` value is an IP, that address is the rate-limit key. Otherwise the key is `GOTRUE_RATE_LIMIT_HEADER`. |
+| MEGABASE_AUTH_OTP_MAX_FAILED_ATTEMPTS | Default `0`, which leaves a bad code in place. A positive value clears that user's pending verification tokens and one-time-token rows after that many failed checks. Counts are process-local and last until the code's OTP deadline. |
 
 ## Running outside the Supabase stack
 
@@ -114,6 +128,20 @@ off, and a password change while reauthentication or the current password
 is required. `GET /user/identities/authorize` returns 501 once the provider
 is enabled. The admin routes in
 [`specs/auth/admin.md`](../specs/auth/admin.md) return GoTrue statuses.
+Factor routes are served
+([`specs/auth/factors.md`](../specs/auth/factors.md)). `POST /factors`
+enrolls TOTP, phone, and WebAuthn. `POST /factors/{factor_id}/challenge`
+and `POST /factors/{factor_id}/verify` serve TOTP and phone.
+`DELETE /factors/{factor_id}` unenrolls a factor. Recovery codes are
+`GET` and `POST /factors/recovery-codes`,
+`POST /factors/recovery-codes/regenerate`,
+`POST /factors/recovery-codes/verify`, and
+`DELETE /factors/recovery-codes`. WebAuthn challenge and verify return
+501 when those switches are on. Phone challenge returns 500
+`Failed to get SMS provider` when no SMS provider is configured, and 501
+when one is, because sending is not ported. The `GOTRUE_MFA_*` defaults
+are in the table above. TOTP enroll and verify default on; phone,
+WebAuthn, and recovery codes default off.
 Every other `/auth/v1` path returns 501 `MEGABASE_NOT_IMPLEMENTED`.
 `GET`, `HEAD`, `OPTIONS`, `POST`, `PUT`, `PATCH`, and `DELETE` on
 `/rest/v1/{relation}`, and `GET`, `HEAD`, and `OPTIONS` on `/rest/v1/`,
@@ -124,7 +152,7 @@ Horizontal filters are in
 ([`specs/rest/rpc.md`](../specs/rest/rpc.md)). Embeds, `Prefer`, and other
 media types return 501 `MEGABASE_NOT_IMPLEMENTED`.
 
-Signup, logout, verify, token, and the user routes need `DATABASE_URL` (the
+Signup, logout, verify, token, the user routes, and the factor routes need `DATABASE_URL` (the
 Auth SQL from [`specs/auth/database.md`](../specs/auth/database.md)) and
 `JWT_SECRET`. `GET` and `POST /auth/v1/verify` check that secret before the
 one-time token is read. A session is signed only for a `Session` outcome;
@@ -135,7 +163,7 @@ anonymous off, `disable_signup` false, mailer autoconfirm on (the judge
 overlay has no mail server), phone autoconfirm on, SMS provider empty,
 SAML and passkeys off, audience and role `authenticated`, expiry 3600
 seconds, issuer `http://localhost:8000/auth/v1`, password minimum 6,
-`GOTRUE_SITE_URL` or `SITE_URL` `http://localhost:3000`, mailer OTP expiry 86400 seconds,
+`GOTRUE_SITE_URL` or `SITE_URL` `http://localhost:3000`, mailer OTP expiry 86400 seconds (`GOTRUE_MAILER_OTP_EXP`),
 secure email change on. Bool
 overrides accept Go's `1`/`t`/`true`/`0`/`f`/`false`.
 `GOTRUE_PASSWORD_MIN_LENGTH` below 6 is raised to 6. External OAuth

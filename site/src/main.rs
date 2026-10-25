@@ -976,6 +976,26 @@ mod tests {
         out
     }
 
+    /// Drops the home-page commit total. A full history can reach the same
+    /// integer the Kite mock used for units.
+    fn without_live_commit_total(html: &str) -> String {
+        let Some(label) = html.find("TOTAL COMMITS") else {
+            return html.to_string();
+        };
+        let Some(value) = html[label..].find(r#"<span class="home-stat-value">"#) else {
+            return html.to_string();
+        };
+        let start = label + value;
+        let Some(end_rel) = html[start..].find("</span>") else {
+            return html.to_string();
+        };
+        let end = start + end_rel + "</span>".len();
+        let mut out = String::with_capacity(html.len());
+        out.push_str(&html[..start]);
+        out.push_str(&html[end..]);
+        out
+    }
+
     #[test]
     fn commit_stamp_is_not_a_unit_total() {
         let stripped = without_commit_stamp("<p>commit 1334abc · 2026</p>");
@@ -995,6 +1015,14 @@ mod tests {
         assert!(!stripped.contains(">334<"));
         assert!(stripped.contains("1,036"));
         assert!(without_live_counters("<span>334</span>").contains(">334<"));
+    }
+
+    #[test]
+    fn live_commit_total_is_not_the_unit_mock() {
+        let html = r#"<span class="home-stat-label">TOTAL COMMITS ↗</span><span class="home-stat-value">334</span><span class="home-stat-value">1,036</span>"#;
+        let stripped = without_live_commit_total(html);
+        assert!(!stripped.contains(">334<"));
+        assert!(stripped.contains(">1,036<"));
     }
 
     #[test]
@@ -1228,6 +1256,9 @@ mod tests {
             status.contains(&shown),
             "status must show summary.totals.units ({shown})"
         );
+        // 334 is the Kite mock unit total. A full checkout can also have
+        // that many commits or pull requests, so those live stats are not
+        // part of this check.
         let home_units = without_live_counters(&home);
         let status_units = without_live_counters(&status);
         assert!(!home_units.contains(">334<") && !status_units.contains(">334<"));

@@ -1,7 +1,9 @@
 //! Postgres Meta-compatible API (`/pg`) for Megabase.
 //!
 //! Target behavior: Postgres Meta, vendor/postgres-meta (Apache-2.0), pinned in `vendor/`.
-//! `GET /health` and `GET /config/version` are served (`specs/meta/health-version.md`).
+//! `GET /health`, `GET /config/version`, the `/policies` routes and the five
+//! `/tables` routes are served (`specs/meta/health-version.md`,
+//! `specs/meta/policies.md`, `specs/meta/tables.md`).
 //! Every other request returns the structured `MEGABASE_NOT_IMPLEMENTED` 501.
 //!
 //! The pinned gateway runs `acl` with only the `admin` group on `/pg/`, so a
@@ -11,6 +13,10 @@
 
 // Ported from supabase/postgres-meta src/server/app.ts, src/server/routes/config.ts
 // and src/lib/sql/version.sql.ts (Apache-2.0), pin v0.100.0.
+
+mod pg_format;
+mod policies;
+mod tables;
 
 use std::sync::Arc;
 
@@ -42,7 +48,7 @@ const VERSION_SQL: &str = "SELECT
   current_setting('max_connections') :: int8 AS max_connections";
 
 /// `PG_CONN_TIMEOUT_SECS` default (`src/server/constants.ts`).
-const CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
+pub(crate) const CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
 
 /// Database pool and service-role verifier for `/pg`.
 #[derive(Clone, Default)]
@@ -73,6 +79,17 @@ pub fn router_with_state(state: MetaState) -> Router {
     Router::new()
         .route("/pg/health", get(health))
         .route("/pg/config/version", get(version))
+        .merge(policies::routes())
+        .route(
+            "/pg/tables",
+            get(tables::list_tables).post(tables::create_table),
+        )
+        .route(
+            "/pg/tables/:id",
+            get(tables::retrieve_table)
+                .patch(tables::update_table)
+                .delete(tables::remove_table),
+        )
         .with_state(state)
         .merge(megabase_core::not_implemented_router(COMPONENT))
         .method_not_allowed_fallback(megabase_core::not_implemented_handler(COMPONENT))
@@ -144,22 +161,30 @@ async fn version(State(state): State<MetaState>) -> Response {
 }
 
 async fn version_row(pool: &sqlx::PgPool) -> Result<(String, i64, i64, i64), sqlx::Error> {
-    let options = pool.connect_options();
-    let mut connection =
-        tokio::time::timeout(CONNECT_TIMEOUT, PgConnection::connect_with(&options))
-            .await
-            .map_err(|_| sqlx::Error::PoolTimedOut)??;
+    let mut connection = open_meta_connection(pool).await?;
     let row = sqlx::query_as(VERSION_SQL).fetch_one(&mut connection).await;
-    // `pgMeta.end()`: a failed close only loses the goodbye message.
+    close_meta_connection(connection).await;
+    row
+}
+
+/// One connection per Postgres Meta request, closed afterwards (`pgMeta.end()`).
+pub(crate) async fn open_meta_connection(pool: &sqlx::PgPool) -> Result<PgConnection, sqlx::Error> {
+    let options = pool.connect_options();
+    tokio::time::timeout(CONNECT_TIMEOUT, PgConnection::connect_with(&options))
+        .await
+        .map_err(|_| sqlx::Error::PoolTimedOut)?
+}
+
+/// `pgMeta.end()`: a failed close only loses the goodbye message.
+pub(crate) async fn close_meta_connection(connection: PgConnection) {
     if let Err(error) = connection.close().await {
         tracing::warn!(%error, "closing the postgres-meta connection failed");
     }
-    row
 }
 
 /// `src/server/routes/index.ts` `onRequest` with no `PG_CONNECTION`: the
 /// thrown error reaches Fastify's default error handler.
-fn no_connection() -> Response {
+pub(crate) fn no_connection() -> Response {
     fastify_json(
         StatusCode::INTERNAL_SERVER_ERROR,
         &json!({
@@ -170,7 +195,7 @@ fn no_connection() -> Response {
     )
 }
 
-fn fastify_json(status: StatusCode, body: &Value) -> Response {
+pub(crate) fn fastify_json(status: StatusCode, body: &Value) -> Response {
     (
         status,
         [(header::CONTENT_TYPE, "application/json; charset=utf-8")],
@@ -259,8 +284,8 @@ mod tests {
 
     #[tokio::test]
     async fn other_routes_stay_501() {
-        let (status, body) = get(app(), "/pg/tables", Some(&key("service_role"))).await;
+        let (status, body) = get(app(), "/pg/columns", Some(&key("service_role"))).await;
         assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
-        assert_eq!(body["unit"], "GET /pg/tables");
+        assert_eq!(body["unit"], "GET /pg/columns");
     }
 }

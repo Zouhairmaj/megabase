@@ -1823,7 +1823,7 @@
       "group": "database",
       "kind": "sql-table",
       "name": "auth.custom_oauth_providers",
-      "level": 1,
+      "level": 2,
       "source": {
         "repo": "auth",
         "file": "migrations/20260219120000_add_custom_oauth_providers.up.sql",
@@ -1875,7 +1875,7 @@
       "group": "database",
       "kind": "sql-table",
       "name": "auth.mfa_amr_claims",
-      "level": 1,
+      "level": 2,
       "source": {
         "repo": "auth",
         "file": "migrations/20221003041349_add_mfa_schema.up.sql",
@@ -1888,7 +1888,7 @@
       "group": "database",
       "kind": "sql-table",
       "name": "auth.mfa_challenges",
-      "level": 1,
+      "level": 2,
       "source": {
         "repo": "auth",
         "file": "migrations/20221003041349_add_mfa_schema.up.sql",
@@ -1901,7 +1901,7 @@
       "group": "database",
       "kind": "sql-table",
       "name": "auth.mfa_factors",
-      "level": 1,
+      "level": 2,
       "source": {
         "repo": "auth",
         "file": "migrations/20221003041349_add_mfa_schema.up.sql",
@@ -1914,7 +1914,7 @@
       "group": "database",
       "kind": "sql-table",
       "name": "auth.mfa_recovery_code_sets",
-      "level": 1,
+      "level": 2,
       "source": {
         "repo": "auth",
         "file": "migrations/20260824000001_add_recovery_codes_tables.up.sql",
@@ -1927,7 +1927,7 @@
       "group": "database",
       "kind": "sql-table",
       "name": "auth.mfa_recovery_codes",
-      "level": 1,
+      "level": 2,
       "source": {
         "repo": "auth",
         "file": "migrations/20260824000001_add_recovery_codes_tables.up.sql",
@@ -1940,7 +1940,7 @@
       "group": "database",
       "kind": "sql-table",
       "name": "auth.oauth_authorizations",
-      "level": 1,
+      "level": 2,
       "source": {
         "repo": "auth",
         "file": "migrations/20250804100000_add_oauth_authorizations_consents.up.sql",
@@ -1953,7 +1953,7 @@
       "group": "database",
       "kind": "sql-table",
       "name": "auth.oauth_client_states",
-      "level": 1,
+      "level": 2,
       "source": {
         "repo": "auth",
         "file": "migrations/20251201000000_add_oauth_client_states_table.up.sql",
@@ -1966,7 +1966,7 @@
       "group": "database",
       "kind": "sql-table",
       "name": "auth.oauth_clients",
-      "level": 1,
+      "level": 2,
       "source": {
         "repo": "auth",
         "file": "migrations/20250731150234_add_oauth_clients_table.up.sql",
@@ -1979,7 +1979,7 @@
       "group": "database",
       "kind": "sql-table",
       "name": "auth.oauth_consents",
-      "level": 1,
+      "level": 2,
       "source": {
         "repo": "auth",
         "file": "migrations/20250804100000_add_oauth_authorizations_consents.up.sql",
@@ -2018,7 +2018,7 @@
       "group": "database",
       "kind": "sql-table",
       "name": "auth.saml_providers",
-      "level": 1,
+      "level": 2,
       "source": {
         "repo": "auth",
         "file": "migrations/20221021082433_add_saml.up.sql",
@@ -2031,7 +2031,7 @@
       "group": "database",
       "kind": "sql-table",
       "name": "auth.saml_relay_states",
-      "level": 1,
+      "level": 2,
       "source": {
         "repo": "auth",
         "file": "migrations/20221021082433_add_saml.up.sql",
@@ -2057,7 +2057,7 @@
       "group": "database",
       "kind": "sql-table",
       "name": "auth.scim_tokens",
-      "level": 1,
+      "level": 2,
       "source": {
         "repo": "auth",
         "file": "migrations/20260821010000_add_scim_tokens.up.sql",
@@ -2070,7 +2070,7 @@
       "group": "database",
       "kind": "sql-table",
       "name": "auth.scim_users",
-      "level": 1,
+      "level": 2,
       "source": {
         "repo": "auth",
         "file": "migrations/20260821000000_add_scim_users.up.sql",
@@ -2096,7 +2096,7 @@
       "group": "database",
       "kind": "sql-table",
       "name": "auth.sso_domains",
-      "level": 1,
+      "level": 2,
       "source": {
         "repo": "auth",
         "file": "migrations/20221021082433_add_saml.up.sql",
@@ -2109,7 +2109,7 @@
       "group": "database",
       "kind": "sql-table",
       "name": "auth.sso_providers",
-      "level": 1,
+      "level": 2,
       "source": {
         "repo": "auth",
         "file": "migrations/20221021082433_add_saml.up.sql",
@@ -2122,7 +2122,7 @@
       "group": "database",
       "kind": "sql-table",
       "name": "auth.sso_sessions",
-      "level": 1,
+      "level": 2,
       "source": {
         "repo": "auth",
         "file": "migrations/20221021082433_add_saml.up.sql",
@@ -2148,7 +2148,7 @@
       "group": "database",
       "kind": "sql-table",
       "name": "auth.webauthn_challenges",
-      "level": 1,
+      "level": 2,
       "source": {
         "repo": "auth",
         "file": "migrations/20260302000000_add_passkeys.up.sql",
@@ -2161,7 +2161,7 @@
       "group": "database",
       "kind": "sql-table",
       "name": "auth.webauthn_credentials",
-      "level": 1,
+      "level": 2,
       "source": {
         "repo": "auth",
         "file": "migrations/20260302000000_add_passkeys.up.sql",
