@@ -997,6 +997,9 @@ pub(crate) fn get_referrer(
 /// A non-HTTP(S) URL with no host, including an empty host, is same-site
 /// when the site host is also empty, otherwise it is matched against the
 /// allow list.
+/// The http(s) regular-hostname check uses that same written host, not the
+/// WHATWG domain after mapping, so the gate and the allow-list match text
+/// see one host.
 /// Globs see the URL with the fragment removed and the query kept. A
 /// rejected candidate falls through to the site URL in [`get_referrer`].
 pub(crate) fn redirect_ok(
@@ -1039,12 +1042,12 @@ pub(crate) fn redirect_ok(
     match target.host() {
         Some(Host::Ipv4(ip)) => return Ok(ip.is_loopback()),
         Some(Host::Ipv6(ip)) => return Ok(ip.is_loopback()),
-        Some(Host::Domain(domain)) => {
-            if !domain.is_empty() && domain.chars().all(|ch| ch.is_ascii_digit()) {
+        Some(Host::Domain(_)) => {
+            if !redirect_host.is_empty() && redirect_host.chars().all(|ch| ch.is_ascii_digit()) {
                 return Ok(false);
             }
             if (target.scheme() == "http" || target.scheme() == "https")
-                && !regular_hostname(domain)
+                && !regular_hostname(redirect_host)
             {
                 return Ok(false);
             }
@@ -1188,6 +1191,7 @@ fn go_is_localhost(host: &str) -> bool {
 }
 
 /// `regularHostname` in `request.go`: `^[a-zA-Z0-9]([a-zA-Z0-9.-]*[a-zA-Z0-9])?$`.
+/// Callers pass the written host, the same host the allow-list match sees.
 fn regular_hostname(host: &str) -> bool {
     let bytes = host.as_bytes();
     let Some((&first, rest)) = bytes.split_first() else {
@@ -3253,6 +3257,40 @@ mod tests {
             "https://example.com",
             "https://app.example/callback?next=1",
             &exact
+        )
+        .unwrap());
+    }
+
+    #[test]
+    fn redirect_http_host_uses_written_hostname() {
+        let star = vec!["https://*".to_string()];
+        let mapped = [
+            "https://app\u{3002}example",
+            "https://app\u{ff0e}example",
+            "https://app\u{ff61}example",
+            "https://app%2eexample",
+        ];
+        for raw in mapped {
+            let parsed = Url::parse(raw).unwrap_or_else(|err| panic!("{raw}: {err}"));
+            let Some(Host::Domain(domain)) = parsed.host() else {
+                panic!("{raw}: expected a domain host");
+            };
+            assert!(regular_hostname(domain), "{raw} maps to {domain}");
+            assert!(!regular_hostname(go_hostname(raw)), "{raw}");
+            assert!(
+                !redirect_ok("https://site.example", raw, &star).unwrap(),
+                "{raw}"
+            );
+        }
+        assert!(!redirect_ok("https://site.example", "https://app.", &star).unwrap());
+        assert!(redirect_ok("https://site.example", "https://app", &star).unwrap());
+        assert!(!redirect_ok("https://site.example", "https://app.example", &star).unwrap());
+        let dotted = vec!["https://app.example/*".to_string()];
+        assert!(redirect_ok("https://site.example", "https://app.example/cb", &dotted).unwrap());
+        assert!(!redirect_ok(
+            "https://site.example",
+            "https://app\u{3002}example/cb",
+            &dotted
         )
         .unwrap());
     }

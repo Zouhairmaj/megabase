@@ -98,7 +98,9 @@ fragment removed and its query kept. Userinfo does not reject the URL; the
 host is the host after it. A backslash in the authority is rejected. An
 all-digit host is rejected (a non-empty host of only digits). An IPv4
 spelling that Go keeps as a hostname is matched as written, including
-against the allow list. A non-HTTP(S) URL with no host, including an
+against the allow list. An `http` or `https` domain is checked against
+GoTrue's regular hostname pattern on that written host, the same host
+the allow-list match text contains. A non-HTTP(S) URL with no host, including an
 empty host, is same-site when the site host is also empty; otherwise it
 is matched against the allow list. An allow-list pattern
 this port cannot compile

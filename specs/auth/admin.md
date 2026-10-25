@@ -439,7 +439,8 @@ accepts is rejected before the allow list, as is a non-empty all-digit host.
 An IPv4 spelling Go keeps as a hostname (for example fewer than four
 decimal labels) is compared as written: the same written host matches
 the site, and otherwise it must match the allow list. An `http` or
-`https` domain must match GoTrue's regular hostname pattern. A
+`https` domain must match GoTrue's regular hostname pattern on the
+written host, the same host the allow-list match text contains. A
 non-HTTP(S) URL with no host, including an empty host (`myapp://`,
 `myapp:///callback`), is not rejected for that; it is matched against
 the allow list. An all-digit host is a non-empty host of only digits.
