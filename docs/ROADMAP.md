@@ -37,6 +37,11 @@ exotic operators are Level 1 scope but not on the critical path.
 | 4 | `/functions/v1`, pooler, Postgres Meta, **Studio test** | ≥80%, all held | Backlog |
 | 5 | Studio front end served from the binary (stretch; deferred) | feasibility first | Deferred |
 
+An `auth.*` table takes the level of the feature that owns it
+([0046](decisions/0046-feature-auth-tables-follow-feature-level.md)).
+Level 1 keeps `auth.users`, `auth.uid()`, and `auth.jwt()`. MFA, OAuth,
+SAML, SSO, SCIM, passkey, and custom OAuth provider tables are Level 2.
+
 ## Views of the work
 
 - **Board** (Project, grouped by Status): Backlog → Ready → In progress → In review → Done, plus Blocked.
