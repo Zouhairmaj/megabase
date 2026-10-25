@@ -22,7 +22,7 @@ use super::{
     can_upload, header_str, request_jwt, Actor, Scope, MAX_SIGNED_URL_EXPIRES_IN, SCOPE_DOWNLOAD,
 };
 use crate::{
-    database_error, fastify_json,
+    fastify_json,
     limits::{is_uuid, is_valid_bucket_name, is_valid_key},
     not_implemented, StorageError, StorageState,
 };
@@ -108,6 +108,7 @@ pub(crate) async fn sign_objects(
         uri: &uri,
         headers: &headers,
         operation: OP_SIGN_MANY,
+        roles: &state.api_roles,
     };
     let attempt = async {
         let mut tx = scope.begin(pool).await?;
@@ -117,11 +118,11 @@ pub(crate) async fn sign_objects(
             .fetch_all(&mut *tx)
             .await?;
         tx.commit().await?;
-        Ok::<_, sqlx::Error>(names)
+        Ok::<_, super::ApplyError>(names)
     };
     let found: HashSet<String> = match attempt.await {
         Ok(names) => names.into_iter().collect(),
-        Err(error) => return database_error(&error),
+        Err(error) => return super::apply_response(error),
     };
     let now = Utc::now().timestamp();
     let mut entries = Vec::with_capacity(paths.len());
@@ -239,6 +240,7 @@ pub(crate) async fn sign_upload_object(
         uri: &uri,
         headers: &headers,
         operation: OP_SIGN_UPLOAD_URL,
+        roles: &state.api_roles,
     };
     if let Err(response) = can_upload(
         pool,

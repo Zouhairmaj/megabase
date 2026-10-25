@@ -60,9 +60,16 @@ stays 501, including `?select` with no `=`.
 claims `{"role":"anon"}`. A bearer token is verified with HS256. The
 statement runs after `SET LOCAL` role, `request.jwt.claims`,
 `request.method`, `request.path` (`/{relation}`, not the gateway prefix),
-and `search_path` to the negotiated schema. Reads use a read-only
-transaction. Catalog lookups (existence, columns, privileges, primary key)
-run before `SET ROLE`.
+and `search_path` to the negotiated schema. The role applied is `anon`,
+`authenticated`, `service_role`, or a name in `MEGABASE_DB_EXTRA_ROLES`.
+Any other claim is rejected before `set_config('role', …)`, with the
+PostgreSQL error PostgREST returns for that name. A request this route does
+not serve answers 501 before that rejection, including an unhandled query, a
+`Range` header on `GET`, a counted write, an embed or aggregate in a write
+`select`, and `limit` or `offset` on `PATCH` or `DELETE`. `OPTIONS` still
+reads privileges as the pool user and does not apply that rejection. Reads
+use a read-only transaction. Catalog lookups (existence, columns,
+privileges, primary key) run before `SET ROLE`.
 
 JSON is the default body media type when `Content-Type` is missing.
 `application/json` and `application/*` are accepted. Other known media
@@ -144,6 +151,8 @@ must be exactly those columns, each a non-negated `eq`, with no logic tree.
 | No pool, or the pool cannot start a transaction | 503 | `PGRST000` Database connection error. |
 | Bearer token and no JWT secret | 500 | `PGRST300` Server lacks JWT secret |
 | Bad or expired JWT | 401 | `PGRST301` or `PGRST303`, plus `WWW-Authenticate` |
+| JWT `role` is not `anon`, `authenticated`, `service_role`, or `MEGABASE_DB_EXTRA_ROLES`, and `pg_roles` has no such role | 401 | `22023` `role "{role}" does not exist` |
+| JWT `role` is not one of those roles, and `pg_roles` has it | 403 | `42501` `permission denied to set role "{role}"` |
 | Unknown relation | 404 | `PGRST205` Could not find the table '{schema}.{relation}' in the schema cache |
 | More than one path segment, and not `rpc/{fn}` | 404 | `PGRST125` Invalid path specified in request URL |
 | Method not in the table above | 405 | `PGRST117` Unsupported HTTP method: {METHOD} |
@@ -153,7 +162,7 @@ must be exactly those columns, each a non-negated `eq`, with no logic tree.
 | Unknown `Content-Type` | 400 | `PGRST102` Content-Type not acceptable: {type} |
 | Column not in the cache | 400 | `PGRST204` Could not find the '{column}' column of '{relation}' in the schema cache |
 | `PUT` with `limit` or `offset` | 400 | `PGRST114` limit/offset querystring parameters are not allowed for PUT |
-| `PATCH` or `DELETE` with `limit` or `offset` | 501 | `MEGABASE_NOT_IMPLEMENTED` for that route. Checked before the body is parsed |
+| `PATCH` or `DELETE` with `limit` or `offset` | 501 | `MEGABASE_NOT_IMPLEMENTED` for that route. Checked before the body is parsed and before the role rejection |
 | `PUT` filters are not exactly the primary key `eq`s | 405 | `PGRST105` Filters must include all and only primary key columns with 'eq' operators |
 | `PUT` body primary key does not match the URL, or the statement did not change one row | 400 | `PGRST115` Payload values do not match URL in primary key column(s). The transaction is rolled back |
 | `42501` as `anon` | 401 | PostgreSQL message, code `42501` |
@@ -165,10 +174,10 @@ must be exactly those columns, each a non-negated `eq`, with no logic tree.
 PostgREST's fuzzy table hint is not served; `hint` stays null on `PGRST205`.
 
 `PUT` checks order is: query parse (`PGRST100`), then `Prefer` (501), then
-`PGRST114`, then the body (`PGRST102`), then the database, then `PGRST105`
+`PGRST114`, then the body (`PGRST102`), then filters with no `eq`
+(`PGRST105`), then the role rejection, then the database, then `PGRST105`
 against the catalog primary key, then `PGRST115`. An empty `PUT` body is
-`PGRST102` even when the filters are missing. Filters with no `eq` are
-`PGRST105` before the pool is required, once the body is valid JSON.
+`PGRST102` even when the filters are missing.
 
 ## Edge cases
 
