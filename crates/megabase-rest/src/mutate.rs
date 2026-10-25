@@ -29,9 +29,9 @@ use crate::filter::{quote_ident, sql_type_name};
 use crate::params::{where_clause, ReadQuery};
 use crate::prefer::{set_applied, Count, Missing, Prefer, Representation, Resolution, Scope};
 use crate::read::{
-    self, begin, content_range, load_columns, pgrst, query_failure, relation_exists,
-    set_request_context, singular_check, table_not_found, unimplemented_unit, unsafe_type,
-    ReadShape, Session,
+    self, begin, content_range, enforce_db_role, load_columns, pgrst, query_failure,
+    relation_exists, set_request_context, singular_check, table_not_found, unimplemented_unit,
+    unsafe_type, ReadShape, Session,
 };
 
 const EMPTY_JSON: &str = "Empty or invalid json";
@@ -136,6 +136,10 @@ pub(crate) async fn mutate(
         None
     };
 
+    // These answers do not need a database. They stay ahead of the role check.
+    if let Err(response) = enforce_db_role(pool, session).await {
+        return *response;
+    }
     let Some(pool) = pool else {
         return read::database_unavailable();
     };
