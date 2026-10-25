@@ -183,6 +183,15 @@ mod tests {
         assert!(buckets < objects, "objects references buckets");
         assert!(objects < position(&sql, "TRIGGER protect_objects_delete"));
         assert!(buckets < operation);
+        assert!(
+            position(
+                &sql,
+                "CREATE OR REPLACE FUNCTION storage.get_common_prefix("
+            ) < position(
+                &sql,
+                "CREATE OR REPLACE FUNCTION storage.list_objects_with_delimiter("
+            )
+        );
         for helper in [
             "storage.allow_only_operation(",
             "storage.allow_any_operation(",
