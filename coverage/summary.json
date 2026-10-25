@@ -3,24 +3,24 @@
   "totals": {
     "units": 1036,
     "implemented": 358,
-    "tested": 218,
-    "conformant": 218
+    "tested": 219,
+    "conformant": 214
   },
   "percent": {
     "coverage": 34.6,
-    "conformance": 100.0,
-    "done": 21.0
+    "conformance": 96.7,
+    "done": 20.7
   },
   "judge": {
-    "cases": 468,
+    "cases": 484,
     "passing": 468
   },
   "components": {
     "auth": {
       "units": 159,
       "implemented": 128,
-      "tested": 86,
-      "conformant": 86,
+      "tested": 87,
+      "conformant": 82,
       "groups": {
         "admin": {
           "units": 28,
@@ -32,7 +32,7 @@
           "units": 32,
           "implemented": 32,
           "tested": 32,
-          "conformant": 32
+          "conformant": 28
         },
         "endpoints": {
           "units": 13,
@@ -49,7 +49,7 @@
         "hooks": {
           "units": 7,
           "implemented": 1,
-          "tested": 0,
+          "tested": 1,
           "conformant": 0
         },
         "oauth": {
@@ -565,7 +565,7 @@
     "auth:grant-type:password": "conformant",
     "auth:grant-type:pkce": "implemented",
     "auth:grant-type:refresh_token": "conformant",
-    "auth:hook:custom_access_token": "implemented",
+    "auth:hook:custom_access_token": "tested",
     "auth:provider:azure": "implemented",
     "auth:provider:bitbucket": "implemented",
     "auth:provider:discord": "implemented",
@@ -650,10 +650,10 @@
     "auth:route:PUT /auth/v1/admin/users/{user_id}": "conformant",
     "auth:route:PUT /auth/v1/admin/users/{user_id}/factors/{factor_id}": "conformant",
     "auth:route:PUT /auth/v1/user": "conformant",
-    "auth:sql-function:auth.email()": "conformant",
-    "auth:sql-function:auth.jwt()": "conformant",
-    "auth:sql-function:auth.role()": "conformant",
-    "auth:sql-function:auth.uid()": "conformant",
+    "auth:sql-function:auth.email()": "tested",
+    "auth:sql-function:auth.jwt()": "tested",
+    "auth:sql-function:auth.role()": "tested",
+    "auth:sql-function:auth.uid()": "tested",
     "auth:sql-table:auth.audit_log_entries": "conformant",
     "auth:sql-table:auth.custom_oauth_providers": "conformant",
     "auth:sql-table:auth.flow_state": "conformant",
