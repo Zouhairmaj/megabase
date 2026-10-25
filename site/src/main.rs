@@ -935,6 +935,28 @@ mod tests {
         }
     }
 
+    /// Drops the home-stat commit and pull-request values.
+    ///
+    /// Those totals are live. `334` is a real commit count as well as the old
+    /// mock unit total, so the unit-total guard must not see these cells.
+    fn without_live_counters(html: &str) -> String {
+        let mut out = html.to_string();
+        for label in ["TOTAL COMMITS ↗", "TOTAL PRS ↗"] {
+            let Some(label_at) = out.find(label) else {
+                continue;
+            };
+            let Some(rel) = out[label_at..].find(r#"<span class="home-stat-value">"#) else {
+                continue;
+            };
+            let start = label_at + rel + r#"<span class="home-stat-value">"#.len();
+            let Some(end_rel) = out[start..].find('<') else {
+                continue;
+            };
+            out.replace_range(start..start + end_rel, "");
+        }
+        out
+    }
+
     /// Drops the 7-hex commit stamp (`commit abc1234`) that pages print from
     /// `GITHUB_SHA`, so a guard on a literal number cannot collide with a hash.
     fn without_commit_stamp(html: &str) -> String {
@@ -982,6 +1004,17 @@ mod tests {
         assert!(without_commit_stamp("commit 334").contains("334"));
         assert!(without_commit_stamp("commit 334x").contains("334"));
         assert!(without_commit_stamp("commit 1334abcd").contains("334"));
+    }
+
+    #[test]
+    fn commit_total_334_is_not_the_mock_unit_total() {
+        let html = r#"<span class="home-stat-label">TOTAL COMMITS ↗</span>
+    <span class="home-stat-value">334</span>
+    <span class="unit-total">1,036</span>"#;
+        let stripped = without_live_counters(html);
+        assert!(!stripped.contains(">334<"));
+        assert!(stripped.contains("1,036"));
+        assert!(without_live_counters("<span>334</span>").contains(">334<"));
     }
 
     #[test]
@@ -1226,10 +1259,11 @@ mod tests {
         // 334 was the Kite placeholder unit total. Live pages must not use it
         // as `totals.units`; a commit or PR count may still be 334.
         assert_ne!(total, 334, "live coverage must not use the Kite mock total");
-        // A full checkout can also have that many commits, so the live
-        // commit stat is not part of the rendered-page check.
-        let home_units = without_live_commit_total(&home);
-        assert!(!home_units.contains(">334<") && !status.contains(">334<"));
+        // A full checkout can also have that many commits or pull requests,
+        // so those live stats are not part of this check.
+        let home_units = without_live_counters(&home);
+        let status_units = without_live_counters(&status);
+        assert!(!home_units.contains(">334<") && !status_units.contains(">334<"));
         assert_treemap_svgs_are_fluid(&home);
         assert_treemap_svgs_are_fluid(&status);
         assert!(!home.contains("coverage/treemap.svg"));

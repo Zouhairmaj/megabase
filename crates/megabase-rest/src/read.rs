@@ -15,7 +15,9 @@ use axum::extract::{OriginalUri, State};
 use axum::http::{header, HeaderMap, HeaderName, HeaderValue, Method, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::Router;
-use megabase_core::{bearer_token, JwtError, MegabaseNotImplemented};
+use megabase_core::{
+    bearer_token, db_role, JwtError, MegabaseNotImplemented, RoleFailure, ROLE_EXISTS_SQL,
+};
 use serde_json::{Map, Value};
 
 use crate::filter::{quote_ident, UnsafeType};
@@ -131,6 +133,8 @@ async fn root(
         Err(response) => return *response,
     };
     // The gateway's `rest-v1-openapi` route only admits the admin ACL group.
+    // That check stays ahead of the role allow-list so a non-admin token
+    // still receives the ACL response.
     if session.role != "service_role" {
         return megabase_core::kong::acl_forbidden();
     }
@@ -196,6 +200,7 @@ async fn relation_route(
     };
     if method == Method::OPTIONS {
         // megabase:unit rest:route:OPTIONS /rest/v1/{relation}
+        // Privileges are read as the pool user. The JWT role is not applied.
         return relation_options(state, &schema, relation, session.anon).await;
     }
     if !matches!(
@@ -257,6 +262,13 @@ async fn relation_route(
     };
     if method == Method::GET && headers.get(header::RANGE).is_some() {
         return not_implemented(method, path);
+    }
+    // A read has finished every check that can answer 501. A write answers
+    // those inside `mutate`, before the role is applied.
+    if is_read {
+        if let Err(response) = enforce_db_role(state.pool.as_ref(), &session).await {
+            return *response;
+        }
     }
     match *method {
         Method::GET => {
@@ -548,6 +560,8 @@ pub(crate) struct Session {
     pub(crate) anon: bool,
     /// `Prefer: timezone=` value, applied with `set_config('timezone', …, true)`.
     pub(crate) timezone: Option<String>,
+    /// Roles this request may apply. Copied from [`RestState`].
+    api_roles: megabase_core::ApiRoles,
 }
 
 pub(crate) fn session(
@@ -573,7 +587,11 @@ pub(crate) fn session(
         )));
     };
     match jwt.verify(token) {
-        Ok(claims) => Ok(session_from_claims(claims.role, claims.raw)),
+        Ok(claims) => Ok(session_from_claims(
+            claims.role,
+            claims.raw,
+            state.api_roles.clone(),
+        )),
         Err(error) => Err(Box::new(jwt_failure(&error))),
     }
 }
@@ -584,10 +602,15 @@ fn anon_session() -> Session {
         claims: r#"{"role":"anon"}"#.to_string(),
         anon: true,
         timezone: None,
+        api_roles: megabase_core::ApiRoles::default(),
     }
 }
 
-fn session_from_claims(role: Option<String>, mut raw: Map<String, Value>) -> Session {
+fn session_from_claims(
+    role: Option<String>,
+    mut raw: Map<String, Value>,
+    api_roles: megabase_core::ApiRoles,
+) -> Session {
     let role = role
         .filter(|value| !value.is_empty())
         .unwrap_or_else(|| "anon".to_string());
@@ -598,7 +621,43 @@ fn session_from_claims(role: Option<String>, mut raw: Map<String, Value>) -> Ses
         claims: Value::Object(raw).to_string(),
         anon,
         timezone: None,
+        api_roles,
     }
+}
+
+/// Rejects a JWT `role` that [`db_role`] does not allow, before any
+/// statement runs as that role.
+///
+/// With a pool, `pg_roles` chooses the PostgreSQL error. Without one, the
+/// catalog cannot be read, so the answer is [`database_unavailable`].
+pub(crate) async fn enforce_db_role(
+    pool: Option<&sqlx::PgPool>,
+    session: &Session,
+) -> Result<(), Box<Response>> {
+    let Err(rejected) = db_role(&session.role, &session.api_roles) else {
+        return Ok(());
+    };
+    let Some(pool) = pool else {
+        return Err(Box::new(database_unavailable()));
+    };
+    let exists: bool = sqlx::query_scalar(ROLE_EXISTS_SQL)
+        .bind(rejected.role())
+        .fetch_one(pool)
+        .await
+        .map_err(|error| Box::new(query_failure(&error, session.anon)))?;
+    Err(Box::new(postgrest_role_response(&rejected.failure(exists))))
+}
+
+/// PostgREST body for a [`RoleFailure`]: `code` is the SQLSTATE, `details`
+/// and `hint` are null.
+pub(crate) fn postgrest_role_response(failure: &RoleFailure) -> Response {
+    pgrst(
+        failure.postgrest_status(),
+        failure.sqlstate,
+        &failure.message,
+        None,
+        None,
+    )
 }
 
 fn jwt_failure(error: &JwtError) -> Response {
@@ -1946,6 +2005,17 @@ pub(crate) async fn set_request_context(
     request_path: &str,
     schema: &str,
 ) -> Result<(), Box<Response>> {
+    let role = match db_role(&session.role, &session.api_roles) {
+        Ok(role) => role.to_string(),
+        Err(rejected) => {
+            let exists: bool = sqlx::query_scalar(ROLE_EXISTS_SQL)
+                .bind(rejected.role())
+                .fetch_one(&mut **tx)
+                .await
+                .map_err(|error| Box::new(query_failure(&error, session.anon)))?;
+            return Err(Box::new(postgrest_role_response(&rejected.failure(exists))));
+        }
+    };
     sqlx::query(
         "SELECT set_config('role', $1, true),
                 set_config('request.jwt.claims', $2, true),
@@ -1954,7 +2024,7 @@ pub(crate) async fn set_request_context(
                 set_config('search_path', $5, true),
                 set_config('timezone', coalesce($6::text, current_setting('timezone')), true)",
     )
-    .bind(&session.role)
+    .bind(&role)
     .bind(&session.claims)
     .bind(method)
     .bind(request_path)
@@ -2469,6 +2539,145 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn unhandled_query_stays_501_before_the_role_check() {
+        let app = router(state_with_secret(SECRET));
+        let token = sign(SECRET, &json!({"role": "not existing"}));
+        let request = Request::builder()
+            .uri("/rest/v1/todos?select")
+            .header(header::AUTHORIZATION, format!("Bearer {token}"))
+            .body(Body::empty())
+            .unwrap();
+        let (status, body, _) = send(app.clone(), request).await;
+        assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
+        assert_eq!(body["code"], "MEGABASE_NOT_IMPLEMENTED");
+        assert_eq!(body["unit"], "GET /rest/v1/todos");
+
+        let rpc = Request::builder()
+            .uri("/rest/v1/rpc/add_numbers?select=id")
+            .header(header::AUTHORIZATION, format!("Bearer {token}"))
+            .body(Body::empty())
+            .unwrap();
+        let (status, body, _) = send(app, rpc).await;
+        assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
+        assert_eq!(body["unit"], "GET /rest/v1/rpc/add_numbers");
+    }
+
+    #[tokio::test]
+    async fn unserved_write_stays_501_before_the_role_check() {
+        let token = sign(SECRET, &json!({"role": "not existing"}));
+        let cases = [
+            (
+                "POST",
+                "/rest/v1/todos",
+                Some("count=exact"),
+                r#"{"id":1}"#,
+                "rest:prefer:count=exact",
+            ),
+            (
+                "PATCH",
+                "/rest/v1/todos?id=eq.1&select=notes(body)",
+                None,
+                "{}",
+                "PATCH /rest/v1/todos",
+            ),
+            (
+                "POST",
+                "/rest/v1/todos?select=id.sum()",
+                None,
+                r#"{"id":1}"#,
+                "POST /rest/v1/todos",
+            ),
+            (
+                "PATCH",
+                "/rest/v1/todos?limit=1",
+                None,
+                "{}",
+                "PATCH /rest/v1/todos",
+            ),
+            (
+                "DELETE",
+                "/rest/v1/todos?id=eq.1&offset=2",
+                None,
+                "",
+                "DELETE /rest/v1/todos",
+            ),
+        ];
+        for (method, uri, prefer, payload, unit) in cases {
+            let app = router(state_with_secret(SECRET));
+            let mut builder = Request::builder()
+                .method(method)
+                .uri(uri)
+                .header(header::AUTHORIZATION, format!("Bearer {token}"))
+                .header(header::CONTENT_TYPE, "application/json");
+            if let Some(prefer) = prefer {
+                builder = builder.header("prefer", prefer);
+            }
+            let request = builder.body(Body::from(payload)).unwrap();
+            let (status, body, _) = send(app, request).await;
+            assert_eq!(status, StatusCode::NOT_IMPLEMENTED, "{method} {uri} {body}");
+            assert_eq!(body["code"], "MEGABASE_NOT_IMPLEMENTED", "{method} {uri}");
+            assert_eq!(body["unit"], unit, "{method} {uri}");
+        }
+    }
+
+    #[tokio::test]
+    async fn write_request_errors_stay_ahead_of_the_role_check() {
+        let token = sign(SECRET, &json!({"role": "not existing"}));
+        let cases = [
+            (
+                "PUT",
+                "/rest/v1/todos?id=eq.1&limit=1",
+                r#"{"id":1}"#,
+                StatusCode::BAD_REQUEST,
+                "PGRST114",
+            ),
+            (
+                "POST",
+                "/rest/v1/todos",
+                "",
+                StatusCode::BAD_REQUEST,
+                "PGRST102",
+            ),
+            (
+                "PUT",
+                "/rest/v1/todos",
+                r#"{"id":1}"#,
+                StatusCode::METHOD_NOT_ALLOWED,
+                "PGRST105",
+            ),
+        ];
+        for (method, uri, payload, expected, code) in cases {
+            let app = router(state_with_secret(SECRET));
+            let request = Request::builder()
+                .method(method)
+                .uri(uri)
+                .header(header::AUTHORIZATION, format!("Bearer {token}"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(payload))
+                .unwrap();
+            let (status, body, _) = send(app, request).await;
+            assert_eq!(status, expected, "{method} {uri} {body}");
+            assert_eq!(body["code"], code, "{method} {uri}");
+        }
+    }
+
+    #[tokio::test]
+    async fn served_write_still_rejects_an_unconfigured_role() {
+        let app = router(state_with_secret(SECRET));
+        let token = sign(SECRET, &json!({"role": "not existing"}));
+        let request = Request::builder()
+            .method("POST")
+            .uri("/rest/v1/todos")
+            .header(header::AUTHORIZATION, format!("Bearer {token}"))
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(r#"{"id":1}"#))
+            .unwrap();
+        let (status, body, _) = send(app, request).await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(body["code"], "PGRST000");
+    }
+
+    #[tokio::test]
     async fn bad_bearer_is_401_before_query_parse() {
         let app = router(state_with_secret(SECRET));
         let request = Request::builder()
@@ -2517,6 +2726,77 @@ mod tests {
                 headers[header::WWW_AUTHENTICATE],
                 format!("Bearer error=\"invalid_token\", error_description=\"{message}\"")
             );
+        }
+    }
+
+    #[tokio::test]
+    async fn unconfigured_role_without_a_pool_is_unavailable() {
+        let app = router(state_with_secret(SECRET));
+        let token = sign(SECRET, &json!({"role": "not existing"}));
+        let request = Request::builder()
+            .uri("/rest/v1/todos")
+            .header(header::AUTHORIZATION, format!("Bearer {token}"))
+            .body(Body::empty())
+            .unwrap();
+        let (status, body, _) = send(app, request).await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(body["code"], "PGRST000");
+    }
+
+    #[tokio::test]
+    async fn options_does_not_apply_the_role_check() {
+        let app = router(state_with_secret(SECRET));
+        let token = sign(SECRET, &json!({"role": "not existing"}));
+        let request = Request::builder()
+            .method("OPTIONS")
+            .uri("/rest/v1/todos")
+            .header(header::AUTHORIZATION, format!("Bearer {token}"))
+            .body(Body::empty())
+            .unwrap();
+        let (status, body, _) = send(app, request).await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(body["code"], "PGRST000");
+        assert_ne!(body["code"], "22023");
+    }
+
+    #[tokio::test]
+    async fn existing_unconfigured_role_is_permission_denied() {
+        let failure = RoleFailure::from_catalog("postgres", true);
+        let response = postgrest_role_response(&failure);
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let body: Value = serde_json::from_slice(&bytes).unwrap();
+        // `enforce_db_role` returns this body when `pg_roles` contains the name.
+        assert_eq!(
+            body,
+            json!({
+                "code": "42501",
+                "message": "permission denied to set role \"postgres\"",
+                "details": null,
+                "hint": null,
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn configured_roles_still_reach_the_database() {
+        let secret = JwtSecret::new(SECRET);
+        let state = RestState::from_config(&Config {
+            jwt_secret: Some(secret),
+            db_extra_roles: vec!["reporter".into()],
+            ..Config::default()
+        });
+        let app = router(state);
+        for role in ["anon", "authenticated", "service_role", "reporter"] {
+            let token = sign(SECRET, &json!({ "role": role }));
+            let request = Request::builder()
+                .uri("/rest/v1/todos")
+                .header(header::AUTHORIZATION, format!("Bearer {token}"))
+                .body(Body::empty())
+                .unwrap();
+            let (status, body, _) = send(app.clone(), request).await;
+            assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{role} {body}");
+            assert_eq!(body["code"], "PGRST000", "{role}");
         }
     }
 
