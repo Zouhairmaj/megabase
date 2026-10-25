@@ -374,11 +374,12 @@ pub(crate) async fn put_signed_object(
         uri: &uri,
         headers: &headers,
         operation: OP_UPLOAD_SIGNED,
+        roles: &state.api_roles,
     };
     let bucket = match fetch_upload_bucket(pool, &scope, &bucket_id).await {
         Ok(Some(bucket)) => bucket,
         Ok(None) => return StorageError::no_such_bucket().into_response(),
-        Err(error) => return database_error(&error),
+        Err(error) => return super::apply_response(error),
     };
     let mime_type = file.mime_type.as_ref();
     let allowed = bucket.allowed_mime_types.unwrap_or_default();
