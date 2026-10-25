@@ -169,3 +169,32 @@ pub fn access_claims(
     payload.insert("is_anonymous".into(), json!(user.is_anonymous));
     Value::Object(payload)
 }
+
+/// Access-token claims after MFA verification.
+///
+/// `amr` is already ordered most-recent first, the way
+/// `Session.CalculateAALAndAMR` sorts it. The level is `aal2`.
+pub fn mfa_access_claims(
+    user: &UserRecord,
+    session_id: Uuid,
+    amr: &[(String, SystemTime)],
+    issuer: &str,
+    now: i64,
+    expires_in: i64,
+) -> Value {
+    let mut payload = access_claims(
+        user, session_id, UNIX_EPOCH, "password", issuer, now, expires_in,
+    );
+    if let Value::Object(object) = &mut payload {
+        object.insert("aal".into(), json!("aal2"));
+        object.insert(
+            "amr".into(),
+            Value::Array(
+                amr.iter()
+                    .map(|(method, at)| json!({ "method": method, "timestamp": unix_secs(*at) }))
+                    .collect(),
+            ),
+        );
+    }
+    payload
+}
