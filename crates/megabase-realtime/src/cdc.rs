@@ -8,10 +8,12 @@
 // lib/extensions/postgres_cdc_rls/db_settings.ex and lib/realtime/adapters/changes.ex
 // (Apache-2.0), pin v2.143.3.
 
+use std::borrow::Cow;
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
+use megabase_core::{db_role, ApiRoles, ROLE_EXISTS_SQL};
 use serde_json::Value;
 use sqlx::postgres::PgConnection;
 use sqlx::Row;
@@ -137,11 +139,30 @@ pub(crate) struct Cdc {
     /// `SLOT_NAME_SUFFIX` is set: the cluster may host another server.
     slot_suffixed: bool,
     subscribers: Mutex<Vec<Subscriber>>,
+    roles: Arc<Mutex<ApiRoles>>,
+}
+
+/// `claims ->> 'role'`: JSON null and a missing key are SQL NULL. A string
+/// is that text. Any other JSON value is its text form, which is not NULL.
+fn claim_role_text(claims: &Value) -> Option<Cow<'_, str>> {
+    match claims.get("role") {
+        None | Some(Value::Null) => None,
+        Some(Value::String(role)) => Some(Cow::Borrowed(role.as_str())),
+        Some(other) => Some(Cow::Owned(other.to_string())),
+    }
+}
+
+fn fatal_insert(error: &subscriptions::CreateError) -> (String, bool) {
+    (error.to_string(), error.fatal())
 }
 
 impl Cdc {
     /// The extension for `pool`; `slot_name_suffix` is `SLOT_NAME_SUFFIX`.
-    pub(crate) fn new(pool: sqlx::PgPool, slot_name_suffix: Option<&str>) -> Self {
+    pub(crate) fn new(
+        pool: sqlx::PgPool,
+        slot_name_suffix: Option<&str>,
+        roles: Arc<Mutex<ApiRoles>>,
+    ) -> Self {
         let slot_name = match slot_name_suffix {
             Some(suffix) => format!("{SLOT_NAME}_{suffix}"),
             None => SLOT_NAME.to_owned(),
@@ -151,7 +172,17 @@ impl Cdc {
             slot_name,
             slot_suffixed: slot_name_suffix.is_some(),
             subscribers: Mutex::new(Vec::new()),
+            roles,
         }
+    }
+
+    /// Whether `role` is on the shared allow-list.
+    #[cfg(test)]
+    pub(crate) fn allows_role(&self, role: &str) -> bool {
+        self.roles
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .allows(role)
     }
 
     fn subscribers(&self) -> MutexGuard<'_, Vec<Subscriber>> {
@@ -326,6 +357,49 @@ impl Cdc {
             .is_some())
     }
 
+    /// Rejects a claims `role` that [`db_role`] does not allow, before the
+    /// subscription rows are inserted. `apply_rls` reads `claims_role` from
+    /// those rows, so a rejected role never reaches `set_config`.
+    ///
+    /// The reported error is the one the insert's generated column would
+    /// raise: `realtime.to_regrole((claims ->> 'role'))` (`role_name::regrole`)
+    /// is `42704` for an unknown name, and the `NOT NULL` `claims_role`
+    /// column is `23502` when `->>` yields NULL.
+    async fn ensure_claims_role(
+        &self,
+        claims: &Value,
+        params: &subscriptions::SubscriptionParams,
+    ) -> Result<(), (String, bool)> {
+        let Some(role) = claim_role_text(claims) else {
+            return Err(fatal_insert(&subscriptions::null_claims_role(params)));
+        };
+        let allowed = {
+            let roles = self.roles.lock().unwrap_or_else(PoisonError::into_inner);
+            db_role(role.as_ref(), &roles).is_ok()
+        };
+        if allowed {
+            return Ok(());
+        }
+        let exists = match sqlx::query_scalar::<_, bool>(ROLE_EXISTS_SQL)
+            .bind(role.as_ref())
+            .fetch_one(&self.pool)
+            .await
+        {
+            Ok(exists) => exists,
+            Err(error) => {
+                let error = subscriptions::CreateError::Database(error);
+                let fatal = error.fatal();
+                return Err((error.to_string(), fatal));
+            }
+        };
+        let error = if exists {
+            subscriptions::unconfigured_existing_role(role.as_ref(), params)
+        } else {
+            subscriptions::undefined_claims_role(role.as_ref(), params)
+        };
+        Err(fatal_insert(&error))
+    }
+
     /// `postgres_subscribe_attempt/2`: the error message and whether it is
     /// one of `@postgres_subscribe_fatal_reasons`.
     async fn subscribe_attempt(
@@ -345,6 +419,9 @@ impl Cdc {
         }
         // `subscription_list/1` prepends, so rows go in reverse join order.
         list.reverse();
+        if let Some(params) = list.first().map(|sub| &sub.params) {
+            self.ensure_claims_role(claims, params).await?;
+        }
         subscriptions::create(&self.pool, PUBLICATION, &list)
             .await
             .map_err(|error| (error.to_string(), error.fatal()))
@@ -659,9 +736,41 @@ pub(crate) fn params_id(params: &Value) -> u32 {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{Arc, Mutex, PoisonError};
+
     use super::*;
     use crate::hub::OUTBOX_CAPACITY;
     use serde_json::json;
+
+    fn shared_roles() -> Arc<Mutex<megabase_core::ApiRoles>> {
+        Arc::new(Mutex::new(megabase_core::ApiRoles::default()))
+    }
+
+    #[test]
+    fn claim_role_text_follows_json_text() {
+        assert!(claim_role_text(&json!({})).is_none());
+        assert!(claim_role_text(&json!({"role": null})).is_none());
+        assert_eq!(
+            claim_role_text(&json!({"role": "authenticated"})).as_deref(),
+            Some("authenticated")
+        );
+        assert_eq!(claim_role_text(&json!({"role": 1})).as_deref(), Some("1"));
+        assert_eq!(
+            claim_role_text(&json!({"role": true})).as_deref(),
+            Some("true")
+        );
+    }
+
+    #[tokio::test]
+    async fn role_list_is_shared_with_the_caller() {
+        let roles = shared_roles();
+        let cdc = Cdc::new(lazy_pool(), None, Arc::clone(&roles));
+        assert!(cdc.allows_role("anon"));
+        assert!(!cdc.allows_role("reporter"));
+        *roles.lock().unwrap_or_else(PoisonError::into_inner) =
+            megabase_core::ApiRoles::new(["reporter"]);
+        assert!(cdc.allows_role("reporter"));
+    }
 
     fn lazy_pool() -> sqlx::PgPool {
         sqlx::postgres::PgPoolOptions::new()
@@ -712,7 +821,7 @@ mod tests {
 
     #[tokio::test]
     async fn dispatch_pushes_matching_ids_per_api() {
-        let cdc = Cdc::new(lazy_pool(), None);
+        let cdc = Cdc::new(lazy_pool(), None, shared_roles());
         let (a, b, c) = (Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4());
         let (new_box, mut new_rx) = Outbox::new(OUTBOX_CAPACITY);
         let (old_box, mut old_rx) = Outbox::new(OUTBOX_CAPACITY);
@@ -784,7 +893,7 @@ mod tests {
             .acquire_timeout(Duration::from_millis(200))
             .connect_lazy("postgres://megabase@127.0.0.1:1/megabase")
             .unwrap();
-        let cdc = Cdc::new(pool, None);
+        let cdc = Cdc::new(pool, None, shared_roles());
         let id = Uuid::new_v4();
         let (outbox, mut rx) = Outbox::new(OUTBOX_CAPACITY);
         cdc.subscribe(Subscriber {
@@ -834,7 +943,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_stored_refresh_resumes_only_at_the_latest_generation() {
-        let cdc = Cdc::new(lazy_pool(), None);
+        let cdc = Cdc::new(lazy_pool(), None, shared_roles());
         let id = Uuid::new_v4();
         let (outbox, mut rx) = Outbox::new(OUTBOX_CAPACITY);
         cdc.subscribe(Subscriber {
@@ -876,9 +985,12 @@ mod tests {
             .build()
             .unwrap();
         let _guard = rt.enter();
-        assert_eq!(Cdc::new(lazy_pool(), None).slot_name, SLOT_NAME);
         assert_eq!(
-            Cdc::new(lazy_pool(), Some("dev")).slot_name,
+            Cdc::new(lazy_pool(), None, shared_roles()).slot_name,
+            SLOT_NAME
+        );
+        assert_eq!(
+            Cdc::new(lazy_pool(), Some("dev"), shared_roles()).slot_name,
             "supabase_realtime_replication_slot_dev"
         );
         assert_eq!(backoff(1), Duration::from_millis(200));

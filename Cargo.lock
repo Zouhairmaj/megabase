@@ -1460,6 +1460,7 @@ name = "megabase-storage"
 version = "0.1.48"
 dependencies = [
  "axum",
+ "base64 0.22.1",
  "chrono",
  "md-5 0.10.6",
  "megabase-core",
