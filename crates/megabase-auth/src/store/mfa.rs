@@ -2,18 +2,23 @@
 // internal/models/recovery_code.go, internal/models/sessions.go, and
 // internal/models/user.go (MIT), pin v2.197.0.
 
-//! MFA factor and recovery-code reads, and factor removal.
-//!
-//! Enrollment, challenges, and verification are not ported, so nothing here
-//! creates a factor, a challenge, or a recovery code.
+//! MFA factors, challenges, recovery codes, and the AAL2 session upgrade.
 
 use std::collections::HashMap;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::Value;
 use sqlx::Row;
 use uuid::Uuid;
 
 use super::{insert_audit, remember_audit, timed, Backend, BackendKind, StoreError, UserRecord};
+
+#[path = "mfa_flow.rs"]
+mod flow;
+
+pub(crate) use flow::{
+    phone_otp, EnrolledFactor, FactorVerify, MfaError, RecoveryIssue, UpgradedSession,
+};
 
 /// One `auth.mfa_factors` row, as far as the factor routes read it.
 #[derive(Clone, Debug)]
@@ -25,6 +30,12 @@ pub struct FactorRow {
     /// `unverified` or `verified`.
     pub status: String,
     pub friendly_name: String,
+    /// Base32 TOTP secret, or empty.
+    pub secret: String,
+    /// E.164 digits without `+`, or empty.
+    pub phone: String,
+    pub created_at: SystemTime,
+    pub last_challenged_at: Option<SystemTime>,
 }
 
 impl FactorRow {
@@ -62,6 +73,32 @@ pub(super) struct MemoryMfa {
     recovery: HashMap<Uuid, RecoveryCodeStatus>,
     /// AAL2 sessions and the factor (`sessions.factor_id`) that raised them.
     aal2_sessions: HashMap<Uuid, Uuid>,
+    challenges: Vec<MemoryChallenge>,
+    /// Argon2id hashes and lockout, keyed by user id.
+    recovery_codes: HashMap<Uuid, MemoryRecovery>,
+    /// AMR claims for a session: method and `updated_at`.
+    amr: HashMap<Uuid, Vec<(String, SystemTime)>>,
+}
+
+struct MemoryChallenge {
+    id: Uuid,
+    factor_id: Uuid,
+    created_at: SystemTime,
+    verified_at: Option<SystemTime>,
+    ip: String,
+    otp: String,
+}
+
+struct MemoryCode {
+    id: Uuid,
+    hash: String,
+    consumed_at: Option<SystemTime>,
+}
+
+struct MemoryRecovery {
+    failed: i32,
+    locked_until: Option<SystemTime>,
+    codes: Vec<MemoryCode>,
 }
 
 impl Backend {
@@ -159,7 +196,9 @@ impl Backend {
                 timed(async {
                     let row = sqlx::query(
                         "SELECT id, user_id, factor_type::text AS factor_type,
-                                status::text AS status, COALESCE(friendly_name, '') AS friendly_name
+                                status::text AS status, COALESCE(friendly_name, '') AS friendly_name,
+                                COALESCE(secret, '') AS secret, COALESCE(phone, '') AS phone,
+                                created_at, last_challenged_at
                          FROM auth.mfa_factors WHERE user_id = $1 AND id = $2 LIMIT 1",
                     )
                     .bind(user_id)
@@ -239,7 +278,9 @@ impl Backend {
                 timed(async {
                     let row = sqlx::query(
                         "SELECT id, user_id, factor_type::text AS factor_type,
-                                status::text AS status, COALESCE(friendly_name, '') AS friendly_name
+                                status::text AS status, COALESCE(friendly_name, '') AS friendly_name,
+                                COALESCE(secret, '') AS secret, COALESCE(phone, '') AS phone,
+                                created_at, last_challenged_at
                          FROM auth.mfa_factors
                          WHERE user_id = $1 AND factor_type = 'recovery_code' LIMIT 1",
                     )
@@ -318,12 +359,23 @@ impl Backend {
 }
 
 fn factor_row(row: &sqlx::postgres::PgRow) -> Result<FactorRow, StoreError> {
+    let created_at = row
+        .try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("created_at")?
+        .map(super::from_ts)
+        .unwrap_or(UNIX_EPOCH);
+    let last_challenged_at = row
+        .try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("last_challenged_at")?
+        .map(super::from_ts);
     Ok(FactorRow {
         id: row.try_get("id")?,
         user_id: row.try_get("user_id")?,
         factor_type: row.try_get("factor_type")?,
         status: row.try_get("status")?,
         friendly_name: row.try_get("friendly_name")?,
+        secret: row.try_get("secret")?,
+        phone: row.try_get("phone")?,
+        created_at,
+        last_challenged_at,
     })
 }
 
@@ -348,6 +400,10 @@ impl Backend {
             factor_type: factor_type.into(),
             status: status.into(),
             friendly_name: String::new(),
+            secret: String::new(),
+            phone: String::new(),
+            created_at: SystemTime::now(),
+            last_challenged_at: None,
         });
         id
     }
