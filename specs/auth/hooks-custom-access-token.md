@@ -166,9 +166,10 @@ wrapping `Error running hook URI` failure.
 - **`aud` shape.** golang-jwt `MarshalSingleStringAsArray` defaults to
   true, so the first hook input in a GoTrue process has `aud` as a
   one-element array. `SignJWT` then sets that global false, and later
-  tokens use a string. Megabase always sends a string. The judge fixture
-  collapses a one-element `aud` array to a string so the hook cases do
-  not depend on request order.
+  tokens use a string. Megabase always sends a string. The hook fixture
+  copies `aud` as-is. The judge harness compares a one-element string
+  `aud` array as that string (`judge/NORMALIZATION.md`) so the hook
+  cases do not depend on request order.
 
 ## Tests
 

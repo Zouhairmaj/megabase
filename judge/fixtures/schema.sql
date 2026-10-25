@@ -328,13 +328,10 @@ grant select on public.judge_caller to anon, authenticated, service_role;
 -- out of the OpenAPI document. Every issued token gets judge_hook = on.
 -- A member-prefixed mailbox also gets user_role = member.
 --
--- golang-jwt's MarshalSingleStringAsArray defaults to true, so the first
--- hook input in an Auth process sends aud as a one-element array.
--- SignJWT then sets that global to false (vendor/auth
--- internal/tokens/service.go), and every later token sends a string.
--- Megabase always sends a string. Collapse a single audience to a string
--- here so the cases compare judge_hook and user_role, not which request
--- happened to run first.
+-- The hook copies claims as-is. GoTrue's first hook input in a process
+-- may send aud as a one-element array; later tokens send a string.
+-- Comparison of that representation lives in the harness
+-- (judge/NORMALIZATION.md), not here.
 create function public.custom_access_token_hook(event jsonb)
 returns jsonb
 language plpgsql
@@ -344,13 +341,7 @@ declare
   claims jsonb := event -> 'claims';
   email text := coalesce(claims ->> 'email', '');
 begin
-  claims := coalesce(claims, '{}'::jsonb);
-  if jsonb_typeof(claims -> 'aud') = 'array'
-     and jsonb_array_length(claims -> 'aud') = 1
-     and jsonb_typeof(claims -> 'aud' -> 0) = 'string' then
-    claims := jsonb_set(claims, '{aud}', claims -> 'aud' -> 0, true);
-  end if;
-  claims := jsonb_set(claims, '{judge_hook}', to_jsonb('on'::text), true);
+  claims := jsonb_set(coalesce(claims, '{}'::jsonb), '{judge_hook}', to_jsonb('on'::text), true);
   if email like 'judge-hook-member-%@example.com' then
     claims := jsonb_set(claims, '{user_role}', to_jsonb('member'::text), true);
   end if;

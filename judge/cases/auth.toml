@@ -2054,8 +2054,8 @@ headers = { Authorization = "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQ
 
 # custom_access_token. The hook is enabled on both stacks and adds judge_hook
 # to every issued access token. A member-prefixed mailbox also gets
-# user_role = member. The fixture collapses a one-element aud array to a
-# string: GoTrue sends an array only for the first hook call in a process.
+# user_role = member. GoTrue may emit aud as a one-element array on the
+# first token in a process; the harness compares that as the string.
 
 [[case]]
 id = "auth.hook.access-token.password"
