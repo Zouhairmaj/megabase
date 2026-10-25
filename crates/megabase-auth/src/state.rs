@@ -78,6 +78,13 @@ pub struct AuthState {
     /// `POST /resend`: its own `GOTRUE_RATE_LIMIT_OTP` bucket (GoTrue does not
     /// share the OTP limiter's tokens with resend).
     pub(crate) resend_limiter: Arc<KeyedLimiter>,
+    /// `POST /factors/{id}/verify` and `POST /factors/recovery-codes/verify`:
+    /// GoTrue `FactorVerify`, `GOTRUE_MFA_RATE_LIMIT_CHALLENGE_AND_VERIFY`
+    /// (default 15) per minute, burst 30, one-minute entry TTL.
+    pub(crate) factor_verify_limiter: Arc<KeyedLimiter>,
+    /// `POST /factors/{id}/challenge`: GoTrue `FactorChallenge`. Same
+    /// setting and entry TTL as [`Self::factor_verify_limiter`], own bucket.
+    pub(crate) factor_challenge_limiter: Arc<KeyedLimiter>,
     /// `GOTRUE_SECURITY_SB_FORWARDED_FOR_ENABLED`. Default false: the verify
     /// and OTP limiters use [`Self::rate_limit_header`] only.
     pub sb_forwarded_for_enabled: bool,
@@ -194,6 +201,16 @@ impl AuthState {
             )?,
             otp_limiter: per_five_minutes(&lookup, "GOTRUE_RATE_LIMIT_OTP", DEFAULT_OTP_RATE)?,
             resend_limiter: per_five_minutes(&lookup, "GOTRUE_RATE_LIMIT_OTP", DEFAULT_OTP_RATE)?,
+            factor_verify_limiter: per_minute(
+                &lookup,
+                "GOTRUE_MFA_RATE_LIMIT_CHALLENGE_AND_VERIFY",
+                DEFAULT_MFA_CHALLENGE_AND_VERIFY_RATE,
+            )?,
+            factor_challenge_limiter: per_minute(
+                &lookup,
+                "GOTRUE_MFA_RATE_LIMIT_CHALLENGE_AND_VERIFY",
+                DEFAULT_MFA_CHALLENGE_AND_VERIFY_RATE,
+            )?,
             sb_forwarded_for_enabled: security_flag(
                 &lookup,
                 "GOTRUE_SECURITY_SB_FORWARDED_FOR_ENABLED",
@@ -246,6 +263,8 @@ impl AuthState {
             verify_limiter: defaults.verify_limiter,
             otp_limiter: defaults.otp_limiter,
             resend_limiter: defaults.resend_limiter,
+            factor_verify_limiter: defaults.factor_verify_limiter,
+            factor_challenge_limiter: defaults.factor_challenge_limiter,
             sb_forwarded_for_enabled: defaults.sb_forwarded_for_enabled,
             otp_max_failed_attempts: defaults.otp_max_failed_attempts,
             backend,
@@ -358,6 +377,10 @@ const DEFAULT_SAML_ASSERTION_RATE: f64 = 15.0;
 const DEFAULT_VERIFY_RATE: f64 = 30.0;
 /// `RateLimitOtp` default (`GOTRUE_RATE_LIMIT_OTP`).
 const DEFAULT_OTP_RATE: f64 = 30.0;
+/// `MFA.RateLimitChallengeAndVerify` default. The reference stack does not set it.
+const DEFAULT_MFA_CHALLENGE_AND_VERIFY_RATE: f64 = 15.0;
+/// `FactorVerify` entry TTL (`DefaultExpirationTTL: time.Minute`).
+const MFA_VERIFY_ENTRY_TTL: Duration = Duration::from_secs(60);
 
 fn otp_max_failed_attempts(raw: Option<String>) -> Result<u32, ConfigError> {
     let Some(raw) = raw.filter(|value| !value.trim().is_empty()) else {
@@ -367,6 +390,19 @@ fn otp_max_failed_attempts(raw: Option<String>) -> Result<u32, ConfigError> {
         key: "MEGABASE_AUTH_OTP_MAX_FAILED_ATTEMPTS".into(),
         value: raw,
     })
+}
+
+/// Events per minute, burst [`TOKEN_BURST`], entries kept for one minute.
+fn per_minute(
+    lookup: &impl Fn(&str) -> Option<String>,
+    key: &str,
+    default: f64,
+) -> Result<Arc<KeyedLimiter>, ConfigError> {
+    Ok(Arc::new(KeyedLimiter::with_entry_ttl(
+        rate_setting(lookup, key, default)? / 60.0,
+        TOKEN_BURST,
+        MFA_VERIFY_ENTRY_TTL,
+    )))
 }
 
 fn per_five_minutes(
@@ -655,6 +691,14 @@ mod tests {
             (name == "GOTRUE_RATE_LIMIT_OTP").then(|| "lots".into())
         })
         .is_err());
+        assert!(AuthState::try_from_lookup(|name| {
+            (name == "GOTRUE_MFA_RATE_LIMIT_CHALLENGE_AND_VERIFY").then(|| "lots".into())
+        })
+        .is_err());
+        assert!(AuthState::try_from_lookup(|name| {
+            (name == "GOTRUE_MFA_RATE_LIMIT_CHALLENGE_AND_VERIFY").then(|| "15".into())
+        })
+        .is_ok());
         assert!(!AuthState::reference().sb_forwarded_for_enabled);
         assert_eq!(AuthState::reference().otp_max_failed_attempts, 0);
         let enabled = AuthState::from_lookup(|name| match name {

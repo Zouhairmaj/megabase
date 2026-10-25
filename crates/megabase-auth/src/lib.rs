@@ -12,6 +12,8 @@
 //! `pg-functions://` custom access token hook at every token issuance.
 //! Issue #47 serves the `/factors` authentication, configuration, and AAL
 //! gates, factor unenroll, and the recovery-code status and delete routes.
+//! Issue #495 serves TOTP and phone enroll, challenge, and verify, WebAuthn
+//! enroll, and recovery-code generate, regenerate, and verify.
 //! Issue #46 serves `GET`/`POST /callback` up to the provider code exchange
 //! and `POST /magiclink` and `POST /otp` up to mail and SMS delivery.
 //! Issue #382 serves `POST /recover` through GoTrue's no-op mail client and
@@ -49,6 +51,7 @@ mod provider;
 mod ratelimit;
 mod reauthenticate;
 mod recover;
+mod recovery_code;
 mod resend;
 mod roles;
 mod routes;
@@ -58,6 +61,7 @@ mod sso;
 mod state;
 mod store;
 mod token;
+mod totp;
 mod user;
 mod verify;
 mod well_known;

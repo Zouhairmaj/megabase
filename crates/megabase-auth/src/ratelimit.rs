@@ -1,10 +1,14 @@
 // Ported from supabase/auth internal/api/middleware.go and
 // internal/api/apilimiter/apilimiter.go (MIT), pin v2.197.0.
 
-//! Header-keyed token-bucket rate limiting, as GoTrue's `Token` limiter.
+//! Header-keyed token-bucket rate limiting, as GoTrue's tollbooth limiters.
 //!
-//! GoTrue builds `tollbooth.NewLimiter(rate, ...).SetBurst(30)` with a one
-//! hour entry TTL. [`limit_by_header`] limits only when
+//! GoTrue builds `tollbooth.NewLimiter(rate, ...).SetBurst(30)`. Most
+//! limiters keep an entry for one hour. `FactorVerify` and
+//! `FactorChallenge` keep one for one minute. The entry expires a fixed
+//! interval after it is created; a later request does not extend that
+//! deadline. The next request starts from a full burst. [`limit_by_header`]
+//! limits only when
 //! `GOTRUE_RATE_LIMIT_HEADER` names a header whose first comma-separated
 //! value is non-blank. [`perform_rate_limiting`] uses a parsed
 //! `Sb-Forwarded-For` address only when
@@ -30,6 +34,8 @@ const SWEEP_INTERVAL: Duration = Duration::from_secs(60);
 
 struct Bucket {
     tokens: f64,
+    /// When this cache entry was stored. Tollbooth does not extend it on read.
+    created: Instant,
     last: Instant,
 }
 
@@ -37,6 +43,8 @@ struct Bucket {
 pub(crate) struct KeyedLimiter {
     rate: f64,
     burst: f64,
+    /// How long a key keeps its bucket after creation (`DefaultExpirationTTL`).
+    entry_ttl: Duration,
     table: Mutex<Table>,
 }
 
@@ -47,11 +55,17 @@ struct Table {
 }
 
 impl KeyedLimiter {
-    /// `rate` is tokens per second.
+    /// `rate` is tokens per second. Entries live for one hour.
     pub(crate) fn new(rate: f64, burst: f64) -> Self {
+        Self::with_entry_ttl(rate, burst, ENTRY_TTL)
+    }
+
+    /// `new`, with GoTrue's `DefaultExpirationTTL` for this limiter.
+    pub(crate) fn with_entry_ttl(rate: f64, burst: f64, entry_ttl: Duration) -> Self {
         Self {
             rate: rate.max(0.0),
             burst,
+            entry_ttl,
             table: Mutex::new(Table::default()),
         }
     }
@@ -62,6 +76,7 @@ impl KeyedLimiter {
     }
 
     fn allow_at(&self, key: &str, now: Instant) -> bool {
+        let entry_ttl = self.entry_ttl;
         let mut guard = self.table.lock().unwrap_or_else(PoisonError::into_inner);
         let table = &mut *guard;
         let sweep_due = table
@@ -70,13 +85,21 @@ impl KeyedLimiter {
         if table.buckets.len() >= SWEEP_AT && sweep_due {
             table
                 .buckets
-                .retain(|_, bucket| now.saturating_duration_since(bucket.last) < ENTRY_TTL);
+                .retain(|_, bucket| now.saturating_duration_since(bucket.created) < entry_ttl);
             table.last_sweep = Some(now);
         }
         let bucket = table.buckets.entry(key.to_string()).or_insert(Bucket {
             tokens: self.burst,
+            created: now,
             last: now,
         });
+        // Tollbooth stores the limiter with a fixed cache TTL. The next
+        // request after that deadline starts from a full burst.
+        if now.saturating_duration_since(bucket.created) >= entry_ttl {
+            bucket.tokens = self.burst;
+            bucket.created = now;
+            bucket.last = now;
+        }
         let elapsed = now.saturating_duration_since(bucket.last).as_secs_f64();
         bucket.tokens = (bucket.tokens + elapsed * self.rate).min(self.burst);
         bucket.last = now;
@@ -169,6 +192,7 @@ impl EmailLimiter {
                 let burst = events.trunc().max(0.0);
                 let bucket = state.bucket.get_or_insert(Bucket {
                     tokens: burst,
+                    created: now,
                     last: now,
                 });
                 let per_second = if every.is_zero() {
@@ -330,6 +354,18 @@ mod tests {
         assert!(parse_email_rate("x/1s").is_err());
         assert!(parse_email_rate("1/2/3").is_err());
         assert!(parse_email_rate("1/x").is_err());
+    }
+
+    #[test]
+    fn entry_expires_from_creation_not_last_use() {
+        let limiter = KeyedLimiter::with_entry_ttl(0.0, 1.0, Duration::from_secs(60));
+        let start = Instant::now();
+        assert!(limiter.allow_at("a", start));
+        assert!(!limiter.allow_at("a", start + Duration::from_secs(59)));
+        assert!(
+            limiter.allow_at("a", start + Duration::from_secs(60)),
+            "the bucket resets one TTL after it was created"
+        );
     }
 
     #[test]
