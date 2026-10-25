@@ -21,8 +21,8 @@ use serde_json::{json, Map, Value};
 use sqlx::Row;
 
 use super::{
-    backend, etag, header_str, object_file, object_row_json, pg_error, remove_file, request_jwt,
-    Actor, Scope, FIND_OBJECT_FOR_UPDATE_SQL, FIND_OBJECT_SQL,
+    backend, etag, header_str, object_file, object_row_json, remove_file, request_jwt, Actor,
+    Scope, FIND_OBJECT_FOR_UPDATE_SQL, FIND_OBJECT_SQL,
 };
 use crate::{
     bucket::{json_object, validation_not_implemented},
@@ -295,6 +295,7 @@ pub(crate) async fn move_object(
         uri: &uri,
         headers: &headers,
         operation: OP_MOVE,
+        roles: &state.api_roles,
     };
 
     // `testPermission`: find and rename the source as the request role.
@@ -319,12 +320,12 @@ pub(crate) async fn move_object(
             .fetch_optional(&mut *tx)
             .await?;
         tx.rollback().await?;
-        Ok::<_, sqlx::Error>(updated.is_some())
+        Ok::<_, super::ApplyError>(updated.is_some())
     };
     match probe.await {
         Ok(true) => {}
         Ok(false) => return StorageError::no_such_key().into_response(),
-        Err(error) => return pg_error(&error, StorageError::resource_already_exists),
+        Err(error) => return super::apply_pg(error, StorageError::resource_already_exists),
     }
 
     let source = async {
@@ -336,7 +337,7 @@ pub(crate) async fn move_object(
             .await?;
         tx.commit().await?;
         row.map(|row| {
-            Ok::<_, sqlx::Error>((
+            Ok::<_, super::ApplyError>((
                 row.try_get::<Option<String>, _>("version")?,
                 row.try_get::<Option<Value>, _>("user_metadata")?,
             ))
@@ -346,7 +347,7 @@ pub(crate) async fn move_object(
     let (source_version, user_metadata) = match source.await {
         Ok(Some(source)) => source,
         Ok(None) => return StorageError::no_such_key().into_response(),
-        Err(error) => return pg_error(&error, StorageError::resource_already_exists),
+        Err(error) => return super::apply_pg(error, StorageError::resource_already_exists),
     };
     let moved = || fastify_json(StatusCode::OK, &json!({ "message": "Successfully moved" }));
     if input.bucket_id == input.destination_bucket && input.source_key == input.destination_key {
@@ -417,7 +418,7 @@ pub(crate) async fn move_object(
             return Ok(false);
         }
         tx.commit().await?;
-        Ok::<_, sqlx::Error>(true)
+        Ok::<_, super::ApplyError>(true)
     };
     match renamed.await {
         Ok(true) => {
@@ -431,7 +432,7 @@ pub(crate) async fn move_object(
         }
         Err(error) => {
             remove_file(&destination_file).await;
-            pg_error(&error, StorageError::resource_already_exists)
+            super::apply_pg(error, StorageError::resource_already_exists)
         }
     }
 }
@@ -483,6 +484,7 @@ pub(crate) async fn copy_object(
         uri: &uri,
         headers: &headers,
         operation: OP_COPY,
+        roles: &state.api_roles,
     };
 
     let origin = async {
@@ -494,7 +496,7 @@ pub(crate) async fn copy_object(
             .await?;
         tx.commit().await?;
         row.map(|row| {
-            Ok::<_, sqlx::Error>((
+            Ok::<_, super::ApplyError>((
                 row.try_get::<Option<String>, _>("version")?,
                 row.try_get::<Option<Value>, _>("metadata")?,
                 row.try_get::<Option<Value>, _>("user_metadata")?,
@@ -505,7 +507,7 @@ pub(crate) async fn copy_object(
     let (source_version, source_metadata, source_user_metadata) = match origin.await {
         Ok(Some(origin)) => origin,
         Ok(None) => return StorageError::no_such_key().into_response(),
-        Err(error) => return pg_error(&error, StorageError::resource_already_exists),
+        Err(error) => return super::apply_pg(error, StorageError::resource_already_exists),
     };
     // `copyMetadata ? originObject.user_metadata : userMetadata`; without
     // `x-metadata` the latter is `undefined`.
@@ -546,10 +548,10 @@ pub(crate) async fn copy_object(
             .bind("1")
             .execute(&mut *tx)
             .await?;
-        tx.rollback().await
+        tx.rollback().await.map_err(super::ApplyError::from)
     };
     if let Err(error) = probe.await {
-        return pg_error(&error, StorageError::key_already_exists);
+        return super::apply_pg(error, StorageError::key_already_exists);
     }
 
     let (Some(source_file), Some(destination_file)) = (
@@ -612,7 +614,7 @@ pub(crate) async fn copy_object(
             body.extend(object);
         }
         tx.commit().await?;
-        Ok::<_, sqlx::Error>((Value::Object(body), replaced))
+        Ok::<_, super::ApplyError>((Value::Object(body), replaced))
     };
     match written.await {
         Ok((body, replaced)) => {
@@ -629,7 +631,7 @@ pub(crate) async fn copy_object(
         }
         Err(error) => {
             remove_file(&destination_file).await;
-            pg_error(&error, StorageError::resource_already_exists)
+            super::apply_pg(error, StorageError::resource_already_exists)
         }
     }
 }
