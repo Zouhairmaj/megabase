@@ -10,7 +10,7 @@ Specs go in `specs/rest/<unit>.md` (GOAL.md section 5). Mark served code with `/
 
 | State | Unit id | Upstream source |
 |---|---|---|
-| 🟩 | `rest:order-modifier:asc` | [src/library/PostgREST/ApiRequest/QueryParams.hs:851](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/ApiRequest/QueryParams.hs#L851) |
-| 🟩 | `rest:order-modifier:desc` | [src/library/PostgREST/ApiRequest/QueryParams.hs:852](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/ApiRequest/QueryParams.hs#L852) |
+| ✅ | `rest:order-modifier:asc` | [src/library/PostgREST/ApiRequest/QueryParams.hs:851](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/ApiRequest/QueryParams.hs#L851) |
+| ✅ | `rest:order-modifier:desc` | [src/library/PostgREST/ApiRequest/QueryParams.hs:852](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/ApiRequest/QueryParams.hs#L852) |
 | 🟩 | `rest:order-modifier:nullsfirst` | [src/library/PostgREST/ApiRequest/QueryParams.hs:846](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/ApiRequest/QueryParams.hs#L846) |
 | 🟩 | `rest:order-modifier:nullslast` | [src/library/PostgREST/ApiRequest/QueryParams.hs:847](https://github.com/PostgREST/postgrest/blob/0d97c05d8d23bd8a83c867abc45ef481a6d5d2c7/src/library/PostgREST/ApiRequest/QueryParams.hs#L847) |
