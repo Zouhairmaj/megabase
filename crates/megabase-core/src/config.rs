@@ -36,6 +36,10 @@ pub struct Config {
     /// `PGRST_DB_AGGREGATES_ENABLED`, default `false` (PostgREST's default,
     /// and the pinned Supabase compose file does not set it).
     pub db_aggregates_enabled: bool,
+    /// `MEGABASE_DB_EXTRA_ROLES`. Comma-separated role names, besides
+    /// `anon`, `authenticated`, and `service_role`, that a JWT `role` claim
+    /// may apply with `set_config('role', …)`. Empty when unset.
+    pub db_extra_roles: Vec<String>,
     /// `FILE_STORAGE_BACKEND_PATH`, the directory Storage keeps object bytes
     /// in (storage-api's file backend setting). Unset or empty leaves the
     /// object routes at 501.
@@ -58,6 +62,7 @@ impl fmt::Debug for Config {
             .field("http_timeout", &self.http_timeout)
             .field("request_body_limit", &self.request_body_limit)
             .field("db_aggregates_enabled", &self.db_aggregates_enabled)
+            .field("db_extra_roles", &self.db_extra_roles)
             .field("storage_file_path", &self.storage_file_path)
             .finish()
     }
@@ -73,6 +78,7 @@ impl Default for Config {
             http_timeout: DEFAULT_HTTP_TIMEOUT,
             request_body_limit: DEFAULT_REQUEST_BODY_LIMIT,
             db_aggregates_enabled: false,
+            db_extra_roles: Vec::new(),
             storage_file_path: None,
         }
     }
@@ -125,6 +131,9 @@ impl Config {
             request_body_limit,
             db_aggregates_enabled: lookup("PGRST_DB_AGGREGATES_ENABLED")
                 .is_some_and(|raw| raw.trim().eq_ignore_ascii_case("true")),
+            db_extra_roles: lookup("MEGABASE_DB_EXTRA_ROLES")
+                .map(|raw| parse_csv_roles(&raw))
+                .unwrap_or_default(),
             storage_file_path: lookup("FILE_STORAGE_BACKEND_PATH")
                 .filter(|raw| !raw.is_empty())
                 .map(std::path::PathBuf::from),
@@ -139,6 +148,13 @@ impl Config {
         }
     }
 
+    /// API roles a JWT `role` claim may apply: the three standard names plus
+    /// [`Self::db_extra_roles`].
+    #[must_use]
+    pub fn api_roles(&self) -> crate::ApiRoles {
+        crate::ApiRoles::new(self.db_extra_roles.iter().map(String::as_str))
+    }
+
     /// HS256 verifier from `JWT_SECRET`. Missing or empty is
     /// [`crate::jwt::JwtError::SecretMissing`]. A shorter non-empty secret is
     /// [`crate::jwt::JwtError::SecretTooShort`]. Megabase never invents a
@@ -149,6 +165,18 @@ impl Config {
             _ => Err(crate::jwt::JwtError::SecretMissing.into()),
         }
     }
+}
+
+fn parse_csv_roles(raw: &str) -> Vec<String> {
+    let mut roles: Vec<String> = raw
+        .split(',')
+        .map(str::trim)
+        .filter(|role| !role.is_empty())
+        .map(str::to_string)
+        .collect();
+    roles.sort();
+    roles.dedup();
+    roles
 }
 
 fn parse_millis(raw: &str) -> crate::Result<Duration> {
@@ -302,5 +330,21 @@ mod tests {
         })
         .unwrap_err();
         assert!(body.to_string().contains("byte count"), "{body}");
+    }
+
+    #[test]
+    fn extra_roles_are_split_trimmed_and_deduplicated() {
+        let config = Config::from_lookup(|key| {
+            (key == "MEGABASE_DB_EXTRA_ROLES").then(|| " reporter, analytics ,reporter".into())
+        })
+        .unwrap();
+        assert_eq!(
+            config.db_extra_roles,
+            vec!["analytics".to_string(), "reporter".to_string()]
+        );
+        assert!(config.api_roles().allows("reporter"));
+        assert!(config.api_roles().allows("anon"));
+        assert!(!config.api_roles().allows("postgres"));
+        assert!(Config::default().db_extra_roles.is_empty());
     }
 }

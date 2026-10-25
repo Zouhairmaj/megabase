@@ -18,7 +18,11 @@ Apache-2.0. storage-api runs every file in `migrations/tenant/` in order
 When `DATABASE_URL` is set, `megabase_storage::install_schema`
 (`crates/megabase-storage/src/schema.rs`) runs one transaction under
 `pg_advisory_xact_lock(hashtext('megabase.storage.install_schema'))`:
-`sql/buckets.sql`, then the files below in install order. Every statement
+`sql/buckets.sql`, then the files below in install order, then
+`sql/list_v2.sql` (`storage.list_objects_with_delimiter`,
+`storage.search_by_timestamp`, `storage.search_v2`) so
+`POST /object/list-v2` can call them. Those three functions are not
+claimed as sql-function units. Every statement
 is guarded or `CREATE OR REPLACE`, so a restart, or a database the
 storage-api migrations already reached the pin on, keeps the same
 definitions. Function owners and the `storage.install_roles` role setup in
