@@ -14,7 +14,7 @@
 use std::time::SystemTime;
 
 use axum::extract::State;
-use axum::http::{HeaderMap, StatusCode};
+use axum::http::{header::ALLOW, HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use megabase_core::MegabaseNotImplemented;
 
@@ -66,6 +66,19 @@ pub(crate) async fn reauthenticate(State(state): State<AuthState>, headers: Head
         Err(Stop::Error(error)) => error.into_response(),
         Err(Stop::NotPorted) => MegabaseNotImplemented::new(COMPONENT, UNIT).into_response(),
     }
+}
+
+/// chi registers `/reauthenticate` under `requireAuthentication`, then only
+/// `GET`. A missing or invalid bearer fails before the method check. A
+/// signed-in caller on any other method gets 405 `Allow: GET`.
+pub(crate) async fn require_then_method_not_allowed(
+    State(state): State<AuthState>,
+    headers: HeaderMap,
+) -> Response {
+    if let Err(response) = require_user(&state, &headers).await {
+        return *response;
+    }
+    (StatusCode::METHOD_NOT_ALLOWED, [(ALLOW, "GET")]).into_response()
 }
 
 async fn send_reauthentication(state: &AuthState, user: &UserRecord) -> Result<(), Stop> {
@@ -184,12 +197,32 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn missing_bearer_is_401_and_other_methods_are_405() {
+    async fn missing_bearer_is_401_before_the_method_check() {
         let (app, _, _) = app();
         let (status, body) = call(&app, "GET", "/auth/v1/reauthenticate", "").await;
         assert_eq!(status, StatusCode::UNAUTHORIZED);
         assert_eq!(body["error_code"], "no_authorization");
+        // chi runs requireAuthentication on every method. The judge's anon
+        // JWT has no `sub`, so POST is 403, not 405.
         let (status, body) = call(&app, "POST", "/auth/v1/reauthenticate", "").await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+        assert_eq!(body["error_code"], "no_authorization");
+        let anon = Hs256::new(SECRET.as_bytes())
+            .unwrap()
+            .sign(&json!({
+                "role": "anon",
+                "iss": "supabase-demo",
+                "exp": 4_000_000_000u64,
+            }))
+            .unwrap()
+            .as_str()
+            .to_string();
+        let (status, body) = call(&app, "POST", "/auth/v1/reauthenticate", &anon).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_eq!(body["error_code"], "bad_jwt");
+        assert_eq!(body["msg"], "invalid claim: missing sub claim");
+        let access = signup(&app, "methods@example.com").await;
+        let (status, body) = call(&app, "POST", "/auth/v1/reauthenticate", &access).await;
         assert_eq!(status, StatusCode::METHOD_NOT_ALLOWED);
         assert_eq!(body["allow"], "GET");
     }
@@ -298,6 +331,8 @@ mod tests {
         let (status, body) = call(&app, "GET", "/auth/v1/reauthenticate", &access).await;
         assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
         assert_eq!(body["msg"], SEND_FAILED);
+        assert_eq!(body["error_code"], "unexpected_failure");
+        Uuid::parse_str(body["error_id"].as_str().unwrap()).unwrap();
         assert_eq!(
             backend
                 .reauthentication_token_for_test("ada@example.com")

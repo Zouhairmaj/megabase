@@ -51,7 +51,9 @@ pub(crate) fn router(state: AuthState) -> Router {
         .route("/auth/v1/authorize", get(crate::external::authorize))
         .route(
             "/auth/v1/reauthenticate",
-            get_only(get(crate::reauthenticate::reauthenticate)),
+            get(crate::reauthenticate::reauthenticate)
+                .head(crate::reauthenticate::require_then_method_not_allowed)
+                .fallback(crate::reauthenticate::require_then_method_not_allowed),
         )
         .route("/auth/v1/signup", post(signup))
         .route("/auth/v1/token", post(crate::token::token))

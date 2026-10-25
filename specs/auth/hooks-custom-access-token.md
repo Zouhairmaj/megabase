@@ -159,8 +159,10 @@ wrapping `Error running hook URI` failure.
   GoTrue's `RemoteAddr` fallback is missing; without `X-Forwarded-For` the
   field is omitted. `Sb-Forwarded-For` is not read (off in the reference
   stack).
-- **`error_id`.** GoTrue adds the request id to 5xx bodies; no Megabase
-  Auth error does yet.
+- **`error_id`.** GoTrue adds the request id to 5xx bodies. Megabase
+  `GoTrueError` 5xx responses do the same with a generated UUID (the
+  reference stack leaves `GOTRUE_API_REQUEST_ID_HEADER` unset). Hook
+  5xx bodies that do not go through `GoTrueError` still omit it.
 - **In-memory backend.** Tests use a Rust closure as the hook function.
   Memory writes are not transactional, so a failure keeps the session.
 

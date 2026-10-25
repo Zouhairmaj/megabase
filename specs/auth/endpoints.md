@@ -37,10 +37,16 @@ Reference-stack flags come from `vendor/supabase/docker/.env.example` and
 
 ## Inputs
 
-Health, settings, and reauthenticate take no body. They are registered with
-chi's `r.Get` only (`vendor/auth/internal/api/api.go:202`, `:222`, `:278`),
-so `HEAD` and every other method get chi's `methodNotAllowedHandler`: 405,
-`Allow: GET`, empty body. chi does not answer `HEAD` from a `GET` route.
+Health, settings, and reauthenticate take no body. Health and settings are
+registered with chi's `r.Get` only (`vendor/auth/internal/api/api.go:202`,
+`:222`), so `HEAD` and every other method get chi's
+`methodNotAllowedHandler`: 405, `Allow: GET`, empty body. chi does not
+answer `HEAD` from a `GET` route. Reauthenticate is
+`r.With(api.requireAuthentication).Route("/reauthenticate", …)` then
+`r.Get` (`:277`). The bearer check runs on every method: a missing bearer
+is 401, the judge anon JWT (no `sub`) is 403 `bad_jwt` / `invalid claim:
+missing sub claim`, and only a signed-in caller on a non-`GET` method
+reaches 405.
 Without an `apikey`
 the gateway answers first (`specs/server/key-auth.md`). Signup, invite,
 recover, and resend read a JSON body of at most `1 << 20` bytes.
@@ -211,7 +217,9 @@ client as `POST /recover`. A randomness failure is 500
 `user_reauthenticate_requested`, `reauthentication_token`,
 `reauthentication_sent_at`, and a `reauthentication_token` one-time token.
 An unreachable SMTP host is 500 with that message and stores nothing. A
-reachable host is 501.
+5xx body includes `error_id` (a UUID; GoTrue copies the request id, and
+the reference stack leaves `GOTRUE_API_REQUEST_ID_HEADER` unset so that
+id is generated). A reachable host is 501.
 
 ## POST /resend
 
