@@ -250,6 +250,11 @@ impl<'a> TokenHookCall<'a> {
         })
     }
 
+    /// Issuer, issued-at, and lifetime for the claims this call would sign.
+    pub(crate) fn claim_timing(&self) -> (&'a str, i64, i64) {
+        (self.issuer, self.now, self.expires_in)
+    }
+
     /// `CustomAccessTokenInput` for the session the store just wrote.
     pub(crate) fn input(&self, issued: &IssuedSession) -> Value {
         let claims = access_claims(
@@ -261,6 +266,11 @@ impl<'a> TokenHookCall<'a> {
             self.now,
             self.expires_in,
         );
+        self.input_with_claims(issued.user.id, &claims)
+    }
+
+    /// `CustomAccessTokenInput` when the caller already built the claims.
+    pub(crate) fn input_with_claims(&self, user_id: Uuid, claims: &Value) -> Value {
         let mut metadata = Map::new();
         metadata.insert("uuid".into(), json!(Uuid::new_v4().to_string()));
         metadata.insert("time".into(), json!(rfc3339_nano(SystemTime::now())));
@@ -270,7 +280,7 @@ impl<'a> TokenHookCall<'a> {
         }
         json!({
             "metadata": Value::Object(metadata),
-            "user_id": issued.user.id.to_string(),
+            "user_id": user_id.to_string(),
             "claims": claims,
             "authentication_method": self.authentication_method,
         })
@@ -462,9 +472,28 @@ pub(crate) async fn run_pg(
     call: &TokenHookCall<'_>,
     issued: &IssuedSession,
 ) -> Result<Value, HookError> {
-    let function = pg_target(call)?;
     let input = call.input(issued);
-    let outcome = invoke_pg(conn, function, &input).await;
+    invoke_hook_pg(conn, call, &input).await
+}
+
+/// [`run_pg`] for claims the caller already built, such as an AAL2 token.
+pub(crate) async fn run_pg_claims(
+    conn: &mut sqlx::PgConnection,
+    call: &TokenHookCall<'_>,
+    user_id: Uuid,
+    claims: &Value,
+) -> Result<Value, HookError> {
+    let input = call.input_with_claims(user_id, claims);
+    invoke_hook_pg(conn, call, &input).await
+}
+
+async fn invoke_hook_pg(
+    conn: &mut sqlx::PgConnection,
+    call: &TokenHookCall<'_>,
+    input: &Value,
+) -> Result<Value, HookError> {
+    let function = pg_target(call)?;
+    let outcome = invoke_pg(conn, function, input).await;
     finish(outcome, &call.hook.uri)
 }
 
@@ -479,6 +508,26 @@ pub(crate) fn run_memory(
     issued: &IssuedSession,
     function: Option<&MemoryHook>,
 ) -> Result<Value, HookError> {
+    let input = call.input(issued);
+    invoke_hook_memory(call, function, &input)
+}
+
+/// [`run_memory`] for claims the caller already built, such as an AAL2 token.
+pub(crate) fn run_memory_claims(
+    call: &TokenHookCall<'_>,
+    user_id: Uuid,
+    claims: &Value,
+    function: Option<&MemoryHook>,
+) -> Result<Value, HookError> {
+    let input = call.input_with_claims(user_id, claims);
+    invoke_hook_memory(call, function, &input)
+}
+
+fn invoke_hook_memory(
+    call: &TokenHookCall<'_>,
+    function: Option<&MemoryHook>,
+    input: &Value,
+) -> Result<Value, HookError> {
     pg_target(call)?;
     let Some(function) = function else {
         return Err(HookError::coded(format!(
@@ -486,8 +535,7 @@ pub(crate) fn run_memory(
             call.hook.uri
         )));
     };
-    let input = call.input(issued);
-    finish(PgOutcome::Returned(function(&input)), &call.hook.uri)
+    finish(PgOutcome::Returned(function(input)), &call.hook.uri)
 }
 
 fn pg_target<'a>(call: &TokenHookCall<'a>) -> Result<&'a PgFunctionName, HookError> {
