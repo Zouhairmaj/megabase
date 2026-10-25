@@ -5,13 +5,10 @@
 //! `/auth/v1/factors` routes.
 //!
 //! Every route runs GoTrue's `requireAuthentication` and `requireNotAnonymous`
-//! first, and the `{factor_id}` routes then `loadFactor`. Unenroll, recovery
-//! code status, and recovery code deletion are ported. The configuration
-//! gates, AAL checks, and request validation of the other routes match
-//! GoTrue; past those checks, TOTP, phone, and WebAuthn enrollment,
-//! challenges, factor verification, and recovery code generation and
-//! verification need secrets, QR codes, SMS, WebAuthn, argon2id, and AAL2
-//! session issuance that are not ported, so they return HTTP 501.
+//! first, and the `{factor_id}` routes then `loadFactor`. TOTP and phone
+//! enrollment, challenge, and verification are ported, as are recovery-code
+//! generation, rotation, and redemption. WebAuthn challenge and verification
+//! stay 501 when those switches are on: credential ceremonies are not ported.
 
 use axum::body::Body;
 use axum::extract::{Path, State};
@@ -24,21 +21,27 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use uuid::Uuid;
 
+use std::net::IpAddr;
+use std::time::{SystemTime, UNIX_EPOCH};
+
 use crate::error::{unexpected, validation, GoTrueError};
 use crate::gojson::{self, GoStruct, Kind};
-use crate::routes::{read_body, JsonOk};
+use crate::hooks::TokenHookCall;
+use crate::jsonutil::{mfa_access_claims, session_json};
+use crate::ratelimit::perform_rate_limiting;
+use crate::routes::{read_body, JsonOk, INVALID_CHANNEL};
 use crate::state::AuthState;
-use crate::store::FactorRow;
+use crate::store::{
+    EnrolledFactor, FactorRow, FactorVerify, IssuedSession, MfaError, RecoveryIssue,
+    UpgradedSession,
+};
 use crate::token::null_as_default;
-use crate::user::{require_user, Authed};
+use crate::totp::issuer_host;
+use crate::user::{require_user, validate_phone, Authed};
 use crate::COMPONENT;
 
-const UNIT_ENROLL: &str = "auth:route:POST /auth/v1/factors";
 const UNIT_CHALLENGE: &str = "auth:route:POST /auth/v1/factors/{factor_id}/challenge";
 const UNIT_VERIFY: &str = "auth:route:POST /auth/v1/factors/{factor_id}/verify";
-const UNIT_RECOVERY_GENERATE: &str = "auth:route:POST /auth/v1/factors/recovery-codes";
-const UNIT_RECOVERY_REGENERATE: &str = "auth:route:POST /auth/v1/factors/recovery-codes/regenerate";
-const UNIT_RECOVERY_VERIFY: &str = "auth:route:POST /auth/v1/factors/recovery-codes/verify";
 
 const NOT_ENROLLED: &str = "The user has not enrolled recovery codes";
 const BAD_FACTOR_TYPE: &str = "factor_type needs to be totp, phone, or webauthn";
@@ -103,6 +106,18 @@ pub(crate) fn router(state: AuthState) -> Router {
 struct EnrollBody {
     #[serde(default, deserialize_with = "null_as_default")]
     factor_type: String,
+    #[serde(default, deserialize_with = "null_as_default")]
+    friendly_name: String,
+    #[serde(default, deserialize_with = "null_as_default")]
+    issuer: String,
+    #[serde(default, deserialize_with = "null_as_default")]
+    phone: String,
+}
+
+#[derive(Default, Deserialize)]
+struct ChallengeBody {
+    #[serde(default, deserialize_with = "null_as_default")]
+    channel: String,
 }
 
 #[derive(Default, Deserialize)]
@@ -112,22 +127,28 @@ struct CodeBody {
 }
 
 #[derive(Default, Deserialize)]
-struct FriendlyNameBody {}
+struct FriendlyNameBody {
+    #[serde(default, deserialize_with = "null_as_default")]
+    friendly_name: String,
+}
 
-/// `POST /factors` (`EnrollFactor`) up to factor creation.
-///
-/// The factor-type switch and its enroll gates match GoTrue. Creating a
-/// TOTP secret and QR code, a phone factor, or a WebAuthn factor is not
-/// ported, so an enabled type returns 501.
+/// `ChallengeFactorParams.channel`. `webauthn` is ignored for phone and TOTP.
+const CHALLENGE_PARAMS: GoStruct = GoStruct {
+    name: "ChallengeFactorParams",
+    fields: &[("channel", Kind::Str)],
+};
+
+// megabase:unit auth:route:POST /auth/v1/factors
+/// `POST /factors` (`EnrollFactor`).
 async fn enroll_factor(State(state): State<AuthState>, headers: HeaderMap, body: Body) -> Response {
     let authed = match require_factor_user(&state, &headers).await {
         Ok(authed) => authed,
         Err(response) => return *response,
     };
-    if authed.session_id.is_none() {
+    let Some(session_id) = authed.session_id else {
         return unexpected("A valid session and a registered user are required to enroll a factor")
             .into_response();
-    }
+    };
     let params: EnrollBody = match decode(body, &ENROLL_FACTOR_PARAMS).await {
         Ok(params) => params,
         Err(response) => return *response,
@@ -151,29 +172,150 @@ async fn enroll_factor(State(state): State<AuthState>, headers: HeaderMap, body:
         )
         .into_response();
     }
-    MegabaseNotImplemented::new(COMPONENT, UNIT_ENROLL).into_response()
+    let enrolled = match params.factor_type.as_str() {
+        "totp" => {
+            let issuer = if params.issuer.is_empty() {
+                match issuer_host(&state.config.site_url) {
+                    Some(host) => host,
+                    None => {
+                        return unexpected("site url is improperly formatted").into_response();
+                    }
+                }
+            } else {
+                params.issuer
+            };
+            state
+                .backend
+                .enroll_totp(
+                    &authed.user,
+                    session_id,
+                    &params.friendly_name,
+                    &issuer,
+                    mfa,
+                )
+                .await
+        }
+        "phone" => {
+            if params.phone.is_empty() {
+                return validation("Phone number required to enroll Phone factor").into_response();
+            }
+            let phone = match validate_phone(&params.phone) {
+                Ok(phone) => phone,
+                Err(error) => return error.into_response(),
+            };
+            state
+                .backend
+                .enroll_phone(
+                    &authed.user,
+                    session_id,
+                    &params.friendly_name,
+                    &phone,
+                    &params.phone,
+                    mfa,
+                )
+                .await
+        }
+        "webauthn" => {
+            state
+                .backend
+                .enroll_webauthn(&authed.user, session_id, &params.friendly_name, mfa)
+                .await
+        }
+        _ => return validation(BAD_FACTOR_TYPE).into_response(),
+    };
+    match enrolled {
+        Ok(factor) => JsonOk(enroll_json(&factor)).into_response(),
+        Err(error) => mfa_error(error),
+    }
 }
 
-/// `POST /factors/{factor_id}/challenge` (`ChallengeFactor`) up to the
-/// challenge. The verify gates match GoTrue; creating a challenge is not
-/// ported and returns 501.
+// megabase:unit auth:route:POST /auth/v1/factors/{factor_id}/challenge
+/// `POST /factors/{factor_id}/challenge` (`ChallengeFactor`).
 async fn challenge_factor(
     State(state): State<AuthState>,
     Path(factor_id): Path<String>,
     headers: HeaderMap,
+    body: Body,
 ) -> Response {
-    let (_, factor) = match load_factor(&state, &headers, &factor_id).await {
+    let (authed, factor) = match load_factor(&state, &headers, &factor_id).await {
         Ok(loaded) => loaded,
         Err(response) => return *response,
     };
+    // `limitHandler(FactorChallenge)` runs after `loadFactor`. Its bucket
+    // is separate from `FactorVerify` and uses the same setting.
+    if let Err(error) = perform_rate_limiting(
+        &state.factor_challenge_limiter,
+        state.sb_forwarded_for_enabled,
+        &state.rate_limit_header,
+        &headers,
+    ) {
+        return error.into_response();
+    }
     if let Err(response) = verify_gate(&state, &factor, "mfa_webauthn_verify_not_enabled") {
         return *response;
     }
-    MegabaseNotImplemented::new(COMPONENT, UNIT_CHALLENGE).into_response()
+    let ip = client_ip(&headers);
+    let created = match factor.factor_type.as_str() {
+        "totp" => {
+            state
+                .backend
+                .challenge_totp(&authed.user, &factor, &ip, &state.config.mfa)
+                .await
+        }
+        "phone" => {
+            let bytes = match read_body(body).await {
+                Ok(bytes) => bytes,
+                Err(error) => return error.into_response(),
+            };
+            let params = match gojson::decode::<Option<ChallengeBody>>(&bytes, &CHALLENGE_PARAMS) {
+                Ok(params) => params.unwrap_or_default(),
+                Err(error) => return error.into_response(),
+            };
+            let channel = if params.channel.is_empty() {
+                "sms"
+            } else {
+                params.channel.as_str()
+            };
+            if !crate::routes::valid_channel(channel, &state.config.sms_provider) {
+                return validation(INVALID_CHANNEL).into_response();
+            }
+            if let Err(error) = state
+                .backend
+                .phone_challenge_allowed(&factor, &state.config.mfa)
+                .await
+            {
+                return mfa_error(error);
+            }
+            let otp = match crate::store::phone_otp(state.config.mfa.phone_otp_length) {
+                Ok(otp) => otp,
+                Err(error) => return mfa_error(error),
+            };
+            if let Err(response) = send_mfa_sms(&state, &otp) {
+                return *response;
+            }
+            state
+                .backend
+                .challenge_phone(&authed.user, &factor, &ip, &otp, &state.config.mfa)
+                .await
+        }
+        "webauthn" => {
+            return MegabaseNotImplemented::new(COMPONENT, UNIT_CHALLENGE).into_response();
+        }
+        _ => return validation(BAD_FACTOR_TYPE).into_response(),
+    };
+    match created {
+        Ok(challenge) => JsonOk(json!({
+            "id": challenge.id,
+            "type": challenge.factor_type,
+            "expires_at": challenge.expires_at,
+        }))
+        .into_response(),
+        Err(error) => mfa_error(error),
+    }
 }
 
-/// `POST /factors/{factor_id}/verify` (`VerifyFactor`) up to the challenge
-/// lookup.
+// megabase:unit auth:route:POST /auth/v1/factors/{factor_id}/verify
+/// `POST /factors/{factor_id}/verify` (`VerifyFactor`).
 ///
 /// `challenge_id` is a gofrs `uuid.UUID` and `webauthn` a struct in GoTrue,
 /// so their decode errors carry text this crate does not reproduce; a body
@@ -184,10 +326,20 @@ async fn verify_factor(
     headers: HeaderMap,
     body: Body,
 ) -> Response {
-    let (_, factor) = match load_factor(&state, &headers, &factor_id).await {
+    let (authed, factor) = match load_factor(&state, &headers, &factor_id).await {
         Ok(loaded) => loaded,
         Err(response) => return *response,
     };
+    // `limitHandler(FactorVerify)` runs after `loadFactor` and before the
+    // handler. Challenge uses a separate limiter with the same setting.
+    if let Err(error) = perform_rate_limiting(
+        &state.factor_verify_limiter,
+        state.sb_forwarded_for_enabled,
+        &state.rate_limit_header,
+        &headers,
+    ) {
+        return error.into_response();
+    }
     let bytes = match read_body(body).await {
         Ok(bytes) => bytes,
         Err(error) => return error.into_response(),
@@ -206,7 +358,57 @@ async fn verify_factor(
     if let Err(response) = verify_gate(&state, &factor, "mfa_webauthn_enroll_not_enabled") {
         return *response;
     }
-    MegabaseNotImplemented::new(COMPONENT, UNIT_VERIFY).into_response()
+    let Some(session_id) = authed.session_id else {
+        return unexpected("Cannot read SessionId claim as UUID").into_response();
+    };
+    if factor.factor_type == "webauthn" {
+        return MegabaseNotImplemented::new(COMPONENT, UNIT_VERIFY).into_response();
+    }
+    let challenge_id = challenge_id_from(&bytes);
+    let ip = client_ip(&headers);
+    let verified = match factor.factor_type.as_str() {
+        "totp" => {
+            let hook = mfa_hook(&state, &headers, "totp");
+            state
+                .backend
+                .verify_totp(
+                    &authed.user,
+                    &factor,
+                    FactorVerify {
+                        session_id,
+                        challenge_id,
+                        code: &params.code,
+                        ip: &ip,
+                    },
+                    &state.config.mfa,
+                    hook.as_ref(),
+                )
+                .await
+        }
+        "phone" => {
+            let hook = mfa_hook(&state, &headers, "mfa/phone");
+            state
+                .backend
+                .verify_phone(
+                    &authed.user,
+                    &factor,
+                    FactorVerify {
+                        session_id,
+                        challenge_id,
+                        code: &params.code,
+                        ip: &ip,
+                    },
+                    &state.config.mfa,
+                    hook.as_ref(),
+                )
+                .await
+        }
+        _ => return validation(BAD_FACTOR_TYPE).into_response(),
+    };
+    match verified {
+        Ok(upgraded) => session_response(&state, session_id, upgraded),
+        Err(error) => mfa_error(error),
+    }
 }
 
 // megabase:unit auth:route:DELETE /auth/v1/factors/{factor_id}
@@ -274,6 +476,7 @@ async fn recovery_codes_status(State(state): State<AuthState>, headers: HeaderMa
     }
 }
 
+// megabase:unit auth:route:POST /auth/v1/factors/recovery-codes
 async fn recovery_codes_generate(
     State(state): State<AuthState>,
     headers: HeaderMap,
@@ -297,32 +500,43 @@ async fn recovery_codes_generate(
         Ok(bytes) => bytes,
         Err(error) => return error.into_response(),
     };
-    if !bytes.is_empty() {
-        if let Err(error) =
-            gojson::decode::<Option<FriendlyNameBody>>(&bytes, &RECOVERY_CODES_GENERATE_PARAMS)
-        {
-            return error.into_response();
+    let friendly_name = if bytes.is_empty() {
+        String::new()
+    } else {
+        match gojson::decode::<Option<FriendlyNameBody>>(&bytes, &RECOVERY_CODES_GENERATE_PARAMS) {
+            Ok(params) => params.unwrap_or_default().friendly_name,
+            Err(error) => return error.into_response(),
         }
-    }
+    };
     if let Err(response) = require_aal2(&state, session_id, "generate recovery codes").await {
         return *response;
     }
     match state.backend.recovery_code_status(authed.user.id).await {
-        Ok(Some(_)) => GoTrueError::new(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "mfa_verified_factor_exists",
-            "Recovery codes are already enrolled for this user, use regenerate to rotate them",
-        )
-        .into_response(),
-        // Generating and argon2id-hashing the codes is not ported.
-        Ok(None) => MegabaseNotImplemented::new(COMPONENT, UNIT_RECOVERY_GENERATE).into_response(),
+        Ok(Some(_)) => {
+            return GoTrueError::new(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "mfa_verified_factor_exists",
+                "Recovery codes are already enrolled for this user, use regenerate to rotate them",
+            )
+            .into_response();
+        }
+        Ok(None) => {}
         Err(error) => {
             tracing::error!(%error, "recovery code set lookup failed");
-            unexpected("Database error finding recovery code set").into_response()
+            return unexpected("Database error finding recovery code set").into_response();
         }
+    }
+    match state
+        .backend
+        .generate_recovery_codes(&authed.user, session_id, &friendly_name, &state.config.mfa)
+        .await
+    {
+        Ok(issued) => JsonOk(recovery_json(&issued)).into_response(),
+        Err(error) => mfa_error(error),
     }
 }
 
+// megabase:unit auth:route:POST /auth/v1/factors/recovery-codes/regenerate
 async fn recovery_codes_regenerate(State(state): State<AuthState>, headers: HeaderMap) -> Response {
     let authed = match require_factor_user(&state, &headers).await {
         Ok(authed) => authed,
@@ -341,18 +555,24 @@ async fn recovery_codes_regenerate(State(state): State<AuthState>, headers: Head
         return *response;
     }
     match state.backend.recovery_code_status(authed.user.id).await {
-        // Replacing the codes needs argon2id, which is not ported.
-        Ok(Some(_)) => {
-            MegabaseNotImplemented::new(COMPONENT, UNIT_RECOVERY_REGENERATE).into_response()
-        }
-        Ok(None) => not_enrolled(),
+        Ok(Some(_)) => {}
+        Ok(None) => return not_enrolled(),
         Err(error) => {
             tracing::error!(%error, "recovery code set lookup failed");
-            unexpected("Database error finding recovery code set").into_response()
+            return unexpected("Database error finding recovery code set").into_response();
         }
+    }
+    match state
+        .backend
+        .regenerate_recovery_codes(&authed.user, &state.config.mfa)
+        .await
+    {
+        Ok(issued) => JsonOk(recovery_json(&issued)).into_response(),
+        Err(error) => mfa_error(error),
     }
 }
 
+// megabase:unit auth:route:POST /auth/v1/factors/recovery-codes/verify
 async fn recovery_codes_verify(
     State(state): State<AuthState>,
     headers: HeaderMap,
@@ -362,12 +582,21 @@ async fn recovery_codes_verify(
         Ok(authed) => authed,
         Err(response) => return *response,
     };
-    if authed.session_id.is_none() {
+    // The same `FactorVerify` limiter as `POST /factors/{id}/verify`.
+    if let Err(error) = perform_rate_limiting(
+        &state.factor_verify_limiter,
+        state.sb_forwarded_for_enabled,
+        &state.rate_limit_header,
+        &headers,
+    ) {
+        return error.into_response();
+    }
+    let Some(session_id) = authed.session_id else {
         return unexpected(
             "A valid session and a registered user are required to verify recovery codes",
         )
         .into_response();
-    }
+    };
     if !state.config.mfa.recovery_codes_verify {
         return GoTrueError::new(
             StatusCode::UNPROCESSABLE_ENTITY,
@@ -383,8 +612,21 @@ async fn recovery_codes_verify(
     if normalize_recovery_code(&params.code).is_empty() {
         return validation("Code needs to be non-empty").into_response();
     }
-    // Comparing argon2id hashes and issuing an AAL2 session is not ported.
-    MegabaseNotImplemented::new(COMPONENT, UNIT_RECOVERY_VERIFY).into_response()
+    let hook = mfa_hook(&state, &headers, "mfa/recovery_code");
+    match state
+        .backend
+        .verify_recovery_code(
+            &authed.user,
+            session_id,
+            &params.code,
+            &state.config.mfa,
+            hook.as_ref(),
+        )
+        .await
+    {
+        Ok(upgraded) => session_response(&state, session_id, upgraded),
+        Err(error) => mfa_error(error),
+    }
 }
 
 // megabase:unit auth:route:DELETE /auth/v1/factors/recovery-codes
@@ -605,6 +847,160 @@ fn internal(error: &crate::store::StoreError) -> Response {
     unexpected("Unexpected failure, please check server logs for more information").into_response()
 }
 
+fn mfa_error(error: MfaError) -> Response {
+    match error {
+        MfaError::Store(crate::store::StoreError::Hook(error)) => (*error).into_response(),
+        MfaError::Store(error) => internal(&error),
+        MfaError::Status {
+            status,
+            code,
+            message,
+        } => {
+            let status = StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+            GoTrueError::new(status, code, message).into_response()
+        }
+    }
+}
+
+fn enroll_json(factor: &EnrolledFactor) -> Value {
+    let mut body = json!({
+        "id": factor.id,
+        "type": factor.factor_type,
+        "friendly_name": factor.friendly_name,
+    });
+    if factor.factor_type == "totp" {
+        body["totp"] = json!({
+            "qr_code": factor.qr_code,
+            "secret": factor.secret,
+            "uri": factor.uri,
+        });
+    }
+    if factor.factor_type == "phone" {
+        body["phone"] = json!(factor.phone);
+    }
+    body
+}
+
+fn recovery_json(issued: &RecoveryIssue) -> Value {
+    json!({
+        "id": issued.id,
+        "type": "recovery_code",
+        "friendly_name": issued.friendly_name,
+        "total": issued.codes.len(),
+        "codes": issued.codes,
+    })
+}
+
+fn session_response(state: &AuthState, session_id: Uuid, upgraded: UpgradedSession) -> Response {
+    let Some(jwt) = state.jwt.clone() else {
+        return unexpected("Server lacks JWT secret").into_response();
+    };
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs() as i64)
+        .unwrap_or(0);
+    let expires_in = state.config.jwt_exp_seconds;
+    let claims = match &upgraded.hook_claims {
+        Some(claims) => claims.clone(),
+        None => mfa_access_claims(
+            &upgraded.user,
+            session_id,
+            &upgraded.amr,
+            &state.config.jwt_issuer,
+            now,
+            expires_in,
+        ),
+    };
+    let access_token = match jwt.sign(&claims) {
+        Ok(token) => token,
+        Err(error) => {
+            tracing::error!(%error, "signing access token failed");
+            return unexpected("error generating jwt token").into_response();
+        }
+    };
+    let issued = IssuedSession {
+        user: upgraded.user,
+        refresh_token: upgraded.refresh_token,
+        session_id,
+        amr_at: SystemTime::now(),
+        amr_method: "totp".into(),
+        hook_claims: None,
+    };
+    JsonOk(session_json(&issued, &access_token, expires_in, now)).into_response()
+}
+
+/// `GetIPAddress` without a socket address: `X-Forwarded-For`, else
+/// `0.0.0.0` so `mfa_challenges.ip_address` (inet) accepts the value.
+/// Challenge and verify use the same address, so they match.
+fn client_ip(headers: &HeaderMap) -> String {
+    headers
+        .get("x-forwarded-for")
+        .and_then(|value| value.to_str().ok())
+        .into_iter()
+        .flat_map(|header| header.split(','))
+        .map(str::trim)
+        .find_map(|entry| entry.parse::<IpAddr>().ok())
+        .map(|ip| ip.to_string())
+        .unwrap_or_else(|| "0.0.0.0".to_string())
+}
+
+fn challenge_id_from(bytes: &[u8]) -> Uuid {
+    let Ok(Value::Object(object)) = serde_json::from_slice::<Value>(bytes) else {
+        return Uuid::nil();
+    };
+    object
+        .iter()
+        .find(|(key, _)| key.eq_ignore_ascii_case("challenge_id"))
+        .and_then(|(_, value)| value.as_str().and_then(parse_gofrs_uuid))
+        .unwrap_or(Uuid::nil())
+}
+
+/// `generateSMSFromTemplate`, then `GetSmsProvider`.
+///
+/// No SMS client is ported. A missing provider is GoTrue's 500. A configured
+/// provider would send the message, so that step is 501.
+fn send_mfa_sms(state: &AuthState, otp: &str) -> Result<(), Box<Response>> {
+    let template = &state.config.mfa.phone_sms_template;
+    let message = template
+        .replace("{{ .Code }}", otp)
+        .replace("{{.Code}}", otp)
+        .replace("{{ .Code}}", otp)
+        .replace("{{.Code }}", otp);
+    if message.contains("{{") {
+        return Err(Box::new(
+            unexpected("error generating sms template").into_response(),
+        ));
+    }
+    let _ = message;
+    if state.config.sms_provider.is_empty() {
+        return Err(Box::new(
+            unexpected("Failed to get SMS provider").into_response(),
+        ));
+    }
+    Err(Box::new(
+        MegabaseNotImplemented::new(COMPONENT, UNIT_CHALLENGE).into_response(),
+    ))
+}
+
+fn mfa_hook<'a>(
+    state: &'a AuthState,
+    headers: &HeaderMap,
+    method: &'static str,
+) -> Option<TokenHookCall<'a>> {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs() as i64)
+        .unwrap_or(0);
+    TokenHookCall::new(
+        state.config.custom_access_token_hook.as_ref(),
+        headers,
+        method,
+        &state.config.jwt_issuer,
+        now,
+        state.config.jwt_exp_seconds,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -626,7 +1022,17 @@ mod tests {
     }
 
     async fn fixture(configure: impl FnOnce(&mut AuthConfig)) -> Fixture {
+        fixture_hook(configure, None).await
+    }
+
+    async fn fixture_hook(
+        configure: impl FnOnce(&mut AuthConfig),
+        hook: Option<std::sync::Arc<crate::hooks::MemoryHook>>,
+    ) -> Fixture {
         let backend = Backend::memory();
+        if let Some(function) = hook {
+            backend.set_access_token_hook_for_test(function).await;
+        }
         let mut config = AuthConfig::reference_defaults();
         configure(&mut config);
         let jwt = Hs256::new(SECRET.as_bytes()).unwrap();
@@ -675,6 +1081,58 @@ mod tests {
         let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
         let json = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
         (status, json)
+    }
+
+    async fn call_keyed(
+        app: &Router,
+        path: &str,
+        body: &str,
+        token: Option<&str>,
+        headers: &[(&str, &str)],
+    ) -> (StatusCode, Value) {
+        let mut builder = Request::builder().method("POST").uri(path);
+        if let Some(token) = token {
+            builder = builder.header("authorization", format!("Bearer {token}"));
+        }
+        for (name, value) in headers {
+            builder = builder.header(*name, *value);
+        }
+        let request = builder.body(Body::from(body.to_string())).unwrap();
+        let response = app.clone().oneshot(request).await.unwrap();
+        let status = response.status();
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let json = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
+        (status, json)
+    }
+
+    /// Burst of one on `FactorVerify`, keyed by `x-rate-key`.
+    async fn limited_fixture(sb_forwarded_for: bool) -> Fixture {
+        let backend = Backend::memory();
+        let config = AuthConfig::reference_defaults();
+        let jwt = Hs256::new(SECRET.as_bytes()).unwrap();
+        let mut state = AuthState::new(config, Some(jwt), backend.clone());
+        state.rate_limit_header = "x-rate-key".into();
+        state.sb_forwarded_for_enabled = sb_forwarded_for;
+        state.factor_verify_limiter =
+            std::sync::Arc::new(crate::ratelimit::KeyedLimiter::new(0.0, 1.0));
+        state.factor_challenge_limiter =
+            std::sync::Arc::new(crate::ratelimit::KeyedLimiter::new(0.0, 1.0));
+        let app = crate::router_with_state(state);
+        let body = json!({ "email": EMAIL, "password": "secret-pass" }).to_string();
+        let (status, body) = call(&app, "POST", "/auth/v1/signup", Some(&body), None).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        let token = body["access_token"].as_str().unwrap().to_string();
+        let claims = Hs256::new(SECRET.as_bytes())
+            .unwrap()
+            .verify(&token)
+            .unwrap();
+        let session_id = Uuid::parse_str(claims.raw["session_id"].as_str().unwrap()).unwrap();
+        Fixture {
+            app,
+            backend,
+            token,
+            session_id,
+        }
     }
 
     fn assert_error(result: &(StatusCode, Value), status: StatusCode, code: &str, msg: &str) {
@@ -804,7 +1262,14 @@ mod tests {
             "mfa_webauthn_enroll_not_enabled",
             "MFA enroll is disabled for WebAuthn",
         );
-        assert_501(&enroll(r#"{"FACTOR_TYPE":"totp"}"#).await, UNIT_ENROLL);
+        let enrolled = enroll(r#"{"FACTOR_TYPE":"totp"}"#).await;
+        assert_eq!(enrolled.0, StatusCode::OK, "{}", enrolled.1);
+        assert_eq!(enrolled.1["type"], "totp");
+        assert!(enrolled.1["totp"]["secret"].as_str().unwrap().len() >= 16);
+        assert!(enrolled.1["totp"]["uri"]
+            .as_str()
+            .unwrap()
+            .starts_with("otpauth://totp/"));
         let result = enroll(r#"{"factor_type":1}"#).await;
         assert_eq!(result.0, StatusCode::BAD_REQUEST);
         assert_eq!(result.1["error_code"], "bad_json");
@@ -867,7 +1332,10 @@ mod tests {
             async move { call(&app, "POST", &path, Some(body), Some(&token)).await }
         };
 
-        assert_501(&post(totp, "challenge", "").await, UNIT_CHALLENGE);
+        let challenged = post(totp, "challenge", "").await;
+        assert_eq!(challenged.0, StatusCode::OK, "{}", challenged.1);
+        assert_eq!(challenged.1["type"], "totp");
+        assert!(challenged.1["expires_at"].is_i64());
         assert_error(
             &post(phone, "challenge", "").await,
             StatusCode::UNPROCESSABLE_ENTITY,
@@ -895,9 +1363,11 @@ mod tests {
         );
         let result = post(totp, "verify", "").await;
         assert_eq!(result.1["error_code"], "bad_json", "{}", result.1);
-        assert_501(
+        assert_error(
             &post(totp, "verify", r#"{"code":"123456"}"#).await,
-            UNIT_VERIFY,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "mfa_factor_not_found",
+            "MFA factor with the provided challenge ID not found",
         );
         assert_501(
             &post(totp, "verify", r#"{"challenge_id":"nope","code":"123456"}"#).await,
@@ -922,6 +1392,403 @@ mod tests {
             "validation_failed",
             BAD_FACTOR_TYPE,
         );
+    }
+
+    #[tokio::test]
+    async fn totp_verify_is_rate_limited_like_gotrue() {
+        let fx = limited_fixture(false).await;
+        let factor = fx
+            .backend
+            .add_factor_for_test(EMAIL, "totp", "unverified")
+            .await;
+        let path = format!("/auth/v1/factors/{factor}/verify");
+        let missing = format!("/auth/v1/factors/{}/verify", Uuid::new_v4());
+        let recovery = "/auth/v1/factors/recovery-codes/verify";
+        let empty = r#"{"code":""}"#;
+
+        // `loadFactor` runs before the limiter, so a missing factor is not counted.
+        let missed = call_keyed(
+            &fx.app,
+            &missing,
+            empty,
+            Some(&fx.token),
+            &[("x-rate-key", "miss")],
+        )
+        .await;
+        assert_error(
+            &missed,
+            StatusCode::NOT_FOUND,
+            "mfa_factor_not_found",
+            "Factor not found",
+        );
+        let missed = call_keyed(
+            &fx.app,
+            &missing,
+            empty,
+            Some(&fx.token),
+            &[("x-rate-key", "miss")],
+        )
+        .await;
+        assert_eq!(missed.0, StatusCode::NOT_FOUND, "{}", missed.1);
+
+        // An authenticated verify consumes one token, then the next is 429.
+        let first = call_keyed(
+            &fx.app,
+            &path,
+            empty,
+            Some(&fx.token),
+            &[("x-rate-key", "k1")],
+        )
+        .await;
+        assert_error(
+            &first,
+            StatusCode::BAD_REQUEST,
+            "validation_failed",
+            "Code needs to be non-empty",
+        );
+        let limited = call_keyed(
+            &fx.app,
+            &path,
+            empty,
+            Some(&fx.token),
+            &[("x-rate-key", "k1")],
+        )
+        .await;
+        assert_error(
+            &limited,
+            StatusCode::TOO_MANY_REQUESTS,
+            "over_request_rate_limit",
+            "Request rate limit reached",
+        );
+        // Recovery-code verify shares this bucket.
+        let shared = call_keyed(
+            &fx.app,
+            recovery,
+            r#"{"code":"abcd"}"#,
+            Some(&fx.token),
+            &[("x-rate-key", "k1")],
+        )
+        .await;
+        assert_error(
+            &shared,
+            StatusCode::TOO_MANY_REQUESTS,
+            "over_request_rate_limit",
+            "Request rate limit reached",
+        );
+
+        let other = call_keyed(
+            &fx.app,
+            &path,
+            empty,
+            Some(&fx.token),
+            &[("x-rate-key", "k2")],
+        )
+        .await;
+        assert_eq!(other.0, StatusCode::BAD_REQUEST, "{}", other.1);
+
+        // No rate-limit header: the request is not counted.
+        let open = call_keyed(&fx.app, &path, empty, Some(&fx.token), &[]).await;
+        assert_eq!(open.0, StatusCode::BAD_REQUEST, "{}", open.1);
+        let open = call_keyed(&fx.app, &path, empty, Some(&fx.token), &[]).await;
+        assert_eq!(open.0, StatusCode::BAD_REQUEST, "{}", open.1);
+
+        let forwarded = limited_fixture(true).await;
+        let factor = forwarded
+            .backend
+            .add_factor_for_test(EMAIL, "totp", "unverified")
+            .await;
+        let path = format!("/auth/v1/factors/{factor}/verify");
+        let first = call_keyed(
+            &forwarded.app,
+            &path,
+            empty,
+            Some(&forwarded.token),
+            &[
+                ("sb-forwarded-for", "203.0.113.5"),
+                ("x-rate-key", "unused"),
+            ],
+        )
+        .await;
+        assert_eq!(first.0, StatusCode::BAD_REQUEST, "{}", first.1);
+        let limited = call_keyed(
+            &forwarded.app,
+            &path,
+            empty,
+            Some(&forwarded.token),
+            &[("sb-forwarded-for", "203.0.113.5"), ("x-rate-key", "other")],
+        )
+        .await;
+        assert_error(
+            &limited,
+            StatusCode::TOO_MANY_REQUESTS,
+            "over_request_rate_limit",
+            "Request rate limit reached",
+        );
+        let fresh = call_keyed(
+            &forwarded.app,
+            &path,
+            empty,
+            Some(&forwarded.token),
+            &[("sb-forwarded-for", "203.0.113.9"), ("x-rate-key", "fresh")],
+        )
+        .await;
+        assert_eq!(fresh.0, StatusCode::BAD_REQUEST, "{}", fresh.1);
+    }
+
+    #[tokio::test]
+    async fn totp_challenge_has_its_own_rate_limit_bucket() {
+        let fx = limited_fixture(false).await;
+        let factor = fx
+            .backend
+            .add_factor_for_test(EMAIL, "totp", "unverified")
+            .await;
+        let path = format!("/auth/v1/factors/{factor}/challenge");
+        let missing = format!("/auth/v1/factors/{}/challenge", Uuid::new_v4());
+        let missed = call_keyed(
+            &fx.app,
+            &missing,
+            "",
+            Some(&fx.token),
+            &[("x-rate-key", "miss")],
+        )
+        .await;
+        assert_error(
+            &missed,
+            StatusCode::NOT_FOUND,
+            "mfa_factor_not_found",
+            "Factor not found",
+        );
+        let first = call_keyed(&fx.app, &path, "", Some(&fx.token), &[("x-rate-key", "k1")]).await;
+        assert_eq!(first.0, StatusCode::OK, "{}", first.1);
+        let limited =
+            call_keyed(&fx.app, &path, "", Some(&fx.token), &[("x-rate-key", "k1")]).await;
+        assert_error(
+            &limited,
+            StatusCode::TOO_MANY_REQUESTS,
+            "over_request_rate_limit",
+            "Request rate limit reached",
+        );
+        let verify = format!("/auth/v1/factors/{factor}/verify");
+        let separate = call_keyed(
+            &fx.app,
+            &verify,
+            r#"{"code":""}"#,
+            Some(&fx.token),
+            &[("x-rate-key", "k1")],
+        )
+        .await;
+        assert_error(
+            &separate,
+            StatusCode::BAD_REQUEST,
+            "validation_failed",
+            "Code needs to be non-empty",
+        );
+    }
+
+    #[tokio::test]
+    async fn totp_enroll_challenge_verify_upgrades_aal() {
+        let fx = fixture(|_| {}).await;
+        let enrolled = call(
+            &fx.app,
+            "POST",
+            "/auth/v1/factors",
+            Some(r#"{"factor_type":"totp","friendly_name":"phone-app","issuer":"megabase"}"#),
+            Some(&fx.token),
+        )
+        .await;
+        assert_eq!(enrolled.0, StatusCode::OK, "{}", enrolled.1);
+        let factor_id = enrolled.1["id"].as_str().unwrap();
+        let secret = enrolled.1["totp"]["secret"].as_str().unwrap();
+        assert!(enrolled.1["totp"]["uri"]
+            .as_str()
+            .unwrap()
+            .contains("issuer=megabase"));
+        let challenged = call(
+            &fx.app,
+            "POST",
+            &format!("/auth/v1/factors/{factor_id}/challenge"),
+            Some(""),
+            Some(&fx.token),
+        )
+        .await;
+        assert_eq!(challenged.0, StatusCode::OK, "{}", challenged.1);
+        let challenge_id = challenged.1["id"].as_str().unwrap();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let code = crate::totp::current_code(secret, now);
+        let verified = call(
+            &fx.app,
+            "POST",
+            &format!("/auth/v1/factors/{factor_id}/verify"),
+            Some(&format!(
+                r#"{{"challenge_id":"{challenge_id}","code":"{code}"}}"#
+            )),
+            Some(&fx.token),
+        )
+        .await;
+        assert_eq!(verified.0, StatusCode::OK, "{}", verified.1);
+        assert!(verified.1["access_token"].is_string());
+        assert!(verified.1["refresh_token"].is_string());
+        let claims = megabase_core::Hs256::new(SECRET.as_bytes())
+            .unwrap()
+            .verify(verified.1["access_token"].as_str().unwrap())
+            .unwrap();
+        assert_eq!(claims.raw["aal"], "aal2");
+        assert_eq!(claims.raw["amr"][0]["method"], "totp");
+        assert_eq!(claims.raw["amr"][1]["method"], "password");
+        assert!(fx.backend.session_is_aal2(fx.session_id).await.unwrap());
+
+        let wrong = call(
+            &fx.app,
+            "POST",
+            &format!("/auth/v1/factors/{factor_id}/verify"),
+            Some(&format!(
+                r#"{{"challenge_id":"{challenge_id}","code":"000000"}}"#
+            )),
+            Some(&fx.token),
+        )
+        .await;
+        assert_error(
+            &wrong,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "mfa_ip_address_mismatch",
+            "Challenge and verify IP addresses mismatch.",
+        );
+    }
+
+    #[tokio::test]
+    async fn totp_verify_signs_custom_access_token_hook_claims() {
+        let events = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let seen = std::sync::Arc::clone(&events);
+        let function: std::sync::Arc<crate::hooks::MemoryHook> =
+            std::sync::Arc::new(move |event: &Value| {
+                seen.lock().expect("hook events").push(event.clone());
+                let mut claims = event["claims"].clone();
+                claims["user_role"] = json!("moderator");
+                Some(json!({ "claims": claims }).to_string())
+            });
+        let fx = fixture_hook(
+            |config| {
+                config.custom_access_token_hook =
+                    Some(crate::hooks::AccessTokenHook::pg_function_for_test(
+                        "public",
+                        "custom_access_token_hook",
+                    ));
+            },
+            Some(function),
+        )
+        .await;
+        events.lock().expect("hook events").clear();
+        let enrolled = call(
+            &fx.app,
+            "POST",
+            "/auth/v1/factors",
+            Some(r#"{"factor_type":"totp","friendly_name":"hook","issuer":"megabase"}"#),
+            Some(&fx.token),
+        )
+        .await;
+        assert_eq!(enrolled.0, StatusCode::OK, "{}", enrolled.1);
+        let factor_id = enrolled.1["id"].as_str().unwrap();
+        let secret = enrolled.1["totp"]["secret"].as_str().unwrap();
+        let challenged = call(
+            &fx.app,
+            "POST",
+            &format!("/auth/v1/factors/{factor_id}/challenge"),
+            Some(""),
+            Some(&fx.token),
+        )
+        .await;
+        assert_eq!(challenged.0, StatusCode::OK, "{}", challenged.1);
+        let challenge_id = challenged.1["id"].as_str().unwrap();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let code = crate::totp::current_code(secret, now);
+        let verified = call(
+            &fx.app,
+            "POST",
+            &format!("/auth/v1/factors/{factor_id}/verify"),
+            Some(&format!(
+                r#"{{"challenge_id":"{challenge_id}","code":"{code}"}}"#
+            )),
+            Some(&fx.token),
+        )
+        .await;
+        assert_eq!(verified.0, StatusCode::OK, "{}", verified.1);
+        let claims = megabase_core::Hs256::new(SECRET.as_bytes())
+            .unwrap()
+            .verify(verified.1["access_token"].as_str().unwrap())
+            .unwrap();
+        assert_eq!(claims.raw["aal"], "aal2");
+        assert_eq!(claims.raw["user_role"], "moderator");
+        let events = events.lock().expect("hook events");
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0]["authentication_method"], "totp");
+        assert_eq!(events[0]["claims"]["aal"], "aal2");
+        assert_eq!(events[0]["claims"]["amr"][0]["method"], "totp");
+    }
+
+    #[tokio::test]
+    async fn phone_challenge_reports_missing_provider_and_unported_send() {
+        let body = r#"{"factor_type":"phone","phone":"+15555550100"}"#;
+        let missing = fixture(|config| {
+            config.mfa.phone_enroll = true;
+            config.mfa.phone_verify = true;
+        })
+        .await;
+        let enrolled = call(
+            &missing.app,
+            "POST",
+            "/auth/v1/factors",
+            Some(body),
+            Some(&missing.token),
+        )
+        .await;
+        assert_eq!(enrolled.0, StatusCode::OK, "{}", enrolled.1);
+        let factor_id = enrolled.1["id"].as_str().unwrap();
+        let challenged = call(
+            &missing.app,
+            "POST",
+            &format!("/auth/v1/factors/{factor_id}/challenge"),
+            Some("{}"),
+            Some(&missing.token),
+        )
+        .await;
+        assert_error(
+            &challenged,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "unexpected_failure",
+            "Failed to get SMS provider",
+        );
+
+        let configured = fixture(|config| {
+            config.mfa.phone_enroll = true;
+            config.mfa.phone_verify = true;
+            config.sms_provider = "twilio".into();
+        })
+        .await;
+        let enrolled = call(
+            &configured.app,
+            "POST",
+            "/auth/v1/factors",
+            Some(body),
+            Some(&configured.token),
+        )
+        .await;
+        assert_eq!(enrolled.0, StatusCode::OK, "{}", enrolled.1);
+        let factor_id = enrolled.1["id"].as_str().unwrap();
+        let challenged = call(
+            &configured.app,
+            "POST",
+            &format!("/auth/v1/factors/{factor_id}/challenge"),
+            Some("{}"),
+            Some(&configured.token),
+        )
+        .await;
+        assert_501(&challenged, UNIT_CHALLENGE);
     }
 
     #[tokio::test]
@@ -1065,7 +1932,7 @@ mod tests {
             "validation_failed",
             "Code needs to be non-empty",
         );
-        assert_501(
+        assert_error(
             &call(
                 &fx.app,
                 "POST",
@@ -1074,7 +1941,9 @@ mod tests {
                 token,
             )
             .await,
-            UNIT_RECOVERY_VERIFY,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "mfa_verification_failed",
+            "Invalid recovery code entered",
         );
 
         let totp = fx
@@ -1082,10 +1951,6 @@ mod tests {
             .add_factor_for_test(EMAIL, "totp", "verified")
             .await;
         fx.backend.set_aal2_for_test(fx.session_id, totp).await;
-        assert_501(
-            &call(&fx.app, "POST", generate, None, token).await,
-            UNIT_RECOVERY_GENERATE,
-        );
         assert_error(
             &call(&fx.app, "POST", regenerate, None, token).await,
             StatusCode::NOT_FOUND,
@@ -1098,28 +1963,54 @@ mod tests {
             "mfa_factor_not_found",
             NOT_ENROLLED,
         );
-
-        let recovery = fx
-            .backend
-            .add_factor_for_test(EMAIL, "recovery_code", "verified")
-            .await;
-        fx.backend
-            .add_recovery_set_for_test(EMAIL, recovery, 10, 10)
-            .await;
+        let generated = call(&fx.app, "POST", generate, None, token).await;
+        assert_eq!(generated.0, StatusCode::OK, "{}", generated.1);
+        assert_eq!(generated.1["type"], "recovery_code");
+        assert_eq!(generated.1["friendly_name"], "Recovery codes");
+        assert_eq!(generated.1["codes"].as_array().map(Vec::len), Some(10));
+        let recovery = generated.1["id"].as_str().unwrap().to_string();
         assert_error(
             &call(&fx.app, "POST", generate, None, token).await,
             StatusCode::UNPROCESSABLE_ENTITY,
             "mfa_verified_factor_exists",
             "Recovery codes are already enrolled for this user, use regenerate to rotate them",
         );
-        assert_501(
-            &call(&fx.app, "POST", regenerate, None, token).await,
-            UNIT_RECOVERY_REGENERATE,
-        );
+        let rotated = call(&fx.app, "POST", regenerate, None, token).await;
+        assert_eq!(rotated.0, StatusCode::OK, "{}", rotated.1);
+        assert_eq!(rotated.1["total"], 10);
+        assert_eq!(rotated.1["id"], recovery);
+        let code = rotated.1["codes"][0].as_str().unwrap();
+        // A second AAL1 session redeems the code. The original session stays
+        // bound to the TOTP factor, so deleting the recovery factor later
+        // does not drop it from AAL2.
+        let login = call(
+            &fx.app,
+            "POST",
+            "/auth/v1/token?grant_type=password",
+            Some(&json!({ "email": EMAIL, "password": "secret-pass" }).to_string()),
+            None,
+        )
+        .await;
+        assert_eq!(login.0, StatusCode::OK, "{}", login.1);
+        let aal1 = login.1["access_token"].as_str().unwrap();
+        let verified = call(
+            &fx.app,
+            "POST",
+            verify,
+            Some(&format!(r#"{{"code":"{code}"}}"#)),
+            Some(aal1),
+        )
+        .await;
+        assert_eq!(verified.0, StatusCode::OK, "{}", verified.1);
+        let claims = megabase_core::Hs256::new(SECRET.as_bytes())
+            .unwrap()
+            .verify(verified.1["access_token"].as_str().unwrap())
+            .unwrap();
+        assert_eq!(claims.raw["aal"], "aal2");
+        assert_eq!(claims.raw["amr"][0]["method"], "mfa/recovery_code");
         let (status, body) = call(&fx.app, "DELETE", generate, None, token).await;
         assert_eq!(status, StatusCode::OK, "{body}");
-        assert_eq!(body, json!({ "id": recovery }));
-        assert!(!fx.backend.has_factor_for_test(recovery).await);
+        assert_eq!(body["id"], recovery);
         assert_error(
             &call(&fx.app, "GET", generate, None, token).await,
             StatusCode::NOT_FOUND,
@@ -1128,6 +2019,106 @@ mod tests {
         );
         // The TOTP factor still holds the session at AAL2.
         assert!(fx.backend.session_is_aal2(fx.session_id).await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn totp_round_trip_persists_on_postgres() {
+        let Ok(url) = std::env::var("MEGABASE_AUTH_TEST_DATABASE") else {
+            eprintln!("MEGABASE_AUTH_TEST_DATABASE unset; postgres MFA integration not run");
+            return;
+        };
+        crate::install_schema(&url)
+            .await
+            .expect("install auth schema");
+        let backend = crate::store::Backend::connect(&url).await.expect("connect");
+        let jwt = megabase_core::Hs256::new(SECRET.as_bytes()).unwrap();
+        let app = crate::router_with_state(AuthState::new(
+            crate::AuthConfig::reference_defaults(),
+            Some(jwt.clone()),
+            backend,
+        ));
+        let email = format!(
+            "mfa-{}@example.com",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|duration| duration.as_nanos())
+                .unwrap_or(1)
+        );
+        let signup = call(
+            &app,
+            "POST",
+            "/auth/v1/signup",
+            Some(&format!(
+                r#"{{"email":"{email}","password":"secret-pass"}}"#
+            )),
+            None,
+        )
+        .await;
+        assert_eq!(signup.0, StatusCode::OK, "{}", signup.1);
+        let token = signup.1["access_token"].as_str().unwrap().to_string();
+        let enrolled = call(
+            &app,
+            "POST",
+            "/auth/v1/factors",
+            Some(r#"{"factor_type":"totp","friendly_name":"app","issuer":"megabase"}"#),
+            Some(&token),
+        )
+        .await;
+        assert_eq!(enrolled.0, StatusCode::OK, "{}", enrolled.1);
+        let factor_id = enrolled.1["id"].as_str().unwrap();
+        let secret = enrolled.1["totp"]["secret"].as_str().unwrap();
+        let challenged = call(
+            &app,
+            "POST",
+            &format!("/auth/v1/factors/{factor_id}/challenge"),
+            Some("{}"),
+            Some(&token),
+        )
+        .await;
+        assert_eq!(challenged.0, StatusCode::OK, "{}", challenged.1);
+        let challenge_id = challenged.1["id"].as_str().unwrap();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let code = crate::totp::current_code(secret, now);
+        let verified = call(
+            &app,
+            "POST",
+            &format!("/auth/v1/factors/{factor_id}/verify"),
+            Some(&format!(
+                r#"{{"challenge_id":"{challenge_id}","code":"{code}"}}"#
+            )),
+            Some(&token),
+        )
+        .await;
+        assert_eq!(verified.0, StatusCode::OK, "{}", verified.1);
+        let claims = jwt
+            .verify(verified.1["access_token"].as_str().unwrap())
+            .unwrap();
+        assert_eq!(claims.raw["aal"], "aal2");
+        assert_eq!(claims.raw["amr"][0]["method"], "totp");
+        let pool = sqlx::postgres::PgPoolOptions::new()
+            .connect(&url)
+            .await
+            .unwrap();
+        let aal: String = sqlx::query_scalar(
+            "SELECT s.aal::text FROM auth.sessions s
+             JOIN auth.users u ON u.id = s.user_id
+             WHERE u.email = $1",
+        )
+        .bind(&email)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(aal, "aal2");
+        let stored: String =
+            sqlx::query_scalar("SELECT secret FROM auth.mfa_factors WHERE id = $1::uuid")
+                .bind(factor_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(stored, secret);
     }
 
     #[test]
