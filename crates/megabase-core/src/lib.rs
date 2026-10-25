@@ -7,6 +7,7 @@ pub mod gotrue_jwt;
 pub mod ids;
 pub mod jwt;
 pub mod kong;
+pub mod role;
 
 use axum::{
     extract::OriginalUri,
@@ -20,6 +21,7 @@ pub use error::{Error, MegabaseNotImplemented, Result};
 pub use gotrue_jwt::GoTrueJwtError;
 pub use ids::{CompactJwt, JwtSecret, UserId};
 pub use jwt::{bearer_token, Hs256, JwtClaims, JwtError};
+pub use role::{db_role, ApiRoles, RoleFailure, UnconfiguredRole, ROLE_EXISTS_SQL};
 
 /// A router that answers every method and path with HTTP 501.
 ///
