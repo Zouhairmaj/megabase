@@ -4,15 +4,15 @@
     "units": 1036,
     "implemented": 364,
     "tested": 220,
-    "conformant": 206
+    "conformant": 201
   },
   "percent": {
     "coverage": 35.1,
-    "conformance": 94.5,
-    "done": 19.9
+    "conformance": 91.8,
+    "done": 19.4
   },
   "judge": {
-    "cases": 495,
+    "cases": 510,
     "passing": 468
   },
   "components": {
@@ -20,7 +20,7 @@
       "units": 159,
       "implemented": 130,
       "tested": 88,
-      "conformant": 86,
+      "conformant": 81,
       "groups": {
         "admin": {
           "units": 28,
@@ -32,7 +32,7 @@
           "units": 32,
           "implemented": 32,
           "tested": 32,
-          "conformant": 32
+          "conformant": 27
         },
         "endpoints": {
           "units": 13,
@@ -656,11 +656,11 @@
     "auth:sql-function:auth.jwt()": "conformant",
     "auth:sql-function:auth.role()": "conformant",
     "auth:sql-function:auth.uid()": "conformant",
-    "auth:sql-table:auth.audit_log_entries": "conformant",
+    "auth:sql-table:auth.audit_log_entries": "tested",
     "auth:sql-table:auth.custom_oauth_providers": "conformant",
-    "auth:sql-table:auth.flow_state": "conformant",
-    "auth:sql-table:auth.identities": "conformant",
-    "auth:sql-table:auth.instances": "conformant",
+    "auth:sql-table:auth.flow_state": "tested",
+    "auth:sql-table:auth.identities": "tested",
+    "auth:sql-table:auth.instances": "tested",
     "auth:sql-table:auth.mfa_amr_claims": "conformant",
     "auth:sql-table:auth.mfa_challenges": "conformant",
     "auth:sql-table:auth.mfa_factors": "conformant",
@@ -681,7 +681,7 @@
     "auth:sql-table:auth.sso_domains": "conformant",
     "auth:sql-table:auth.sso_providers": "conformant",
     "auth:sql-table:auth.sso_sessions": "conformant",
-    "auth:sql-table:auth.users": "conformant",
+    "auth:sql-table:auth.users": "tested",
     "auth:sql-table:auth.webauthn_challenges": "conformant",
     "auth:sql-table:auth.webauthn_credentials": "conformant",
     "auth:verify-type:email": "implemented",
