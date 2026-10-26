@@ -88,13 +88,24 @@ GET reads `token` and `redirect_to` from the query. `token` is stored as the
 token hash (GoTrue copies it onto `token_hash`). The redirect target is the
 first allowed URL among `redirect_to`, the `Referer` header, and the site URL.
 The site URL is `GOTRUE_SITE_URL`, or `SITE_URL` when that is unset
-(`http://localhost:3000` when both are unset). A candidate is allowed when it
-matches the site (same scheme and host; loopback may use another port), is a
-loopback IP, or matches `GOTRUE_URI_ALLOW_LIST` (`ADDITIONAL_REDIRECT_URLS`
-when that list is unset). The host is the authority after any userinfo, so
-`http://127.0.0.1:1@evil.com/` is not loopback. An allow-list pattern this
-port cannot compile (`[`, `]`, `{`, `}`, or a dangling `\`) is HTTP 501
-`GOTRUE_URI_ALLOW_LIST` instead of a guessed site-URL fallback.
+(`http://localhost:3000` when both are unset). A candidate is parsed with
+the WHATWG URL parser and allowed when it matches the site (same scheme
+and written host, as in Go `URL.Hostname`; a localhost host may use
+another port), is a
+dotted-decimal or IPv6 loopback address, or matches `GOTRUE_URI_ALLOW_LIST`
+(`ADDITIONAL_REDIRECT_URLS` when that list is unset) on the URL with its
+fragment removed and its query kept. Userinfo does not reject the URL; the
+host is the host after it. A backslash in the authority is rejected. An
+all-digit host is rejected (a non-empty host of only digits). An IPv4
+spelling that Go keeps as a hostname is matched as written, including
+against the allow list. An `http` or `https` domain is checked against
+GoTrue's regular hostname pattern on that written host, the same host
+the allow-list match text contains. A non-HTTP(S) URL with no host, including an
+empty host, is same-site when the site host is also empty; otherwise it
+is matched against the allow list. An allow-list pattern
+this port cannot compile
+(`[`, `]`, `{`, `}`, or a dangling `\`) is HTTP 501 `GOTRUE_URI_ALLOW_LIST`
+instead of a guessed site-URL fallback.
 
 POST reads a JSON object: `type`, `token`, `token_hash`, `email`, `phone`,
 `redirect_to`. Exactly one of `token` and `token_hash` is set. With `token`,
