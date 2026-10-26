@@ -1,0 +1,198 @@
+# Level 1 auth tables written by email/password flows.
+# Each case links the sql-table unit and compares the before/after row
+# delta (`snapshot` replaces the default auth.users + public.todos pair).
+# `rows = true` is used only where the whole table is deterministic.
+#
+# Not covered here, because a case would fail on current main:
+# auth.sessions (reference stores ip and user_agent; megabase leaves them
+# null), auth.refresh_tokens (per-request token, and parent after rotation),
+# auth.one_time_tokens (recover does not persist a token when mail delivery
+# fails; generate_link bodies differ), auth.schema_migrations (reference
+# records migration versions; megabase's table is empty).
+
+[[case]]
+id = "auth.snapshot.users.signup"
+description = "Email/password sign-up inserts the same auth.users row on both stacks"
+units = ["auth:sql-table:auth.users"]
+snapshot = ["auth.users"]
+[[case.step]]
+method = "POST"
+path = "/auth/v1/signup"
+json = { email = "judge-snap-users-{{run}}@example.com", password = "judge-password-1" }
+
+[[case]]
+id = "auth.snapshot.users.metadata"
+description = "Sign-up user metadata is stored the same way in auth.users"
+units = ["auth:sql-table:auth.users"]
+snapshot = ["auth.users"]
+[[case.step]]
+method = "POST"
+path = "/auth/v1/signup"
+json = { email = "judge-snap-users-meta-{{run}}@example.com", password = "judge-password-1", data = { name = "Ada" } }
+
+# The reference admin user JSON omits generated `confirmed_at`. Megabase
+# includes it. The pointer is removed so this case compares the row.
+[[case]]
+id = "auth.snapshot.users.admin"
+description = "Service-role user create inserts the same auth.users row"
+units = ["auth:sql-table:auth.users"]
+snapshot = ["auth.users"]
+[[case.step]]
+method = "POST"
+path = "/auth/v1/admin/users"
+key = "service_role"
+json = { email = "judge-snap-users-admin-{{run}}@example.com", password = "judge-password-1", email_confirm = true }
+ignore = ["/confirmed_at"]
+
+[[case]]
+id = "auth.snapshot.identities.signup"
+description = "Email/password sign-up inserts the same auth.identities row"
+units = ["auth:sql-table:auth.identities"]
+snapshot = ["auth.identities"]
+[[case.step]]
+method = "POST"
+path = "/auth/v1/signup"
+json = { email = "judge-snap-ident-{{run}}@example.com", password = "judge-password-1" }
+
+[[case]]
+id = "auth.snapshot.identities.metadata"
+description = "Sign-up metadata is stored the same way in auth.identities"
+units = ["auth:sql-table:auth.identities"]
+snapshot = ["auth.identities"]
+[[case.step]]
+method = "POST"
+path = "/auth/v1/signup"
+json = { email = "judge-snap-ident-meta-{{run}}@example.com", password = "judge-password-1", data = { name = "Ada" } }
+
+[[case]]
+id = "auth.snapshot.identities.admin"
+description = "Service-role user create inserts the same auth.identities row"
+units = ["auth:sql-table:auth.identities"]
+snapshot = ["auth.identities"]
+[[case.step]]
+method = "POST"
+path = "/auth/v1/admin/users"
+key = "service_role"
+json = { email = "judge-snap-ident-admin-{{run}}@example.com", password = "judge-password-1", email_confirm = true }
+ignore = ["/confirmed_at"]
+
+[[case]]
+id = "auth.snapshot.audit.signup"
+description = "Sign-up writes the same user_signedup and login audit rows"
+units = ["auth:sql-table:auth.audit_log_entries"]
+snapshot = ["auth.audit_log_entries"]
+[[case.step]]
+method = "POST"
+path = "/auth/v1/signup"
+json = { email = "judge-snap-audit-{{run}}@example.com", password = "judge-password-1" }
+
+[[case]]
+id = "auth.snapshot.audit.password"
+description = "A later password grant appends the same login audit row"
+units = ["auth:sql-table:auth.audit_log_entries"]
+snapshot = ["auth.audit_log_entries"]
+[[case.step]]
+method = "POST"
+path = "/auth/v1/signup"
+json = { email = "judge-snap-audit-pw-{{run}}@example.com", password = "judge-password-1" }
+[[case.step]]
+method = "POST"
+path = "/auth/v1/token?grant_type=password"
+json = { email = "judge-snap-audit-pw-{{run}}@example.com", password = "judge-password-1" }
+
+[[case]]
+id = "auth.snapshot.audit.refresh"
+description = "Refresh writes the same token_refreshed and token_revoked audit rows"
+units = ["auth:sql-table:auth.audit_log_entries"]
+snapshot = ["auth.audit_log_entries"]
+[[case.step]]
+method = "POST"
+path = "/auth/v1/signup"
+json = { email = "judge-snap-audit-refresh-{{run}}@example.com", password = "judge-password-1" }
+capture = { refresh = "/refresh_token" }
+[[case.step]]
+method = "POST"
+path = "/auth/v1/token?grant_type=refresh_token"
+json = { refresh_token = "{{refresh}}" }
+
+[[case]]
+id = "auth.snapshot.audit.logout"
+description = "Logout appends the same logout audit row"
+units = ["auth:sql-table:auth.audit_log_entries"]
+snapshot = ["auth.audit_log_entries"]
+[[case.step]]
+method = "POST"
+path = "/auth/v1/signup"
+json = { email = "judge-snap-audit-logout-{{run}}@example.com", password = "judge-password-1" }
+capture = { token = "/access_token" }
+[[case.step]]
+method = "POST"
+path = "/auth/v1/logout"
+headers = { Authorization = "Bearer {{token}}" }
+
+[[case]]
+id = "auth.snapshot.audit.admin"
+description = "Service-role user create writes the same user_signedup audit row"
+units = ["auth:sql-table:auth.audit_log_entries"]
+snapshot = ["auth.audit_log_entries"]
+[[case.step]]
+method = "POST"
+path = "/auth/v1/admin/users"
+key = "service_role"
+json = { email = "judge-snap-audit-admin-{{run}}@example.com", password = "judge-password-1", email_confirm = true }
+ignore = ["/confirmed_at"]
+
+# Mail delivery fails on both stacks (no SMTP server), after the PKCE
+# flow_state row is committed. The reference 500 also carries a generated
+# error_id; megabase omits it. Ignoring that field lets the case compare
+# the row.
+[[case]]
+id = "auth.snapshot.flow.recover-s256"
+description = "PKCE recover (S256) inserts the same auth.flow_state row"
+units = ["auth:sql-table:auth.flow_state"]
+snapshot = ["auth.flow_state"]
+[[case.step]]
+method = "POST"
+path = "/auth/v1/signup"
+json = { email = "judge-snap-flow-s256-{{run}}@example.com", password = "judge-password-1" }
+[[case.step]]
+method = "POST"
+path = "/auth/v1/recover"
+json = { email = "judge-snap-flow-s256-{{run}}@example.com", code_challenge = "judge-code-challenge-abcdefghijklmnopqrstuvwxyz0123456789", code_challenge_method = "S256" }
+ignore = ["/error_id"]
+
+[[case]]
+id = "auth.snapshot.flow.recover-plain"
+description = "PKCE recover (plain) inserts the same auth.flow_state row"
+units = ["auth:sql-table:auth.flow_state"]
+snapshot = ["auth.flow_state"]
+[[case.step]]
+method = "POST"
+path = "/auth/v1/signup"
+json = { email = "judge-snap-flow-plain-{{run}}@example.com", password = "judge-password-1" }
+[[case.step]]
+method = "POST"
+path = "/auth/v1/recover"
+json = { email = "judge-snap-flow-plain-{{run}}@example.com", code_challenge = "judge-code-challenge-abcdefghijklmnopqrstuvwxyz0123456789", code_challenge_method = "plain" }
+ignore = ["/error_id"]
+
+[[case]]
+id = "auth.snapshot.instances.rows"
+description = "auth.instances has the same rows on both databases (empty on this pin)"
+units = ["auth:sql-table:auth.instances"]
+[[case.db]]
+table = "auth.instances"
+rows = true
+
+[[case]]
+id = "auth.snapshot.instances.signup"
+description = "Email/password sign-up does not diverge auth.instances"
+units = ["auth:sql-table:auth.instances"]
+snapshot = ["auth.instances"]
+[[case.step]]
+method = "POST"
+path = "/auth/v1/signup"
+json = { email = "judge-snap-inst-{{run}}@example.com", password = "judge-password-1" }
+[[case.db]]
+table = "auth.instances"
+rows = true
