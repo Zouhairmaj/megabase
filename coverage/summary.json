@@ -4,15 +4,15 @@
     "units": 1036,
     "implemented": 362,
     "tested": 218,
-    "conformant": 203
+    "conformant": 193
   },
   "percent": {
     "coverage": 34.9,
-    "conformance": 94.9,
-    "done": 19.6
+    "conformance": 91.4,
+    "done": 18.6
   },
   "judge": {
-    "cases": 493,
+    "cases": 512,
     "passing": 468
   },
   "components": {
@@ -324,7 +324,7 @@
       "units": 93,
       "implemented": 93,
       "tested": 93,
-      "conformant": 78,
+      "conformant": 68,
       "groups": {
         "aggregates": {
           "units": 5,
@@ -342,7 +342,7 @@
           "units": 28,
           "implemented": 28,
           "tested": 28,
-          "conformant": 28
+          "conformant": 18
         },
         "logic": {
           "units": 3,
@@ -739,21 +739,21 @@
     "rest:filter-operator:any": "conformant",
     "rest:filter-operator:cd": "conformant",
     "rest:filter-operator:cs": "conformant",
-    "rest:filter-operator:eq": "conformant",
+    "rest:filter-operator:eq": "tested",
     "rest:filter-operator:fts": "conformant",
-    "rest:filter-operator:gt": "conformant",
-    "rest:filter-operator:gte": "conformant",
+    "rest:filter-operator:gt": "tested",
+    "rest:filter-operator:gte": "tested",
     "rest:filter-operator:ilike": "conformant",
     "rest:filter-operator:imatch": "conformant",
-    "rest:filter-operator:in": "conformant",
-    "rest:filter-operator:is": "conformant",
-    "rest:filter-operator:isdistinct": "conformant",
+    "rest:filter-operator:in": "tested",
+    "rest:filter-operator:is": "tested",
+    "rest:filter-operator:isdistinct": "tested",
     "rest:filter-operator:like": "conformant",
-    "rest:filter-operator:lt": "conformant",
-    "rest:filter-operator:lte": "conformant",
+    "rest:filter-operator:lt": "tested",
+    "rest:filter-operator:lte": "tested",
     "rest:filter-operator:match": "conformant",
-    "rest:filter-operator:neq": "conformant",
-    "rest:filter-operator:not": "conformant",
+    "rest:filter-operator:neq": "tested",
+    "rest:filter-operator:not": "tested",
     "rest:filter-operator:nxl": "conformant",
     "rest:filter-operator:nxr": "conformant",
     "rest:filter-operator:ov": "conformant",
