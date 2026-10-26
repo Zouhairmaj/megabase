@@ -1918,3 +1918,130 @@ units = ["auth:route:GET /auth/v1/scim/v2/Schemas"]
 [[case.step]]
 method = "GET"
 path = "/auth/v1/scim/v2/Schemas"
+
+# Level 1 minimum of three cases. Admin success paths below are the ones
+# whose bodies match the reference stack. generate_link omits the per-call
+# OTP, token, and action link (spec: do not compare those).
+
+[[case]]
+id = "auth.admin.users.create.password"
+description = "Admin user create stores an unconfirmed user with the given password"
+units = ["auth:route:POST /auth/v1/admin/users"]
+[[case.step]]
+method = "POST"
+path = "/auth/v1/admin/users"
+key = "service_role"
+json = { email = "judge-admincreate-{{run}}@example.com", password = "judge-password-1" }
+
+[[case]]
+id = "auth.admin.users.get.created"
+description = "Admin user get returns the user created by email signup"
+units = ["auth:route:GET /auth/v1/admin/users/{user_id}"]
+[[case.step]]
+method = "POST"
+path = "/auth/v1/signup"
+json = { email = "judge-adminget-{{run}}@example.com", password = "judge-password-1" }
+capture = { user_id = "/user/id" }
+[[case.step]]
+method = "GET"
+path = "/auth/v1/admin/users/{{user_id}}"
+key = "service_role"
+
+[[case]]
+id = "auth.admin.users.put.metadata"
+description = "Admin user update merges user_metadata onto a signed-up user"
+units = ["auth:route:PUT /auth/v1/admin/users/{user_id}"]
+[[case.step]]
+method = "POST"
+path = "/auth/v1/signup"
+json = { email = "judge-adminput-{{run}}@example.com", password = "judge-password-1" }
+capture = { user_id = "/user/id" }
+[[case.step]]
+method = "PUT"
+path = "/auth/v1/admin/users/{{user_id}}"
+key = "service_role"
+json = { user_metadata = { name = "Ada" } }
+
+[[case]]
+id = "auth.admin.generate-link.recovery"
+description = "Admin generate_link recovery returns a link payload for an existing user"
+units = ["auth:route:POST /auth/v1/admin/generate_link"]
+[[case.step]]
+method = "POST"
+path = "/auth/v1/signup"
+json = { email = "judge-link-recovery-{{run}}@example.com", password = "judge-password-1" }
+[[case.step]]
+method = "POST"
+path = "/auth/v1/admin/generate_link"
+key = "service_role"
+json = { type = "recovery", email = "judge-link-recovery-{{run}}@example.com" }
+ignore = ["/email_otp", "/hashed_token", "/action_link"]
+
+# Email OTP (token + email) is a different lookup from the token_hash cases.
+# A made-up code is expired on both stacks.
+
+[[case]]
+id = "auth.verify.post.signup-otp"
+description = "POST /verify signup rejects an unknown email OTP"
+units = ["auth:route:POST /auth/v1/verify", "auth:verify-type:signup"]
+[[case.step]]
+method = "POST"
+path = "/auth/v1/verify"
+json = { type = "signup", token = "000000", email = "nobody@example.com" }
+
+[[case]]
+id = "auth.verify.post.invite-otp"
+description = "POST /verify invite rejects an unknown email OTP"
+units = ["auth:route:POST /auth/v1/verify", "auth:verify-type:invite"]
+[[case.step]]
+method = "POST"
+path = "/auth/v1/verify"
+json = { type = "invite", token = "000000", email = "nobody@example.com" }
+
+[[case]]
+id = "auth.verify.post.recovery-otp"
+description = "POST /verify recovery rejects an unknown email OTP"
+units = ["auth:route:POST /auth/v1/verify", "auth:verify-type:recovery"]
+[[case.step]]
+method = "POST"
+path = "/auth/v1/verify"
+json = { type = "recovery", token = "000000", email = "nobody@example.com" }
+
+[[case]]
+id = "auth.verify.post.email-change-otp"
+description = "POST /verify email_change rejects an unknown email OTP"
+units = ["auth:route:POST /auth/v1/verify", "auth:verify-type:email_change"]
+[[case.step]]
+method = "POST"
+path = "/auth/v1/verify"
+json = { type = "email_change", token = "000000", email = "nobody@example.com" }
+
+# POST /recover. The reference stack has no mail server, so a known address
+# is a 500 whose body also carries error_id; that case is not here.
+
+[[case]]
+id = "auth.recover.empty"
+description = "Password recovery without an email is a validation error"
+units = ["auth:route:POST /auth/v1/recover"]
+[[case.step]]
+method = "POST"
+path = "/auth/v1/recover"
+json = {}
+
+[[case]]
+id = "auth.recover.invalid-email"
+description = "Password recovery rejects an email that is not an address"
+units = ["auth:route:POST /auth/v1/recover"]
+[[case.step]]
+method = "POST"
+path = "/auth/v1/recover"
+json = { email = "not-an-email" }
+
+[[case]]
+id = "auth.recover.unknown"
+description = "Password recovery for an unknown email returns an empty object"
+units = ["auth:route:POST /auth/v1/recover"]
+[[case.step]]
+method = "POST"
+path = "/auth/v1/recover"
+json = { email = "judge-recover-unknown-{{run}}@example.com" }

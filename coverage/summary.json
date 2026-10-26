@@ -3,30 +3,30 @@
   "totals": {
     "units": 1036,
     "implemented": 362,
-    "tested": 218,
-    "conformant": 191
+    "tested": 219,
+    "conformant": 182
   },
   "percent": {
     "coverage": 34.9,
-    "conformance": 89.3,
-    "done": 18.4
+    "conformance": 87.5,
+    "done": 17.6
   },
   "judge": {
-    "cases": 524,
+    "cases": 535,
     "passing": 468
   },
   "components": {
     "auth": {
       "units": 159,
       "implemented": 128,
-      "tested": 86,
-      "conformant": 81,
+      "tested": 87,
+      "conformant": 72,
       "groups": {
         "admin": {
           "units": 28,
           "implemented": 28,
           "tested": 28,
-          "conformant": 28
+          "conformant": 24
         },
         "database": {
           "units": 32,
@@ -37,7 +37,7 @@
         "endpoints": {
           "units": 13,
           "implemented": 7,
-          "tested": 5,
+          "tested": 6,
           "conformant": 5
         },
         "factors": {
@@ -98,7 +98,7 @@
           "units": 10,
           "implemented": 10,
           "tested": 6,
-          "conformant": 6
+          "conformant": 1
         },
         "well-known": {
           "units": 3,
@@ -608,7 +608,7 @@
     "auth:route:GET /auth/v1/admin/sso/providers": "conformant",
     "auth:route:GET /auth/v1/admin/sso/providers/{idp_id}": "conformant",
     "auth:route:GET /auth/v1/admin/users": "conformant",
-    "auth:route:GET /auth/v1/admin/users/{user_id}": "conformant",
+    "auth:route:GET /auth/v1/admin/users/{user_id}": "tested",
     "auth:route:GET /auth/v1/admin/users/{user_id}/factors": "conformant",
     "auth:route:GET /auth/v1/admin/users/{user_id}/passkeys": "conformant",
     "auth:route:GET /auth/v1/factors/recovery-codes": "implemented",
@@ -625,11 +625,11 @@
     "auth:route:GET /auth/v1/verify": "conformant",
     "auth:route:PATCH /auth/v1/passkeys/{passkey_id}": "conformant",
     "auth:route:POST /auth/v1/admin/custom-providers": "conformant",
-    "auth:route:POST /auth/v1/admin/generate_link": "conformant",
+    "auth:route:POST /auth/v1/admin/generate_link": "tested",
     "auth:route:POST /auth/v1/admin/oauth/clients": "conformant",
     "auth:route:POST /auth/v1/admin/oauth/clients/{client_id}/regenerate_secret": "conformant",
     "auth:route:POST /auth/v1/admin/sso/providers": "conformant",
-    "auth:route:POST /auth/v1/admin/users": "conformant",
+    "auth:route:POST /auth/v1/admin/users": "tested",
     "auth:route:POST /auth/v1/factors": "implemented",
     "auth:route:POST /auth/v1/factors/recovery-codes": "implemented",
     "auth:route:POST /auth/v1/factors/recovery-codes/regenerate": "implemented",
@@ -640,14 +640,14 @@
     "auth:route:POST /auth/v1/logout": "conformant",
     "auth:route:POST /auth/v1/magiclink": "implemented",
     "auth:route:POST /auth/v1/oauth/clients/register": "implemented",
-    "auth:route:POST /auth/v1/recover": "implemented",
+    "auth:route:POST /auth/v1/recover": "tested",
     "auth:route:POST /auth/v1/signup": "conformant",
     "auth:route:POST /auth/v1/token": "conformant",
-    "auth:route:POST /auth/v1/verify": "conformant",
+    "auth:route:POST /auth/v1/verify": "tested",
     "auth:route:PUT /auth/v1/admin/custom-providers/{identifier}": "conformant",
     "auth:route:PUT /auth/v1/admin/oauth/clients/{client_id}": "conformant",
     "auth:route:PUT /auth/v1/admin/sso/providers/{idp_id}": "conformant",
-    "auth:route:PUT /auth/v1/admin/users/{user_id}": "conformant",
+    "auth:route:PUT /auth/v1/admin/users/{user_id}": "tested",
     "auth:route:PUT /auth/v1/admin/users/{user_id}/factors/{factor_id}": "conformant",
     "auth:route:PUT /auth/v1/user": "conformant",
     "auth:sql-function:auth.email()": "conformant",
@@ -683,12 +683,12 @@
     "auth:sql-table:auth.webauthn_challenges": "conformant",
     "auth:sql-table:auth.webauthn_credentials": "conformant",
     "auth:verify-type:email": "implemented",
-    "auth:verify-type:email_change": "conformant",
-    "auth:verify-type:invite": "conformant",
+    "auth:verify-type:email_change": "tested",
+    "auth:verify-type:invite": "tested",
     "auth:verify-type:magiclink": "implemented",
     "auth:verify-type:phone_change": "implemented",
-    "auth:verify-type:recovery": "conformant",
-    "auth:verify-type:signup": "conformant",
+    "auth:verify-type:recovery": "tested",
+    "auth:verify-type:signup": "tested",
     "auth:verify-type:sms": "implemented",
     "functions:op:op_delete_env": "implemented",
     "functions:op:op_env": "implemented",
