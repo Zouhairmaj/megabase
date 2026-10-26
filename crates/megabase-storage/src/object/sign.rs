@@ -24,7 +24,7 @@ use super::{
     MAX_SIGNED_URL_EXPIRES_IN, SCOPE_DOWNLOAD,
 };
 use crate::{
-    database_error, fastify_json,
+    fastify_json,
     limits::{is_uuid, is_valid_bucket_name, is_valid_key},
     mime::is_allowed_mime_type,
     not_implemented,
