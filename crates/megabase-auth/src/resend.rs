@@ -24,7 +24,8 @@ use uuid::Uuid;
 
 use crate::admin_batch2::generate_otp;
 use crate::config::AuthConfig;
-use crate::error::{bad_json, unexpected, validation, GoTrueError};
+use crate::error::{unexpected, validation, GoTrueError};
+use crate::gojson;
 use crate::ratelimit::perform_rate_limiting;
 use crate::recover::{authorize_recipient, deliver, frequency_limited, take_email_slot, Stop};
 use crate::routes::{read_body, request_aud, validate_email, validate_pkce};
@@ -32,7 +33,7 @@ use crate::state::AuthState;
 use crate::store::{
     email_otp_hash, EmailChangeResend, FlowStateRecord, LoginChannel, SignupResend, UserRecord,
 };
-use crate::token::{null_as_default, unhandled};
+use crate::token::unhandled;
 use crate::user::validate_phone;
 use crate::COMPONENT;
 
@@ -48,34 +49,21 @@ enum Kind {
     PhoneChange,
 }
 
-#[derive(Default)]
+/// `ResendConfirmationParams`. Keys are remapped by [`gojson::decode`] so
+/// an ASCII case-insensitive duplicate keeps the last value in document
+/// order, matching Go `encoding/json`.
+#[derive(Default, Deserialize)]
 struct ResendBody {
+    #[serde(default)]
     r#type: String,
+    #[serde(default)]
     email: String,
+    #[serde(default)]
     phone: String,
+    #[serde(default)]
     code_challenge: String,
+    #[serde(default)]
     code_challenge_method: String,
-}
-
-/// Go `encoding/json` matches object keys without regard to case, and the
-/// last duplicate wins.
-impl<'de> Deserialize<'de> for ResendBody {
-    fn deserialize<D: serde::Deserializer<'de>>(de: D) -> Result<Self, D::Error> {
-        let map = serde_json::Map::<String, serde_json::Value>::deserialize(de)?;
-        let mut body = Self::default();
-        for (key, value) in map {
-            let slot = match key.to_ascii_lowercase().as_str() {
-                "type" => &mut body.r#type,
-                "email" => &mut body.email,
-                "phone" => &mut body.phone,
-                "code_challenge" => &mut body.code_challenge,
-                "code_challenge_method" => &mut body.code_challenge_method,
-                _ => continue,
-            };
-            *slot = null_as_default(value).map_err(serde::de::Error::custom)?;
-        }
-        Ok(body)
-    }
 }
 
 impl ResendBody {
@@ -155,10 +143,11 @@ pub(crate) async fn resend(
         Err(error) => return error.into_response(),
     };
     // Go unmarshals a top-level `null` into the zero-valued params struct.
-    let mut params: ResendBody = match serde_json::from_slice::<Option<ResendBody>>(&bytes) {
-        Ok(params) => params.unwrap_or_default(),
-        Err(error) => return bad_json(error).into_response(),
-    };
+    let mut params: ResendBody =
+        match gojson::decode::<Option<ResendBody>>(&bytes, &gojson::RESEND_PARAMS) {
+            Ok(params) => params.unwrap_or_default(),
+            Err(error) => return error.into_response(),
+        };
     if let Err(error) = params.validate(&state.config) {
         return error.into_response();
     }
@@ -385,6 +374,17 @@ mod tests {
     const SECRET: &str = "your-super-secret-jwt-token-with-at-least-32-characters-long";
     /// RFC 7636 appendix B.
     const CHALLENGE: &str = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM";
+
+    #[test]
+    fn case_insensitive_duplicates_keep_the_last_key_in_document_order() {
+        let params: ResendBody = gojson::decode(
+            br#"{"type":"signup","EMAIL":"first@example.com","email":"second@example.com","EMAIL":"third@example.com"}"#,
+            &gojson::RESEND_PARAMS,
+        )
+        .unwrap_or_else(|error| panic!("{}", error.message));
+        assert_eq!(params.r#type, "signup");
+        assert_eq!(params.email, "third@example.com");
+    }
 
     fn app(autoconfirm: bool) -> (Router, Backend) {
         let backend = Backend::memory();

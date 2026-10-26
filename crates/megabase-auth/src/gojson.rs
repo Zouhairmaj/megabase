@@ -96,6 +96,18 @@ pub(crate) const INVITE_PARAMS: GoStruct = GoStruct {
     fields: &[("email", Kind::Str), ("data", Kind::Map)],
 };
 
+/// `ResendConfirmationParams` in `internal/api/resend.go`.
+pub(crate) const RESEND_PARAMS: GoStruct = GoStruct {
+    name: "ResendConfirmationParams",
+    fields: &[
+        ("type", Kind::Str),
+        ("email", Kind::Str),
+        ("phone", Kind::Str),
+        ("code_challenge", Kind::Str),
+        ("code_challenge_method", Kind::Str),
+    ],
+};
+
 /// `RefreshTokenGrantParams` in `internal/api/token_refresh.go`.
 pub(crate) const REFRESH_TOKEN_GRANT_PARAMS: GoStruct = GoStruct {
     name: "RefreshTokenGrantParams",
