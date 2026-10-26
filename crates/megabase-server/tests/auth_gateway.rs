@@ -45,8 +45,9 @@ async fn auth_prefix_reaches_health_settings_and_stubs() {
     assert_eq!(body["external"]["email"], true);
 
     let (status, body) = send("GET", "/auth/v1/reauthenticate", None).await;
-    assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
-    assert_eq!(body["unit"], "auth:route:GET /auth/v1/reauthenticate");
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert_eq!(body["error_code"], "no_authorization");
+    assert_eq!(body["msg"], "This endpoint requires a valid Bearer token");
 
     let (status, body) = send(
         "POST",

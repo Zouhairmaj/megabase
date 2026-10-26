@@ -17,7 +17,9 @@
 //! Issue #46 serves `GET`/`POST /callback` up to the provider code exchange
 //! and `POST /magiclink` and `POST /otp` up to mail and SMS delivery.
 //! Issue #382 serves `POST /recover` through GoTrue's no-op mail client and
-//! an unreachable SMTP host. Issue #401 serves `POST /invite` the same way.
+//! an unreachable SMTP host. `GET /reauthenticate` and `POST /resend` use
+//! that same client for email; SMS delivery stays 501. Issue #401 serves
+//! `POST /invite` the same way.
 //! Issue #55 serves the JWKS and OIDC / OAuth discovery documents. Issue #49
 //! serves the `GET /authorize` redirect for the providers whose constructor
 //! needs no network call. Issue #50 serves the `/passkeys` disabled gate and,
@@ -47,8 +49,10 @@ mod passkeys;
 mod platform;
 mod provider;
 mod ratelimit;
+mod reauthenticate;
 mod recover;
 mod recovery_code;
+mod resend;
 mod roles;
 mod routes;
 mod schema;

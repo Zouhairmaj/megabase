@@ -7,11 +7,10 @@
 //! `POST /token` (password and refresh-token grants),
 //! `GET`/`POST /verify` (signup, invite, recovery, email change), and the
 //! user routes are implemented; `POST /recover` lives in `crate::recover`,
-//! `POST /invite` in `crate::invite`, and the signup confirmation email
-//! (autoconfirm off) in `crate::confirm`. Resend, reauthenticate, phone
-//! signup, anonymous signup, and the other verify types stay HTTP 501. `POST /resend`
-//! validates its JSON request, then stays 501 because it needs the mailer
-//! (it does no user lookup).
+//! `POST /invite` in `crate::invite`, `GET /reauthenticate` in
+//! `crate::reauthenticate`, `POST /resend` in `crate::resend`, and the signup
+//! confirmation email (autoconfirm off) in `crate::confirm`. Phone signup,
+//! anonymous signup, and the SMS sender stay HTTP 501.
 
 use std::sync::OnceLock;
 use std::time::SystemTime;
@@ -32,9 +31,7 @@ use serde_json::{json, Map, Value};
 use uuid::Uuid;
 
 use crate::config::{AuthConfig, AUTH_VERSION};
-use crate::error::{
-    bad_json, body_too_large, go_quote, unexpected, validation, GoTrueError, MAX_BODY_BYTES,
-};
+use crate::error::{body_too_large, go_quote, unexpected, validation, GoTrueError, MAX_BODY_BYTES};
 use crate::gojson;
 use crate::hooks::TokenHookCall;
 use crate::jsonutil::{session_claims, session_json, unix_secs};
@@ -44,8 +41,6 @@ use crate::token::null_as_default;
 use crate::COMPONENT;
 
 const UNIT_SIGNUP: &str = "auth:route:POST /auth/v1/signup";
-const UNIT_REAUTHENTICATE: &str = "auth:route:GET /auth/v1/reauthenticate";
-const UNIT_RESEND: &str = "auth:route:POST /auth/v1/resend";
 
 pub(crate) const INVALID_CHANNEL: &str = "Invalid channel, supported values are 'sms' or 'whatsapp'. 'whatsapp' is only supported if Twilio or Twilio Verify is used as the provider.";
 
@@ -54,13 +49,18 @@ pub(crate) fn router(state: AuthState) -> Router {
         .route("/auth/v1/health", get_only(get(health)))
         .route("/auth/v1/settings", get_only(get(settings)))
         .route("/auth/v1/authorize", get(crate::external::authorize))
-        .route("/auth/v1/reauthenticate", get(reauthenticate))
+        .route(
+            "/auth/v1/reauthenticate",
+            get(crate::reauthenticate::reauthenticate)
+                .head(crate::reauthenticate::require_then_method_not_allowed)
+                .fallback(crate::reauthenticate::require_then_method_not_allowed),
+        )
         .route("/auth/v1/signup", post(signup))
         .route("/auth/v1/token", post(crate::token::token))
         .route("/auth/v1/invite", post(crate::invite::invite))
         .route("/auth/v1/logout", post(logout))
         .route("/auth/v1/recover", post(crate::recover::recover))
-        .route("/auth/v1/resend", post(resend))
+        .route("/auth/v1/resend", post(crate::resend::resend))
         .route("/auth/v1/magiclink", post(crate::otp::magiclink))
         .route("/auth/v1/otp", post(crate::otp::otp))
         .route(
@@ -155,104 +155,6 @@ async fn settings(State(state): State<AuthState>) -> Response {
         "passkeys_enabled": config.passkeys_enabled,
     }))
     .into_response()
-}
-
-async fn reauthenticate() -> MegabaseNotImplemented {
-    MegabaseNotImplemented::new(COMPONENT, UNIT_REAUTHENTICATE)
-}
-
-#[derive(Default)]
-struct ResendBody {
-    r#type: String,
-    email: String,
-    phone: String,
-    code_challenge: String,
-    code_challenge_method: String,
-}
-
-/// Go `encoding/json` matches object keys to struct tags without regard to
-/// case, and the last duplicate wins; serde's derive is case-sensitive.
-impl<'de> Deserialize<'de> for ResendBody {
-    fn deserialize<D: serde::Deserializer<'de>>(de: D) -> Result<Self, D::Error> {
-        let map = serde_json::Map::<String, serde_json::Value>::deserialize(de)?;
-        let mut body = Self::default();
-        for (key, value) in map {
-            let slot = match key.to_ascii_lowercase().as_str() {
-                "type" => &mut body.r#type,
-                "email" => &mut body.email,
-                "phone" => &mut body.phone,
-                "code_challenge" => &mut body.code_challenge,
-                "code_challenge_method" => &mut body.code_challenge_method,
-                _ => continue,
-            };
-            *slot = null_as_default(value).map_err(serde::de::Error::custom)?;
-        }
-        Ok(body)
-    }
-}
-
-impl ResendBody {
-    fn validate(&self, config: &AuthConfig) -> Result<(), GoTrueError> {
-        match self.r#type.as_str() {
-            "signup" | "email_change" => {
-                validate_pkce(&self.code_challenge_method, &self.code_challenge)?;
-            }
-            "sms" | "phone_change" => {}
-            _ => {
-                return Err(validation(
-                    "Missing one of these types: signup, email_change, sms, phone_change",
-                ))
-            }
-        }
-        if self.email.is_empty() && self.r#type == "signup" {
-            return Err(validation("Type provided requires an email address"));
-        }
-        if self.phone.is_empty() && self.r#type == "sms" {
-            return Err(validation("Type provided requires a phone number"));
-        }
-        if !self.email.is_empty() && !self.phone.is_empty() {
-            return Err(validation(
-                "Only an email address or phone number should be provided.",
-            ));
-        } else if !self.email.is_empty() {
-            if !config.email_enabled {
-                return Err(GoTrueError::new(
-                    StatusCode::BAD_REQUEST,
-                    "email_provider_disabled",
-                    "Email logins are disabled",
-                ));
-            }
-            validate_email(&self.email)?;
-        } else if !self.phone.is_empty() {
-            if !config.phone_enabled {
-                return Err(GoTrueError::new(
-                    StatusCode::BAD_REQUEST,
-                    "phone_provider_disabled",
-                    "Phone logins are disabled",
-                ));
-            }
-            crate::user::validate_phone(&self.phone)?;
-        } else {
-            return Err(validation("Missing email address or phone number"));
-        }
-        Ok(())
-    }
-}
-
-async fn resend(State(state): State<AuthState>, body: Body) -> Response {
-    let bytes = match read_body(body).await {
-        Ok(bytes) => bytes,
-        Err(error) => return error.into_response(),
-    };
-    // Go unmarshals a top-level `null` into the zero-valued params struct.
-    let params: ResendBody = match serde_json::from_slice::<Option<ResendBody>>(&bytes) {
-        Ok(params) => params.unwrap_or_default(),
-        Err(error) => return bad_json(error).into_response(),
-    };
-    if let Err(error) = params.validate(&state.config) {
-        return error.into_response();
-    }
-    MegabaseNotImplemented::new(COMPONENT, UNIT_RESEND).into_response()
 }
 
 // megabase:unit auth:route:POST /auth/v1/signup
@@ -922,18 +824,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn scoped_routes_without_behavior_are_501() {
-        let app = router(AuthState::reference());
-        for (method, path, unit) in [("GET", "/auth/v1/reauthenticate", UNIT_REAUTHENTICATE)] {
-            let (status, body) = call(app.clone(), method, path, Some("{}"), &[]).await;
-            assert_eq!(status, StatusCode::NOT_IMPLEMENTED, "{path}");
-            assert_eq!(body["code"], "MEGABASE_NOT_IMPLEMENTED");
-            assert_eq!(body["component"], "auth");
-            assert_eq!(body["unit"], unit);
-        }
-    }
-
-    #[tokio::test]
     async fn resend_validation_matches_gotrue() {
         let app = router(AuthState::reference());
         for (request, message) in [
@@ -1011,7 +901,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn valid_resend_stays_501_without_user_lookup() {
+    async fn valid_resend_without_a_database_is_500() {
+        // A lookup failure must not answer 200, which would hide the outage
+        // as "no such user".
         let app = router(AuthState::reference());
         for request in [
             r#"{"type":"signup","email":"a@example.com"}"#,
@@ -1021,10 +913,9 @@ mod tests {
         ] {
             let (status, body) =
                 call(app.clone(), "POST", "/auth/v1/resend", Some(request), &[]).await;
-            assert_eq!(status, StatusCode::NOT_IMPLEMENTED, "{body}");
-            assert_eq!(body["code"], "MEGABASE_NOT_IMPLEMENTED");
-            assert_eq!(body["component"], "auth");
-            assert_eq!(body["unit"], UNIT_RESEND);
+            assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR, "{body}");
+            assert_eq!(body["error_code"], "unexpected_failure");
+            assert_eq!(body["msg"], "Unable to process request");
         }
     }
 
@@ -1042,11 +933,11 @@ mod tests {
 
     #[tokio::test]
     async fn resend_matches_field_names_case_insensitively() {
-        let app = router(AuthState::reference());
+        let (app, _) = memory_app();
         let request = r#"{"Type":"signup","EMAIL":"a@example.com"}"#;
         let (status, body) = call(app, "POST", "/auth/v1/resend", Some(request), &[]).await;
-        assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
-        assert_eq!(body["code"], "MEGABASE_NOT_IMPLEMENTED");
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(body, serde_json::json!({}));
     }
 
     #[tokio::test]

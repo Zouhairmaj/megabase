@@ -81,7 +81,7 @@ async fn health_and_not_implemented_bodies() {
         observe("GET", "/rest/v1/todos", None).await
     );
     insta::assert_json_snapshot!(
-        "auth_reauthenticate_not_implemented",
+        "auth_reauthenticate_no_bearer",
         observe("GET", "/auth/v1/reauthenticate", None).await
     );
     insta::assert_json_snapshot!("studio_fallback", observe("GET", "/", None).await);

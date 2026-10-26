@@ -120,9 +120,13 @@ returns 501, because the SMTP exchange is not ported.
 `GOTRUE_SMTP_MAX_FREQUENCY` (default one minute),
 `GOTRUE_RATE_LIMIT_EMAIL_SENT` (default 30 per hour, applied when mailer
 autoconfirm is off), and `GOTRUE_EXTERNAL_EMAIL_AUTHORIZED_ADDRESSES` work
-as in GoTrue. Invite, resend, and reauthenticate return 501 with their unit
-id. Magic link, SMS, phone
-change, the `email` OTP type, and PKCE on verify do too. `PUT /user`
+as in GoTrue. `GET /reauthenticate` and `POST /resend` use that same mail
+client ([`specs/auth/endpoints.md`](../specs/auth/endpoints.md)). Resend is
+also limited by `GOTRUE_RATE_LIMIT_OTP` (default 30 per five minutes, burst
+30) when `GOTRUE_RATE_LIMIT_HEADER` is present, on its own bucket.
+`POST /invite` is served
+([`specs/auth/invite.md`](../specs/auth/invite.md)). SMS and phone-change
+delivery stay 501. `PUT /user`
 returns 501 for an email change, a phone change while SMS autoconfirm is
 off, and a password change while reauthentication or the current password
 is required. `GET /user/identities/authorize` returns 501 once the provider

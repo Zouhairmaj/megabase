@@ -75,6 +75,9 @@ pub struct AuthState {
     /// `POST /otp` and `POST /magiclink`: `GOTRUE_RATE_LIMIT_OTP` (default 30)
     /// per five minutes, burst 30. Keyed like [`Self::verify_limiter`].
     pub(crate) otp_limiter: Arc<KeyedLimiter>,
+    /// `POST /resend`: its own `GOTRUE_RATE_LIMIT_OTP` bucket (GoTrue does not
+    /// share the OTP limiter's tokens with resend).
+    pub(crate) resend_limiter: Arc<KeyedLimiter>,
     /// `POST /factors/{id}/verify` and `POST /factors/recovery-codes/verify`:
     /// GoTrue `FactorVerify`, `GOTRUE_MFA_RATE_LIMIT_CHALLENGE_AND_VERIFY`
     /// (default 15) per minute, burst 30, one-minute entry TTL.
@@ -197,6 +200,7 @@ impl AuthState {
                 DEFAULT_VERIFY_RATE,
             )?,
             otp_limiter: per_five_minutes(&lookup, "GOTRUE_RATE_LIMIT_OTP", DEFAULT_OTP_RATE)?,
+            resend_limiter: per_five_minutes(&lookup, "GOTRUE_RATE_LIMIT_OTP", DEFAULT_OTP_RATE)?,
             factor_verify_limiter: per_minute(
                 &lookup,
                 "GOTRUE_MFA_RATE_LIMIT_CHALLENGE_AND_VERIFY",
@@ -258,6 +262,7 @@ impl AuthState {
             saml_assertion_limiter: defaults.saml_assertion_limiter,
             verify_limiter: defaults.verify_limiter,
             otp_limiter: defaults.otp_limiter,
+            resend_limiter: defaults.resend_limiter,
             factor_verify_limiter: defaults.factor_verify_limiter,
             factor_challenge_limiter: defaults.factor_challenge_limiter,
             sb_forwarded_for_enabled: defaults.sb_forwarded_for_enabled,

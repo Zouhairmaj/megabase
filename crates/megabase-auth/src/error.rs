@@ -10,7 +10,8 @@ use axum::{
     response::{IntoResponse, Response},
     Json,
 };
-use serde_json::json;
+use serde_json::{json, Value};
+use uuid::Uuid;
 
 pub const MAX_BODY_BYTES: usize = 1 << 20;
 
@@ -54,6 +55,7 @@ impl IntoResponse for GoTrueError {
             "error_code": self.error_code,
             "msg": self.message,
         });
+        attach_error_id(&mut body, self.status);
         if let Some(reasons) = &self.weak_password {
             body["weak_password"] = json!({ "reasons": reasons });
         }
@@ -93,6 +95,15 @@ pub fn unexpected(message: impl Into<String>) -> GoTrueError {
         "unexpected_failure",
         message,
     )
+}
+
+/// GoTrue `handleResponseErrorHTTP`: 5xx bodies carry `error_id` from
+/// `utilities.GetRequestID`. The reference stack leaves
+/// `GOTRUE_API_REQUEST_ID_HEADER` unset, so that id is a fresh UUID.
+fn attach_error_id(body: &mut Value, status: StatusCode) {
+    if status.as_u16() >= 500 {
+        body["error_id"] = json!(Uuid::new_v4().to_string());
+    }
 }
 
 /// `apierrors.OAuthError`: always HTTP 400 with `error` and an
@@ -203,6 +214,25 @@ mod tests {
             go_quote("\u{110bd}\u{1d173}\u{e0000}"),
             "\"\\U000110bd\\U0001d173\\U000e0000\""
         );
+    }
+
+    #[tokio::test]
+    async fn unexpected_failure_includes_an_error_id() {
+        let response = unexpected("Error sending reauthentication email").into_response();
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let body: Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(body["error_code"], "unexpected_failure");
+        assert_eq!(body["msg"], "Error sending reauthentication email");
+        Uuid::parse_str(body["error_id"].as_str().unwrap()).unwrap();
+        let response = validation("nope").into_response();
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let body: Value = serde_json::from_slice(&bytes).unwrap();
+        assert!(body.get("error_id").is_none());
     }
 
     #[tokio::test]
