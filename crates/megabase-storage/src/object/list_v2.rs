@@ -17,7 +17,7 @@ use chrono::{DateTime, Utc};
 use serde_json::{json, Map, Value};
 use sqlx::{Postgres, QueryBuilder, Row};
 
-use super::{apply_pg, optional_int, optional_str, request_jwt, Actor, ApplyError, Scope};
+use super::{optional_int, optional_str, request_jwt, Actor, Scope};
 use crate::{
     fastify_json, iso, limits::is_valid_bucket_name, not_implemented, StorageError, StorageState,
 };
@@ -691,7 +691,7 @@ async fn fetch_rows(
     pool: &sqlx::PgPool,
     bucket_id: &str,
     query: &Resolved<'_>,
-) -> Result<Vec<Listed>, ApplyError> {
+) -> Result<Vec<Listed>, super::ApplyError> {
     let mut tx = scope.begin(pool).await?;
     let rows = if query.with_delimiter && !query.exact_match {
         let levels = i32::try_from(query.prefix.split('/').count()).unwrap_or(i32::MAX);
@@ -735,8 +735,8 @@ async fn fetch_rows(
     let from_search = query.with_delimiter && !query.exact_match;
     rows.iter()
         .map(|row| read_row(row, from_search))
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(ApplyError::from)
+        .collect::<Result<Vec<_>, sqlx::Error>>()
+        .map_err(super::ApplyError::from)
 }
 
 fn next_token(row: &Listed, query: &Resolved<'_>) -> (String, String) {
@@ -816,7 +816,7 @@ pub(crate) async fn list_objects_v2(
     };
     let fetched = match fetch_rows(&scope, pool, &bucket_id, &query).await {
         Ok(rows) => rows,
-        Err(error) => return apply_pg(error, StorageError::resource_already_exists),
+        Err(error) => return super::apply_pg(error, StorageError::resource_already_exists),
     };
     let rows = if query.with_delimiter && !query.exact_match {
         collapse(fetched, query.prefix, &bucket_id)
