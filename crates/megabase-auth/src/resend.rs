@@ -12,6 +12,7 @@
 //! OTP generation fails the request when the system random source cannot be
 //! read. A database error is 500, not an empty 200.
 
+use std::fmt;
 use std::time::SystemTime;
 
 use axum::body::Body;
@@ -19,6 +20,7 @@ use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use megabase_core::MegabaseNotImplemented;
+use serde::de::{self, MapAccess, Visitor};
 use serde::Deserialize;
 use uuid::Uuid;
 
@@ -58,23 +60,40 @@ struct ResendBody {
 }
 
 /// Go `encoding/json` matches object keys without regard to case, and the
-/// last duplicate wins.
+/// last duplicate wins. Walk the object in document order so mixed-case
+/// repeats (`EMAIL` then `email` then `EMAIL`) keep the last value, the
+/// same way as the pinned decoder. Collecting into `serde_json::Map`
+/// first would drop earlier spellings of the same key and then let a
+/// later different-case spelling win.
 impl<'de> Deserialize<'de> for ResendBody {
     fn deserialize<D: serde::Deserializer<'de>>(de: D) -> Result<Self, D::Error> {
-        let map = serde_json::Map::<String, serde_json::Value>::deserialize(de)?;
-        let mut body = Self::default();
-        for (key, value) in map {
-            let slot = match key.to_ascii_lowercase().as_str() {
-                "type" => &mut body.r#type,
-                "email" => &mut body.email,
-                "phone" => &mut body.phone,
-                "code_challenge" => &mut body.code_challenge,
-                "code_challenge_method" => &mut body.code_challenge_method,
-                _ => continue,
-            };
-            *slot = null_as_default(value).map_err(serde::de::Error::custom)?;
+        struct ResendVisitor;
+
+        impl<'de> Visitor<'de> for ResendVisitor {
+            type Value = ResendBody;
+
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("a resend request object")
+            }
+
+            fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<ResendBody, A::Error> {
+                let mut body = ResendBody::default();
+                while let Some((key, value)) = map.next_entry::<String, serde_json::Value>()? {
+                    let slot = match key.to_ascii_lowercase().as_str() {
+                        "type" => &mut body.r#type,
+                        "email" => &mut body.email,
+                        "phone" => &mut body.phone,
+                        "code_challenge" => &mut body.code_challenge,
+                        "code_challenge_method" => &mut body.code_challenge_method,
+                        _ => continue,
+                    };
+                    *slot = null_as_default(value).map_err(de::Error::custom)?;
+                }
+                Ok(body)
+            }
         }
-        Ok(body)
+
+        de.deserialize_map(ResendVisitor)
     }
 }
 
@@ -381,6 +400,16 @@ mod tests {
     use crate::config::AuthConfig;
     use crate::ratelimit::KeyedLimiter;
     use crate::store::Backend;
+
+    #[test]
+    fn last_case_insensitive_json_duplicate_wins() {
+        let body: ResendBody = serde_json::from_str(
+            r#"{"type":"signup","EMAIL":"first@example.com","email":"second@example.com","EMAIL":"third@example.com"}"#,
+        )
+        .unwrap();
+        assert_eq!(body.email, "third@example.com");
+        assert_eq!(body.r#type, "signup");
+    }
 
     const SECRET: &str = "your-super-secret-jwt-token-with-at-least-32-characters-long";
     /// RFC 7636 appendix B.
