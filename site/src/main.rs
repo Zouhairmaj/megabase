@@ -1256,9 +1256,11 @@ mod tests {
             status.contains(&shown),
             "status must show summary.totals.units ({shown})"
         );
-        // 334 is the Kite mock unit total. A full checkout can also have
-        // that many commits or pull requests, so those live stats are not
-        // part of this check.
+        // 334 was the Kite placeholder unit total. Live pages must not use it
+        // as `totals.units`; a commit or PR count may still be 334.
+        assert_ne!(total, 334, "live coverage must not use the Kite mock total");
+        // A full checkout can also have that many commits or pull requests,
+        // so those live stats are not part of this check.
         let home_units = without_live_counters(&home);
         let status_units = without_live_counters(&status);
         assert!(!home_units.contains(">334<") && !status_units.contains(">334<"));

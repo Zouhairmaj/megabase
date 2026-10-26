@@ -17,8 +17,10 @@ pub mod gate;
 pub mod os;
 pub mod proxy;
 pub mod runtime;
+mod user_workers;
 pub mod worker;
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -33,6 +35,7 @@ use tracing::warn;
 
 pub use gate::GateError;
 pub use proxy::{ProxyError, UPSTREAM_HOST};
+pub use user_workers::{HeapStatistics, MemStat};
 pub use worker::{
     entrypoint, BootError, DenoRuntime, Runtime, StartFuture, WorkerHandle, WorkerSpec,
     DEFAULT_BOOT_TIMEOUT, ENTRYPOINTS,
@@ -95,6 +98,25 @@ impl FunctionsState {
     #[must_use]
     pub fn is_enabled(&self) -> bool {
         self.inner.is_some()
+    }
+
+    /// `EdgeRuntime.userWorkers.tryCleanupIdleWorkers`: how many idle
+    /// workers acknowledged early drop. A disabled router returns 0.
+    pub async fn cleanup_idle_workers(&self, timeout_ms: u64) -> usize {
+        match &self.inner {
+            Some(inner) => inner.workers.cleanup_idle_workers(timeout_ms).await,
+            None => 0,
+        }
+    }
+
+    /// `EdgeRuntime.userWorkers.memStats` for workers still in the pool.
+    /// A disabled router returns an empty map, and each entry's `stats` is
+    /// `None` (no isolate heap sample).
+    pub async fn user_worker_mem_stats(&self) -> BTreeMap<String, MemStat> {
+        match &self.inner {
+            Some(inner) => inner.workers.mem_stats().await,
+            None => BTreeMap::new(),
+        }
     }
 
     /// [`Self::from_lookup`] over the process environment.
@@ -236,8 +258,8 @@ async fn invoke(State(inner): State<Arc<Inner>>, request: Request) -> Response {
         None => format!("/{rest}"),
     };
 
-    let addr = match inner.workers.address(&name).await {
-        Ok(addr) => addr,
+    let key = match inner.workers.create_main(&name).await {
+        Ok(key) => key,
         Err(error) => {
             warn!(function = %name, %error, "edge function did not start");
             return message(
@@ -246,15 +268,11 @@ async fn invoke(State(inner): State<Arc<Inner>>, request: Request) -> Response {
             );
         }
     };
-    match proxy::forward(addr, request, &target).await {
+    match inner.workers.fetch(key, request, &target).await {
         Ok(response) => response,
         Err(error) => {
             warn!(function = %name, %error, "edge function did not answer");
-            inner.workers.forget(&name).await;
-            message(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("InvalidWorkerResponse: {error}"),
-            )
+            message(StatusCode::INTERNAL_SERVER_ERROR, error.to_string())
         }
     }
 }
@@ -288,6 +306,13 @@ mod tests {
 
     fn env_map(pairs: Vec<(String, String)>) -> HashMap<String, String> {
         pairs.into_iter().collect()
+    }
+
+    #[tokio::test]
+    async fn a_disabled_router_has_no_user_workers() {
+        let state = FunctionsState::disabled();
+        assert_eq!(state.cleanup_idle_workers(0).await, 0);
+        assert!(state.user_worker_mem_stats().await.is_empty());
     }
 
     #[test]

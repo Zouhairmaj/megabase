@@ -43,6 +43,8 @@ rust-version = "1.89"
 [workspace.dependencies]
 tokio = { version = "1.40", features = ["full"] }
 axum = "0.7.9"
+bytes = "1.12"
+http-body = "1.1"
 tower = { version = "0.5", features = ["util"] }
 hyper = { version = "1.12", features = ["client", "http1"] }
 hyper-util = { version = "0.1.21", features = ["tokio"] }
