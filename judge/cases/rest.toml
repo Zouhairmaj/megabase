@@ -2841,3 +2841,328 @@ method = "DELETE"
 path = "/rest/v1/todos?id=eq.9561"
 key = "service_role"
 headers = { Prefer = "return=minimal" }
+
+# Level 1 array and range filters. Each operator below already has one case;
+# these add the second and third. Spans are int4range [1,4), [4,8), [10,12).
+# Todos are (write the spec, true, 2), (port the unit, false, 3),
+# (run the judge, false, 1). Rankings ranks are 2, NULL, 1.
+
+[[case]]
+id = "rest.filter.cs.not"
+description = "Negated range contains. A range contains itself, so not.cs drops that row."
+units = ["rest:filter-operator:cs"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/spans?during=not.cs.%5B1,4)&select=id,body&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/spans?during=not.cs.%5B10,11)&select=id,body&order=id"
+
+[[case]]
+id = "rest.filter.cs.bounds"
+description = "Contains an inclusive literal (canonicalized), a point range, and a span nobody holds."
+units = ["rest:filter-operator:cs"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/spans?during=cs.%5B1,3%5D&select=id,body&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/spans?during=cs.%5B10,11)&select=id,body&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/spans?during=cs.%5B1,12)&select=id,body&order=id"
+
+[[case]]
+id = "rest.filter.cd.not"
+description = "Negated contained-by. Every fixture span sits inside [0,20)."
+units = ["rest:filter-operator:cd"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/spans?during=not.cd.%5B0,20)&select=id,body&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/spans?during=not.cd.%5B1,4)&select=id,body&order=id"
+
+[[case]]
+id = "rest.filter.cd.multi"
+description = "Contained by a window that holds two spans, one span, or the canonical form of [1,4)."
+units = ["rest:filter-operator:cd"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/spans?during=cd.%5B4,12)&select=id,body&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/spans?during=cd.%5B9,13)&select=id,body&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/spans?during=cd.%5B1,3%5D&select=id,body&order=id"
+
+[[case]]
+id = "rest.filter.ov.not"
+description = "Negated overlap. Half-open bounds that only touch are not an overlap."
+units = ["rest:filter-operator:ov"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/spans?during=not.ov.%5B1,4)&select=id,body&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/spans?during=not.ov.%5B4,11)&select=id,body&order=id"
+
+[[case]]
+id = "rest.filter.ov.multi"
+description = "Overlap of two spans, of no span, and of a canonical single point."
+units = ["rest:filter-operator:ov"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/spans?during=ov.%5B4,11)&select=id,body&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/spans?during=ov.%5B8,9)&select=id,body&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/spans?during=ov.%5B3,3%5D&select=id,body&order=id"
+
+[[case]]
+id = "rest.filter.sl.not"
+description = "Negated strictly-left. not.sl of a range past every span matches nothing."
+units = ["rest:filter-operator:sl"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/spans?during=not.sl.%5B9,10)&select=id,body&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/spans?during=not.sl.%5B12,13)&select=id,body&order=id"
+
+[[case]]
+id = "rest.filter.sl.multi"
+description = "Strictly left of a mid range, of a range at the origin, and of a range past every span."
+units = ["rest:filter-operator:sl"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/spans?during=sl.%5B9,10)&select=id,body&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/spans?during=sl.%5B1,2)&select=id,body&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/spans?during=sl.%5B12,13)&select=id,body&order=id"
+
+[[case]]
+id = "rest.filter.sr.not"
+description = "Negated strictly-right. Every span starts at or after 1, so not.sr.[0,1) is empty."
+units = ["rest:filter-operator:sr"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/spans?during=not.sr.%5B8,9)&select=id,body&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/spans?during=not.sr.%5B0,1)&select=id,body&order=id"
+
+[[case]]
+id = "rest.filter.sr.empty"
+description = "Strictly right of an early range, of a range nothing clears, and of [0,1)."
+units = ["rest:filter-operator:sr"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/spans?during=sr.%5B1,2)&select=id,body&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/spans?during=sr.%5B11,12)&select=id,body&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/spans?during=sr.%5B0,1)&select=id,body&order=id"
+
+[[case]]
+id = "rest.filter.nxl.not"
+description = "Negated does-not-extend-left. not.nxl of a range every span clears is empty."
+units = ["rest:filter-operator:nxl"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/spans?during=not.nxl.%5B9,20)&select=id,body&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/spans?during=not.nxl.%5B1,2)&select=id,body&order=id"
+
+[[case]]
+id = "rest.filter.nxl.multi"
+description = "Does not extend left of 4, of 11, and of 1."
+units = ["rest:filter-operator:nxl"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/spans?during=nxl.%5B4,20)&select=id,body&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/spans?during=nxl.%5B11,20)&select=id,body&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/spans?during=nxl.%5B1,2)&select=id,body&order=id"
+
+[[case]]
+id = "rest.filter.nxr.not"
+description = "Negated does-not-extend-right. not.nxr of a range every span ends inside is empty."
+units = ["rest:filter-operator:nxr"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/spans?during=not.nxr.%5B1,5)&select=id,body&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/spans?during=not.nxr.%5B1,12)&select=id,body&order=id"
+
+[[case]]
+id = "rest.filter.nxr.empty"
+description = "Does not extend right of 9, of 3, and of 12."
+units = ["rest:filter-operator:nxr"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/spans?during=nxr.%5B1,9)&select=id,body&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/spans?during=nxr.%5B1,3)&select=id,body&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/spans?during=nxr.%5B1,12)&select=id,body&order=id"
+
+[[case]]
+id = "rest.filter.adj.not"
+description = "Negated adjacent. Overlap is not adjacency, and a gap is not adjacency."
+units = ["rest:filter-operator:adj"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/spans?during=not.adj.%5B4,5)&select=id,body&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/spans?during=not.adj.%5B0,1)&select=id,body&order=id"
+
+[[case]]
+id = "rest.filter.adj.touch"
+description = "Adjacent on the left, at a shared bound, not adjacent to a range it overlaps, and adjacent to two spans across a gap."
+units = ["rest:filter-operator:adj"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/spans?during=adj.%5B0,1)&select=id,body&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/spans?during=adj.%5B3,4)&select=id,body&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/spans?during=adj.%5B5,6)&select=id,body&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/spans?during=adj.%5B8,10)&select=id,body&order=id"
+
+[[case]]
+id = "rest.filter.any.comparisons"
+description = "any over gt, lt, gte, an empty list, match, and a one-element eq list."
+units = ["rest:filter-operator:any"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?priority=gt(any).%7B2,3%7D&select=id,title&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?priority=lt(any).%7B2,1%7D&select=id,title&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?priority=gte(any).%7B3,4%7D&select=id,title&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?priority=eq(any).%7B%7D&select=id&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?title=match(any).%7B%5Eport,%5Erun%7D&select=id,title&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?done=eq(any).%7Btrue%7D&select=id,title&order=id"
+
+[[case]]
+id = "rest.filter.any.negated"
+description = "Negated any, quoted array elements, and a case-insensitive match list."
+units = ["rest:filter-operator:any"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?priority=not.eq(any).%7B1,2%7D&select=id,title&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?title=not.like(any).%7B*spec,port*%7D&select=id,title&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?title=eq(any).%7B%22write%20the%20spec%22,%22run%20the%20judge%22%7D&select=id,title&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?title=imatch(any).%7B%5EPORT,%5ERUN%7D&select=id,title&order=id"
+
+[[case]]
+id = "rest.filter.all.comparisons"
+description = "all over an impossible eq, lt, lte, like, match, and a repeated boolean."
+units = ["rest:filter-operator:all"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?priority=eq(all).%7B2,3%7D&select=id&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?priority=lt(all).%7B4,3%7D&select=id,title&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?priority=lte(all).%7B2,3%7D&select=id,title&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?title=like(all).%7B*the*,*unit%7D&select=id,title&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?title=match(all).%7Bthe,unit%7D&select=id,title&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?done=eq(all).%7Bfalse,false%7D&select=id,title&order=id"
+
+[[case]]
+id = "rest.filter.all.negated"
+description = "Negated all, case-insensitive all, and a match list that must satisfy every pattern."
+units = ["rest:filter-operator:all"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?priority=not.gt(all).%7B0,1%7D&select=id,title&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?title=not.like(all).%7B*the*,*spec%7D&select=id,title&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?title=ilike(all).%7B*UNIT,*PORT*%7D&select=id,title&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?title=match(all).%7B%5Ew,spec%7D&select=id,title&order=id"
+
+[[case]]
+id = "rest.filter.isdistinct.not"
+description = "Negated IS DISTINCT FROM, including an empty string on text."
+units = ["rest:filter-operator:isdistinct"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?priority=not.isdistinct.2&select=id,title&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?done=not.isdistinct.false&select=id,title&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?title=not.isdistinct.port%20the%20unit&select=id,title&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?title=isdistinct.&select=id&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?title=not.isdistinct.&select=id&order=id"
+
+[[case]]
+id = "rest.filter.isdistinct.nulls"
+description = "IS DISTINCT FROM on a nullable integer keeps NULL rows, and not.isdistinct does not."
+units = ["rest:filter-operator:isdistinct"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/rankings?rank=isdistinct.1&select=id,label,rank&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/rankings?rank=not.isdistinct.2&select=id,label,rank&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/rankings?rank=isdistinct.2&select=id,label,rank&order=id"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/rankings?id=isdistinct.2&select=id,label&order=id"
