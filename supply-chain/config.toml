@@ -190,7 +190,7 @@ version = "0.2.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.ctutils]]
-version = "0.4.5"
+version = "0.4.6"
 criteria = "safe-to-deploy"
 
 [[exemptions.data-encoding]]
