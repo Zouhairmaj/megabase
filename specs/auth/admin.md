@@ -425,12 +425,27 @@ contain a local part and a dotted domain. The redirect follows GoTrue
 query `redirect_to` (percent-decoded, `+` as space) even when the header is
 invalid; otherwise the query value is used. An invalid candidate falls
 through to `Referer`, then `GOTRUE_SITE_URL` (default `http://localhost:3000`).
-A URL is accepted when its scheme and host match the site URL and the port
-matches, except a localhost host (`localhost`, `127.0.0.1`, `::1`, `0.0.0.0`,
-`::`, or a `.localhost` suffix) may use another port. A loopback IP is
-accepted. Any other IP, and an all-digit hostname, are rejected before the
-allow list. An `http` or `https` hostname must match GoTrue's regular
-hostname pattern. Otherwise the URL, with its fragment removed, must match
+A candidate is parsed with the WHATWG URL parser. It is rejected when
+parsing fails or when a backslash appears in the authority. Userinfo
+does not reject the URL; the host compared is the host after it, as in
+Go `URL.Hostname`. Scheme is compared as parsed; the host is the
+written hostname, case-sensitive, as in Go `URL.Hostname`. The port
+is the one written in the authority, and it must match, except a
+localhost host (`localhost`, `127.0.0.1`, `::1`, `0.0.0.0`, `::`, or a
+`.localhost` suffix) may use another port. Two empty hosts with the
+same non-HTTP(S) scheme are same-site. A dotted-decimal or IPv6
+loopback address is accepted. Any other address Go's `net.ParseIP`
+accepts is rejected before the allow list, as is a non-empty all-digit host.
+An IPv4 spelling Go keeps as a hostname (for example fewer than four
+decimal labels) is compared as written: the same written host matches
+the site, and otherwise it must match the allow list. An `http` or
+`https` domain must match GoTrue's regular hostname pattern on the
+written host, the same host the allow-list match text contains. A
+non-HTTP(S) URL with no host, including an empty host (`myapp://`,
+`myapp:///callback`), is not rejected for that; it is matched against
+the allow list. An all-digit host is a non-empty host of only digits.
+Otherwise the URL, with its fragment removed
+and its query kept, must match
 `GOTRUE_URI_ALLOW_LIST` (comma-separated globs; `ADDITIONAL_REDIRECT_URLS`
 when that variable is unset or blank). `*` and `?` do not cross `.` or `/`;
 `**` does. A pattern with an unescaped character class or `{` alternative is
