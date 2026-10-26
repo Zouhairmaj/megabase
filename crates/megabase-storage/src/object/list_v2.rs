@@ -733,10 +733,10 @@ async fn fetch_rows(
     };
     tx.commit().await?;
     let from_search = query.with_delimiter && !query.exact_match;
-    Ok(rows
-        .iter()
+    rows.iter()
         .map(|row| read_row(row, from_search))
-        .collect::<Result<Vec<_>, _>>()?)
+        .collect::<Result<Vec<_>, sqlx::Error>>()
+        .map_err(super::ApplyError::from)
 }
 
 fn next_token(row: &Listed, query: &Resolved<'_>) -> (String, String) {
