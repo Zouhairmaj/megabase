@@ -4,15 +4,15 @@
     "units": 1036,
     "implemented": 362,
     "tested": 218,
-    "conformant": 191
+    "conformant": 178
   },
   "percent": {
     "coverage": 34.9,
-    "conformance": 89.3,
-    "done": 18.4
+    "conformance": 85.2,
+    "done": 17.2
   },
   "judge": {
-    "cases": 524,
+    "cases": 549,
     "passing": 468
   },
   "components": {
@@ -324,7 +324,7 @@
       "units": 93,
       "implemented": 93,
       "tested": 93,
-      "conformant": 71,
+      "conformant": 58,
       "groups": {
         "aggregates": {
           "units": 5,
@@ -354,13 +354,13 @@
           "units": 13,
           "implemented": 13,
           "tested": 13,
-          "conformant": 13
+          "conformant": 10
         },
         "ordering": {
           "units": 4,
           "implemented": 4,
           "tested": 4,
-          "conformant": 4
+          "conformant": 2
         },
         "prefer": {
           "units": 16,
@@ -372,19 +372,19 @@
           "units": 8,
           "implemented": 8,
           "tested": 8,
-          "conformant": 6
+          "conformant": 2
         },
         "resources": {
           "units": 10,
           "implemented": 10,
           "tested": 10,
-          "conformant": 10
+          "conformant": 8
         },
         "rpc": {
           "units": 4,
           "implemented": 4,
           "tested": 4,
-          "conformant": 4
+          "conformant": 2
         }
       }
     },
@@ -769,10 +769,10 @@
     "rest:media-type:application/geo+json": "conformant",
     "rest:media-type:application/json": "conformant",
     "rest:media-type:application/octet-stream": "conformant",
-    "rest:media-type:application/openapi+json": "conformant",
-    "rest:media-type:application/vnd.pgrst.array+json;nulls=stripped": "conformant",
+    "rest:media-type:application/openapi+json": "tested",
+    "rest:media-type:application/vnd.pgrst.array+json;nulls=stripped": "tested",
     "rest:media-type:application/vnd.pgrst.object+json": "conformant",
-    "rest:media-type:application/vnd.pgrst.object+json;nulls=stripped": "conformant",
+    "rest:media-type:application/vnd.pgrst.object+json;nulls=stripped": "tested",
     "rest:media-type:application/vnd.pgrst.plan+{format}": "conformant",
     "rest:media-type:application/x-www-form-urlencoded": "conformant",
     "rest:media-type:text/csv": "conformant",
@@ -780,8 +780,8 @@
     "rest:media-type:text/xml": "conformant",
     "rest:order-modifier:asc": "conformant",
     "rest:order-modifier:desc": "conformant",
-    "rest:order-modifier:nullsfirst": "conformant",
-    "rest:order-modifier:nullslast": "conformant",
+    "rest:order-modifier:nullsfirst": "tested",
+    "rest:order-modifier:nullslast": "tested",
     "rest:prefer:count=estimated": "conformant",
     "rest:prefer:count=exact": "conformant",
     "rest:prefer:count=planned": "conformant",
@@ -799,16 +799,16 @@
     "rest:prefer:tx=commit": "conformant",
     "rest:prefer:tx=rollback": "conformant",
     "rest:query-param:and": "tested",
-    "rest:query-param:columns": "conformant",
-    "rest:query-param:limit": "conformant",
-    "rest:query-param:offset": "conformant",
-    "rest:query-param:on_conflict": "conformant",
+    "rest:query-param:columns": "tested",
+    "rest:query-param:limit": "tested",
+    "rest:query-param:offset": "tested",
+    "rest:query-param:on_conflict": "tested",
     "rest:query-param:or": "tested",
     "rest:query-param:order": "conformant",
     "rest:query-param:select": "conformant",
-    "rest:route:DELETE /rest/v1/{relation}": "conformant",
+    "rest:route:DELETE /rest/v1/{relation}": "tested",
     "rest:route:GET /rest/v1/": "conformant",
-    "rest:route:GET /rest/v1/rpc/{function}": "conformant",
+    "rest:route:GET /rest/v1/rpc/{function}": "tested",
     "rest:route:GET /rest/v1/{relation}": "conformant",
     "rest:route:HEAD /rest/v1/": "conformant",
     "rest:route:HEAD /rest/v1/rpc/{function}": "conformant",
@@ -816,8 +816,8 @@
     "rest:route:OPTIONS /rest/v1/": "conformant",
     "rest:route:OPTIONS /rest/v1/rpc/{function}": "conformant",
     "rest:route:OPTIONS /rest/v1/{relation}": "conformant",
-    "rest:route:PATCH /rest/v1/{relation}": "conformant",
-    "rest:route:POST /rest/v1/rpc/{function}": "conformant",
+    "rest:route:PATCH /rest/v1/{relation}": "tested",
+    "rest:route:POST /rest/v1/rpc/{function}": "tested",
     "rest:route:POST /rest/v1/{relation}": "conformant",
     "rest:route:PUT /rest/v1/{relation}": "conformant",
     "storage:route:DELETE /storage/v1/bucket/{bucketId}": "implemented",

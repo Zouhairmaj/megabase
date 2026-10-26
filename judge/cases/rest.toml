@@ -2231,6 +2231,256 @@ path = "/rest/v1/rpc/add_numbers"
 headers = { Accept = "application/vnd.pgrst.object+json" }
 json = { a = 2, b = 3 }
 
+# Level 1 cases for query parameters, null ordering, RPC, PATCH/DELETE, and
+# Accept. Each unit below had fewer than three cases. Writes use ids 9701–9703
+# and remove them before the case ends. Fixture rows stay unchanged.
+[[case]]
+id = "rest.query.and.no-match"
+description = "and of two filters that no fixture row satisfies is an empty page"
+units = ["rest:query-param:and"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?and=(done.eq.true,priority.eq.1)&select=id&order=id"
+
+[[case]]
+id = "rest.query.and.nested"
+description = "and keeps rows that also match a nested or"
+units = ["rest:query-param:and"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?and=(done.eq.false,or(priority.eq.1,priority.eq.3))&select=id&order=id"
+
+[[case]]
+id = "rest.query.columns.does-not-project"
+description = "columns on a read leaves the select list in charge of the shape"
+units = ["rest:query-param:columns"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?columns=title&select=id,done&order=id"
+
+[[case]]
+id = "rest.query.columns.empty"
+description = "An empty columns parameter is PGRST100"
+units = ["rest:query-param:columns"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?columns="
+
+[[case]]
+id = "rest.query.limit.zero"
+description = "limit=0 returns no rows"
+units = ["rest:query-param:limit"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?select=id&order=id&limit=0"
+
+[[case]]
+id = "rest.query.limit.two"
+description = "limit=2 keeps the first two rows in order"
+units = ["rest:query-param:limit"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?select=id&order=id&limit=2"
+
+[[case]]
+id = "rest.query.offset.skips"
+description = "offset without limit skips the first rows and returns the rest"
+units = ["rest:query-param:offset"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?select=id&order=id&offset=2"
+
+[[case]]
+id = "rest.query.offset.past-end"
+description = "An offset past the last row is an empty page"
+units = ["rest:query-param:offset"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?select=id&order=id&offset=9"
+
+[[case]]
+id = "rest.query.on-conflict.multi"
+description = "on_conflict with two columns is ignored on a read"
+units = ["rest:query-param:on_conflict"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?on_conflict=id,title&select=id&order=id"
+
+[[case]]
+id = "rest.query.on-conflict.empty"
+description = "An empty on_conflict parameter is PGRST100"
+units = ["rest:query-param:on_conflict"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?on_conflict="
+
+[[case]]
+id = "rest.query.or.with-filter"
+description = "A top-level filter is combined with or by and"
+units = ["rest:query-param:or"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?or=(id.eq.1,id.eq.2)&done=eq.false&select=id&order=id"
+
+[[case]]
+id = "rest.order.desc-nullsfirst"
+description = "Descending order places nulls first when nullsfirst is set"
+units = ["rest:order-modifier:nullsfirst"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/rankings?select=id,label,rank&order=rank.desc.nullsfirst"
+
+[[case]]
+id = "rest.order.asc-nullslast"
+description = "Ascending order places nulls last when nullslast is set"
+units = ["rest:order-modifier:nullslast"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/rankings?select=id,label,rank&order=rank.asc.nullslast"
+
+[[case]]
+id = "rest.rpc.get.repeated-arg"
+description = "A repeated GET argument keeps the last value"
+units = ["rest:route:GET /rest/v1/rpc/{function}"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/rpc/add_numbers?a=1&a=8&b=2"
+
+[[case]]
+id = "rest.rpc.get.unknown"
+description = "GET on an unknown function is 404 PGRST202"
+units = ["rest:route:GET /rest/v1/rpc/{function}"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/rpc/does_not_exist"
+
+[[case]]
+id = "rest.rpc.post.invalid-json"
+description = "POST with a body that is not JSON is 400 PGRST102"
+units = ["rest:route:POST /rest/v1/rpc/{function}"]
+[[case.step]]
+method = "POST"
+path = "/rest/v1/rpc/add_numbers"
+headers = { "Content-Type" = "application/json" }
+body = "not json"
+
+[[case]]
+id = "rest.patch.one-row"
+description = "PATCH updates the matching row and a later read sees the new value"
+units = ["rest:route:PATCH /rest/v1/{relation}"]
+[[case.step]]
+method = "DELETE"
+path = "/rest/v1/todos?id=eq.9701"
+key = "service_role"
+[[case.step]]
+method = "POST"
+path = "/rest/v1/todos"
+key = "service_role"
+json = { id = 9701, title = "l1-patch", priority = 1 }
+[[case.step]]
+method = "PATCH"
+path = "/rest/v1/todos?id=eq.9701"
+key = "service_role"
+json = { priority = 9 }
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?id=eq.9701&select=id,title,priority"
+key = "service_role"
+[[case.step]]
+method = "DELETE"
+path = "/rest/v1/todos?id=eq.9701"
+key = "service_role"
+
+[[case]]
+id = "rest.patch.no-rows"
+description = "PATCH matching no row is 204 and inserts nothing"
+units = ["rest:route:PATCH /rest/v1/{relation}"]
+[[case.step]]
+method = "PATCH"
+path = "/rest/v1/todos?id=eq.9703"
+key = "service_role"
+json = { title = "l1-patch-missing" }
+
+[[case]]
+id = "rest.delete.inserted-row"
+description = "DELETE removes a row that was just inserted"
+units = ["rest:route:DELETE /rest/v1/{relation}"]
+[[case.step]]
+method = "DELETE"
+path = "/rest/v1/todos?id=eq.9702"
+key = "service_role"
+[[case.step]]
+method = "POST"
+path = "/rest/v1/todos"
+key = "service_role"
+json = { id = 9702, title = "l1-delete", priority = 4 }
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?id=eq.9702&select=id,title"
+key = "service_role"
+[[case.step]]
+method = "DELETE"
+path = "/rest/v1/todos?id=eq.9702"
+key = "service_role"
+[[case.step]]
+method = "GET"
+path = "/rest/v1/todos?id=eq.9702&select=id"
+key = "service_role"
+
+[[case]]
+id = "rest.delete.anon-denied"
+description = "DELETE as anon is denied"
+units = ["rest:route:DELETE /rest/v1/{relation}"]
+[[case.step]]
+method = "DELETE"
+path = "/rest/v1/todos?id=eq.1"
+
+[[case]]
+id = "rest.media-type.openapi-json.head"
+description = "HEAD on the root with Accept application/openapi+json has no body"
+units = ["rest:media-type:application/openapi+json"]
+[[case.step]]
+method = "HEAD"
+path = "/rest/v1/"
+key = "service_role"
+headers = { Accept = "application/openapi+json" }
+
+[[case]]
+id = "rest.media-type.openapi-json.charset"
+description = "Accept application/openapi+json with a charset still returns the OpenAPI document"
+units = ["rest:media-type:application/openapi+json"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/"
+key = "service_role"
+headers = { Accept = "application/openapi+json;charset=utf-8" }
+
+[[case]]
+id = "rest.media.array-nulls-stripped.one-null"
+description = "Array nulls=stripped drops a null field from the one matching row"
+units = ["rest:media-type:application/vnd.pgrst.array+json;nulls=stripped"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/rankings?select=id,label,rank&label=eq.unranked"
+headers = { Accept = "application/vnd.pgrst.array+json;nulls=stripped" }
+
+[[case]]
+id = "rest.media.array-nulls-stripped.head"
+description = "HEAD with array nulls=stripped has that content type and no body"
+units = ["rest:media-type:application/vnd.pgrst.array+json;nulls=stripped"]
+[[case.step]]
+method = "HEAD"
+path = "/rest/v1/rankings?select=id,label,rank&order=id"
+headers = { Accept = "application/vnd.pgrst.array+json;nulls=stripped" }
+
+[[case]]
+id = "rest.media.object-nulls-stripped.no-null"
+description = "Object nulls=stripped keeps every field when the single row has no null"
+units = ["rest:media-type:application/vnd.pgrst.object+json;nulls=stripped"]
+[[case.step]]
+method = "GET"
+path = "/rest/v1/rankings?select=id,label,rank&label=eq.first"
+headers = { Accept = "application/vnd.pgrst.object+json;nulls=stripped" }
 # Comparison, null, and set filters, plus and/or trees. Each request is a
 # behavior the earlier filter cases do not cover.
 
