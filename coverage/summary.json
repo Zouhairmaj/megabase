@@ -2,12 +2,12 @@
   "schema": 1,
   "totals": {
     "units": 1036,
-    "implemented": 362,
+    "implemented": 363,
     "tested": 218,
     "conformant": 191
   },
   "percent": {
-    "coverage": 34.9,
+    "coverage": 35.0,
     "conformance": 89.3,
     "done": 18.4
   },
@@ -110,7 +110,7 @@
     },
     "functions": {
       "units": 276,
-      "implemented": 6,
+      "implemented": 7,
       "tested": 1,
       "conformant": 1,
       "groups": {
@@ -128,7 +128,7 @@
         },
         "event_worker": {
           "units": 2,
-          "implemented": 0,
+          "implemented": 1,
           "tested": 0,
           "conformant": 0
         },
@@ -695,6 +695,7 @@
     "functions:op:op_get_env": "implemented",
     "functions:op:op_runtime_memory_usage": "implemented",
     "functions:op:op_set_env": "implemented",
+    "functions:op:op_user_worker_log": "implemented",
     "functions:route:* /functions/v1/{function_name}": "conformant",
     "meta:route:DELETE /pg/policies/{id}": "implemented",
     "meta:route:DELETE /pg/tables/{id}": "implemented",
