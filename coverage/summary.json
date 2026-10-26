@@ -4,15 +4,15 @@
     "units": 1036,
     "implemented": 367,
     "tested": 218,
-    "conformant": 218
+    "conformant": 206
   },
   "percent": {
     "coverage": 35.4,
-    "conformance": 100.0,
-    "done": 21.0
+    "conformance": 96.1,
+    "done": 19.9
   },
   "judge": {
-    "cases": 468,
+    "cases": 487,
     "passing": 468
   },
   "components": {
@@ -324,7 +324,7 @@
       "units": 93,
       "implemented": 93,
       "tested": 93,
-      "conformant": 93,
+      "conformant": 81,
       "groups": {
         "aggregates": {
           "units": 5,
@@ -342,7 +342,7 @@
           "units": 28,
           "implemented": 28,
           "tested": 28,
-          "conformant": 28
+          "conformant": 18
         },
         "logic": {
           "units": 3,
@@ -372,7 +372,7 @@
           "units": 8,
           "implemented": 8,
           "tested": 8,
-          "conformant": 8
+          "conformant": 6
         },
         "resources": {
           "units": 10,
@@ -744,21 +744,21 @@
     "rest:filter-operator:any": "conformant",
     "rest:filter-operator:cd": "conformant",
     "rest:filter-operator:cs": "conformant",
-    "rest:filter-operator:eq": "conformant",
+    "rest:filter-operator:eq": "tested",
     "rest:filter-operator:fts": "conformant",
-    "rest:filter-operator:gt": "conformant",
-    "rest:filter-operator:gte": "conformant",
+    "rest:filter-operator:gt": "tested",
+    "rest:filter-operator:gte": "tested",
     "rest:filter-operator:ilike": "conformant",
     "rest:filter-operator:imatch": "conformant",
-    "rest:filter-operator:in": "conformant",
-    "rest:filter-operator:is": "conformant",
-    "rest:filter-operator:isdistinct": "conformant",
+    "rest:filter-operator:in": "tested",
+    "rest:filter-operator:is": "tested",
+    "rest:filter-operator:isdistinct": "tested",
     "rest:filter-operator:like": "conformant",
-    "rest:filter-operator:lt": "conformant",
-    "rest:filter-operator:lte": "conformant",
+    "rest:filter-operator:lt": "tested",
+    "rest:filter-operator:lte": "tested",
     "rest:filter-operator:match": "conformant",
-    "rest:filter-operator:neq": "conformant",
-    "rest:filter-operator:not": "conformant",
+    "rest:filter-operator:neq": "tested",
+    "rest:filter-operator:not": "tested",
     "rest:filter-operator:nxl": "conformant",
     "rest:filter-operator:nxr": "conformant",
     "rest:filter-operator:ov": "conformant",
@@ -803,12 +803,12 @@
     "rest:prefer:timezone=*": "conformant",
     "rest:prefer:tx=commit": "conformant",
     "rest:prefer:tx=rollback": "conformant",
-    "rest:query-param:and": "conformant",
+    "rest:query-param:and": "tested",
     "rest:query-param:columns": "conformant",
     "rest:query-param:limit": "conformant",
     "rest:query-param:offset": "conformant",
     "rest:query-param:on_conflict": "conformant",
-    "rest:query-param:or": "conformant",
+    "rest:query-param:or": "tested",
     "rest:query-param:order": "conformant",
     "rest:query-param:select": "conformant",
     "rest:route:DELETE /rest/v1/{relation}": "conformant",
