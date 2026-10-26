@@ -99,6 +99,81 @@ begin
 end
 $do$;
 
+-- Same guard for the other helpers the judge RPCs call. The reference
+-- database already has them; the megabase database does not until Auth
+-- starts and replaces these stubs. Do not replace a body that exists.
+do $do$
+begin
+  if to_regprocedure('auth.jwt()') is null then
+    create schema if not exists auth;
+    create function auth.jwt()
+    returns jsonb
+    language sql
+    stable
+    as $fn$
+      select
+      coalesce(
+        nullif(current_setting('request.jwt.claim', true), ''),
+        nullif(current_setting('request.jwt.claims', true), '')
+      )::jsonb
+    $fn$;
+    -- GoTrue's later migration replaces this body and must own the
+    -- function. The reference init role (supabase_admin) can reassign
+    -- it. `prepare` loads this file as `postgres`, which cannot, and
+    -- Megabase replaces the stub itself.
+    if exists (
+      select 1
+      from pg_roles
+      where rolname = current_user
+        and (rolsuper or pg_has_role(current_user, 'supabase_auth_admin', 'MEMBER'))
+    ) then
+      alter function auth.jwt() owner to supabase_auth_admin;
+    end if;
+    grant execute on function auth.jwt() to public;
+  end if;
+end
+$do$;
+
+do $do$
+begin
+  if to_regprocedure('auth.role()') is null then
+    create schema if not exists auth;
+    create function auth.role()
+    returns text
+    language sql
+    stable
+    as $fn$
+      select
+      coalesce(
+        nullif(current_setting('request.jwt.claim.role', true), ''),
+        (nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'role')
+      )::text
+    $fn$;
+    grant execute on function auth.role() to public;
+  end if;
+end
+$do$;
+
+do $do$
+begin
+  if to_regprocedure('auth.email()') is null then
+    create schema if not exists auth;
+    create function auth.email()
+    returns text
+    language sql
+    stable
+    as $fn$
+      select
+      coalesce(
+        nullif(current_setting('request.jwt.claim.email', true), ''),
+        (nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'email')
+      )::text
+    $fn$;
+    grant execute on function auth.email() to public;
+  end if;
+end
+$do$;
+
 -- Two fixed owners. Judge cases mint HS256 tokens for these subjects with
 -- the demo JWT_SECRET from vendor/supabase/docker/.env.example. service_role
 -- bypasses RLS; anon has no grant on notes or note_comments.
@@ -182,5 +257,100 @@ insert into public.note_comments (note_id, user_id, body)
 select id, user_id, 'comment-secret'
 from public.notes
 where body = 'victim-secret';
+
+-- REST-visible wrappers for auth.uid(), auth.jwt(), auth.role() and
+-- auth.email(). Scalar RPCs, one RLS table, and one view, so judge cases
+-- can call the helpers with the anon key, a user bearer, and service_role.
+create function public.judge_auth_uid()
+returns uuid
+language sql
+stable
+as $$ select auth.uid() $$;
+
+create function public.judge_auth_role()
+returns text
+language sql
+stable
+as $$ select auth.role() $$;
+
+create function public.judge_auth_email()
+returns text
+language sql
+stable
+as $$ select auth.email() $$;
+
+create function public.judge_auth_jwt()
+returns jsonb
+language sql
+stable
+as $$ select auth.jwt() $$;
+
+grant execute on function
+  public.judge_auth_uid(),
+  public.judge_auth_role(),
+  public.judge_auth_email(),
+  public.judge_auth_jwt()
+  to anon, authenticated, service_role;
+
+create table public.judge_subjects (
+  id uuid primary key,
+  label text not null
+);
+
+alter table public.judge_subjects enable row level security;
+
+create policy judge_subjects_select on public.judge_subjects
+  for select to authenticated
+  using (id = (select auth.uid()));
+
+revoke all on table public.judge_subjects from anon, authenticated;
+grant select on table public.judge_subjects to authenticated;
+grant all on table public.judge_subjects to service_role;
+
+insert into public.judge_subjects (id, label) values
+  ('00000000-0000-4000-8000-0000000000a1', 'owner-a'),
+  ('00000000-0000-4000-8000-0000000000b2', 'owner-b');
+
+create view public.judge_caller
+  with (security_invoker = true) as
+select
+  auth.uid() as uid,
+  auth.role() as caller_role,
+  auth.email() as email,
+  auth.jwt() ->> 'iss' as jwt_iss,
+  auth.jwt() ->> 'role' as jwt_role,
+  auth.jwt() ->> 'email' as jwt_email;
+
+grant select on public.judge_caller to anon, authenticated, service_role;
+
+-- Custom access token hook (pg-functions). GoTrue calls it as
+-- supabase_auth_admin. It is not granted to the REST roles, so it stays
+-- out of the OpenAPI document. Every issued token gets judge_hook = on.
+-- A member-prefixed mailbox also gets user_role = member.
+--
+-- The hook copies claims as-is. GoTrue's first hook input in a process
+-- may send aud as a one-element array; later tokens send a string.
+-- Comparison of that representation lives in the harness
+-- (judge/NORMALIZATION.md), not here.
+create function public.custom_access_token_hook(event jsonb)
+returns jsonb
+language plpgsql
+stable
+as $$
+declare
+  claims jsonb := event -> 'claims';
+  email text := coalesce(claims ->> 'email', '');
+begin
+  claims := jsonb_set(coalesce(claims, '{}'::jsonb), '{judge_hook}', to_jsonb('on'::text), true);
+  if email like 'judge-hook-member-%@example.com' then
+    claims := jsonb_set(claims, '{user_role}', to_jsonb('member'::text), true);
+  end if;
+  return jsonb_build_object('claims', claims);
+end;
+$$;
+
+revoke all on function public.custom_access_token_hook(jsonb) from public, anon, authenticated, service_role;
+grant usage on schema public to supabase_auth_admin;
+grant execute on function public.custom_access_token_hook(jsonb) to supabase_auth_admin;
 
 notify pgrst, 'reload schema';

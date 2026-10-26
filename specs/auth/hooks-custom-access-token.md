@@ -163,6 +163,13 @@ wrapping `Error running hook URI` failure.
   Auth error does yet.
 - **In-memory backend.** Tests use a Rust closure as the hook function.
   Memory writes are not transactional, so a failure keeps the session.
+- **`aud` shape.** golang-jwt `MarshalSingleStringAsArray` defaults to
+  true, so the first hook input in a GoTrue process has `aud` as a
+  one-element array. `SignJWT` then sets that global false, and later
+  tokens use a string. Megabase always sends a string. The hook fixture
+  copies `aud` as-is. The judge harness compares a one-element string
+  `aud` array as that string (`judge/NORMALIZATION.md`) so the hook
+  cases do not depend on request order.
 
 ## Tests
 
@@ -170,5 +177,6 @@ wrapping `Error running hook URI` failure.
 parsing, every error shape, schema messages, IP and time formatting, and
 HTTP tests on the memory backend for signup, password, refresh, verify, a
 hook error, a schema failure, a missing function, and an HTTPS hook (501).
-Judge cases need the hook enabled on the reference stack, which the pinned
-compose file does not do.
+The judge overlay enables this hook
+(`pg-functions://postgres/public/custom_access_token_hook`) on Auth and
+on Megabase. Cases live in `judge/cases/auth.toml`.

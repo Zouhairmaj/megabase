@@ -53,6 +53,23 @@ fn jwt_regex() -> &'static Regex {
     RE.get_or_init(|| Regex::new(JWT_PATTERN).expect("valid jwt regex"))
 }
 
+/// golang-jwt `MarshalSingleStringAsArray` defaults to true, so GoTrue's
+/// first signed token in a process may encode `aud` as a one-element
+/// array. `SignJWT` then sets that global false. Megabase always emits a
+/// string. Collapse a single string audience so both representations
+/// compare equal.
+fn canonicalize_single_aud(map: &mut serde_json::Map<String, Value>) {
+    let single = match map.get("aud") {
+        Some(Value::Array(items)) if items.len() == 1 && items[0].is_string() => {
+            Some(items[0].clone())
+        }
+        _ => None,
+    };
+    if let Some(value) = single {
+        map.insert("aud".into(), value);
+    }
+}
+
 /// Renders a JWT as its decoded claims minus `iat`, `exp` and `jti`, so two
 /// tokens compare equal exactly when every other claim matches. The
 /// signature is not checked. A payload that is not a JSON object becomes
@@ -67,6 +84,7 @@ fn jwt_claims(token: &Captures<'_>) -> String {
             for key in VOLATILE_CLAIMS {
                 map.remove(*key);
             }
+            canonicalize_single_aud(&mut map);
             // Each `amr` entry carries the session's creation time; keep its
             // method and structure.
             if let Some(Value::Array(entries)) = map.get_mut("amr") {
@@ -226,6 +244,25 @@ mod tests {
             changed[claim] = other;
             assert_ne!(text(&token(&changed)), reference, "{claim}");
         }
+    }
+
+    #[test]
+    fn jwt_one_element_aud_array_matches_string() {
+        let string_aud = json!({
+            "role": "authenticated", "aud": "authenticated", "sub": "u1"
+        });
+        let array_aud = json!({
+            "role": "authenticated", "aud": ["authenticated"], "sub": "u1"
+        });
+        assert_eq!(text(&token(&string_aud)), text(&token(&array_aud)));
+        let two = json!({
+            "role": "authenticated", "aud": ["authenticated", "other"], "sub": "u1"
+        });
+        assert_ne!(text(&token(&string_aud)), text(&token(&two)));
+        let other = json!({
+            "role": "authenticated", "aud": "other", "sub": "u1"
+        });
+        assert_ne!(text(&token(&string_aud)), text(&token(&other)));
     }
 
     #[test]

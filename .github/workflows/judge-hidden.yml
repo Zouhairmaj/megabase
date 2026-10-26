@@ -107,6 +107,8 @@ jobs:
           # Discard server logs. Request paths would reveal held-out cases.
           MEGABASE_PORT=8100 MEGABASE_HOST=0.0.0.0 \
             JWT_SECRET="$JWT_SECRET" DATABASE_URL="$DATABASE_URL" \
+            GOTRUE_HOOK_CUSTOM_ACCESS_TOKEN_ENABLED=true \
+            GOTRUE_HOOK_CUSTOM_ACCESS_TOKEN_URI="pg-functions://postgres/public/custom_access_token_hook" \
             ./target/release/megabase >/dev/null 2>&1 &
       - name: Wait
         run: ./target/release/megabase-judge wait --timeout 240
